@@ -80,6 +80,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(cfg["inbounds"][1]["settings"]["clients"]), 2)
         self.assertEqual(len(load(self.env.state)), 2)
 
+    def test_the_validated_temp_file_ends_in_json(self):
+        # xray derives the config format from the extension: a temp name without .json fails `xray run -test` on a real host.
+        self.assertEqual(self.put(body(cred(U1))).status_code, 200)
+        tested = [a for a in self.env.proc.calls if "-test" in a]
+        self.assertEqual(len(tested), 1)
+        path = tested[0][tested[0].index("-c") + 1]
+        self.assertTrue(path.endswith(".json"), path)
+        self.assertEqual(os.path.dirname(path), str(self.env.config.parent))
+
     def test_unchanged_push_does_not_restart(self):
         self.put(body(cred(U1)))
         self.env.proc.calls.clear()

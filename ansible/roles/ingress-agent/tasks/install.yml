@@ -62,11 +62,17 @@
     - "{{ ingress_agent_dir }}/app"
   become: true
 
+# `ingress_agent_src` may contain `..` (for example `{{ playbook_dir }}/../vendor/...`), but the find module
+# reports normalised paths, so every prefix comparison below uses the real path.
+- name: Resolve the agent source path on the control host
+  ansible.builtin.set_fact:
+    ingress_agent_src_real: "{{ ingress_agent_src | realpath }}"
+
 # The agent source is listed on the control host: only *.py, never __pycache__
-# or tests. Files removed upstream are not deleted on the host.
+# or tests. Anything else found under the app directory on the host is removed below.
 - name: List the agent source files on the control host
   ansible.builtin.find:
-    paths: "{{ ingress_agent_src }}/app"
+    paths: "{{ ingress_agent_src_real }}/app"
     patterns: ["*.py"]
     excludes: ["__pycache__", "tests", "test_*.py"]
     recurse: true
@@ -86,20 +92,54 @@
   loop: >-
     {{ ingress_agent_files.files
        | map(attribute='path')
-       | map('regex_replace', '^' ~ (ingress_agent_src ~ '/app/') | regex_escape ~ '(.*)$', '\1')
+       | map('regex_replace', '^' ~ (ingress_agent_src_real ~ '/app/') | regex_escape ~ '(.*)$', '\1')
        | map('dirname') | select | unique | sort | list }}
   become: true
 
 - name: Copy the agent app
   ansible.builtin.copy:
     src: "{{ item.path }}"
-    dest: "{{ ingress_agent_dir }}/app/{{ item.path | regex_replace('^' ~ (ingress_agent_src ~ '/app/') | regex_escape, '') }}"
+    dest: "{{ ingress_agent_dir }}/app/{{ item.path | regex_replace('^' ~ (ingress_agent_src_real ~ '/app/') | regex_escape, '') }}"
     owner: root
     group: root
     mode: "0644"
   loop: "{{ ingress_agent_files.files }}"
   loop_control:
     label: "{{ item.path | basename }}"
+  become: true
+  notify: restart ingress-agent
+
+# Heal a wrong or outdated tree: whatever is under the app directory on the host and is neither a source file
+# nor a directory leading to one is removed (children first).
+- name: Find what is currently under the app directory on the host
+  ansible.builtin.find:
+    paths: "{{ ingress_agent_dir }}/app"
+    recurse: true
+    hidden: true
+    file_type: any
+  become: true
+  check_mode: false
+  register: ingress_agent_present
+
+- name: Work out the stale paths
+  ansible.builtin.set_fact:
+    ingress_agent_stale: >-
+      {%- set expected = ingress_agent_files.files | map(attribute='path')
+            | map('regex_replace', '^' ~ (ingress_agent_src_real ~ '/app/') | regex_escape ~ '(.*)$',
+                  ingress_agent_dir ~ '/app/\\1') | list -%}
+      {%- set ns = namespace(out=[]) -%}
+      {%- for p in ingress_agent_present.files | map(attribute='path') -%}
+        {%- if p not in expected and (expected | select('match', (p ~ '/') | regex_escape) | list | length) == 0 -%}
+          {%- set ns.out = ns.out + [p] -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ ns.out | sort(reverse=true) | to_json }}
+
+- name: Remove stale files and directories from the app directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ ingress_agent_stale | from_json }}"
   become: true
   notify: restart ingress-agent
 

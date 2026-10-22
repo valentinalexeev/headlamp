@@ -18,7 +18,7 @@
   # owns config.json; restarting it makes its startup restore re-render
   # config.json from the new base and restart xray only if it differs.
   no_log: true
-  notify: restart ingress-agent
+  notify: restart ingress-agent after base config change
 
 # Seed only: lets xray start before the agent has ever run. Never overwritten
 # afterwards, the ingress agent owns this file.

@@ -47,7 +47,7 @@
   ],
   'outbounds': [
     {'tag': 'blocked', 'protocol': 'blackhole'},
-    {'tag': 'direct', 'protocol': 'freedom', 'settings': {'domainStrategy': 'UseIPv4'}},
+    {'tag': 'direct', 'protocol': 'freedom', 'streamSettings': {'sockopt': {'domainStrategy': 'UseIPv4'}}},
     {'tag': 'via-exit', 'protocol': 'socks', 'settings': {'servers': [{'address': socks_host, 'port': socks_port}]}}
   ],
   'routing': {

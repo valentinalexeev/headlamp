@@ -31,7 +31,9 @@
   become: true
   when: not ansible_check_mode
 
-- name: restart ingress-agent
+# Own name on purpose: the ingress-agent role defines `restart ingress-agent`, and handler names are global, so
+# reusing that name would run the agent role's unguarded handler here, before its unit exists.
+- name: restart ingress-agent after base config change
   ansible.builtin.systemd:
     name: "{{ ingress_agent_unit }}"
     state: restarted

@@ -1,0 +1,12 @@
+# Copy to hosts.yml (gitignored). ansible_host should be a STABLE name (your tailnet's MagicDNS
+# name for the node), not a cloud IP that changes whenever the VM is recreated.
+all:
+  children:
+    exit_nodes_vm:
+      hosts:
+        node1:
+          ansible_host: node1.tailnet.example.com
+          ansible_user: ubuntu
+    route_provisioned:
+      hosts:
+        node1: {}

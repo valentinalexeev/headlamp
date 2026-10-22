@@ -1,0 +1,5 @@
+# Real secrets/keys live only on the Docker host, not in the repo.
+.env
+config/wg0.conf
+state/*
+!state/.gitignore

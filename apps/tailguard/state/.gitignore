@@ -1,0 +1,3 @@
+# Keep this dir; ignore tailscale runtime state.
+*
+!.gitignore

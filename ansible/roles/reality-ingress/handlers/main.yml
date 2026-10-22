@@ -1,0 +1,41 @@
+---
+# Only binary / unit / geodata changes restart xray directly. A change to
+# config.base.json restarts the ingress agent instead (it owns
+# /etc/xray/config.json): its startup restore re-renders the config from the
+# base and restarts xray only if the result differs.
+- name: restart xray
+  ansible.builtin.systemd:
+    name: xray
+    daemon_reload: true
+    state: restarted
+  become: true
+  # Units and binaries are not written in check mode.
+  when: not ansible_check_mode
+
+# admin is off in the Caddyfile, so there is no reload; restart instead.
+- name: restart caddy-ingress
+  ansible.builtin.systemd:
+    name: caddy-ingress
+    daemon_reload: true
+    state: restarted
+  become: true
+  when: not ansible_check_mode
+
+# Atomic (nft -f replaces the table); `reloaded` starts the unit if inactive.
+# Never `restarted`: xray Requires= this unit and would be restarted with it.
+- name: reload ingress-guard
+  ansible.builtin.systemd:
+    name: ingress-guard
+    daemon_reload: true
+    state: reloaded
+  become: true
+  when: not ansible_check_mode
+
+- name: restart ingress-agent
+  ansible.builtin.systemd:
+    name: "{{ ingress_agent_unit }}"
+    state: restarted
+  become: true
+  when:
+    - not ansible_check_mode
+    - reality_agent_unit.stat.exists | default(false)

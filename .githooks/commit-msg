@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Refuse commit messages that name real-world places, networks or authorities (CLAUDE.md).
+# Enabled together with the pre-commit hook by `make hooks` (core.hooksPath).
+[ -x scripts/check-denylist.sh ] || exit 0
+exec scripts/check-denylist.sh --message "$1"

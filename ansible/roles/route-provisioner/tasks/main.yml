@@ -1,0 +1,62 @@
+---
+- name: Install route-provisioner dependencies
+  ansible.builtin.apt:
+    name:
+      - bgpq4
+      - dnsutils
+      - python3
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: Create config directory
+  ansible.builtin.file:
+    path: /etc/tailscale-split-routes
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: Create working directory
+  ansible.builtin.file:
+    path: /var/lib/tailscale-split-routes
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: Deploy ASN list
+  ansible.builtin.template:
+    src: asns.txt.j2
+    dest: /etc/tailscale-split-routes/asns.txt
+    mode: "0644"
+  become: true
+
+- name: Deploy host list
+  ansible.builtin.template:
+    src: hosts.txt.j2
+    dest: /etc/tailscale-split-routes/hosts.txt
+    mode: "0644"
+  become: true
+
+- name: Deploy direct-host list (no ASN expansion)
+  ansible.builtin.template:
+    src: direct-hosts.txt.j2
+    dest: /etc/tailscale-split-routes/direct-hosts.txt
+    mode: "0644"
+  become: true
+
+- name: Deploy the route-provisioning script
+  ansible.builtin.template:
+    src: update-tailscale-split-routes.sh.j2
+    dest: /usr/local/sbin/update-tailscale-split-routes.sh
+    mode: "0755"
+  become: true
+
+- name: Schedule the route-provisioning cron job
+  ansible.builtin.cron:
+    name: "update tailscale split-tunnel routes"
+    minute: "0"
+    hour: "*/{{ route_cron_interval_hours }}"
+    job: "/usr/local/sbin/update-tailscale-split-routes.sh >> /var/log/tailscale-split-routes.log 2>&1"
+    user: root
+  become: true

@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>node control</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #131824;
+    --border: #232a3a;
+    --text: #e6e9ef;
+    --muted: #8b93a7;
+    --accent: #4f8cff;
+    --good: #35c078;
+    --bad: #e5534b;
+    --warn: #d9a441;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin: 0 0 0.25rem;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: 0 0 2rem;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.25rem;
+    width: 100%;
+    max-width: 720px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+  }
+  .card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+  }
+  .card-head h2 {
+    font-size: 1.05rem;
+    margin: 0;
+  }
+  .card-head .provider {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    min-height: 1.4rem;
+  }
+  .dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .dot.running { background: var(--good); }
+  .dot.stopped { background: var(--bad); }
+  .dot.transition { background: var(--warn); }
+  .status-text {
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .detail {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin: -0.5rem 0 1rem;
+  }
+  .buttons {
+    display: flex;
+    gap: 0.6rem;
+  }
+  button {
+    flex: 1;
+    padding: 0.55rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #1a2130;
+    color: var(--text);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.start:hover:not(:disabled) { border-color: var(--good); }
+  button.stop:hover:not(:disabled) { border-color: var(--bad); }
+  button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .footer {
+    margin-top: 2rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .footer button {
+    flex: none;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+  }
+  .error-banner {
+    width: 100%;
+    max-width: 720px;
+    background: #2a1618;
+    border: 1px solid #4a2226;
+    color: #ffb3ae;
+    border-radius: 8px;
+    padding: 0.6rem 0.9rem;
+    font-size: 0.85rem;
+    margin-bottom: 1.25rem;
+    display: none;
+  }
+  .error-banner.visible { display: block; }
+  .tailnet {
+    margin-top: 0.75rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .tailnet .dot { width: 0.45rem; height: 0.45rem; }
+</style>
+</head>
+<body>
+  <h1 id="page-title">node control</h1>
+  <p class="subtitle" id="page-subtitle"></p>
+
+  <div class="error-banner" id="error-banner"></div>
+
+  <div class="cards" id="cards"></div>
+
+  <template id="card-template">
+    <div class="card">
+      <div class="card-head">
+        <h2 class="node-name"></h2>
+        <span class="provider"></span>
+      </div>
+      <div class="status-row">
+        <span class="dot node-dot"></span>
+        <span class="status-text node-status">loading…</span>
+      </div>
+      <div class="detail node-detail"></div>
+      <div class="buttons">
+        <button class="start node-start">Start</button>
+        <button class="stop node-stop">Stop</button>
+      </div>
+      <div class="tailnet node-tailnet"></div>
+    </div>
+  </template>
+
+  <div class="footer">
+    <span id="last-refresh">—</span>
+    <button onclick="refresh()">Refresh</button>
+  </div>
+
+<script>
+const POLL_MS = 8000;
+const POLL_MS_BUSY = 2000;
+
+// NODES (which nodes exist and their per-node quirks) is fetched from /nodes.json, which the server builds
+// from its nodes config. startStatus/stopStatus are compared uppercased, so providers that return lowercase
+// status strings (Fly) work the same as uppercase ones. tailnetName is the node's headscale name -- the name a
+// user picks in their exit-node list -- distinct from the node id used as NODES' key and in the API paths;
+// /tailnet/status is keyed by tailnetName.
+let NODES = {};
+
+// Resolves a card's detail line from `cfg.detailFields` (or
+// `cfg.notConfiguredDetailFields` while not_configured): an ordered list
+// of either a plain field name (shown as-is) or `{field, template}` (value
+// spliced into template's "{value}"). The first field present with a
+// truthy value wins; falls back to ''.
+function formatDetail(cfg, data, notConfigured) {
+  const fields = (notConfigured && cfg.notConfiguredDetailFields) || cfg.detailFields || [];
+  for (const f of fields) {
+    const field = typeof f === 'string' ? f : f.field;
+    const value = data[field];
+    if (!value) continue;
+    return typeof f === 'string' ? value : f.template.replace('{value}', value);
+  }
+  return data.detail || '';
+}
+
+// One card is stamped out from #card-template per NODES entry, and its
+// elements are cached here by node name -- adding a future node only
+// means adding an entry to NODES above, nothing in the DOM or here.
+const els = {};
+
+function buildCards() {
+  const template = document.getElementById('card-template');
+  const container = document.getElementById('cards');
+  for (const [node, cfg] of Object.entries(NODES)) {
+    const card = template.content.firstElementChild.cloneNode(true);
+    card.querySelector('.node-name').textContent = node;
+    card.querySelector('.provider').textContent = cfg.provider;
+    const startBtn = card.querySelector('.node-start');
+    const stopBtn = card.querySelector('.node-stop');
+    startBtn.addEventListener('click', () => doAction(node, 'start'));
+    stopBtn.addEventListener('click', () => doAction(node, 'stop'));
+    container.appendChild(card);
+    els[node] = {
+      dot: card.querySelector('.node-dot'),
+      status: card.querySelector('.node-status'),
+      detail: card.querySelector('.node-detail'),
+      tailnet: card.querySelector('.node-tailnet'),
+      startBtn,
+      stopBtn,
+    };
+  }
+}
+
+// busy[node] is null when idle, or the action ('start'/'stop') an
+// in-flight/unresolved request is waiting on. While set, both buttons for
+// that node stay disabled -- start/stop are long-running (the cloud API
+// call returns immediately but the instance/ASG takes time to actually
+// reach the target state) so a single POST response is not enough signal
+// to let the user click again. busy only clears once a status poll shows
+// the node actually reached the expected state; a failed action or a
+// failed status poll leaves busy set, so an error blocks repeat clicks
+// exactly like an unresolved status does. Refresh (the manual button, and
+// the regular poll) is the only way out: it always re-evaluates busy
+// against the latest status.
+let busy = {};
+let timer = null;
+
+function showError(msg) {
+  const b = document.getElementById('error-banner');
+  if (!msg) {
+    b.classList.remove('visible');
+    b.textContent = '';
+    return;
+  }
+  b.textContent = msg;
+  b.classList.add('visible');
+}
+
+function dotClass(statusText) {
+  const s = (statusText || '').toUpperCase();
+  if (s === 'RUNNING' || s === 'ACTIVE' || s === 'STARTED') return 'running';
+  if (s === 'STOPPED' || s === 'NOT_CONFIGURED') return 'stopped';
+  if (s === '') return '';
+  return 'transition';
+}
+
+// Has `data` (this poll's status payload for `node`) reached the state
+// that `action` ('start'/'stop') was waiting for? Used to decide whether
+// to clear busy[node].
+function resolved(node, data, action) {
+  const status = (data.status || '').toUpperCase();
+  if (status === 'NOT_CONFIGURED') return true;
+  const cfg = NODES[node];
+  if (action === 'start') return status === cfg.startStatus;
+  if (action === 'stop') return status === cfg.stopStatus;
+  return true;
+}
+
+function render(node, data) {
+  const cfg = NODES[node];
+  const { dot, status: text, detail, startBtn, stopBtn } = els[node];
+
+  if (busy[node] && resolved(node, data, busy[node])) {
+    busy[node] = null;
+  }
+
+  const status = data.status || 'unknown';
+  const statusUpper = status.toUpperCase();
+  const notConfigured = statusUpper === 'NOT_CONFIGURED';
+
+  if (notConfigured && cfg.prettyNotConfigured) {
+    dot.className = 'dot';
+    text.textContent = 'not configured';
+  } else {
+    dot.className = 'dot ' + dotClass(status);
+    text.textContent = busy[node] ? `${status} (working…)` : status;
+  }
+  detail.textContent = formatDetail(cfg, data, notConfigured);
+
+  const blocked = busy[node] !== null || notConfigured;
+  startBtn.disabled = blocked || statusUpper === cfg.startStatus;
+  stopBtn.disabled = blocked || statusUpper === cfg.stopStatus;
+}
+
+// Renders the tailnet-level line under a card, from /tailnet/status's
+// payload (keyed by tailnetName -- see NODES above). Supplementary to the
+// cloud-provider status render() handles: a VM can be RUNNING while its
+// tailscale connection is actually broken, which only this line shows.
+function renderTailnet(node, tailnetStatus) {
+  const el = els[node].tailnet;
+  const name = NODES[node].tailnetName;
+  const entry = tailnetStatus[name];
+
+  if (!entry) {
+    el.innerHTML = `<span class="dot"></span><span>tailnet (${name}): unknown</span>`;
+    return;
+  }
+
+  const dotCls = entry.online ? 'running' : 'stopped';
+  const seen = entry.online
+    ? 'online'
+    : `offline, last seen ${entry.last_seen ? new Date(entry.last_seen).toLocaleString() : 'never'}`;
+  const routes = `${entry.approved_route_count}/${entry.available_route_count} routes`;
+  el.innerHTML = `<span class="dot ${dotCls}"></span><span>tailnet (${name}): ${seen} · ${routes}</span>`;
+}
+
+function scheduleNextPoll() {
+  clearTimeout(timer);
+  const interval = Object.values(busy).some((v) => v) ? POLL_MS_BUSY : POLL_MS;
+  timer = setTimeout(refresh, interval);
+}
+
+async function refresh() {
+  try {
+    const resp = await fetch('/status');
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const data = await resp.json();
+    // Status poll succeeded: this is the only place busy[node] is allowed
+    // to clear, so an errored action or a stalled status fetch keeps
+    // buttons disabled until we can actually confirm the outcome.
+    for (const node of Object.keys(NODES)) {
+      render(node, data[node] || {});
+    }
+    showError(null);
+    document.getElementById('last-refresh').textContent =
+      'updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    showError('Failed to refresh status: ' + e.message);
+  } finally {
+    scheduleNextPoll();
+  }
+
+  // Fetched separately from /status above: it's supplementary info (see
+  // renderTailnet), so a failure here shouldn't block the primary
+  // start/stop status poll or surface in the main error banner. On
+  // failure, just leave whatever was last rendered in place.
+  try {
+    const resp = await fetch('/tailnet/status');
+    if (resp.ok) {
+      const tailnetStatus = await resp.json();
+      for (const node of Object.keys(NODES)) {
+        renderTailnet(node, tailnetStatus);
+      }
+    }
+  } catch (e) {
+    // non-fatal, see comment above
+  }
+}
+
+async function doAction(node, action) {
+  if (busy[node]) return; // already waiting on a prior action for this node
+  busy[node] = action;
+  els[node].startBtn.disabled = true;
+  els[node].stopBtn.disabled = true;
+  try {
+    const resp = await fetch(`/nodes/${node}/${action}`, { method: 'POST' });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(data.detail || `${resp.status}`);
+    }
+    showError(null);
+  } catch (e) {
+    // Deliberately do not clear busy[node] here: leaving it set keeps the
+    // buttons disabled until a status poll either confirms the node
+    // reached the target state or the user hits Refresh, instead of
+    // letting the user immediately retry into the same failure.
+    showError(`${node} ${action} failed: ${e.message}`);
+  }
+  await refresh();
+}
+
+async function init() {
+  try {
+    const resp = await fetch('/nodes.json');
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const cfg = await resp.json();
+    NODES = cfg.nodes;
+    document.title = cfg.title;
+    document.getElementById('page-title').textContent = cfg.title;
+    document.getElementById('page-subtitle').textContent = cfg.subtitle;
+    busy = Object.fromEntries(Object.keys(NODES).map((n) => [n, null]));
+    buildCards();
+    refresh();
+  } catch (e) {
+    showError('Failed to load the node list: ' + e.message);
+  }
+}
+init();
+</script>
+</body>
+</html>

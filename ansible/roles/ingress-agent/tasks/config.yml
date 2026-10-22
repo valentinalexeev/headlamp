@@ -1,0 +1,33 @@
+---
+- name: Create the environment file directory
+  ansible.builtin.file:
+    path: "{{ ingress_agent_env_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+- name: Write the environment file (holds the token)
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ ingress_agent_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  no_log: true
+  notify: restart ingress-agent
+
+# Apply a changed app/unit/env now, in its final configuration.
+- name: Apply handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start ingress-agent
+  ansible.builtin.systemd:
+    name: ingress-agent
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode

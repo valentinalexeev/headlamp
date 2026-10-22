@@ -1,0 +1,90 @@
+# TailGuard — WireGuard server bridged to a Tailscale exit node. See README.md.
+#
+# Operator-run on the Docker host: `docker compose up -d`. Not Ansible/Terraform managed.
+services:
+  tailguard:
+    image: ghcr.io/juhovh/tailguard:latest
+    container_name: tailguard
+    env_file: .env
+    environment:
+      # Never pin the exit node at boot: env is baked in at container creation, so a
+      # stale IP would crashloop `tailscale up` after a reboot. exit-node-tracker
+      # selects it at runtime instead (see track-exit-node.sh).
+      - TS_EXIT_NODE=
+    volumes:
+      - ./config:/etc/wireguard          # wg0.conf = the WireGuard SERVER config
+      - ./state:/tailguard/state         # in-container tailscale state (persist!)
+      - ./run:/tmp                       # tailscaled.sock, shared with exit-node-tracker
+    cap_add: [NET_ADMIN]
+    devices:
+      - /dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    networks: [ip6net]
+    ports:
+      - "51820:51820/udp"                # WireGuard: clients hit <host-lan-ip>:51820
+      - "41642:41642/udp"                # in-container tailscale (host tailscaled owns 41641)
+    restart: unless-stopped
+    # If the host runs watchtower it auto-updates :latest. To pin this container instead,
+    # uncomment:
+    # labels:
+    #   com.centurylinklabs.watchtower.enable: "false"
+
+  # Watchdog: probes real egress through the exit node; closes the WireGuard
+  # listener (udp/51820) when the exit node stops forwarding, reopens it when it
+  # returns. Shares tailguard's netns so probes go via the exit node and
+  # iptables edits land in the same namespace. See route-health.sh.
+  route-health:
+    image: ghcr.io/juhovh/tailguard:latest      # already ships curl + iptables
+    container_name: tailguard-route-health
+    network_mode: "service:tailguard"
+    cap_add: [NET_ADMIN]
+    depends_on:
+      tailguard:
+        condition: service_healthy
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/route-health.sh"]
+    volumes:
+      - ./route-health.sh:/route-health.sh:ro
+    # Override the image's HEALTHCHECK (it's /tailguard/healthcheck.sh, which is
+    # for the main container and mutates the shared-netns firewall here).
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f route-health.sh >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Tunables (defaults in the script): INTERVAL, FAIL_N, OK_N, WG_PORT, PROBES, GRACE
+    # environment:
+    #   - FAIL_N=3
+    #   - OK_N=2
+
+  # Follows the exit node across re-registrations (new IP / suffixed name): selects the
+  # online exit node named $EXIT_NODE_PREFIX* whenever the selected one is gone.
+  # Talks to tailguard's own tailscaled through the shared ./run:/tmp socket.
+  exit-node-tracker:
+    image: ghcr.io/juhovh/tailguard:latest
+    container_name: tailguard-exit-node-tracker
+    network_mode: "service:tailguard"      # so the post-pin egress probe goes via the exit node
+    env_file: .env
+    cap_add: [NET_ADMIN]                   # derp-guard edits iptables in the shared netns
+    depends_on:
+      tailguard:
+        condition: service_healthy
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/track-exit-node.sh"]
+    volumes:
+      - ./track-exit-node.sh:/track-exit-node.sh:ro
+      - ./run:/tmp
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f track-exit-node.sh >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  ip6net:
+    enable_ipv6: true

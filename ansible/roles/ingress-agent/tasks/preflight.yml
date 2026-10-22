@@ -1,0 +1,101 @@
+---
+- name: Check facts are gathered
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family is defined
+    fail_msg: >-
+      ingress-agent: ansible facts are missing; do not set gather_facts: false
+      for this role.
+    quiet: true
+
+- name: Check required variables are set
+  ansible.builtin.assert:
+    that:
+      - ingress_agent_src | length > 0
+      - ingress_agent_token | length > 0
+    fail_msg: >-
+      ingress-agent: ingress_agent_src (control-host path to apps/ingress-agent)
+      and ingress_agent_token (from a vault) must be set.
+    quiet: true
+  # No no_log: the failure shows the expression text and fail_msg, never the value.
+
+- name: Check the token is long enough and has no whitespace
+  ansible.builtin.assert:
+    that:
+      - ingress_agent_token | length >= 32
+      - ingress_agent_token is regex('^[^\\s"\'\\\\$`]+\\Z')
+    fail_msg: >-
+      ingress-agent: ingress_agent_token must be at least 32 characters with no
+      whitespace, quotes, backslash, $ or backtick (try `openssl rand -hex 32`).
+      The value is not shown.
+    quiet: true
+
+- name: Check the port and the paths
+  ansible.builtin.assert:
+    that:
+      - ingress_agent_port | string is regex('^[0-9]{1,5}\\Z')
+      - 1 <= (ingress_agent_port | int) <= 65535
+      - ingress_agent_dir is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - ingress_agent_state_dir is regex('^/var/lib/[A-Za-z0-9._-]+\\Z')
+      - ingress_agent_env_file is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - xray_bin is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - xray_base_config is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - xray_config is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - xray_asset_dir is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - xray_unit is regex('^[A-Za-z0-9:._@-]+\\Z')
+      - xray_api is regex('^(127\\.0\\.0\\.1|\\[::1\\]):[0-9]{1,5}\\Z')
+    fail_msg: >-
+      ingress-agent: ingress_agent_port must be 1-65535; the paths must be
+      absolute with no spaces or shell characters; ingress_agent_state_dir must be
+      /var/lib/<dir>; xray_unit a plain unit name; xray_api loopback host:port.
+      Got ingress_agent_port='{{ ingress_agent_port }}',
+      ingress_agent_state_dir='{{ ingress_agent_state_dir }}',
+      xray_api='{{ xray_api }}'.
+    quiet: true
+
+- name: Check the optional direct lists
+  ansible.builtin.assert:
+    that:
+      - ingress_direct_geoip is sequence and ingress_direct_geoip is not string
+      - ingress_direct_geosite is sequence and ingress_direct_geosite is not string
+      - (ingress_direct_geoip + ingress_direct_geosite) | map('string') | select('match', '^[A-Za-z0-9!@._-]{1,64}$') | list | length == (ingress_direct_geoip + ingress_direct_geosite) | length
+    fail_msg: >-
+      ingress-agent: ingress_direct_geoip / ingress_direct_geosite must be lists of
+      geodata list names (letters, digits and ! @ . _ - only, at most 64 characters each).
+    quiet: true
+
+- name: Stat the agent source on the control host
+  ansible.builtin.stat:
+    path: "{{ ingress_agent_src }}/app/main.py"
+  delegate_to: localhost
+  become: false
+  # A read-only stat is safe, and the answer is needed in check mode too.
+  check_mode: false
+  register: ingress_agent_src_main
+
+- name: Check the agent source exists
+  ansible.builtin.assert:
+    that: ingress_agent_src_main.stat.exists
+    fail_msg: >-
+      ingress-agent: {{ ingress_agent_src }}/app/main.py not found on the
+      control host; ingress_agent_src must be the apps/ingress-agent directory.
+    quiet: true
+
+- name: Stat the xray binary and the base config
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ xray_bin }}"
+    - "{{ xray_base_config }}"
+  register: ingress_agent_xray_files
+
+# Warn only: in check mode on a fresh host reality-ingress has not run yet.
+- name: Warn if the reality-ingress role has not been run
+  ansible.builtin.debug:
+    msg: >-
+      ingress-agent: {{ item.item }} does not exist yet; run the reality-ingress
+      role before relying on this agent.
+  loop: "{{ ingress_agent_xray_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists

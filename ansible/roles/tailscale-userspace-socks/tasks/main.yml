@@ -1,0 +1,161 @@
+---
+# Second tailscaled in userspace-networking mode, as its own tailnet node,
+# exposing a loopback SOCKS5 port that egresses via a chosen exit node.
+# The host's normal tailscaled and routing are not touched.
+- name: Preflight checks
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Create the tailscaled-socks system group
+  ansible.builtin.group:
+    name: "{{ socks_user }}"
+    system: true
+  become: true
+
+- name: Create the tailscaled-socks system user (no shell, no home)
+  ansible.builtin.user:
+    name: "{{ socks_user }}"
+    group: "{{ socks_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    home: /nonexistent
+  become: true
+
+# On a host where the unit ran as root before, systemd chowns the existing
+# StateDirectory to the new user on the next start.
+- name: Install the tailscaled-socks unit
+  ansible.builtin.template:
+    src: tailscaled-socks.service.j2
+    dest: /etc/systemd/system/tailscaled-socks.service
+    mode: "0644"
+  become: true
+  notify: restart tailscaled-socks
+
+# Apply a changed unit now so the daemon is in its final configuration
+# before it is queried and joined.
+- name: Apply handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start tailscaled-socks
+  ansible.builtin.systemd:
+    name: tailscaled-socks
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  # In check mode the unit file has not been written yet.
+  when: not ansible_check_mode
+
+- name: Read the second node's state
+  ansible.builtin.command: "{{ socks_tailscale_bin }} --socket={{ socks_socket }} status --json"
+  become: true
+  register: socks_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  retries: "{{ 0 if ansible_check_mode else 10 }}"
+  delay: 2
+  until: socks_status.rc == 0 or socks_status.stdout | length > 0
+
+# Regex instead of from_json: tolerates empty or non-JSON output.
+- name: Work out the backend state
+  ansible.builtin.set_fact:
+    socks_backend_state: >-
+      {{ socks_status.stdout | default('')
+         | regex_findall('"BackendState":\\s*"([A-Za-z]+)"') | first | default('Unknown') }}
+    # Stopped = logged in but down: `up` needs no key then.
+    socks_needs_key: >-
+      {{ (socks_status.stdout | default('')
+         | regex_findall('"BackendState":\\s*"([A-Za-z]+)"') | first | default('Unknown'))
+         in ['Unknown', 'NeedsLogin', 'NoState'] }}
+
+- name: Fail clearly if the second tailscaled cannot be queried
+  ansible.builtin.fail:
+    msg: >-
+      tailscale-userspace-socks: no usable answer from `tailscale --socket={{ socks_socket }}
+      status --json` (rc={{ socks_status.rc }}, stderr={{ socks_status.stderr | default('') }});
+      check `journalctl -u tailscaled-socks`.
+  when: not ansible_check_mode and socks_backend_state == 'Unknown' and socks_status.rc != 0 and socks_status.stdout | length == 0
+
+- name: Require an auth key for the first join
+  ansible.builtin.assert:
+    that: socks_authkey | length > 0
+    fail_msg: >-
+      tailscale-userspace-socks: socks_authkey is empty and the node
+      '{{ socks_hostname }}' is not logged in; provide it from a vault.
+    quiet: true
+  no_log: true
+  when: socks_needs_key | bool and not ansible_check_mode
+
+- name: Bring the second node up (key passed via a 0600 temp file, removed afterwards)
+  when: socks_backend_state != 'Running' and not ansible_check_mode
+  block:
+    - name: Create a temp file for the auth key
+      ansible.builtin.tempfile:
+        state: file
+        prefix: tsauth.
+      become: true
+      register: socks_keyfile
+      no_log: true
+      when: socks_needs_key | bool
+
+    - name: Write the auth key
+      ansible.builtin.copy:
+        content: "{{ socks_authkey }}"
+        dest: "{{ socks_keyfile.path }}"
+        mode: "0600"
+      become: true
+      no_log: true
+      when: socks_needs_key | bool
+
+    # Two paths. First login (key needed): the netmap is still empty, so the
+    # exit node peer is unknown and `up` would reject --exit-node; it is left
+    # to the retried `set` below. Re-join of an already logged-in node (no
+    # key): existing non-default prefs make `up` refuse unless they are
+    # restated, so the exit node flags are passed.
+    # No no_log here: only the key FILE PATH is on the command line, and
+    # rc/stderr must stay visible when the join fails.
+    - name: Run tailscale up on the second node
+      ansible.builtin.command:
+        argv: >-
+          {{ [socks_tailscale_bin, '--socket=' ~ socks_socket, 'up', '--timeout=60s',
+              '--login-server=' ~ socks_login_server,
+              '--hostname=' ~ socks_hostname,
+              '--accept-dns=false', '--accept-routes=false']
+             + (['--auth-key=file:' ~ socks_keyfile.path] if socks_needs_key | bool
+                else ['--exit-node=' ~ socks_exit_node, '--exit-node-allow-lan-access=false']) }}
+      become: true
+  always:
+    - name: Remove the auth key temp file
+      ansible.builtin.file:
+        path: "{{ socks_keyfile.path }}"
+        state: absent
+      become: true
+      no_log: true
+      when: socks_keyfile.path is defined
+
+# Always applied (idempotent): also repairs a changed exit node setting.
+# Retried because the exit node peer may not be in the netmap right after join.
+- name: Select the exit node for the SOCKS node
+  ansible.builtin.command: >-
+    {{ socks_tailscale_bin }} --socket={{ socks_socket }} set
+    --exit-node={{ socks_exit_node }} --exit-node-allow-lan-access=false
+  become: true
+  register: socks_set
+  changed_when: false
+  retries: 5
+  delay: 3
+  until: socks_set is skipped or socks_set.rc == 0
+
+# Not optional: without a selected exit node the SOCKS port egresses from THIS
+# host's userspace stack, i.e. exit-bound traffic would leave locally.
+- name: Assert the exit node is selected
+  ansible.builtin.include_tasks: assert-exit-node.yml
+  when: not ansible_check_mode
+
+- name: Verify through the SOCKS port (opt-in, tag socks-verify)
+  ansible.builtin.include_tasks:
+    file: verify.yml
+    apply:
+      tags: [socks-verify]
+  tags: [never, socks-verify]

@@ -1,0 +1,24 @@
+# No [[services]] block, deliberately: this app has no listener reachable via Fly's own proxy at all.
+# It is reachable only over the tailnet (see start.sh, which binds uvicorn to the tailscale interface's
+# IP, never 0.0.0.0), and even then only per the tag:node-control ACL entry.
+#
+# Placeholder values: your private repo keeps the real fly.toml (and app/nodes.json) and copies them over
+# these at deploy time (see CLAUDE.md, "overlay procedure").
+app = "<your-node-control-app>"
+primary_region = "ams"
+kill_signal = "SIGINT"
+kill_timeout = "5s"
+
+[env]
+  HEADSCALE_LOGIN_SERVER = "https://headscale.example.com"
+  # Name this app registers under on the tailnet.
+  TAILNET_HOSTNAME = "node-control"
+  # Enrolment (optional, see README "Enrolment"): the database lives on the tailscale_state volume below,
+  # because a Machine mounts only one volume.
+  # ENROLL_DB = "/var/lib/tailscale/enroll.db"
+
+# Keep the tailscale identity across deploys; without a volume every deploy registers a brand-new node
+# ("name-1", "name-2", ...). Create it once: flyctl volumes create tailscale_state -a <app> -r <region> -n 1
+[mounts]
+  source = "tailscale_state"
+  destination = "/var/lib/tailscale"

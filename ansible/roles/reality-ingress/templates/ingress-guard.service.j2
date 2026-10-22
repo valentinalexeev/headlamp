@@ -1,0 +1,16 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Kernel backstop: keep xray (uid {{ xray_user }}) off loopback, LAN and the tailnet
+After=network-pre.target
+Wants=network-pre.target
+Before=xray.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ nft_bin }} -f {{ ingress_guard_file }}
+ExecReload={{ nft_bin }} -f {{ ingress_guard_file }}
+ExecStop={{ nft_bin }} delete table inet ingress_guard
+
+[Install]
+WantedBy=multi-user.target

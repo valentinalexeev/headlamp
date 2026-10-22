@@ -1,0 +1,40 @@
+---
+- name: Read the second node's status after selecting the exit node
+  ansible.builtin.command: "{{ socks_tailscale_bin }} --socket={{ socks_socket }} status --json"
+  become: true
+  register: socks_status_after
+  changed_when: false
+  failed_when: false
+  retries: 5
+  delay: 2
+  until: socks_status_after.rc == 0 and (socks_status_after.stdout | default('') | regex_search('"ExitNodeStatus"\\s*:\\s*\\{')) is not none
+
+- name: Work out the selected exit node
+  ansible.builtin.set_fact:
+    socks_exit_selected: >-
+      {{ ((socks_status_after.stdout | from_json).Peer | default({}, true)) | dict2items
+         | map(attribute='value') | selectattr('ExitNode', 'defined') | selectattr('ExitNode') | list }}
+    socks_exit_status: "{{ (socks_status_after.stdout | from_json).ExitNodeStatus | default({}, true) }}"
+  when: socks_status_after.rc == 0 and (socks_status_after.stdout | default('') | regex_search('^\\s*\\{')) is not none
+
+# socks_exit_node may be a node name, a MagicDNS name or a tailnet IP.
+- name: Assert the configured exit node is the selected one
+  ansible.builtin.assert:
+    that:
+      - socks_exit_status.ID | default('') | length > 0
+      - socks_exit_selected | default([]) | length == 1
+      - >-
+        (socks_exit_node | lower) in (
+          [socks_exit_selected[0].HostName | default('') | lower,
+           socks_exit_selected[0].DNSName | default('') | lower | regex_replace('\\.$', ''),
+           socks_exit_selected[0].DNSName | default('') | lower | regex_replace('\\..*$', '')]
+          + (socks_exit_selected[0].TailscaleIPs | default([])))
+    fail_msg: >-
+      tailscale-userspace-socks: after `tailscale --socket={{ socks_socket }} set
+      --exit-node={{ socks_exit_node }}` the node does not report '{{ socks_exit_node }}'
+      as its selected exit node (ExitNodeStatus={{ socks_exit_status | default('absent') }},
+      selected peers={{ socks_exit_selected | default([]) | map(attribute='HostName') | list }},
+      rc={{ socks_status_after.rc }}). Traffic through {{ socks_listen }} would NOT
+      leave via the exit node. Check that the exit node is online and advertises
+      0.0.0.0/0 (headscale routes approved) and the ACL lets this node use it.
+    quiet: true

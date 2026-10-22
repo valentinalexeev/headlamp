@@ -1,0 +1,124 @@
+---
+# Python dependencies come from the OS packages: hosts in restricted networks may not reach PyPI.
+- name: Install the Python dependencies from the OS packages
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-fastapi
+      - python3-uvicorn
+      - python3-pydantic
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+# Skipped in check mode: the packages may not be installed yet.
+- name: Check the installed Python packages
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json
+        from importlib.metadata import version
+        import fastapi, uvicorn, pydantic
+        print(json.dumps({n: version(n) for n in ("fastapi", "uvicorn", "pydantic")}))
+  register: ingress_agent_pkgs
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Show the installed versions
+  ansible.builtin.debug:
+    msg: "{{ ingress_agent_pkgs.stdout | from_json }}"
+  when: not ansible_check_mode and ingress_agent_pkgs.rc == 0
+
+- name: Check the packages import and are new enough
+  ansible.builtin.assert:
+    that:
+      - ingress_agent_pkgs.rc == 0
+      - (ingress_agent_pkgs.stdout | from_json).fastapi is version(ingress_agent_fastapi_min, '>=')
+      - (ingress_agent_pkgs.stdout | from_json).uvicorn is version(ingress_agent_uvicorn_min, '>=')
+    fail_msg: >-
+      ingress-agent: python3 could not import fastapi, uvicorn and pydantic, or
+      they are older than the floors in apps/ingress-agent/requirements.txt
+      (fastapi >= {{ ingress_agent_fastapi_min }}, uvicorn >= {{ ingress_agent_uvicorn_min }}).
+      This distro's packages are too old or missing; use a newer release or
+      provide the packages another way. python3 said:
+      {{ ingress_agent_pkgs.stderr | default('') | trim }}
+      {{ ingress_agent_pkgs.stdout | default('') | trim }}
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Create the agent directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ ingress_agent_dir }}"
+    - "{{ ingress_agent_dir }}/app"
+  become: true
+
+# The agent source is listed on the control host: only *.py, never __pycache__
+# or tests. Files removed upstream are not deleted on the host.
+- name: List the agent source files on the control host
+  ansible.builtin.find:
+    paths: "{{ ingress_agent_src }}/app"
+    patterns: ["*.py"]
+    excludes: ["__pycache__", "tests", "test_*.py"]
+    recurse: true
+    file_type: file
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  register: ingress_agent_files
+
+- name: Create the agent subdirectories
+  ansible.builtin.file:
+    path: "{{ ingress_agent_dir }}/app/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: >-
+    {{ ingress_agent_files.files
+       | map(attribute='path')
+       | map('regex_replace', '^' ~ (ingress_agent_src ~ '/app/') | regex_escape ~ '(.*)$', '\1')
+       | map('dirname') | select | unique | sort | list }}
+  become: true
+
+- name: Copy the agent app
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "{{ ingress_agent_dir }}/app/{{ item.path | regex_replace('^' ~ (ingress_agent_src ~ '/app/') | regex_escape, '') }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ ingress_agent_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  become: true
+  notify: restart ingress-agent
+
+- name: Install the launch wrapper
+  ansible.builtin.template:
+    src: ingress-agent-run.j2
+    dest: /usr/local/sbin/ingress-agent-run
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  notify: restart ingress-agent
+
+- name: Install the unit
+  ansible.builtin.template:
+    src: ingress-agent.service.j2
+    dest: /etc/systemd/system/ingress-agent.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: restart ingress-agent

@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Ingress agent (credentials for the xray Reality ingress)
+After=network-online.target tailscaled.service xray.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+# Root: the agent runs `systemctl restart {{ xray_unit }}`.
+WorkingDirectory={{ ingress_agent_dir }}
+EnvironmentFile={{ ingress_agent_env_file }}
+ExecStart=/usr/local/sbin/ingress-agent-run
+Restart=on-failure
+RestartSec=5
+StateDirectory={{ ingress_agent_state_dir | regex_replace('^/var/lib/', '') }}
+StateDirectoryMode=0700
+ReadWritePaths={{ ingress_agent_state_dir }} {{ xray_config | dirname }}
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

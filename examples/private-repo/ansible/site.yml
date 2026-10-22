@@ -1,0 +1,13 @@
+---
+# Explicit tags: modern ansible-core does not auto-tag roles with their own name.
+- name: Configure VM-based exit nodes
+  hosts: exit_nodes_vm
+  roles:
+    - role: tailscale
+      tags: [tailscale]
+
+- name: Deploy split-tunnel route provisioning
+  hosts: route_provisioned
+  roles:
+    - role: route-provisioner
+      tags: [route-provisioner]

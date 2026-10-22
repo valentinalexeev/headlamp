@@ -1,0 +1,61 @@
+# {{ ansible_managed }}
+{
+	admin off
+	http_port 80
+	https_port 8443
+	auto_https disable_redirects
+	storage file_system {{ caddy_state_dir }}
+	# Runtime/ACME errors go to the journal; no access log is configured. The
+	# filter drops the logged request (its URI carries enrolment tokens).
+	log default {
+		output stderr
+		level ERROR
+		format filter {
+			wrap console
+			fields {
+				request delete
+			}
+		}
+	}
+}
+
+# Plain HTTP: only the ACME HTTP-01 challenge (answered by Caddy itself
+# before these routes). Everything else is a bare 404.
+:80 {
+	respond 404
+}
+
+# Self-steal target of Reality ({{ reality_dest }}); loopback only.
+{{ ingress_host }}:8443 {
+	bind 127.0.0.1
+
+	# Let's Encrypt via HTTP-01 on public :80 only (8443 is not reachable).
+	tls {
+		issuer acme {
+			disable_tlsalpn_challenge
+		}
+	}
+
+	# Exactly /e/<token> and /sub/<token>: no trailing slash, no extra
+	# segments, no encoded slashes, no dot-only tokens ("." / "..").
+	@enroll path_regexp `^/(e|sub)/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}$`
+
+	handle @enroll {
+		reverse_proxy http://{{ enroll_upstream }} {
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Proto
+			header_up -X-Forwarded-Host
+			header_up Host {{ ingress_host }}
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 10s
+				read_timeout 15s
+				write_timeout 15s
+			}
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}

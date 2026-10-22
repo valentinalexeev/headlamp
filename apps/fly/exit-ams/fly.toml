@@ -1,0 +1,37 @@
+# fly.toml app configuration file generated for tailwings on 2023-05-23T23:44:58+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = "<your-fly-exit-app>"
+primary_region = "ams"
+kill_signal = "SIGINT"
+kill_timeout = "5s"
+
+[env]
+  PORT = "41641"
+  # create a reusable auth key and set it:
+  # flyctl secrets set TAILSCALE_AUTH_KEY=tskey-...
+  # ephemeral keys are hardly working for use as exit node as they are ipv6 only
+
+# Persists tailscaled's state across redeploys (was --state=mem: in start.sh,
+# meaning every single deploy -- even a one-line direct-hosts.txt change --
+# re-registered as a brand new tailnet identity, churning the node's name
+# and requiring route re-approval each time). This app's single machine is
+# already pinned to one Fly host/region, so a volume's own host-pinning
+# isn't giving up any flexibility that redeploys were actually using.
+[mounts]
+  source = "tailscale_state"
+  destination = "/var/lib/tailscale"
+
+[[services]]
+  protocol = "udp"
+  internal_port = 41641
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 41641
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 75

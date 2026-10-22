@@ -1,0 +1,5 @@
+# Every rule must list the SAME recipients (scripts/tf-run.sh encrypts to one set).
+# Main key + an offline backup key: losing the only key loses all state and secrets.
+creation_rules:
+  - path_regex: .*\.(sops|enc)\.(yaml|json)$
+    age: age1<main-public-key>,age1<backup-public-key>

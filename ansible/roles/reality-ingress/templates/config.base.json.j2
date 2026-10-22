@@ -1,0 +1,61 @@
+{#
+  BASE config. The ingress agent (apps/ingress-agent) renders the live
+  /etc/xray/config.json from this: it injects clients into the inbound tagged
+  "reality-in", forces routing.domainStrategy=IPOnDemand and PREPENDS its
+  per-user rules to routing.rules. A client matching no rule falls to the FIRST
+  outbound, so "blocked" is listed first; the last base rule is an explicit
+  catch-all to "blocked" as a backstop (the agent's rules stay in front of it).
+#}
+{% set socks_host = socks_listen | regex_replace('^\\[?(.*?)\\]?:[0-9]+$', '\\1') %}
+{% set socks_port = socks_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int %}
+{% set api_host = xray_api_listen | regex_replace('^\\[?(.*?)\\]?:[0-9]+$', '\\1') %}
+{% set api_port = xray_api_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int %}
+{% set cfg = {
+  'log': {'loglevel': 'warning', 'access': 'none'},
+  'stats': {},
+  'api': {'tag': 'api', 'services': ['StatsService']},
+  'policy': {
+    'levels': {'0': {'statsUserUplink': true, 'statsUserDownlink': true}},
+    'system': {'statsInboundUplink': false, 'statsInboundDownlink': false}
+  },
+  'inbounds': [
+    {
+      'tag': 'reality-in',
+      'listen': '0.0.0.0',
+      'port': ingress_listen_port | int,
+      'protocol': 'vless',
+      'settings': {'clients': [], 'decryption': 'none'},
+      'streamSettings': {
+        'network': 'tcp',
+        'security': 'reality',
+        'realitySettings': {
+          'dest': reality_dest,
+          'serverNames': [reality_sni],
+          'privateKey': reality_private_key,
+          'shortIds': [reality_short_id]
+        }
+      },
+      'sniffing': {'enabled': true, 'destOverride': ['http', 'tls'], 'routeOnly': true}
+    },
+    {
+      'tag': 'api',
+      'listen': api_host,
+      'port': api_port,
+      'protocol': 'dokodemo-door',
+      'settings': {'address': api_host}
+    }
+  ],
+  'outbounds': [
+    {'tag': 'blocked', 'protocol': 'blackhole'},
+    {'tag': 'direct', 'protocol': 'freedom', 'settings': {'domainStrategy': 'UseIPv4'}},
+    {'tag': 'via-exit', 'protocol': 'socks', 'settings': {'servers': [{'address': socks_host, 'port': socks_port}]}}
+  ],
+  'routing': {
+    'domainStrategy': 'IPOnDemand',
+    'rules': [
+      {'type': 'field', 'inboundTag': ['api'], 'outboundTag': 'api'},
+      {'type': 'field', 'network': 'tcp,udp', 'outboundTag': 'blocked'}
+    ]
+  }
+} %}
+{{ cfg | to_nice_json }}

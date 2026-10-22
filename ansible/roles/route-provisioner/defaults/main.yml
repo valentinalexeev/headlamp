@@ -1,0 +1,14 @@
+route_asns: []
+route_hosts: []
+# Hosts resolved to their exact current IPs (/32) and advertised directly,
+# WITHOUT the ASN-expansion route_hosts/route_asns get. Use this for hosts
+# on large shared cloud/CDN infrastructure (AWS, Cloudflare, etc.) where
+# the ASN owns far more than the service you actually want to route —
+# expanding to the whole ASN would advertise huge amounts of unrelated
+# traffic through this exit node. Re-resolved every cron cycle, so IP
+# rotation is handled, just less robust than ASN-based coverage for
+# services that genuinely sit on a small, dedicated-to-that-country ASN.
+route_hosts_direct: []
+route_min_prefix_v4: 8
+route_max_prefix_v4: 32
+route_cron_interval_hours: 3

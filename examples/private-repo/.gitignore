@@ -1,0 +1,12 @@
+# plaintext that must never be committed (tf-run.sh creates these only transiently)
+terraform/terraform.tfstate
+terraform/terraform.tfstate.*
+terraform/.terraform/
+terraform/secrets.auto.tfvars.json
+terraform/*-key.json
+ansible/inventory/hosts.yml
+*.dec.json
+*.dec.yaml
+.env
+__pycache__/
+.DS_Store

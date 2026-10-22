@@ -1,0 +1,9 @@
+---
+- name: restart tailscaled-socks
+  ansible.builtin.systemd:
+    name: tailscaled-socks
+    daemon_reload: true
+    state: restarted
+  become: true
+  # The unit is not written in check mode, so there is nothing to restart.
+  when: not ansible_check_mode

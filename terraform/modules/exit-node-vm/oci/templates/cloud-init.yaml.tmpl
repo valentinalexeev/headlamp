@@ -1,0 +1,23 @@
+#cloud-config
+runcmd:
+  # OCI's Ubuntu marketplace images ship with a restrictive default iptables
+  # INPUT chain (only SSH is allowed in) that isn't managed by ufw/netplan --
+  # a well-known OCI-specific gotcha. The OCI security list already scopes
+  # what actually reaches the NIC (WireGuard UDP 41641 only, no SSH), so the
+  # host-level firewall is redundant defense-in-depth, not the real
+  # boundary -- flush it rather than hand-picking rules to avoid silently
+  # dropping tailscale's WireGuard traffic.
+  - iptables -F INPUT
+  - iptables -P INPUT ACCEPT
+  - netfilter-persistent save
+  - curl -fsSL https://tailscale.com/install.sh | sh
+  - sysctl -w net.ipv4.ip_forward=1
+  - sysctl -w net.ipv6.conf.all.forwarding=1
+  - 'echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf'
+  - 'echo "net.ipv6.conf.all.forwarding = 1" >> /etc/sysctl.conf'
+  - >-
+    tailscale up
+    --login-server=${headscale_login_server}
+    --authkey=${tailscale_authkey}
+    --hostname=${hostname}
+    --advertise-exit-node

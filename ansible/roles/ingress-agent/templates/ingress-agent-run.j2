@@ -1,0 +1,25 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# Start the ingress agent bound to the host's tailnet IPv4 address ONLY
+# (never 0.0.0.0). Configuration, including the token, comes from the
+# environment (the unit's EnvironmentFile), not from arguments.
+set -eu
+
+TS_IP=""
+i=0
+while [ "$i" -lt 60 ]; do
+  TS_IP="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
+  [ -n "$TS_IP" ] && break
+  i=$((i + 1))
+  sleep 1
+done
+
+if [ -z "$TS_IP" ]; then
+  echo "ingress-agent-run: tailscale did not report an IPv4 address within 60 s" >&2
+  exit 1
+fi
+
+echo "ingress-agent-run: binding to $TS_IP:{{ ingress_agent_port }}"
+cd {{ ingress_agent_dir }}
+exec python3 -m uvicorn app.main:create_app_from_env --factory \
+  --host "$TS_IP" --port {{ ingress_agent_port }} --no-access-log

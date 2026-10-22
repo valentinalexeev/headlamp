@@ -1,0 +1,14 @@
+---
+# xray (VLESS+Reality) on the public port, with Caddy as the self-steal front.
+# See README.md. Order matters: preflight, install, config, validate, start.
+- name: Preflight checks
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Install binaries, users and units
+  ansible.builtin.include_tasks: install.yml
+
+- name: Kernel backstop for the xray user (nftables)
+  ansible.builtin.include_tasks: guard.yml
+
+- name: Write configuration
+  ansible.builtin.include_tasks: config.yml

@@ -1,0 +1,3 @@
+# tailscaled socket dir (bind-mounted at /tmp); runtime only.
+*
+!.gitignore

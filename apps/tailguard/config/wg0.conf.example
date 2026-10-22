@@ -1,0 +1,20 @@
+# WireGuard SERVER config that TailGuard runs (mounted as /etc/wireguard/wg0.conf).
+# Copy to wg0.conf and fill in real keys. wg0.conf is gitignored.
+#
+# Generate keys on the host with the tailguard image (it ships `wg`):
+#   docker run --rm --entrypoint wg ghcr.io/juhovh/tailguard:latest genkey | tee srv.key | \
+#     docker run --rm -i --entrypoint wg ghcr.io/juhovh/tailguard:latest pubkey > srv.pub
+#   docker run --rm --entrypoint wg ghcr.io/juhovh/tailguard:latest genkey | tee cli.key | \
+#     docker run --rm -i --entrypoint wg ghcr.io/juhovh/tailguard:latest pubkey > cli.pub
+#   docker run --rm --entrypoint wg ghcr.io/juhovh/tailguard:latest genpsk > psk.key
+
+[Interface]
+PrivateKey = <contents of srv.key>
+Address = 10.99.0.1/24, fd99:7461:6c67::1/64
+ListenPort = 51820
+
+# Home router (the WireGuard client).
+[Peer]
+PublicKey = <contents of cli.pub>
+PresharedKey = <contents of psk.key>
+AllowedIPs = 10.99.0.2/32, fd99:7461:6c67::2/128

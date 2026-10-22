@@ -1,0 +1,3 @@
+headscale_login_server: "https://headscale.example.com"
+# Single source of truth for the fleet's tailscale version (the private repo's TAILSCALE_VERSION file).
+tailscale_version: "{{ lookup('file', '../TAILSCALE_VERSION') | trim }}"

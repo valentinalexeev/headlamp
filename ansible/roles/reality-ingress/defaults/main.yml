@@ -1,0 +1,69 @@
+---
+# xray VLESS+Reality entry point with a Caddy "self-steal" front.
+# Values marked REQUIRED have no default on purpose; preflight.yml fails
+# early if they are missing. Real values live in the private repo / vault.
+
+# Public hostname of the ingress (REQUIRED). It must resolve to this host:
+# Let's Encrypt validates it over HTTP-01 on port 80.
+ingress_host: ""
+# Public port of the Reality inbound.
+ingress_listen_port: 443
+
+# Reality (REQUIRED, vault). Private key from `xray x25519`; short id is
+# 2-16 hex chars (`openssl rand -hex 8`). The public key is not used here.
+reality_private_key: ""
+reality_short_id: ""
+reality_sni: "{{ ingress_host }}"
+# The self-steal target: the loopback TLS site of the Caddy front.
+reality_dest: "127.0.0.1:8443"
+
+# xray release (REQUIRED). Version without the leading "v", sha256 of the
+# release archive. The archive must be the linux/amd64 zip that holds the
+# `xray` binary.
+xray_version: ""
+xray_sha256: ""
+xray_url: "https://github.com/XTLS/Xray-core/releases/download/v{{ xray_version }}/Xray-linux-64.zip"
+# Geodata files (REQUIRED), each {name, url, sha256}; at least geoip.dat and
+# geosite.dat (the ingress agent's optional direct lists, ingress_direct_geoip /
+# ingress_direct_geosite, refer to entries of these files).
+xray_geodata_files: []
+
+# Caddy v2 release (REQUIRED). Version without the leading "v", sha256 of the
+# linux/amd64 .tar.gz that holds the `caddy` binary.
+caddy_version: ""
+caddy_sha256: ""
+caddy_url: "https://github.com/caddyserver/caddy/releases/download/v{{ caddy_version }}/caddy_{{ caddy_version }}_linux_amd64.tar.gz"
+
+# host:port of the enrolment listener the front proxies /e/* and /sub/* to
+# (REQUIRED), e.g. "node-control.example.net:8081" or "<tailnet-ip>:8081".
+# No scheme, no path.
+enroll_upstream: ""
+
+# Loopback SOCKS5 port of the `tailscale-userspace-socks` role: the xray
+# outbound `via-exit` dials it. Must be loopback.
+socks_listen: "127.0.0.1:1055"
+
+xray_user: xray
+# xray stats API (loopback only); the ingress agent reads traffic from it.
+xray_api_listen: "127.0.0.1:10085"
+
+# nftables backstop (tasks/guard.yml): ruleset file and nft binary.
+ingress_guard_file: /etc/ingress-guard.nft
+# IPv4 resolvers xray may query on port 53 although they are on loopback or a
+# private network: the system resolver from /etc/resolv.conf (the
+# systemd-resolved stub on Ubuntu). xray's own lookups fail without it.
+ingress_guard_resolvers: ["127.0.0.53"]
+nft_bin: /usr/sbin/nft
+# Unit of the ingress agent; restarted when config.base.json changes (only if
+# the unit file exists), so its startup restore re-renders config.json.
+ingress_agent_unit: ingress-agent
+
+# Install locations.
+xray_bin: /usr/local/bin/xray
+xray_asset_dir: /usr/local/share/xray
+xray_config_dir: /etc/xray
+caddy_bin: /usr/local/bin/caddy
+caddy_user: caddy
+caddy_config_dir: /etc/caddy-ingress
+# Must be under /var/lib/ (the unit derives StateDirectory= from it).
+caddy_state_dir: /var/lib/caddy-ingress

@@ -1,0 +1,7 @@
+# Fallback only — group_vars/all/main.yml overrides this with the real
+# value from the repo-root TAILSCALE_VERSION file for every real playbook
+# run in this repo. This default only matters if the role is ever reused
+# somewhere group_vars/all/main.yml isn't loaded (e.g. a different repo).
+tailscale_version: "1.98.10"
+headscale_login_server: "https://headscale.example.com"
+tailscale_advertise_exit_node: true

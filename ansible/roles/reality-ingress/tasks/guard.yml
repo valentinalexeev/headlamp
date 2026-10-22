@@ -1,0 +1,46 @@
+---
+# nftables backstop for the xray user (README "Kernel backstop"). Installed
+# before xray starts; xray.service Requires= it (fail closed).
+- name: Look for the nft binary
+  ansible.builtin.stat:
+    path: "{{ nft_bin }}"
+  register: reality_nft_bin
+
+- name: Install nftables (nft is missing)
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+    update_cache: true
+  become: true
+  when: not reality_nft_bin.stat.exists
+
+# `nft -c` (dry run in the kernel) validates before the file is replaced. The
+# xray user must exist (install.yml), so validation is skipped in check mode by
+# the template module itself (nothing is written).
+- name: Write the ingress-guard ruleset
+  ansible.builtin.template:
+    src: ingress-guard.nft.j2
+    dest: "{{ ingress_guard_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "{{ nft_bin }} -c -f %s"
+  become: true
+  notify: reload ingress-guard
+
+- name: Install the ingress-guard unit
+  ansible.builtin.template:
+    src: ingress-guard.service.j2
+    dest: /etc/systemd/system/ingress-guard.service
+    mode: "0644"
+  become: true
+  notify: reload ingress-guard
+
+- name: Enable and start ingress-guard
+  ansible.builtin.systemd:
+    name: ingress-guard
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode

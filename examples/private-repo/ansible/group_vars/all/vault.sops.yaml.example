@@ -1,0 +1,2 @@
+# Encrypt with sops, rename to vault.sops.yaml. Never commit it unencrypted.
+tailscale_authkey_node1: "<headscale pre-auth key>"

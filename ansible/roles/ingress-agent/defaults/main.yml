@@ -1,0 +1,39 @@
+---
+# Ingress agent (apps/ingress-agent) as a systemd service next to xray.
+# Values marked REQUIRED have no default on purpose; preflight.yml fails
+# early if they are missing. Real values live in the private repo / vault.
+
+# Path ON THE CONTROL HOST to the apps/ingress-agent directory (REQUIRED),
+# e.g. "{{ playbook_dir }}/../vendor/headlamp/apps/ingress-agent". Its app/
+# subdirectory is copied to the host.
+ingress_agent_src: ""
+# Bearer token the operator side uses to push credentials (REQUIRED, vault,
+# at least 32 characters). Never logged, never on a command line.
+ingress_agent_token: ""
+# TCP port, bound on the host's tailnet address only.
+ingress_agent_port: 9000
+
+# Install locations.
+ingress_agent_dir: /opt/ingress-agent
+# Must be under /var/lib/ (the unit derives StateDirectory= from it).
+ingress_agent_state_dir: /var/lib/ingress-agent
+ingress_agent_env_file: /etc/ingress-agent/env
+
+# Minimum OS-package versions (from apps/ingress-agent/requirements.txt,
+# where the floors are fastapi>=0.110 and uvicorn>=0.30).
+ingress_agent_fastapi_min: "0.110"
+ingress_agent_uvicorn_min: "0.30"
+
+# What the agent drives. The defaults match the reality-ingress role.
+xray_bin: /usr/local/bin/xray
+xray_unit: xray
+xray_api: "127.0.0.1:10085"
+xray_base_config: /etc/xray/config.base.json
+xray_config: /etc/xray/config.json
+# Optional direct lists for `auto` mode: geodata list names (e.g. ["xx"] for geoip:xx / geosite:xx entries);
+# destinations on them leave from this host instead of the exit node. Empty = everything uses the exit node.
+ingress_direct_geoip: []
+ingress_direct_geosite: []
+
+# Geodata directory (xray run -test needs it for geoip:/geosite: rules).
+xray_asset_dir: /usr/local/share/xray

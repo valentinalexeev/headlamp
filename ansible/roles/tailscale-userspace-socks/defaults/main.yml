@@ -1,0 +1,23 @@
+---
+# Loopback-only SOCKS5 listener of the second (userspace) tailscaled.
+socks_listen: "127.0.0.1:1055"
+# Tailnet hostname of this second node (REQUIRED, e.g. "<host>-socks").
+socks_hostname: ""
+# Exit node used for traffic dialled through the SOCKS port (REQUIRED):
+# a node name or a tailnet IP.
+socks_exit_node: ""
+# Pre-auth key for the first join (REQUIRED until the node is logged in).
+# Supply it from a vault; never put a real key in the repo or in logs.
+socks_authkey: ""
+# Unprivileged system user/group the daemon runs as (userspace networking
+# needs no capabilities). Root still drives it over the socket.
+socks_user: tailscaled-socks
+socks_state_dir: /var/lib/tailscaled-socks
+socks_socket: /run/tailscaled-socks/tailscaled.sock
+# headscale_login_server comes from the caller / base `tailscale` role (no fallback here).
+socks_login_server: "{{ headscale_login_server | default('') }}"
+# URL fetched by the opt-in verification tasks (tag: socks-verify).
+socks_verify_url: "https://ifconfig.me"
+# Binaries installed by the base `tailscale` role (.deb).
+socks_tailscaled_bin: /usr/sbin/tailscaled
+socks_tailscale_bin: /usr/bin/tailscale

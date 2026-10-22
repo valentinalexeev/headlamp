@@ -1,0 +1,4 @@
+{% for asn in route_asns %}
+{{ asn.asn }}{% if asn.comment is defined %}   # {{ asn.comment }}{% endif %}
+
+{% endfor %}

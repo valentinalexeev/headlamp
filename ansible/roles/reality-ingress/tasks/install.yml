@@ -1,0 +1,184 @@
+---
+# Binaries are downloaded on the CONTROL host (hosts in restricted networks often cannot reach
+# GitHub), checksum-verified (get_url), unpacked there, then copied to the
+# target. Everything is staged in a fresh per-run temp dir that is removed in
+# `always:`, so nothing unpacked on an earlier run (a predictable path an
+# attacker could have planted in) is ever installed. Check mode: downloads are
+# reported, unpack/copy of binaries is skipped.
+- name: Create the xray and caddy system users
+  ansible.builtin.user:
+    name: "{{ item }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+  loop:
+    - "{{ xray_user }}"
+    - "{{ caddy_user }}"
+  become: true
+
+# setgid: files the root-run ingress agent replaces here inherit group xray.
+- name: Create the xray config directory
+  ansible.builtin.file:
+    path: "{{ xray_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ xray_user }}"
+    mode: "2750"
+  become: true
+
+- name: Create the xray asset directory
+  ansible.builtin.file:
+    path: "{{ xray_asset_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Stage, verify and install the binaries
+  block:
+    - name: Create a fresh stage directory on the control host
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: reality-ingress.
+      delegate_to: localhost
+      become: false
+      register: reality_stage
+      # A real (empty) temp dir even in check mode; removed in `always`.
+      check_mode: false
+
+    - name: Create the stage subdirectories
+      ansible.builtin.file:
+        path: "{{ reality_stage.path }}/{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: [xray, caddy, geodata]
+      delegate_to: localhost
+      become: false
+      check_mode: false
+
+    - name: Download xray (zip) to the control host
+      ansible.builtin.get_url:
+        url: "{{ xray_url }}"
+        dest: "{{ reality_stage.path }}/xray.zip"
+        checksum: "sha256:{{ xray_sha256 }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Download caddy (tar.gz) to the control host
+      ansible.builtin.get_url:
+        url: "{{ caddy_url }}"
+        dest: "{{ reality_stage.path }}/caddy.tar.gz"
+        checksum: "sha256:{{ caddy_sha256 }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+    - name: Download the geodata files to the control host
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "{{ reality_stage.path }}/geodata/{{ item.name }}"
+        checksum: "sha256:{{ item.sha256 }}"
+        mode: "0600"
+      loop: "{{ xray_geodata_files }}"
+      loop_control:
+        label: "{{ item.name }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Unpack xray on the control host (only the verified archive)
+      ansible.builtin.unarchive:
+        src: "{{ reality_stage.path }}/xray.zip"
+        dest: "{{ reality_stage.path }}/xray"
+        remote_src: true
+      delegate_to: localhost
+      become: false
+      when: not ansible_check_mode
+
+    # Plain `tar`, not ansible.builtin.unarchive: unarchive refuses the BSD tar that macOS control hosts have
+    # ("GNU tar required"). `tar -xzf` works with both; only the `caddy` binary is extracted.
+    - name: Unpack caddy on the control host (only the verified archive)
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -xzf
+          - "{{ reality_stage.path }}/caddy.tar.gz"
+          - -C
+          - "{{ reality_stage.path }}/caddy"
+          - caddy
+      changed_when: true
+      delegate_to: localhost
+      become: false
+      when: not ansible_check_mode
+
+    - name: Install the xray binary
+      ansible.builtin.copy:
+        src: "{{ reality_stage.path }}/xray/xray"
+        dest: "{{ xray_bin }}"
+        owner: root
+        group: root
+        mode: "0755"
+      become: true
+      when: not ansible_check_mode
+      notify: restart xray
+
+    - name: Install the geodata files
+      ansible.builtin.copy:
+        src: "{{ reality_stage.path }}/geodata/{{ item.name }}"
+        dest: "{{ xray_asset_dir }}/{{ item.name }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ xray_geodata_files }}"
+      loop_control:
+        label: "{{ item.name }}"
+      become: true
+      when: not ansible_check_mode
+      notify: restart xray
+
+    - name: Install the caddy binary
+      ansible.builtin.copy:
+        src: "{{ reality_stage.path }}/caddy/caddy"
+        dest: "{{ caddy_bin }}"
+        owner: root
+        group: root
+        mode: "0755"
+      become: true
+      when: not ansible_check_mode
+      notify: restart caddy-ingress
+
+  always:
+    - name: Remove the control-host stage directory
+      ansible.builtin.file:
+        path: "{{ reality_stage.path }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      check_mode: false
+      when: reality_stage.path is defined
+
+- name: Create the caddy config directory
+  ansible.builtin.file:
+    path: "{{ caddy_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ caddy_user }}"
+    mode: "0750"
+  become: true
+
+- name: Install the xray unit
+  ansible.builtin.template:
+    src: xray.service.j2
+    dest: /etc/systemd/system/xray.service
+    mode: "0644"
+  become: true
+  notify: restart xray
+
+- name: Install the caddy-ingress unit
+  ansible.builtin.template:
+    src: caddy-ingress.service.j2
+    dest: /etc/systemd/system/caddy-ingress.service
+    mode: "0644"
+  become: true
+  notify: restart caddy-ingress

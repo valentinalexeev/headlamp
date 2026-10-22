@@ -1,0 +1,12 @@
+---
+# tailscale_version no longer needs to be overridden here — it's sourced
+# once, for every playbook (this one and plain site.yml alike), from
+# group_vars/all/main.yml. This playbook exists as a clearly-named,
+# single-purpose entry point for the version-bump workflow, not because
+# it does anything site.yml's tailscale role invocation doesn't already do.
+- name: Bump tailscale version on all VM exit nodes
+  hosts: exit_nodes_vm
+  tasks:
+    - name: Re-run the tailscale role with the new pinned version
+      ansible.builtin.include_role:
+        name: tailscale

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Refuse commits that would put plaintext secrets or Terraform state into git.
+# Enable with `make hooks` (sets core.hooksPath); the tf-* make targets do it for you.
+set -u
+fail=0
+bad() { echo "pre-commit: $*" >&2; fail=1; }
+
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    *terraform.tfstate | *.tfstate.backup | *.tfstate.tmp | *.tfstate.*.backup)
+      bad "plaintext Terraform state staged: $f (only terraform.tfstate.enc.json may be committed)" ;;
+    */secrets.auto.tfvars.json | secrets.auto.tfvars.json | */yandex-sa-terraform-key.json | *.dec.json | *.dec.yaml | .env | */.env)
+      bad "plaintext secret file staged: $f" ;;
+  esac
+  case "$f" in
+    .sops.yaml | */.sops.yaml) ;;   # sops CONFIG (recipients, creation rules), not an encrypted file
+    *.enc.json | *.enc.yaml | *.sops.yaml | *.sops.json)
+      git show ":$f" | grep -q '"\?sops"\?:' || bad "$f has no sops metadata -- it does not look encrypted" ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+# Secret-shaped strings in added lines (encrypted files only contain ENC[...] blobs).
+added="$(git diff --cached -U0 --diff-filter=ACMR -- . ':!*.enc.json' ':!*.enc.yaml' ':!*.sops.yaml' ':!*.sops.json' | grep -E '^\+' | grep -vE '^\+\+\+' || true)"
+if [ -n "$added" ]; then
+  echo "$added" | grep -qE 'AGE-SECRET-KEY-1[A-Z0-9]{40,}'                       && bad "an age private key is staged"
+  echo "$added" | grep -qE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----'               && bad "a private key block is staged"
+  echo "$added" | grep -qE 'tskey-(auth|api)-[A-Za-z0-9]{20,}|hskey-[a-z]+-[A-Za-z0-9_-]{20,}' && bad "a Tailscale/headscale key is staged"
+  echo "$added" | grep -qE 'AKIA[0-9A-Z]{16}|fo1_[A-Za-z0-9_-]{30,}'               && bad "a cloud/Fly credential is staged"
+fi
+
+# No geographic or political references (CLAUDE.md). The pattern list lives on the operator's machine, not in this repo.
+if [ -x scripts/check-denylist.sh ]; then
+  scripts/check-denylist.sh --staged || fail=1
+fi
+
+[ "$fail" = 0 ] || { echo "pre-commit: refusing to commit (bypass only if you are sure: git commit --no-verify)" >&2; exit 1; }

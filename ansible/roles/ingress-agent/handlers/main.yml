@@ -1,0 +1,11 @@
+---
+# xray is deliberately NOT restarted from this role: the agent restarts it
+# itself when the credential set changes.
+- name: restart ingress-agent
+  ansible.builtin.systemd:
+    name: ingress-agent
+    daemon_reload: true
+    state: restarted
+  become: true
+  # Units and files are not written in check mode.
+  when: not ansible_check_mode

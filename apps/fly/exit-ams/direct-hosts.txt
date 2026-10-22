@@ -1,0 +1,7 @@
+# PLACEHOLDER. Hostnames resolved to their exact current IPs and advertised as /32 routes by this
+# node, independent of exit-node selection (see update-direct-routes.sh and the ansible
+# route-provisioner's route_hosts_direct for the same pattern on VM nodes).
+# Your private repo keeps the real list and copies it over this file before `flyctl deploy`.
+# One hostname per line, e.g.:
+# example.com
+# api.example.com

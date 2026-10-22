@@ -1,0 +1,12 @@
+tailscale_hostname: node1
+tailscale_authkey: "{{ tailscale_authkey_node1 }}"
+# Split-tunnel routes advertised by this node. See
+# vendor/headlamp/ansible/roles/route-provisioner/defaults/main.yml for what each list does.
+# Large shared ASNs (AWS, Akamai, ...) belong in route_hosts_direct, NOT route_asns.
+route_asns:
+  - asn: AS64496          # documentation ASN: replace
+    comment: example network
+route_hosts:
+  - example.com
+route_hosts_direct:
+  - api.example.com

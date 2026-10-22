@@ -1,0 +1,10 @@
+---
+# See README.md. Order matters: preflight, install, configure, start.
+- name: Preflight checks
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Install packages, the app, the wrapper and the unit
+  ansible.builtin.include_tasks: install.yml
+
+- name: Write the environment file and start the service
+  ansible.builtin.include_tasks: config.yml

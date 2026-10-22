@@ -1,0 +1,89 @@
+---
+# The agent role usually runs after this one, so on a first run the unit does
+# not exist yet (the agent then renders config.json when it first starts).
+- name: Look for the ingress agent unit
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ ingress_agent_unit }}.service"
+  register: reality_agent_unit
+
+- name: Write the xray BASE config (input of the ingress agent)
+  ansible.builtin.template:
+    src: config.base.json.j2
+    dest: "{{ xray_config_dir }}/config.base.json"
+    owner: root
+    group: "{{ xray_user }}"
+    mode: "0640"
+  become: true
+  # Holds the Reality private key. xray is not restarted directly: the agent
+  # owns config.json; restarting it makes its startup restore re-render
+  # config.json from the new base and restart xray only if it differs.
+  no_log: true
+  notify: restart ingress-agent
+
+# Seed only: lets xray start before the agent has ever run. Never overwritten
+# afterwards, the ingress agent owns this file.
+- name: Seed xray config.json from the base if it does not exist yet
+  ansible.builtin.template:
+    src: config.base.json.j2
+    dest: "{{ xray_config_dir }}/config.json"
+    owner: root
+    group: "{{ xray_user }}"
+    mode: "0640"
+    force: false
+  become: true
+  no_log: true
+
+- name: Write the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config_dir }}/Caddyfile"
+    owner: root
+    group: "{{ caddy_user }}"
+    mode: "0640"
+  become: true
+  notify: restart caddy-ingress
+
+# Validate before anything is (re)started. Skipped in check mode: the binaries
+# and files may not exist yet.
+- name: Validate the xray base config
+  ansible.builtin.command: "{{ xray_bin }} run -test -c {{ xray_config_dir }}/config.base.json"
+  environment:
+    XRAY_LOCATION_ASSET: "{{ xray_asset_dir }}"
+  become: true
+  changed_when: false
+  # No no_log: a validation error must stay visible. The key is not on the
+  # command line (only the file path) and xray reports problems by field name,
+  # not by echoing the config.
+  when: not ansible_check_mode
+
+- name: Validate the Caddyfile (as the caddy user, so no root-owned files appear in its state)
+  ansible.builtin.command: >-
+    runuser -u {{ caddy_user }} -- env HOME={{ caddy_state_dir }}
+    XDG_CONFIG_HOME={{ caddy_state_dir }} XDG_DATA_HOME={{ caddy_state_dir }}
+    {{ caddy_bin }} validate
+    --config {{ caddy_config_dir }}/Caddyfile --adapter caddyfile
+  become: true
+  changed_when: false
+  when: not ansible_check_mode
+
+# Apply changed binaries/units/Caddyfile now, in their final configuration.
+- name: Apply handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start caddy-ingress
+  ansible.builtin.systemd:
+    name: caddy-ingress
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode
+
+- name: Enable and start xray
+  ansible.builtin.systemd:
+    name: xray
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode

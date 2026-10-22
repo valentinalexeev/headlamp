@@ -1,0 +1,13 @@
+# Never commit secrets, state, or site config: see CLAUDE.md.
+*.tfstate
+*.tfstate.*
+terraform/.terraform/
+*.tfvars.json
+*.dec.json
+*.dec.yaml
+.env
+ansible/inventory/
+__pycache__/
+*.pyc
+.DS_Store
+*.swp

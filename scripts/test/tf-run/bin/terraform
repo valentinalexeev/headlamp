@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+import sys, json, os, time, signal
+cmd = sys.argv[1]
+if cmd == "init": sys.exit(0)
+if cmd == "plan": print("stub plan: no changes"); sys.exit(0)
+if cmd == "apply":
+    st = json.load(open("terraform.tfstate")) if os.path.exists("terraform.tfstate") else {"serial": 0, "resources": []}
+    st["serial"] += 1; st["resources"].append("r%d" % st["serial"])
+    json.dump(st, open("terraform.tfstate", "w"))
+    def on_int(*_): sys.exit(130)
+    signal.signal(signal.SIGINT, on_int)
+    time.sleep(float(os.environ.get("STUB_APPLY_SLEEP", "0")))
+    sys.exit(int(os.environ.get("STUB_APPLY_RC", "0")))

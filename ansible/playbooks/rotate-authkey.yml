@@ -1,0 +1,14 @@
+---
+- name: Re-authenticate VM exit nodes with a new authkey
+  hosts: exit_nodes_vm
+  tasks:
+    - name: Re-run tailscale up with the freshly rotated authkey
+      ansible.builtin.command: >
+        tailscale up
+        --login-server={{ headscale_login_server }}
+        --authkey={{ tailscale_authkey }}
+        --hostname={{ tailscale_hostname }}
+        --advertise-exit-node
+      become: true
+      changed_when: true
+      no_log: true

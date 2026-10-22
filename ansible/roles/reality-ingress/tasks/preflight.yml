@@ -1,0 +1,100 @@
+---
+- name: Check required variables are set
+  ansible.builtin.assert:
+    that:
+      - ingress_host | length > 0
+      - reality_private_key | length > 0
+      - reality_short_id | length > 0
+      - xray_version | length > 0
+      - xray_sha256 | length > 0
+      - caddy_version | length > 0
+      - caddy_sha256 | length > 0
+      - enroll_upstream | length > 0
+      - xray_geodata_files | length > 0
+    fail_msg: >-
+      reality-ingress: ingress_host, reality_private_key, reality_short_id,
+      xray_version, xray_sha256, caddy_version, caddy_sha256, enroll_upstream
+      and a non-empty xray_geodata_files must all be set (secrets from a vault).
+    quiet: true
+
+- name: Check ingress_host is a plain hostname
+  ansible.builtin.assert:
+    that:
+      - ingress_host is regex('^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\\Z')
+      - reality_sni is regex('^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\\Z')
+    fail_msg: >-
+      reality-ingress: ingress_host / reality_sni must be a plain hostname
+      (no scheme, port, slash or whitespace).
+    quiet: true
+
+- name: Check the Reality credentials have the right shape
+  ansible.builtin.assert:
+    that:
+      - reality_short_id is regex('^([0-9A-Fa-f]{2}){1,8}\\Z')
+      - reality_private_key is regex('^[A-Za-z0-9_-]{43}\\Z')
+    fail_msg: >-
+      reality-ingress: reality_short_id must be hex of even length, at most 16
+      characters; reality_private_key must be an `xray x25519` private key
+      (43 base64url characters). The values are not shown.
+    quiet: true
+
+- name: Check the listen and upstream addresses
+  ansible.builtin.assert:
+    that:
+      - socks_listen is regex('^(127\\.0\\.0\\.1|\\[::1\\]):[0-9]{1,5}\\Z')
+      - xray_api_listen is regex('^(127\\.0\\.0\\.1|\\[::1\\]):[0-9]{1,5}\\Z')
+      - enroll_upstream is regex('^[A-Za-z0-9.-]+:[0-9]{1,5}\\Z')
+      - reality_dest is regex('^[A-Za-z0-9.-]+:[0-9]{1,5}\\Z')
+      - ingress_listen_port | string is regex('^[0-9]{1,5}\\Z')
+    fail_msg: >-
+      reality-ingress: socks_listen and xray_api_listen must be loopback-only
+      (127.0.0.1:<port> or [::1]:<port>); enroll_upstream and reality_dest must
+      be host:port with no scheme, path or whitespace; ingress_listen_port a number.
+      Got socks_listen='{{ socks_listen }}', xray_api_listen='{{ xray_api_listen }}',
+      enroll_upstream='{{ enroll_upstream }}'.
+    quiet: true
+
+- name: Check ports are in range and the paths/arch are supported
+  ansible.builtin.assert:
+    that:
+      - 1 <= (socks_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
+      - 1 <= (xray_api_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
+      - 1 <= (enroll_upstream | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
+      - 1 <= (reality_dest | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
+      - 1 <= (ingress_listen_port | int) <= 65535
+      - caddy_state_dir is regex('^/var/lib/[A-Za-z0-9._-]+\\Z')
+      - (ansible_facts.architecture | default('')) == 'x86_64'
+    fail_msg: >-
+      reality-ingress: every port must be 1-65535; caddy_state_dir must be
+      /var/lib/<dir>; only x86_64 hosts are supported (facts must be gathered).
+    quiet: true
+
+- name: Check the downloads are pinned by checksum
+  ansible.builtin.assert:
+    that:
+      - xray_sha256 is regex('^[0-9A-Fa-f]{64}\\Z')
+      - caddy_sha256 is regex('^[0-9A-Fa-f]{64}\\Z')
+      - "'geoip.dat' in xray_geodata_files | map(attribute='name', default='')"
+      - "'geosite.dat' in xray_geodata_files | map(attribute='name', default='')"
+      - xray_geodata_files | map(attribute='name', default='') | select('match', '^[A-Za-z0-9._-]+\\Z') | list | length == xray_geodata_files | length
+      - xray_geodata_files | map(attribute='url', default='') | select('match', '^https://') | list | length == xray_geodata_files | length
+      - xray_geodata_files | map(attribute='sha256', default='') | select('match', '^[0-9A-Fa-f]{64}\\Z') | list | length == xray_geodata_files | length
+    fail_msg: >-
+      reality-ingress: xray_sha256 / caddy_sha256 must be 64 hex characters, and
+      xray_geodata_files must include geoip.dat and geosite.dat and every item needs name (plain file name), an https url
+      and a 64-hex sha256.
+    quiet: true
+
+- name: Check the nftables backstop inputs
+  ansible.builtin.assert:
+    that:
+      - xray_user is regex('^[a-z_][a-z0-9_-]{0,31}\\Z')
+      - ingress_guard_resolvers | length > 0
+      - ingress_guard_resolvers | select('match', '^[0-9]{1,3}(\\.[0-9]{1,3}){3}\\Z') | list | length == ingress_guard_resolvers | length
+      - ingress_guard_file is regex('^/etc/[A-Za-z0-9._/-]+\\Z')
+    fail_msg: >-
+      reality-ingress: xray_user must be a plain user name, ingress_guard_resolvers
+      a non-empty list of IPv4 addresses (the resolvers in /etc/resolv.conf), and
+      ingress_guard_file a path under /etc. Got xray_user='{{ xray_user }}',
+      ingress_guard_resolvers={{ ingress_guard_resolvers }}.
+    quiet: true

@@ -1,0 +1,30 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Tailscale userspace-networking daemon with a local SOCKS5 port
+Documentation=https://tailscale.com/kb/1112/userspace-networking
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Unprivileged: userspace networking needs no capabilities. The state and
+# runtime directories below are created by systemd, owned by this user, 0700;
+# root (the Ansible tasks, `tailscale --socket=...`) still reaches the socket
+# because root bypasses file permissions, and tailscaled grants root write access.
+User={{ socks_user }}
+Group={{ socks_user }}
+ExecStart={{ socks_tailscaled_bin }} --tun=userspace-networking --socks5-server={{ socks_listen }} --statedir={{ socks_state_dir }} --socket={{ socks_socket }} --port=0 --no-logs-no-support
+RuntimeDirectory={{ socks_socket | dirname | regex_replace('^/run/', '') }}
+RuntimeDirectoryMode=0700
+StateDirectory={{ socks_state_dir | regex_replace('^/var/lib/', '') }}
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=5
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

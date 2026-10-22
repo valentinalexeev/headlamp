@@ -1,0 +1,97 @@
+---
+# Installed via a direct .deb download, NOT the apt repository — this
+# matches how tailscale is meant to be deployed on every node in this fleet
+# (the original setup used this method, with the apt repo entry left
+# commented out/unused). The .deb is downloaded to the Ansible CONTROL host
+# (the operator's dev machine) and copied to the target, rather than having
+# the target fetch pkgs.tailscale.com directly — exit nodes in restricted networks
+# may not have reliable outbound access to it.
+- name: Check installed tailscale version
+  ansible.builtin.command: dpkg-query -W -f='${Version}' tailscale
+  register: tailscale_dpkg
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "Download tailscale {{ tailscale_version }} .deb to the control host"
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/tailscale_{{ tailscale_version }}_amd64.deb"
+    # Namespaced by target hostname, not just version: this task is
+    # delegate_to: localhost, so its path is shared control-host disk
+    # space across every host in the play, not per-target-host storage —
+    # without inventory_hostname in the name, two hosts needing the same
+    # version at once could race on the same file.
+    dest: "/tmp/tailscale_{{ tailscale_version }}_amd64-{{ inventory_hostname }}.deb"
+  delegate_to: localhost
+  when: tailscale_dpkg.stdout != tailscale_version
+
+- name: "Copy tailscale {{ tailscale_version }} .deb to the target host"
+  ansible.builtin.copy:
+    src: "/tmp/tailscale_{{ tailscale_version }}_amd64-{{ inventory_hostname }}.deb"
+    dest: "/tmp/tailscale_{{ tailscale_version }}_amd64.deb"
+    mode: "0644"
+  become: true
+  when: tailscale_dpkg.stdout != tailscale_version
+
+- name: "Install tailscale {{ tailscale_version }} from the copied .deb"
+  ansible.builtin.apt:
+    deb: "/tmp/tailscale_{{ tailscale_version }}_amd64.deb"
+  become: true
+  when: tailscale_dpkg.stdout != tailscale_version
+  notify: Restart tailscaled
+
+- name: Remove the .deb file from the target host
+  ansible.builtin.file:
+    path: "/tmp/tailscale_{{ tailscale_version }}_amd64.deb"
+    state: absent
+  become: true
+  when: tailscale_dpkg.stdout != tailscale_version
+
+- name: Remove the downloaded .deb file from the control host
+  ansible.builtin.file:
+    path: "/tmp/tailscale_{{ tailscale_version }}_amd64-{{ inventory_hostname }}.deb"
+    state: absent
+  delegate_to: localhost
+  when: tailscale_dpkg.stdout != tailscale_version
+
+# Ubuntu 26.04 no longer reads /etc/sysctl.conf at boot; use a sysctl.d drop-in so it persists.
+- name: Enable IPv4 forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    sysctl_file: /etc/sysctl.d/99-tailscale-forwarding.conf
+    sysctl_set: true
+    state: present
+    reload: true
+  become: true
+
+- name: Enable IPv6 forwarding
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.all.forwarding
+    value: "1"
+    sysctl_file: /etc/sysctl.d/99-tailscale-forwarding.conf
+    sysctl_set: true
+    state: present
+    reload: true
+  become: true
+
+- name: Check current tailscale connection state
+  ansible.builtin.command: tailscale status --json
+  become: true
+  register: ts_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Join the tailnet
+  ansible.builtin.command: >
+    tailscale up
+    --login-server={{ headscale_login_server }}
+    --authkey={{ tailscale_authkey }}
+    --hostname={{ tailscale_hostname }}
+    {{ '--advertise-exit-node' if tailscale_advertise_exit_node else '' }}
+  become: true
+  no_log: true
+  when: >
+    ts_status.rc != 0 or
+    (ts_status.stdout | from_json).BackendState != 'Running'

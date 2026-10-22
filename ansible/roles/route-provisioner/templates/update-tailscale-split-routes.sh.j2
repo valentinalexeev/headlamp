@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WORKDIR="/var/lib/tailscale-split-routes"
+CONF_DIR="/etc/tailscale-split-routes"
+
+ASN_FILE="$CONF_DIR/asns.txt"
+HOST_FILE="$CONF_DIR/hosts.txt"
+DIRECT_HOST_FILE="$CONF_DIR/direct-hosts.txt"
+
+ASN_GENERATED_FILE="$WORKDIR/generated-asns.txt"
+ASN_EFFECTIVE_FILE="$WORKDIR/effective-asns.txt"
+ROUTES_FILE="$WORKDIR/routes.txt"
+OLD_ROUTES_FILE="$WORKDIR/routes.old.txt"
+
+LOG_TAG="ts-split-routes"
+
+MIN_PREFIX_V4={{ route_min_prefix_v4 }}
+MAX_PREFIX_V4={{ route_max_prefix_v4 }}
+
+mkdir -p "$WORKDIR"
+
+tmp_ips="$(mktemp)"
+tmp_asns="$(mktemp)"
+tmp_raw_routes="$(mktemp)"
+tmp_routes="$(mktemp)"
+trap 'rm -f "$tmp_ips" "$tmp_asns" "$tmp_raw_routes" "$tmp_routes"' EXIT
+
+log() {
+  logger -t "$LOG_TAG" "$*"
+  echo "$*"
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    log "Missing required command: $1"
+    exit 1
+  }
+}
+
+require_cmd bgpq4
+require_cmd dig
+require_cmd python3
+require_cmd tailscale
+
+reverse_ipv4() {
+  awk -F. '{print $4"."$3"."$2"."$1}'
+}
+
+ip_to_asns_cymru_dns() {
+  local ip="$1"
+  local reversed
+  reversed="$(echo "$ip" | reverse_ipv4)"
+
+  dig +short TXT "${reversed}.origin.asn.cymru.com" \
+    | tr -d '"' \
+    | awk -F'|' '{print $1}' \
+    | tr ' ' '\n' \
+    | grep -E '^[0-9]+$' \
+    | sed 's/^/AS/' \
+    | sort -u || true
+}
+
+if [[ -f "$HOST_FILE" ]]; then
+  while read -r host _comment; do
+    [[ -z "${host:-}" ]] && continue
+    [[ "$host" =~ ^# ]] && continue
+
+    log "Resolving host: $host"
+
+    dig +short A "$host" \
+      | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+      >> "$tmp_ips" || true
+  done < "$HOST_FILE"
+else
+  log "Host file not found: $HOST_FILE"
+fi
+
+sort -u "$tmp_ips" -o "$tmp_ips"
+
+while read -r ip; do
+  [[ -z "${ip:-}" ]] && continue
+
+  asns="$(ip_to_asns_cymru_dns "$ip")"
+
+  if [[ -n "$asns" ]]; then
+    log "Resolved $ip -> $(echo "$asns" | paste -sd, -)"
+    echo "$asns" >> "$tmp_asns"
+  else
+    log "WARN: Could not resolve ASN for $ip"
+  fi
+done < "$tmp_ips"
+
+sort -u "$tmp_asns" > "$ASN_GENERATED_FILE"
+
+{
+  if [[ -f "$ASN_FILE" ]]; then
+    awk '
+      /^[[:space:]]*#/ {next}
+      /^[[:space:]]*$/ {next}
+      {
+        asn=$1
+        gsub(/[[:space:]]/, "", asn)
+        if (asn ~ /^AS[0-9]+$/) print asn
+        else if (asn ~ /^[0-9]+$/) print "AS" asn
+      }
+    ' "$ASN_FILE"
+  else
+    log "ASN file not found: $ASN_FILE"
+  fi
+
+  cat "$ASN_GENERATED_FILE"
+} | sort -u > "$ASN_EFFECTIVE_FILE"
+
+effective_asn_count="$(wc -l < "$ASN_EFFECTIVE_FILE" | tr -d ' ')"
+
+# Only a hard stop if there's ALSO no direct-hosts config to fall back on —
+# a node that's configured purely with route_hosts_direct (no ASNs/hosts.txt
+# at all) shouldn't be refused just because it has zero ASNs by design.
+if [[ "$effective_asn_count" -eq 0 ]] && [[ ! -s "$DIRECT_HOST_FILE" ]]; then
+  log "No ASNs available and no direct-hosts configured. Refusing to change Tailscale routes."
+  exit 1
+fi
+
+if [[ "$effective_asn_count" -gt 0 ]]; then
+  log "Effective ASN count: $effective_asn_count"
+
+  while read -r asn; do
+    [[ -z "${asn:-}" ]] && continue
+
+    log "Generating prefixes for $asn"
+
+    bgpq4 -4 -A -F "%n/%l\n" "$asn" >> "$tmp_raw_routes" || {
+      log "WARN: bgpq4 failed for $asn"
+    }
+  done < "$ASN_EFFECTIVE_FILE"
+else
+  log "No ASNs configured/resolved — skipping ASN-based route expansion."
+fi
+
+# Direct hosts: resolved to their exact current IPs and added as /32
+# routes WITHOUT ASN expansion — see route_hosts_direct's definition in
+# the role's defaults/main.yml for when to use this instead of hosts.txt.
+if [[ -f "$DIRECT_HOST_FILE" ]]; then
+  while read -r host _comment; do
+    [[ -z "${host:-}" ]] && continue
+    [[ "$host" =~ ^# ]] && continue
+
+    log "Resolving direct host (no ASN expansion): $host"
+
+    dig +short A "$host" \
+      | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
+      | sed 's#$#/32#' \
+      >> "$tmp_raw_routes" || true
+  done < "$DIRECT_HOST_FILE"
+fi
+
+python3 - "$tmp_raw_routes" "$MIN_PREFIX_V4" "$MAX_PREFIX_V4" > "$tmp_routes" <<'PY'
+import ipaddress
+import sys
+
+raw_file = sys.argv[1]
+min_prefix = int(sys.argv[2])
+max_prefix = int(sys.argv[3])
+
+nets = []
+
+with open(raw_file, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        try:
+            net = ipaddress.ip_network(line, strict=False)
+        except ValueError:
+            continue
+
+        if net.version != 4:
+            continue
+
+        if net.prefixlen < min_prefix or net.prefixlen > max_prefix:
+            continue
+
+        nets.append(net)
+
+collapsed = sorted(
+    ipaddress.collapse_addresses(nets),
+    key=lambda n: (int(n.network_address), n.prefixlen)
+)
+
+for net in collapsed:
+    print(net)
+PY
+
+route_count="$(wc -l < "$tmp_routes" | tr -d ' ')"
+
+if [[ "$route_count" -eq 0 ]]; then
+  log "No routes generated. Refusing to clear existing Tailscale routes."
+  exit 1
+fi
+
+cp "$tmp_routes" "$ROUTES_FILE"
+
+if [[ -f "$OLD_ROUTES_FILE" ]] && cmp -s "$ROUTES_FILE" "$OLD_ROUTES_FILE"; then
+  log "No route changes. Route count: $route_count"
+  exit 0
+fi
+
+routes_csv="$(paste -sd, "$ROUTES_FILE")"
+
+log "Applying $route_count routes to Tailscale"
+
+tailscale set --advertise-routes="$routes_csv"
+
+cp "$ROUTES_FILE" "$OLD_ROUTES_FILE"
+
+log "Done. Advertised route count: $route_count"

@@ -1,0 +1,45 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+#
+# Kernel backstop for the xray ingress (see README "Kernel backstop"). Packets
+# sent by uid {{ xray_user }} may reach on loopback only the SOCKS port and the
+# Caddy front (plus port 53 of ingress_guard_resolvers); everything to loopback,
+# RFC1918, CGNAT/tailnet (100.64.0.0/10), link-local and IPv6 ULA/link-local is
+# dropped, even when a hostname resolved to such an address (DNS rebinding).
+# Replies on connections xray ACCEPTED (clients, the stats API queried by the
+# root-run agent) are allowed by the conntrack rule; an xray-initiated
+# connection is never "established" unless its first packet passed.
+{% set socks_host = socks_listen | regex_replace('^\\[?(.*?)\\]?:[0-9]+$', '\\1') %}
+{% set socks_port = socks_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int %}
+{% set dest_host = reality_dest | regex_replace('^(.*):[0-9]+$', '\\1') %}
+{% set dest_port = reality_dest | regex_replace('^.*:([0-9]+)$', '\\1') | int %}
+{% set v4_ports = ([socks_port] if socks_host == '127.0.0.1' else [])
+                + ([dest_port] if dest_host in ['127.0.0.1', 'localhost'] else []) %}
+{% set v6_ports = ([socks_port] if socks_host == '::1' else [])
+                + ([dest_port] if dest_host == 'localhost' else []) %}
+# Atomic replace: create (no-op if present), delete, define.
+table inet ingress_guard
+delete table inet ingress_guard
+
+table inet ingress_guard {
+	chain output {
+		type filter hook output priority 0; policy accept;
+		meta skuid {{ xray_user }} jump xray_out
+	}
+
+	chain xray_out {
+		ct state established,related accept
+{% if v4_ports %}
+		ip daddr 127.0.0.1 tcp dport { {{ v4_ports | unique | join(', ') }} } accept
+{% endif %}
+{% if v6_ports %}
+		ip6 daddr ::1 tcp dport { {{ v6_ports | unique | join(', ') }} } accept
+{% endif %}
+		ip daddr { {{ ingress_guard_resolvers | join(', ') }} } udp dport 53 accept
+		ip daddr { {{ ingress_guard_resolvers | join(', ') }} } tcp dport 53 accept
+		ip daddr { 0.0.0.0/8, 127.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 } drop
+		# fc00::/7 also covers the tailnet range fd7a:115c:a1e0::/48 (listing
+		# both would be an overlapping-interval error in an anonymous set).
+		ip6 daddr { ::1, fc00::/7, fe80::/10 } drop
+	}
+}

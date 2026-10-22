@@ -1,0 +1,50 @@
+---
+- name: Check required variables are set
+  ansible.builtin.assert:
+    that:
+      - socks_hostname | length > 0
+      - socks_exit_node | length > 0
+    fail_msg: >-
+      tailscale-userspace-socks: socks_hostname and socks_exit_node must be set
+      (node name or tailnet IP of the exit node).
+    quiet: true
+
+- name: Check the SOCKS listener is loopback-only
+  ansible.builtin.assert:
+    that:
+      - socks_listen is regex('^(127\\.0\\.0\\.1|\\[::1\\]):[0-9]{1,5}\\Z')
+    fail_msg: >-
+      tailscale-userspace-socks: socks_listen must be loopback-only
+      (127.0.0.1:<port> or [::1]:<port>), got '{{ socks_listen }}'.
+    quiet: true
+
+- name: Check the login server and the systemd-managed paths
+  ansible.builtin.assert:
+    that:
+      - socks_login_server | length > 0
+      - socks_socket is regex('^/run/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\\Z')
+      - socks_state_dir is regex('^/var/lib/[A-Za-z0-9._-]+\\Z')
+      - socks_user is regex('^[a-z_][a-z0-9_-]{0,31}\\Z')
+      - socks_user != 'root'
+    fail_msg: >-
+      tailscale-userspace-socks: headscale_login_server (or socks_login_server)
+      must be set by the caller; socks_socket must be /run/<dir>/<file> and
+      socks_state_dir /var/lib/<dir> (no spaces), so systemd can manage them;
+      socks_user a plain, non-root user name.
+    quiet: true
+
+- name: Stat the tailscale binaries
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ socks_tailscaled_bin }}"
+    - "{{ socks_tailscale_bin }}"
+  register: socks_bins
+
+- name: Check the base tailscale role has installed the binaries
+  ansible.builtin.assert:
+    that: socks_bins.results | map(attribute='stat.exists') | list is all
+    fail_msg: >-
+      tailscale-userspace-socks: {{ socks_tailscaled_bin }} / {{ socks_tailscale_bin }}
+      not found; run the base `tailscale` role on this host first.
+    quiet: true

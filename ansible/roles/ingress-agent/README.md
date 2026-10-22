@@ -44,7 +44,7 @@ packages are older (e.g. Ubuntu 22.04) fails here by design; use a newer release
 1. Preflight (before anything is written): required variables, token length/charset, port
    range, absolute paths, facts gathered, the source exists on the control host.
 2. Installs the packages, copies `app/*.py` (no `__pycache__`, no tests; root, 0755/0644;
-   files deleted upstream are not removed on the host), installs the wrapper
+   anything else under the app directory on the host is removed; `ingress_agent_src` may contain `..`), installs the wrapper
    `/usr/local/sbin/ingress-agent-run` and the unit.
 3. Writes the env file, applies handlers, enables and starts the service.
 

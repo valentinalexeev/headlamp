@@ -48,7 +48,8 @@ class Applier:
 
     def _install(self, cfg: dict) -> None:
         """Write next to the live config, validate, then atomically replace. Raises ApplyError."""
-        fd, tmp = tempfile.mkstemp(dir=self.config_path.parent, prefix=f".{self.config_path.name}.")
+        # xray picks the config format from the file extension, so the validated temp file must end in .json.
+        fd, tmp = tempfile.mkstemp(dir=self.config_path.parent, prefix=f".{self.config_path.name}.", suffix=".json")
         try:
             with os.fdopen(fd, "w") as f:
                 json.dump(cfg, f)

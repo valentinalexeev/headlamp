@@ -92,6 +92,7 @@ commits on top of it or attempt a rewrite on your own.
 | `apps/tailguard` | WireGuard server → tailnet exit node (Docker, operator-run) |
 | `scripts/tf-run.sh`, `.githooks/`, `scripts/test/` | state-in-git workflow, commit hook, tests |
 | `scripts/headscale-assign-host.sh` | helper to register a host under an existing pre-auth key (`HEADSCALE_APP`, `HEADSCALE_LOGIN_SERVER` env) |
+| `scripts/rotate-headscale-api-key.sh` | check (`--check`) and rotate the headscale API key used by the route approver and other apps; all site values come from env vars (`HS_APP`, `HS_URL`, `STAGE_APPS`, `DEPLOY_CMD`, optional sops `SECRET_FILE`/`SECRET_FIELD`). API keys expire: the approver logs `ERROR ... HTTP 401` when its key has, and keeps retrying |
 | `examples/private-repo/` | the skeleton of the private site repo (Makefile, terraform, ansible, fly deploy) |
 
 Anything that identifies a deployment is a placeholder here (`example.com`, `<your-...>`). The

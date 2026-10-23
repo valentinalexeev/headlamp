@@ -32,6 +32,28 @@ class PublicListenerTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    @staticmethod
+    def _target(r):
+        """The deep link a client is sent to: the Location of a 302, or the button's href of the landing page."""
+        import html
+        import re
+
+        if r.status_code == 302:
+            return r.headers["location"]
+        return html.unescape(re.search(r'href="([^"]+)"', r.text).group(1))
+
+    def test_karing_gets_a_landing_page_with_a_button(self):
+        dev, secret = self.store.create_device("Anna", "anna.owner", "karing", int(self.now) + 86400)
+        token = self.store.create_token(dev.id)
+        r = self.client.get(f"/e/{token}")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.headers["content-type"].startswith("text/html"))
+        self.assertEqual(r.headers["cache-control"], "no-store")
+        self.assertEqual(self._target(r), deep_link("karing", sub_url(CFG, secret), "tunnel"))
+        self.assertIn("Open in Karing", r.text)
+        self.assertNotIn("<script", r.text)
+        self.assertEqual(self.client.get(f"/e/{token}").status_code, 404)
+
     def test_valid_token_redirects_once(self):
         token = self.store.create_token(self.device.id)
         r = self.client.get(f"/e/{token}")
@@ -47,7 +69,7 @@ class PublicListenerTest(unittest.TestCase):
         for client in ("sing-box", "karing"):
             dev, secret = self.store.create_device("Anna Secret Phone", "anna.owner", client, int(self.now) + 86400)
             token = self.store.create_token(dev.id)
-            loc = self.client.get(f"/e/{token}").headers["location"]
+            loc = self._target(self.client.get(f"/e/{token}"))
             prof = self.client.get(f"/sub/{secret}").text
             for leaked in ("Anna", "Secret", "anna.owner", "anna"):
                 self.assertNotIn(leaked, loc, client)

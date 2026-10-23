@@ -6,7 +6,7 @@ the ingress host, which must not learn who the clients are. The deep link label 
 
 DNS: the profile hijacks DNS on the tun and resolves through a DoT server reached via the
 ``select`` outbound, so lookups follow the selected mode (no plaintext DNS to the local network). The one
-exception is the ingress host's own name, resolved by the local resolver (rule ``outbound: any``).
+exception is the ingress host's own name, resolved by the local resolver (``route.default_domain_resolver``).
 """
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -14,18 +14,18 @@ from urllib.parse import quote
 from .store import MODES, Device
 
 TUN_ADDRESSES = ["172.19.0.1/30", "fdfe:dcba:9876::1/126"]
-# sing-box legacy DNS server format (valid through 1.13).
+# sing-box >= 1.12 DNS server format (the legacy `address` form is removed in newer clients).
 DNS = {
     "servers": [
-        {"tag": "remote", "address": "tls://1.1.1.1", "detour": "select"},
-        {"tag": "local", "address": "local"},
+        {"type": "tls", "tag": "remote", "server": "1.1.1.1", "detour": "select"},
+        {"type": "local", "tag": "local"},
     ],
-    # Domain names of outbound servers (the ingress host) use the local resolver: resolving them through
-    # ``remote`` would need the very outbound that needs the lookup.
-    "rules": [{"outbound": "any", "server": "local"}],
     "final": "remote",
     "strategy": "prefer_ipv4",
 }
+# Domain names of outbound servers (the ingress host) use the local resolver: resolving them through ``remote``
+# would need the very outbound that needs the lookup.
+DOMAIN_RESOLVER = {"server": "local", "strategy": "prefer_ipv4"}
 
 
 @dataclass(frozen=True)
@@ -93,7 +93,7 @@ def render_profile(device: Device, cfg: IngressCfg) -> dict:
         "inbounds": [
             {"type": "tun", "address": list(TUN_ADDRESSES), "auto_route": True, "strict_route": True}
         ],
-        "dns": {**DNS, "servers": [dict(s) for s in DNS["servers"]], "rules": [dict(r) for r in DNS["rules"]]},
+        "dns": {**DNS, "servers": [dict(s) for s in DNS["servers"]]},
         "outbounds": [
             {"type": "selector", "tag": "select", "outbounds": list(MODES), "default": "auto"},
             *vless,
@@ -103,5 +103,6 @@ def render_profile(device: Device, cfg: IngressCfg) -> dict:
             "rules": [{"action": "sniff"}, {"protocol": "dns", "action": "hijack-dns"}],
             "final": "select",
             "auto_detect_interface": True,
+            "default_domain_resolver": dict(DOMAIN_RESOLVER),
         },
     }

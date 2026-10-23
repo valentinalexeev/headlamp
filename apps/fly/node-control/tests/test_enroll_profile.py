@@ -89,10 +89,9 @@ class ProfileTest(unittest.TestCase):
     def test_dns_goes_through_the_selected_outbound(self):
         self.assertEqual(self.p["dns"], {
             "servers": [
-                {"tag": "remote", "address": "tls://1.1.1.1", "detour": "select"},
-                {"tag": "local", "address": "local"},
+                {"type": "tls", "tag": "remote", "server": "1.1.1.1", "detour": "select"},
+                {"type": "local", "tag": "local"},
             ],
-            "rules": [{"outbound": "any", "server": "local"}],
             "final": "remote",
             "strategy": "prefer_ipv4",
         })
@@ -101,19 +100,25 @@ class ProfileTest(unittest.TestCase):
     def test_dns_servers_and_final(self):
         dns = self.p["dns"]
         servers = {s["tag"]: s for s in dns["servers"]}
-        self.assertEqual(servers["remote"], {"tag": "remote", "address": "tls://1.1.1.1", "detour": "select"})
-        self.assertEqual(servers["local"], {"tag": "local", "address": "local"})
+        self.assertEqual(servers["remote"], {"type": "tls", "tag": "remote", "server": "1.1.1.1", "detour": "select"})
+        self.assertEqual(servers["local"], {"type": "local", "tag": "local"})
         self.assertNotIn("detour", servers["local"])
         self.assertEqual(dns["final"], "remote")
-        self.assertEqual(dns["rules"], [{"outbound": "any", "server": "local"}])
+        self.assertNotIn("rules", dns)
 
     def test_outbound_server_lookup_does_not_depend_on_an_outbound(self):
         # No resolution loop: the VLESS outbounds' server domain is resolved by a server with no detour.
-        dns = self.p["dns"]
-        rule = next(r for r in dns["rules"] if r.get("outbound") == "any")
-        server = next(s for s in dns["servers"] if s["tag"] == rule["server"])
+        resolver = self.p["route"]["default_domain_resolver"]
+        server = next(s for s in self.p["dns"]["servers"] if s["tag"] == resolver["server"])
         self.assertEqual(server["tag"], "local")
         self.assertNotIn("detour", server)
+
+    def test_no_removed_legacy_dns_fields(self):
+        import json
+
+        raw = json.dumps(self.p)
+        self.assertNotIn('"address": "tls://', raw)
+        self.assertNotIn('"outbound": "any"', raw)
 
     def test_profile_has_no_name_or_owner(self):
         import json

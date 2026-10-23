@@ -14,7 +14,10 @@ carry one-time tokens and subscription secrets. This module logs nothing itself.
 with ``host``, ``public_key``, ``short_id``, ``sni`` and optional ``port`` (443) and ``profile_name``
 (``"tunnel"``).
 
-Privacy: the redirect and the profile pass through the ingress host, so neither carries the device
+Clients whose app only opens from a tap (``karing``) get a small HTML page with an "Open in ..." button
+instead of the 302; the others get the 302.
+
+Privacy: the redirect (or that page) and the profile pass through the ingress host, so neither carries the device
 name or owner; the deep link label is the neutral ``profile_name``.
 
 Link previews: messengers fetch a pasted URL to render a preview, which would consume a single-use
@@ -23,6 +26,7 @@ of ``PREVIEW_UA_MARKERS`` get the same empty 404 as every other 404 and do NOT c
 ``/sub/`` answers them the same way. An empty or missing User-Agent is a normal client. A preview
 bot with an unlisted User-Agent can still burn a link: create another one.
 """
+import html
 import json
 import os
 
@@ -47,6 +51,23 @@ def is_preview(user_agent: "str | None") -> bool:
     return any(m in ua for m in PREVIEW_UA_MARKERS)
 
 
+_LANDING = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>Open in {client}</title>
+<style>body{{font:18px system-ui,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center}}
+a{{display:inline-block;margin-top:1.2em;padding:.9em 1.6em;border-radius:.7em;background:#0a66ff;color:#fff;text-decoration:none;font-weight:600}}</style>
+</head><body><main><p>Tap the button to add the profile in {client}.</p><a href="{href}">Open in {client}</a></main></body></html>
+"""
+
+
+def _landing(client: str, location: str) -> Response:
+    """A page with an explicit button: some iOS apps only open from a tap, not from a 302 to their URL scheme."""
+    label = {"karing": "Karing"}.get(client, client)
+    body = _LANDING.format(client=html.escape(label), href=html.escape(location, quote=True))
+    return Response(body, media_type="text/html; charset=utf-8",
+                    headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
 def _not_found() -> Response:
     return Response(status_code=404)
 
@@ -67,6 +88,8 @@ def create_app(store: Store, cfg: IngressCfg) -> FastAPI:
         if device is None:
             return _not_found()
         location = deep_link(device.client, sub_url(cfg, store.subscription_secret(device.id)), cfg.profile_name)
+        if device.client == "karing":
+            return _landing(device.client, location)
         return Response(status_code=302, headers={"Location": location})
 
     @app.get("/sub/{secret}")

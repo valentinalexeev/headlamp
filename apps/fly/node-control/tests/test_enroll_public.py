@@ -108,6 +108,8 @@ class PublicListenerTest(unittest.TestCase):
         "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
         "Mozilla/5.0 (compatible; SomeCrawler/1.0)",
         "Mozilla/5.0 (compatible; Yeti-Spider)",
+        "vkShare; +http://vk.com/dev/Share",
+        "Viber/20.0 (iOS) link preview",
         "Snap URL Preview Service; bot; snapchat",
         "Google-PageRenderer Google (+https://developers.google.com/+/web/snippet/)",
         "Mozilla/5.0 something LinkExpanding",

@@ -385,6 +385,7 @@ class AttachFromEnv(unittest.TestCase):
         from app.enroll import admin
 
         with mock.patch.object(admin, "RECONCILE_SECONDS", 0.01), \
+                mock.patch.object(admin, "FIRST_RECONCILE_SECONDS", 0.01), \
                 mock.patch.object(admin, "reconcile") as rec:
             app, _, _ = self.attach(self.env)
             with TestClient(app):  # runs startup, then shutdown
@@ -395,6 +396,24 @@ class AttachFromEnv(unittest.TestCase):
             n = rec.call_count
             time.sleep(0.1)
             self.assertEqual(rec.call_count, n)  # cancelled
+
+    def test_first_sync_comes_before_a_full_period(self):
+        import asyncio
+
+        from app.enroll import admin
+
+        calls = []
+
+        async def run():
+            with mock.patch.object(admin, "RECONCILE_SECONDS", 60), \
+                    mock.patch.object(admin, "FIRST_RECONCILE_SECONDS", 0.01), \
+                    mock.patch.object(admin, "reconcile", lambda *a: calls.append(1)):
+                task = asyncio.create_task(admin.reconcile_loop(None, None, admin.SyncState()))
+                await asyncio.sleep(0.2)
+                task.cancel()
+
+        asyncio.run(run())
+        self.assertEqual(len(calls), 1)  # synced once right away, the next one is a minute off
 
     def test_loop_survives_exception_and_marks_pending(self):
         import asyncio
@@ -412,6 +431,7 @@ class AttachFromEnv(unittest.TestCase):
 
         async def run():
             with mock.patch.object(admin, "RECONCILE_SECONDS", 0.01), \
+                    mock.patch.object(admin, "FIRST_RECONCILE_SECONDS", 0.01), \
                     mock.patch.object(admin, "reconcile", boom), \
                     self.assertLogs("app.enroll.admin", level="ERROR") as logs:
                 task = asyncio.create_task(admin.reconcile_loop(None, None, state))

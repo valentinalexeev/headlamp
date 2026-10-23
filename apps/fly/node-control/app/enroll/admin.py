@@ -38,7 +38,7 @@ from .agent_client import AgentClient, AgentUnavailable
 from .profile import IngressCfg, cfg_from_dict, sub_url
 from .store import Store
 
-CLIENTS = ("sing-box", "karing")
+CLIENTS = ("sing-box", "karing", "clash")
 RECONCILE_SECONDS = 300
 log = logging.getLogger(__name__)
 _SYNC_LOCK = threading.Lock()  # read store + push as one step, so a stale snapshot never lands last

@@ -2,7 +2,7 @@ import unittest
 
 import _helpers  # noqa: F401
 from app.enroll.profile import IngressCfg, cfg_from_dict, deep_link, render_profile, sub_url
-from app.enroll.store import Device
+from app.enroll.store import MODES, Device
 
 CFG = IngressCfg(host="ingress.example.com", public_key="PUBKEY", short_id="ab12", sni="www.example.com")
 UUIDS = {
@@ -22,6 +22,11 @@ class DeepLinkTest(unittest.TestCase):
         self.assertEqual(
             deep_link("sing-box", "https://h/sub/x", "n"),
             "sing-box://import-remote-profile?url=https%3A%2F%2Fh%2Fsub%2Fx#n")
+
+    def test_clash(self):
+        self.assertEqual(
+            deep_link("clash", "https://h/sub/x", "n"),
+            "clash://install-config?url=https%3A%2F%2Fh%2Fsub%2Fx&name=n")
 
     def test_karing(self):
         self.assertEqual(
@@ -168,3 +173,31 @@ class CfgFromDictTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClashProfileTest(unittest.TestCase):
+    def setUp(self):
+        from app.enroll.profile import render_clash_profile
+
+        self.p = render_clash_profile(
+            Device(id=1, name="Anna Phone", owner="anna.o", client="clash", expires_at=2_000_000_000, revoked=False,
+                   uuids=dict(UUIDS)), CFG)
+
+    def test_three_reality_proxies_and_a_selector(self):
+        self.assertEqual([x["name"] for x in self.p["proxies"]], list(MODES))
+        for x in self.p["proxies"]:
+            self.assertEqual((x["type"], x["flow"], x["servername"]), ("vless", "xtls-rprx-vision", CFG.sni))
+            self.assertEqual(x["reality-opts"], {"public-key": CFG.public_key, "short-id": CFG.short_id})
+        self.assertEqual(self.p["proxy-groups"], [{"name": "select", "type": "select", "proxies": list(MODES)}])
+        self.assertEqual(self.p["rules"], ["MATCH,select"])
+
+    def test_dns_follows_the_selection_and_the_server_name_uses_the_system_resolver(self):
+        self.assertEqual(self.p["dns"]["nameserver"], ["tls://1.1.1.1#select"])
+        self.assertEqual(self.p["dns"]["proxy-server-nameserver"], ["system"])
+
+    def test_no_name_or_owner(self):
+        import json
+
+        raw = json.dumps(self.p)
+        self.assertNotIn("Anna", raw)
+        self.assertNotIn("anna.o", raw)

@@ -9,13 +9,28 @@ API="${HEADSCALE_URL%/}/api/v1"
 
 auth_header="Authorization: Bearer ${HEADSCALE_API_KEY}"
 
+# Every API call goes through here so a rejected key is reported as such instead of as a bare curl failure
+# (an expired key is the usual reason approval silently stops; rotate it with scripts/rotate-headscale-api-key.sh).
+api() { # method path [json-body] -> body on stdout; non-2xx -> loud error, exit 2
+  local method="$1" path="$2" body="${3:-}" out code
+  out="$(mktemp)"
+  code="$(curl -sS -o "$out" -w '%{http_code}' -X "$method" -H "$auth_header" \
+    ${body:+-H "Content-Type: application/json" --data "$body"} "${API}${path}")" || { rm -f "$out"; echo "ERROR: cannot reach ${API}${path}" >&2; exit 2; }
+  if [[ "$code" != 2* ]]; then
+    rm -f "$out"
+    if [[ "$code" == "401" ]]; then
+      echo "ERROR: headscale rejected the API key (HTTP 401): it is expired or invalid; rotate it (scripts/rotate-headscale-api-key.sh)" >&2
+    else
+      echo "ERROR: ${method} ${path} returned HTTP ${code}" >&2
+    fi
+    exit 2
+  fi
+  cat "$out"; rm -f "$out"
+}
+
 echo "Looking for nodes with tag: ${TAG}"
 
-nodes_json="$(
-  curl -fsS \
-    -H "$auth_header" \
-    "${API}/node"
-)"
+nodes_json="$(api GET /node)"
 
 node_rows="$(
   echo "$nodes_json" |
@@ -55,13 +70,7 @@ while IFS=$'\t' read -r node_id node_name routes_csv; do
 
   echo "Approving ${route_count} routes for node ${node_id}"
 
-  curl -fsS \
-    -X POST \
-    -H "$auth_header" \
-    -H "Content-Type: application/json" \
-    --data "$(jq -n --argjson routes "$routes_json" '{routes: $routes}')" \
-    "${API}/node/${node_id}/approve_routes" \
-    >/dev/null
+  api POST "/node/${node_id}/approve_routes" "$(jq -n --argjson routes "$routes_json" '{routes: $routes}')" >/dev/null
 
   echo "Approved routes for node ${node_id}"
 done <<< "$node_rows"

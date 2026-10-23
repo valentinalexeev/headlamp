@@ -64,7 +64,38 @@ def deep_link(client: str, sub_url: str, name: str) -> str:
         return f"sing-box://import-remote-profile?url={url}#{label}"
     if client == "karing":
         return f"karing://install-config?url={url}&name={label}"
+    if client == "clash":
+        return f"clash://install-config?url={url}&name={label}"
     raise ValueError(f"unknown client: {client!r}")
+
+
+def render_clash_profile(device: Device, cfg: IngressCfg) -> dict:
+    """The same three modes as a Clash/mihomo profile (JSON is valid YAML, so it is served as YAML text).
+
+    Needs a mihomo core that sends the hybrid post-quantum key share Reality servers may require. DNS goes through the
+    selected group (``#select``); the ingress host's own name uses the system resolver.
+    """
+    missing = [m for m in MODES if not device.uuids.get(m)]
+    if missing:
+        raise ValueError(f"device lacks uuids for modes: {', '.join(missing)}")
+    return {
+        "proxies": [
+            {
+                "name": mode, "type": "vless", "server": cfg.host, "port": cfg.port, "uuid": device.uuids[mode],
+                "network": "tcp", "tls": True, "udp": True, "flow": "xtls-rprx-vision", "servername": cfg.sni,
+                "client-fingerprint": "chrome",
+                "reality-opts": {"public-key": cfg.public_key, "short-id": cfg.short_id},
+            }
+            for mode in MODES
+        ],
+        "proxy-groups": [{"name": "select", "type": "select", "proxies": list(MODES)}],
+        "rules": ["MATCH,select"],
+        "dns": {
+            "enable": True, "ipv6": False,
+            "nameserver": ["tls://1.1.1.1#select"],
+            "proxy-server-nameserver": ["system"],
+        },
+    }
 
 
 def render_profile(device: Device, cfg: IngressCfg) -> dict:

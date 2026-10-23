@@ -14,7 +14,7 @@ carry one-time tokens and subscription secrets. This module logs nothing itself.
 with ``host``, ``public_key``, ``short_id``, ``sni`` and optional ``port`` (443) and ``profile_name``
 (``"tunnel"``).
 
-Clients whose app only opens from a tap (``karing``) get a small HTML page with an "Open in ..." button
+Clients whose app only opens from a tap (``karing``, ``clash``) get a small HTML page with an "Open in ..." button
 instead of the 302; the others get the 302.
 
 Privacy: the redirect (or that page) and the profile pass through the ingress host, so neither carries the device
@@ -34,7 +34,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .profile import IngressCfg, cfg_from_dict, deep_link, render_profile, sub_url
+from .profile import IngressCfg, cfg_from_dict, deep_link, render_clash_profile, render_profile, sub_url
 from .store import Store
 
 # Case-insensitive substrings of link-preview / crawler User-Agents. iMessage's preview fetch
@@ -62,7 +62,7 @@ a{{display:inline-block;margin-top:1.2em;padding:.9em 1.6em;border-radius:.7em;b
 
 def _landing(client: str, location: str) -> Response:
     """A page with an explicit button: some iOS apps only open from a tap, not from a 302 to their URL scheme."""
-    label = {"karing": "Karing"}.get(client, client)
+    label = {"karing": "Karing", "clash": "Clash Mi"}.get(client, client)
     body = _LANDING.format(client=html.escape(label), href=html.escape(location, quote=True))
     return Response(body, media_type="text/html; charset=utf-8",
                     headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
@@ -88,7 +88,7 @@ def create_app(store: Store, cfg: IngressCfg) -> FastAPI:
         if device is None:
             return _not_found()
         location = deep_link(device.client, sub_url(cfg, store.subscription_secret(device.id)), cfg.profile_name)
-        if device.client == "karing":
+        if device.client in ("karing", "clash"):
             return _landing(device.client, location)
         return Response(status_code=302, headers={"Location": location})
 
@@ -99,6 +99,9 @@ def create_app(store: Store, cfg: IngressCfg) -> FastAPI:
         device = store.device_by_secret(secret)
         if device is None:
             return _not_found()
+        if device.client == "clash":
+            return Response(json.dumps(render_clash_profile(device, cfg)), media_type="text/yaml; charset=utf-8",
+                            headers={"Profile-Update-Interval": "12"})
         return JSONResponse(render_profile(device, cfg), headers={"Profile-Update-Interval": "12"})
 
     return app

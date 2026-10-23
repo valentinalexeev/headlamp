@@ -54,6 +54,20 @@ class PublicListenerTest(unittest.TestCase):
         self.assertNotIn("<script", r.text)
         self.assertEqual(self.client.get(f"/e/{token}").status_code, 404)
 
+    def test_clash_gets_a_landing_page_and_a_yaml_profile(self):
+        dev, secret = self.store.create_device("Anna", "anna.owner", "clash", int(self.now) + 86400)
+        r = self.client.get(f"/e/{self.store.create_token(dev.id)}")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Open in Clash Mi", r.text)
+        self.assertEqual(self._target(r), deep_link("clash", sub_url(CFG, secret), "tunnel"))
+        p = self.client.get(f"/sub/{secret}")
+        self.assertEqual(p.status_code, 200)
+        self.assertTrue(p.headers["content-type"].startswith("text/yaml"))
+        import json
+
+        self.assertEqual([x["name"] for x in json.loads(p.text)["proxies"]], ["auto", "direct", "exit"])
+        self.assertNotIn("Anna", p.text)
+
     def test_valid_token_redirects_once(self):
         token = self.store.create_token(self.device.id)
         r = self.client.get(f"/e/{token}")
@@ -66,7 +80,7 @@ class PublicListenerTest(unittest.TestCase):
     def test_device_name_and_owner_never_reach_the_ingress_host(self):
         from app.enroll import public
 
-        for client in ("sing-box", "karing"):
+        for client in ("sing-box", "karing", "clash"):
             dev, secret = self.store.create_device("Anna Secret Phone", "anna.owner", client, int(self.now) + 86400)
             token = self.store.create_token(dev.id)
             loc = self._target(self.client.get(f"/e/{token}"))

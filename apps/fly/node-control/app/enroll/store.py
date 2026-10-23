@@ -126,7 +126,7 @@ class Store:
         self,
         name: str,
         owner: str,
-        client: Literal["sing-box", "karing"],
+        client: Literal["sing-box", "karing", "clash"],
         expires_at: int,
     ) -> tuple[Device, str]:
         with closing(self._connect()) as db:

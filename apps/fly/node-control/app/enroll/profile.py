@@ -84,7 +84,11 @@ def render_clash_profile(device: Device, cfg: IngressCfg) -> dict:
                 "name": mode, "type": "vless", "server": cfg.host, "port": cfg.port, "uuid": device.uuids[mode],
                 "network": "tcp", "tls": True, "udp": True, "flow": "xtls-rprx-vision", "servername": cfg.sni,
                 "client-fingerprint": "chrome",
-                "reality-opts": {"public-key": cfg.public_key, "short-id": cfg.short_id},
+                "reality-opts": {
+                    "public-key": cfg.public_key, "short-id": cfg.short_id,
+                    # mihomo's default is off; newer Xray Reality servers reject a hello without this key share
+                    "support-x25519mlkem768": True,
+                },
             }
             for mode in MODES
         ],

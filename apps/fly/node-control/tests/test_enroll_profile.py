@@ -187,7 +187,8 @@ class ClashProfileTest(unittest.TestCase):
         self.assertEqual([x["name"] for x in self.p["proxies"]], list(MODES))
         for x in self.p["proxies"]:
             self.assertEqual((x["type"], x["flow"], x["servername"]), ("vless", "xtls-rprx-vision", CFG.sni))
-            self.assertEqual(x["reality-opts"], {"public-key": CFG.public_key, "short-id": CFG.short_id})
+            self.assertEqual(x["reality-opts"], {"public-key": CFG.public_key, "short-id": CFG.short_id,
+                                                "support-x25519mlkem768": True})
         self.assertEqual(self.p["proxy-groups"], [{"name": "select", "type": "select", "proxies": list(MODES)}])
         self.assertEqual(self.p["rules"], ["MATCH,select"])
 

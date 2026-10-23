@@ -5,13 +5,18 @@ kill_timeout = 5
 
 [processes]
 app = "headscale serve"
-route_approver = "/usr/local/bin/cron-approve-routes.sh"
+# Optional route approver: a second machine that approves the routes advertised by `tag:gateway` nodes through the
+# API. OFF by default. It needs the HEADSCALE_API_KEY secret (keys expire: see scripts/rotate-headscale-api-key.sh).
+# Prefer `autoApprovers.routes` in acl.json (prefix -> approving tags), which needs no key; use the approver only when
+# the advertised routes cannot be covered by prefixes. To enable, uncomment the next line and redeploy.
+# route_approver = "/usr/local/bin/cron-approve-routes.sh"
 
 [metrics]
 port = 9090
 path = "/metrics"
 
 [env]
+  # Used only when the optional route approver above is enabled.
   GATEWAY_TAG = "tag:gateway"
   APPROVE_ROUTES_INTERVAL_SECONDS = "300"
   HEADSCALE_URL = "https://headscale.example.com"

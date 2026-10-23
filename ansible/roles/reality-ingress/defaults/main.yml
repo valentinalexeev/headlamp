@@ -56,6 +56,8 @@ ingress_guard_file: /etc/ingress-guard.nft
 # IPv4 resolver is missing from this list.
 ingress_guard_resolvers: ["127.0.0.53"]
 nft_bin: /usr/sbin/nft
+# How often the guard check timer verifies that the nftables table exists and reapplies it if not (systemd time span).
+ingress_guard_check_interval: 30s
 # Unit of the ingress agent; restarted when config.base.json changes (only if
 # the unit file exists), so its startup restore re-renders config.json.
 ingress_agent_unit: ingress-agent

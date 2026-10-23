@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Check that the ingress nftables backstop is loaded
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec={{ ingress_guard_check_interval }}
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

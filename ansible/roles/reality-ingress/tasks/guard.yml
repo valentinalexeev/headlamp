@@ -44,3 +44,24 @@
     daemon_reload: true
   become: true
   when: not ansible_check_mode
+
+# A runtime `nft flush ruleset` (or a firewall tool that flushes) deletes the table; the unit stays "active (exited)",
+# so the table is only restored by the next reload. This timer reapplies it within ingress_guard_check_interval.
+- name: Install the guard check service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - ingress-guard-check.service
+    - ingress-guard-check.timer
+  become: true
+
+- name: Enable and start the guard check timer
+  ansible.builtin.systemd:
+    name: ingress-guard-check.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode

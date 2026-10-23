@@ -13,6 +13,12 @@ ExecStart={{ xray_bin }} run -c {{ xray_config_dir }}/config.json
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
+# Second layer, independent of nftables (cgroup eBPF filter): survives `nft flush ruleset`. Address-based only, so
+# loopback is allowed here and its ports are limited by the nftables guard alone. Needs systemd >= 243 and a kernel with
+# cgroup BPF; verify with `systemctl show xray -p IPAddressDeny -p IPAddressAllow`.
+IPAddressAllow=127.0.0.0/8 ::1{% for r in ingress_guard_resolvers %} {{ r }}{% endfor %}
+
+IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 fc00::/7 fe80::/10
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes

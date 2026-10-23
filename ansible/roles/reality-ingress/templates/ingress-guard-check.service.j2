@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Reapply the ingress nftables backstop if its table is missing (for example after `nft flush ruleset`)
+After=ingress-guard.service
+
+[Service]
+Type=oneshot
+# Quiet when the table is there; otherwise log loudly and reload (never restart: xray Requires= the guard).
+ExecStart=/bin/sh -c '{{ nft_bin }} list table inet ingress_guard >/dev/null 2>&1 || { logger -p daemon.warning -t ingress-guard-check "table inet ingress_guard missing, reapplying"; systemctl reload ingress-guard; }'

@@ -101,6 +101,20 @@ ingress-guard` deletes the table. Not covered: the host's own public address, if
 on an interface (on a 1:1 NAT floating IP it is not). The `direct` outbound resolves with
 `domainStrategy: UseIPv4`, so IPv6 destinations are not dialled directly.
 
+### Surviving a flush
+
+`nft flush ruleset` deletes the table while `ingress-guard.service` stays active, so rerunning the role does not
+bring it back. Two additions cover this:
+
+- `ingress-guard-check.timer` (every `ingress_guard_check_interval`, default 30 s) runs `nft list table inet
+  ingress_guard` and, if it fails, logs a warning (`journalctl -t ingress-guard-check`) and reloads the guard. The
+  gap after a flush is at most one interval.
+- `xray.service` carries `IPAddressDeny=` for private, CGNAT/tailnet, link-local and ULA ranges, with
+  `IPAddressAllow=` for loopback and `ingress_guard_resolvers`. It is enforced by a cgroup eBPF filter that
+  `nft flush ruleset` does not touch. It filters by address only, so the loopback port limits (SOCKS and the Caddy
+  front only) still depend on the nftables table. It needs systemd >= 243 and cgroup BPF in the kernel; check with
+  `systemctl show xray -p IPAddressDeny -p IPAddressAllow`.
+
 ## Ports
 
 Open in the cloud security group (the role changes no host firewall): TCP **443** (Reality) and

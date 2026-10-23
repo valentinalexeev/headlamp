@@ -86,7 +86,7 @@ commits on top of it or attempt a rewrite on your own.
 |---|---|
 | `terraform/modules/exit-node-vm/{yandex,oci,aws,cloudru,selectel}` | reusable VM exit-node modules (root stacks live in YOUR repo) |
 | `ansible/roles/{tailscale,route-provisioner}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; version bump / key rotation playbooks |
-| `apps/fly/headscale` | headscale server image; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders** |
+| `apps/fly/headscale` | headscale server image; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. The route approver (`approve-gateway-routes.sh`, `cron-approve-routes.sh`) is shipped but OFF by default (commented `route_approver` process in `fly.toml`); prefer `autoApprovers.routes` in `acl.json` |
 | `apps/fly/exit-ams` | Fly tailscale exit node; `fly.toml`, `direct-hosts.txt` are **placeholders** |
 | `apps/fly/node-control` | start/stop web UI for the VM nodes; `fly.toml`, `app/nodes.json` are **placeholders** |
 | `apps/tailguard` | WireGuard server → tailnet exit node (Docker, operator-run) |

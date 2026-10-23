@@ -51,7 +51,9 @@ xray_api_listen: "127.0.0.1:10085"
 ingress_guard_file: /etc/ingress-guard.nft
 # IPv4 resolvers xray may query on port 53 although they are on loopback or a
 # private network: the system resolver from /etc/resolv.conf (the
-# systemd-resolved stub on Ubuntu). xray's own lookups fail without it.
+# systemd-resolved stub on Ubuntu). xray's own lookups fail without it. Hosts whose resolv.conf is managed by a
+# tailnet client list a tailnet resolver (100.100.100.100): add it here too. Preflight fails when a blocked-range
+# IPv4 resolver is missing from this list.
 ingress_guard_resolvers: ["127.0.0.53"]
 nft_bin: /usr/sbin/nft
 # Unit of the ingress agent; restarted when config.base.json changes (only if

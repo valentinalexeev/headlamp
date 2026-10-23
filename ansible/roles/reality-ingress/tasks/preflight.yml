@@ -57,10 +57,10 @@
 - name: Check ports are in range and the paths/arch are supported
   ansible.builtin.assert:
     that:
-      - 1 <= (socks_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
-      - 1 <= (xray_api_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
-      - 1 <= (enroll_upstream | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
-      - 1 <= (reality_dest | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
+      - 1 <= (socks_listen | regex_replace('^.*:([0-9]+)$', '\1') | int) <= 65535
+      - 1 <= (xray_api_listen | regex_replace('^.*:([0-9]+)$', '\1') | int) <= 65535
+      - 1 <= (enroll_upstream | regex_replace('^.*:([0-9]+)$', '\1') | int) <= 65535
+      - 1 <= (reality_dest | regex_replace('^.*:([0-9]+)$', '\1') | int) <= 65535
       - 1 <= (ingress_listen_port | int) <= 65535
       - caddy_state_dir is regex('^/var/lib/[A-Za-z0-9._-]+\\Z')
       - (ansible_facts.architecture | default('')) == 'x86_64'
@@ -98,3 +98,31 @@
       ingress_guard_file a path under /etc. Got xray_user='{{ xray_user }}',
       ingress_guard_resolvers={{ ingress_guard_resolvers }}.
     quiet: true
+
+# xray resolves destination names itself, as the unprivileged xray user, and the guard drops its traffic to loopback,
+# private, CGNAT/tailnet and link-local addresses. A system resolver in those ranges (a tailnet resolver, a local stub)
+# must therefore be allowed explicitly in ingress_guard_resolvers, or `direct` lookups stall and fail.
+- name: Read the host's resolver configuration
+  ansible.builtin.slurp:
+    src: /etc/resolv.conf
+  register: ingress_resolv_conf
+
+- name: Check xray can use every IPv4 system resolver
+  ansible.builtin.assert:
+    that:
+      - ingress_unusable_resolvers | length == 0
+    fail_msg: >-
+      reality-ingress: /etc/resolv.conf lists IPv4 resolvers {{ ingress_unusable_resolvers }} that the nftables
+      backstop blocks for the xray user (loopback, private, CGNAT/tailnet or link-local range) and that are not in
+      ingress_guard_resolvers. Add them there (xray may then query them on port 53 only), or point resolv.conf at
+      resolvers outside those ranges. Without this, `direct` outbound lookups time out.
+    quiet: true
+  vars:
+    ingress_resolvers: >-
+      {{ (ingress_resolv_conf.content | b64decode).splitlines()
+         | select('match', '^[ \t]*nameserver[ \t]+[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+[ \t]*$')
+         | map('regex_replace', '^[ \t]*nameserver[ \t]+([0-9.]+)[ \t]*$', '\1') | list }}
+    ingress_unusable_resolvers: >-
+      {{ ingress_resolvers
+         | select('match', '^(0[.]|10[.]|127[.]|169[.]254[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|192[.]168[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.])')
+         | reject('in', ingress_guard_resolvers) | list }}

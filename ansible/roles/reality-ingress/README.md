@@ -50,7 +50,8 @@ Optional: `ingress_listen_port` (443), `reality_sni` (= `ingress_host`), `realit
 (`127.0.0.1:8443`), `socks_listen` (`127.0.0.1:1055`, must be loopback), `xray_user` (`xray`),
 `xray_api_listen` (`127.0.0.1:10085`, loopback), `xray_url` / `caddy_url` (release URLs derived
 from the versions), `ingress_guard_resolvers` (`["127.0.0.53"]`, IPv4 resolvers xray may query on
-port 53; must match `/etc/resolv.conf`), `ingress_guard_file`, `nft_bin`, `ingress_agent_unit`
+port 53; must include every IPv4 resolver in `/etc/resolv.conf` that lies in a range the guard blocks, such as a tailnet
+resolver at `100.100.100.100` or a local stub; preflight checks this), `ingress_guard_file`, `nft_bin`, `ingress_agent_unit`
 (`ingress-agent`). See `defaults/main.yml`.
 
 ## Who owns which config file

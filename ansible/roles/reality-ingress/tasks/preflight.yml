@@ -57,10 +57,10 @@
 - name: Check ports are in range and the paths/arch are supported
   ansible.builtin.assert:
     that:
-      - 1 <= (socks_listen | regex_replace('^.*:([0-9]+)$', '\1') | int) <= 65535
-      - 1 <= (xray_api_listen | regex_replace('^.*:([0-9]+)$', '\1') | int) <= 65535
-      - 1 <= (enroll_upstream | regex_replace('^.*:([0-9]+)$', '\1') | int) <= 65535
-      - 1 <= (reality_dest | regex_replace('^.*:([0-9]+)$', '\1') | int) <= 65535
+      - 1 <= (socks_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
+      - 1 <= (xray_api_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
+      - 1 <= (enroll_upstream | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
+      - 1 <= (reality_dest | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
       - 1 <= (ingress_listen_port | int) <= 65535
       - caddy_state_dir is regex('^/var/lib/[A-Za-z0-9._-]+\\Z')
       - (ansible_facts.architecture | default('')) == 'x86_64'

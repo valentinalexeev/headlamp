@@ -40,6 +40,7 @@ from .store import Store
 
 CLIENTS = ("sing-box", "karing", "clash")
 RECONCILE_SECONDS = 300
+FIRST_RECONCILE_SECONDS = 20  # after a restart: let the tailnet come up, then sync at once instead of waiting a full period
 log = logging.getLogger(__name__)
 _SYNC_LOCK = threading.Lock()  # read store + push as one step, so a stale snapshot never lands last
 _PAGE = Path(__file__).parent.parent / "static" / "enroll.html"
@@ -97,8 +98,10 @@ def reconcile(store: Store, agent, state: "SyncState | None" = None) -> bool:
 
 
 async def reconcile_loop(store, agent, state) -> None:
+    delay = FIRST_RECONCILE_SECONDS
     while True:
-        await asyncio.sleep(RECONCILE_SECONDS)
+        await asyncio.sleep(delay)
+        delay = RECONCILE_SECONDS
         try:
             await asyncio.to_thread(reconcile, store, agent, state)
         except Exception as e:  # noqa: BLE001 - keep the loop alive; log the class only

@@ -42,7 +42,7 @@ from .store import Store
 PREVIEW_UA_MARKERS = (
     "facebookexternalhit", "twitterbot", "telegrambot", "whatsapp", "slackbot", "discordbot",
     "skypeuripreview", "linkedinbot", "embedly", "bot", "crawler", "spider", "preview",
-    "linkexpanding", "google-",
+    "linkexpanding", "google-", "vkshare", "viber",
 )
 
 

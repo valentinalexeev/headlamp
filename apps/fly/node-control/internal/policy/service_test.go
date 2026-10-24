@@ -24,6 +24,8 @@ type fakeAPI struct {
 	version  int
 	getErr   error
 	setErr   error
+	applyErr error // SetPolicy stores the text, then fails
+	breakGet bool  // a failing SetPolicy also breaks later reads
 	checkErr error
 	gets     int
 	sets     []string
@@ -46,7 +48,15 @@ func (f *fakeAPI) SetPolicy(_ context.Context, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sets = append(f.sets, text)
+	if f.applyErr != nil {
+		f.text = text
+		f.version++
+		return f.applyErr
+	}
 	if f.setErr != nil {
+		if f.breakGet {
+			f.getErr = errors.New("read failed")
+		}
 		return f.setErr
 	}
 	f.text = text
@@ -426,5 +436,92 @@ func TestConcurrentApplyOnlyOneSucceeds(t *testing.T) {
 	wg.Wait()
 	if wins.Load() != 1 || api.setCount() != 1 {
 		t.Fatalf("wins=%d sets=%d", wins.Load(), api.setCount())
+	}
+}
+
+func TestApplyAmbiguousErrorThenPolicyAppliedKeepsPending(t *testing.T) {
+	api := newFakeAPI("old")
+	api.applyErr = errors.New("timeout")
+	svc, _, _ := newTestService(t, api)
+	id := applyOK(t, svc, "new")
+	if svc.Outcome(id) != OutcomePending {
+		t.Fatalf("outcome = %q", svc.Outcome(id))
+	}
+	if err := svc.Confirm(context.Background(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyAmbiguousErrorNotAppliedAborts(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(errors.New("connection reset"))
+	svc, _, _ := newTestService(t, api)
+	_, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit")
+	if err == nil || errors.Is(err, ErrUncertain) || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok, _ := svc.store.Pending(); ok {
+		t.Fatal("pending left behind")
+	}
+	if h, _ := svc.store.History(5); len(h) != 0 {
+		t.Fatalf("history = %v", h)
+	}
+}
+
+func TestApplyAmbiguousErrorReReadFailsKeepsPendingAndReturnsErrUncertain(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(errors.New("timeout"))
+	api.breakGet = true
+	svc, clk, _ := newTestService(t, api)
+	id, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit")
+	if !errors.Is(err, ErrUncertain) || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("err = %v", err)
+	}
+	if p, ok, _ := svc.store.Pending(); !ok || p.ID != id {
+		t.Fatalf("pending = %+v %v", p, ok)
+	}
+	api.fail(nil)
+	api.mu.Lock()
+	api.getErr = nil
+	api.mu.Unlock()
+	clk.Advance(testRevert)
+	svc.checkRevert(context.Background())
+	if api.current() != "old" || svc.Outcome(id) != OutcomeReverted {
+		t.Fatalf("text = %q, outcome = %q", api.current(), svc.Outcome(id))
+	}
+}
+
+func TestApplyDefiniteRejectionStillAborts(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(&headscale.APIError{Status: 422, Message: "no"})
+	svc, _, _ := newTestService(t, api)
+	_, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit")
+	var ae *headscale.APIError
+	if !errors.As(err, &ae) || errors.Is(err, ErrUncertain) || api.gets != 1 {
+		t.Fatalf("err = %v, gets = %d", err, api.gets)
+	}
+	if _, ok, _ := svc.store.Pending(); ok {
+		t.Fatal("pending")
+	}
+}
+
+func TestAmbiguousErrorThroughChangeAndRevertTo(t *testing.T) {
+	api := newFakeAPI("old")
+	svc, _, _ := newTestService(t, api)
+	id := applyOK(t, svc, "new")
+	if err := svc.Confirm(context.Background(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	api.applyErr = errors.New("timeout")
+	rid, _, err := svc.RevertTo(context.Background(), "alice", id)
+	if err != nil || svc.Outcome(rid) != OutcomePending || api.current() != "old" {
+		t.Fatalf("revert: id=%d err=%v", rid, err)
+	}
+	if err := svc.Confirm(context.Background(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	cid, _, err := svc.Change(context.Background(), "alice", func(string) (string, error) { return "third", nil }, "r")
+	if err != nil || svc.Outcome(cid) != OutcomePending || api.current() != "third" {
+		t.Fatalf("change: id=%d err=%v", cid, err)
 	}
 }

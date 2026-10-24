@@ -21,6 +21,7 @@ var (
 	ErrBusy           = errors.New("another policy change is pending")
 	ErrNothingPending = errors.New("no policy change is pending")
 	ErrNoChange       = errors.New("policy is unchanged")
+	ErrUncertain      = errors.New("policy write outcome unknown; an automatic revert is armed")
 )
 
 // Outcome is the state of a change.

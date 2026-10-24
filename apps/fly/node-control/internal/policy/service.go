@@ -12,6 +12,9 @@ import (
 	"example.com/node-control/internal/headscale"
 )
 
+// rereadTimeout bounds the read that follows an ambiguous write failure.
+const rereadTimeout = 10 * time.Second
+
 // API is the part of the headscale client the service uses.
 type API interface {
 	GetPolicy(ctx context.Context) (text, updatedAt string, err error)
@@ -68,15 +71,50 @@ func (s *Service) start(ctx context.Context, actor, reason, before, after string
 		return 0, time.Time{}, err
 	}
 	if err := s.api.SetPolicy(ctx, after); err != nil {
-		if aerr := s.store.Abort(id); aerr != nil {
-			slog.Error("policy change abort failed", "id", id, "err", aerr)
+		if err := s.settleWriteError(id, before, after, err); err != nil {
+			if errors.Is(err, ErrUncertain) {
+				return id, deadline, err
+			}
+			return 0, time.Time{}, err
 		}
-		slog.Warn("policy change rejected", "actor", actor, "id", id, "bytes", len(after), "cause", errCause(err))
-		return 0, time.Time{}, err
 	}
 	slog.Info("policy change applied", "actor", actor, "id", id, "reason", reasonClass(reason),
 		"before_bytes", len(before), "after_bytes", len(after), "deadline", deadline.Unix())
 	return id, deadline, nil
+}
+
+// settleWriteError decides what a failed SetPolicy means. A headscale rejection is definite: the
+// change is dropped. Any other failure is ambiguous (headscale may have applied it), so the live
+// policy is re-read: equal to after means success (nil), equal to before means not applied (the
+// change is dropped, err returned), anything else keeps the change pending with its revert armed
+// and returns ErrUncertain.
+func (s *Service) settleWriteError(id int64, before, after string, err error) error {
+	var ae *headscale.APIError
+	if errors.As(err, &ae) {
+		s.abort(id)
+		slog.Warn("policy change rejected", "id", id, "bytes", len(after), "cause", errCause(err))
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), rereadTimeout)
+	defer cancel()
+	live, _, rerr := s.api.GetPolicy(ctx)
+	switch {
+	case rerr == nil && live == after:
+		slog.Warn("policy write reported an error but was applied", "id", id, "cause", errCause(err))
+		return nil
+	case rerr == nil && live == before:
+		s.abort(id)
+		slog.Warn("policy write failed and was not applied", "id", id, "bytes", len(after), "cause", errCause(err))
+		return err
+	}
+	slog.Error("policy write outcome unknown; revert armed", "id", id, "cause", errCause(err))
+	return fmt.Errorf("%w: %w", ErrUncertain, err)
+}
+
+func (s *Service) abort(id int64) {
+	if err := s.store.Abort(id); err != nil {
+		slog.Error("policy change abort failed", "id", id, "err", err)
+	}
 }
 
 // errCause describes an error for logs without the text a headscale message may quote.

@@ -1,0 +1,114 @@
+{
+  "key": "fixture-key-0123456789abcdef",
+  "legacy": {
+    "credentials": [
+      {
+        "mode": "auto",
+        "not_after": 2000000,
+        "uuid": "00000000-0000-4000-8000-000000000001"
+      },
+      {
+        "mode": "direct",
+        "not_after": 2000000,
+        "uuid": "00000000-0000-4000-8000-000000000002"
+      },
+      {
+        "mode": "exit",
+        "not_after": 2000000,
+        "uuid": "00000000-0000-4000-8000-000000000003"
+      }
+    ],
+    "devices": [
+      {
+        "client": "sing-box",
+        "expires_at": 2000000,
+        "id": 1,
+        "name": "device-l1",
+        "owner": "owner-l1",
+        "revoked": false,
+        "secret": "1.gIMK3j4D_ZdqKx1oM_JMew",
+        "uuids": {
+          "auto": "00000000-0000-4000-8000-000000000001",
+          "direct": "00000000-0000-4000-8000-000000000002",
+          "exit": "00000000-0000-4000-8000-000000000003"
+        }
+      },
+      {
+        "client": "clash",
+        "expires_at": 2000000,
+        "id": 2,
+        "name": "device-l2",
+        "owner": "owner-l2",
+        "revoked": true,
+        "secret": "2.MOrV_UXKr2-_KfutxiJqDw",
+        "uuids": {}
+      }
+    ]
+  },
+  "modern": {
+    "credentials": [
+      {
+        "mode": "auto",
+        "not_after": 2000000,
+        "uuid": "222e4b1c-02d5-4bfa-8908-cb023f50020e"
+      },
+      {
+        "mode": "direct",
+        "not_after": 2000000,
+        "uuid": "f216449a-6da3-419a-b5dd-007f3940c601"
+      },
+      {
+        "mode": "exit",
+        "not_after": 2000000,
+        "uuid": "27228c1e-545d-456a-8720-bbcd435860ca"
+      }
+    ],
+    "devices": [
+      {
+        "client": "sing-box",
+        "expires_at": 2000000,
+        "id": 1,
+        "name": "device-a",
+        "owner": "owner-a",
+        "revoked": false,
+        "secret": "1.4N40P5mRHZeOUlys_miAVg",
+        "uuids": {
+          "auto": "222e4b1c-02d5-4bfa-8908-cb023f50020e",
+          "direct": "f216449a-6da3-419a-b5dd-007f3940c601",
+          "exit": "27228c1e-545d-456a-8720-bbcd435860ca"
+        }
+      },
+      {
+        "client": "clash",
+        "expires_at": 2000000,
+        "id": 2,
+        "name": "device-b",
+        "owner": "owner-b",
+        "revoked": true,
+        "secret": "2.MOrV_UXKr2-_KfutxiJqDw",
+        "uuids": {
+          "auto": "33967226-76b6-4fea-a98e-f9cbca24521b",
+          "direct": "ac6672be-395d-4e46-8719-532fada1e169",
+          "exit": "077702e9-fbe4-4d7a-8634-6b5e51eff953"
+        }
+      },
+      {
+        "client": "karing",
+        "expires_at": 999000,
+        "id": 3,
+        "name": "device-c",
+        "owner": "owner-c",
+        "revoked": false,
+        "secret": "3.2ZB-81DjMen3t4fh_zg5bQ",
+        "uuids": {
+          "auto": "2b572a31-9fac-48e0-9f8b-986073344ed0",
+          "direct": "97047282-74c8-4504-abb9-e54c76d16069",
+          "exit": "9e5741b1-dc22-4aa7-bae6-d55f5c13540a"
+        }
+      }
+    ]
+  },
+  "now": 1000000,
+  "token_for_device_a": "IWvG-eBkfoOMhtG6_BeiVw",
+  "token_max_uses": 2
+}

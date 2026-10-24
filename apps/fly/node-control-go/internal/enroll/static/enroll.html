@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>enrolment</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#131824; --border:#232a3a; --text:#e6e9ef; --muted:#8b93a7; --accent:#4f8cff; --bad:#e5534b; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:1.5rem 1rem; background:var(--bg); color:var(--text);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
+  main { max-width:960px; margin:0 auto; }
+  h1 { font-size:1.3rem; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:1rem; margin-bottom:1rem; }
+  form { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.6rem; align-items:end; }
+  label { font-size:.8rem; color:var(--muted); display:flex; flex-direction:column; gap:.2rem; }
+  input, select, button, textarea { font:inherit; padding:.45rem .6rem; border-radius:6px; border:1px solid var(--border);
+         background:var(--bg); color:var(--text); }
+  button { background:var(--accent); border-color:var(--accent); cursor:pointer; }
+  button.danger { background:transparent; border-color:var(--bad); color:var(--bad); }
+  button.ghost { background:transparent; }
+  .tablewrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th, td { text-align:left; padding:.5rem; border-bottom:1px solid var(--border); white-space:nowrap; }
+  td.actions { display:flex; gap:.4rem; }
+  .muted { color:var(--muted); } .bad { color:var(--bad); }
+  #out { display:none; }
+  #syncbanner { display:none; border-color:var(--bad); color:var(--bad); }
+  #out textarea { width:100%; height:5rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Enrolment</h1>
+  <div class="panel" id="syncbanner" role="alert"></div>
+  <div class="panel">
+    <form id="create">
+      <label>Name <input name="name" required maxlength="100"></label>
+      <label>Owner <input name="owner" required maxlength="100"></label>
+      <label>Client
+        <select name="client"><option>sing-box</option><option>karing</option><option>clash</option></select>
+      </label>
+      <label>Expires <input name="expires" type="date" required></label>
+      <button type="submit">Create device</button>
+    </form>
+    <p id="msg" class="muted"></p>
+  </div>
+  <div class="panel" id="out">
+    <div id="outlabel" class="muted"></div>
+    <textarea id="outtext" readonly></textarea>
+    <button class="ghost" id="copy" type="button">Copy</button>
+  </div>
+  <div class="panel tablewrap">
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Client</th><th>Expires</th><th>Status</th><th>Traffic</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const post = (url, body) => fetch(url, {
+  method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})
+}).then(async (r) => { if (!r.ok) throw new Error(r.status + " " + await r.text()); return r.json(); });
+const say = (t, bad) => { $("#msg").textContent = t; $("#msg").className = bad ? "bad" : "muted"; };
+const endOfDay = (d) => Math.floor(new Date(d + "T23:59:59").getTime() / 1000);
+function show(label, text) {
+  $("#out").style.display = "block"; $("#outlabel").textContent = label; $("#outtext").value = text;
+}
+$("#copy").onclick = () => { $("#outtext").select(); navigator.clipboard && navigator.clipboard.writeText($("#outtext").value); };
+
+const SYNC_HINT = {
+  unreachable: "agent unreachable; retried every 5 minutes",
+  unauthorized: "agent refused the token (AGENT_TOKEN mismatch)",
+  rejected: "agent rejected the update (xray refused the config?); see journalctl -u ingress-agent",
+  conflict: "agent refused an empty credential set",
+  error: "unexpected error; see the node-control log",
+};
+function showSync(s) {
+  const b = $("#syncbanner");
+  if (!s || !s.pending) { b.style.display = "none"; b.textContent = ""; return; }
+  const when = s.since ? new Date(s.since * 1000).toLocaleString() : "?";
+  b.textContent = "ingress host out of sync since " + when + ": " + s.state + " (" + (SYNC_HINT[s.state] || "") + ")."
+    + " Revocations and extensions are NOT in effect on the ingress host until this clears.";
+  b.style.display = "block";
+}
+function fmtTraffic(t) {
+  if (!t) return "-";
+  return Object.entries(t).map(([k, v]) => k + " " + v).join(", ");
+}
+async function load() {
+  const r = await fetch("/enroll/devices");
+  const j = await r.json();
+  showSync(j.sync);
+  const devs = j.devices;
+  const body = $("#rows"); body.textContent = "";
+  for (const d of devs) {
+    const tr = document.createElement("tr");
+    const status = d.revoked ? "revoked" : (d.expires_at * 1000 < Date.now() ? "expired" : "active");
+    for (const v of [d.id, d.name, d.owner, d.client, new Date(d.expires_at * 1000).toLocaleDateString(), status, fmtTraffic(d.traffic)]) {
+      const td = document.createElement("td"); td.textContent = v; tr.appendChild(td);
+    }
+    const td = document.createElement("td"); td.className = "actions";
+    const btn = (label, cls, fn) => { const b = document.createElement("button"); b.textContent = label; b.className = cls; b.onclick = fn; td.appendChild(b); };
+    btn("New link", "", async () => {
+      try { const j = await post("/enroll/devices/" + d.id + "/links", {ttl: 86400, max_uses: 1}); show("One-time link for " + d.name + " (24 h)", j.url); }
+      catch (e) { say(e.message, true); }
+    });
+    btn("Extend", "ghost", async () => {
+      const v = prompt("New expiry date (YYYY-MM-DD)"); if (!v) return;
+      try { const j = await post("/enroll/devices/" + d.id + "/extend", {expires_at: endOfDay(v)}); showSync(j.sync); load(); } catch (e) { say(e.message, true); }
+    });
+    btn("Revoke", "danger", async () => {
+      if (!confirm("Revoke " + d.name + "?")) return;
+      try { const j = await post("/enroll/devices/" + d.id + "/revoke"); showSync(j.sync); load(); } catch (e) { say(e.message, true); }
+    });
+    tr.appendChild(td); body.appendChild(tr);
+  }
+}
+$("#create").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  try {
+    const j = await post("/enroll/devices", {name: f.get("name"), owner: f.get("owner"), client: f.get("client"), expires_at: endOfDay(f.get("expires"))});
+    show("Subscription URL for the new device", j.subscription_url);
+    say(j.sync_pending ? "Created; not yet on the ingress host (" + j.sync.state + "), retried every 5 minutes." : "Created.");
+    showSync(j.sync);
+    ev.target.reset(); load();
+  } catch (e) { say(e.message, true); }
+};
+load();
+</script>
+</body>
+</html>

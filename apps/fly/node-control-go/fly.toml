@@ -1,0 +1,43 @@
+# No [[services]] block, deliberately: this app has no listener reachable via Fly's own proxy at all.
+# It is reachable only over the tailnet: the binary embeds a tailscale node (tsnet) and listens on it
+# (:80 admin, :8081 public enrolment when ENROLL_DB is set), never on 0.0.0.0.
+#
+# Placeholder values: your private repo keeps the real fly.toml (and app/nodes.json, app/enroll.json) and
+# copies them over these at deploy time (see CLAUDE.md, "overlay procedure").
+app = "<your-node-control-app>"
+# Set your Fly region.
+primary_region = "<region>"
+kill_signal = "SIGINT"
+# Worst-case graceful shutdown is about 15 s (listener drain up to 5 s, module Stop up to 5 s, then closing
+# the embedded tailscale node up to 5 s); 25 s leaves headroom before the machine is killed.
+kill_timeout = "25s"
+
+[env]
+  HEADSCALE_LOGIN_SERVER = "https://headscale.example.com"
+  # Name this app registers under on the tailnet.
+  TAILNET_HOSTNAME = "node-control"
+  # Optional overrides for discovered nodes (default /srv/app/nodes.json; a missing file is fine).
+  # NODES_CONFIG = "/srv/app/nodes.json"
+  # Enrolment (optional, see README "Enrolment"): the database lives on the tailscale_state volume below,
+  # because a Machine mounts only one volume.
+  # ENROLL_DB = "/var/lib/tailscale/enroll.db"
+  # ENROLL_CONFIG = "/srv/app/enroll.json"
+  # AGENT_URL = "http://<agent-tailnet-ip>:<port>"
+  # ENROLL_ALLOWED_HOSTS = "node-control.example.com,<this-node-tailnet-ip>"
+
+# Tailscale state in the shared Redis (optional, see README "Tailscale state"). Secrets, never values here:
+#   flyctl secrets set -a <app> REDIS_URL=... NODE_CONTROL_STATE_KEY="$(openssl rand -base64 32)"
+# First start only (plain setting, not a secret), to carry over the current identity from the volume:
+#   STATE_IMPORT_FROM = "/var/lib/tailscale/tailscaled.state"
+# The key defaults to <app>:tsnet; the volume below stays because ENROLL_DB lives on it.
+
+# Keep the tailscale identity across deploys; without a volume every deploy registers a brand-new node
+# ("name-1", "name-2", ...). Create it once: flyctl volumes create tailscale_state -a <app> -r <region> -n 1
+[mounts]
+  source = "tailscale_state"
+  destination = "/var/lib/tailscale"
+
+# Memory hint: a Go binary with an embedded tailscale node should fit in 256 MB. Verify with
+# scripts/measure-memory.sh on a trial app before relying on it; do not raise it silently.
+[[vm]]
+  memory = "256mb"

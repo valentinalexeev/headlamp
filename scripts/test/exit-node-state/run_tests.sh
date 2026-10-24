@@ -27,8 +27,8 @@ done
 cmd="$1"; key="${2:-}"; f="$TESTTMP/redis/${key//:/_}"
 [ -e "$TESTTMP/redis_down" ] && { echo "Could not connect to Redis" >&2; exit 1; }
 case "$cmd" in
-  PING) echo PONG;;
-  EXISTS) if [ -f "$f" ]; then echo 1; else echo 0; fi;;
+  PING) if [ -f "$TESTTMP/ping_reply" ]; then cat "$TESTTMP/ping_reply"; else echo PONG; fi;;
+  EXISTS) if [ -f "$TESTTMP/exists_reply" ]; then cat "$TESTTMP/exists_reply"; elif [ -f "$f" ]; then echo 1; else echo 0; fi;;
   GET) [ -f "$f" ] && cat "$f";;
   SET) [ "$x" = 1 ] || exit 2; cat > "$f"; echo "$key" >> "$TESTTMP/redis/set.log"; echo OK;;
   *) exit 2;;
@@ -64,7 +64,7 @@ rkey="$tmp/redis/app_state"; setlog="$tmp/redis/set.log"
 await_watch() { i=0; while ! grep -q "state-sync: watching" "$1" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.5; i=$((i + 1)); done; }
 # wait (max 15 s) until set.log has at least $1 lines
 await_sets() { i=0; while [ "$(nsets)" -lt "$1" ] && [ "$i" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done; }
-reset() { rm -rf "$tmp/state" "$tmp/redis" "$tmp/redis_down" "$tmp/redis_calls.log"; mkdir -p "$tmp/state" "$tmp/redis"; }
+reset() { rm -rf "$tmp/state" "$tmp/redis" "$tmp/redis_down" "$tmp/ping_reply" "$tmp/exists_reply" "$tmp/redis_calls.log"; mkdir -p "$tmp/state" "$tmp/redis"; }
 # put an "encrypted" value into the fake Redis, as identity $1 would have produced it
 seed_redis() { printf '%s' "$2" | PATH="$tmp/bin:$PATH" age -r "pub-$1" -a > "$rkey"; }
 nsets() { if [ -f "$setlog" ]; then wc -l < "$setlog" | tr -d ' '; else echo 0; fi; }
@@ -94,6 +94,29 @@ reset; seed_redis SECRET-B "$doc"; echo local-state > "$state"; before="$(cksum 
 "$sync" restore >/dev/null 2>&1; rc=$?
 [ "$rc" = 1 ] && [ "$(cksum < "$state")" = "$before" ] && [ "$(ls "$tmp/state" | wc -l | tr -d ' ')" = 1 ] && ok "restore: wrong identity -> exit 1, file byte-identical (cksum equal)" || fail "restore wrong id: rc=$rc"
 
+reset; echo local-state > "$state"; before="$(cksum < "$state")"; echo "ERR something odd" > "$tmp/exists_reply"
+"$sync" restore >/dev/null 2>&1; rc=$?
+[ "$rc" = 1 ] && [ "$(nsets)" = 0 ] && [ "$(cksum < "$state")" = "$before" ] && ok "restore: malformed EXISTS reply (rc 0) -> exit 1, no seed, file untouched" || fail "restore bad EXISTS: rc=$rc sets=$(nsets)"
+
+reset; echo local-state > "$state"; echo "NOAUTH Authentication required." > "$tmp/ping_reply"
+err="$("$sync" restore 2>&1 >/dev/null)"; rc=$?
+[ "$rc" = 0 ] && echo "$err" | grep -q "falling back" && [ "$(nsets)" = 0 ] && ok "restore: PING error text (rc 0) + file -> not ready, falls back" || fail "restore bad PING+file: rc=$rc err=$err"
+reset; echo "NOAUTH Authentication required." > "$tmp/ping_reply"
+"$sync" restore >/dev/null 2>&1; rc=$?
+[ "$rc" = 1 ] && [ ! -e "$state" ] && ok "restore: PING error text (rc 0) + no file -> exit 1" || fail "restore bad PING nofile: rc=$rc"
+
+# failed seed push with a local file: error logged, restore still succeeds
+reset; echo local-state > "$state"
+cat > "$tmp/bin/age-fail" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = -r ] && exit 1
+exec "$(dirname "$0")/age" "$@"
+STUB
+mv "$tmp/bin/age" "$tmp/bin/age-real"; sed -i.bak 's|exec "$(dirname "$0")/age"|exec "$(dirname "$0")/age-real"|' "$tmp/bin/age-fail"; mv "$tmp/bin/age-fail" "$tmp/bin/age"; chmod +x "$tmp/bin/age"
+err="$("$sync" restore 2>&1 >/dev/null)"; rc=$?
+mv "$tmp/bin/age-real" "$tmp/bin/age"
+[ "$rc" = 0 ] && [ "$(cat "$state")" = local-state ] && echo "$err" | grep -q "seeding Redis failed" && ok "restore: seed push fails + file present -> exit 0, file untouched, error logged" || fail "restore seed fail: rc=$rc err=$err"
+
 reset
 "$sync" push >/dev/null 2>&1; rc1=$?; : > "$state"; "$sync" push >/dev/null 2>&1; rc2=$?
 [ "$rc1" = 0 ] && [ "$rc2" = 0 ] && [ "$(nsets)" = 0 ] && ok "push: empty or missing file -> no SET" || fail "push empty: $rc1 $rc2 sets=$(nsets)"
@@ -107,11 +130,19 @@ echo v2 > "$state"; await_sets 2; n3="$(nsets)"
 kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null
 [ "$n1" = 1 ] && [ "$n2" = 1 ] && [ "$n3" = 2 ] && grep -q "state-sync: pushed" "$tmp/watch.out" && ok "watch: unchanged file over 3 s -> set.log has exactly 1 line; changed file -> 2 lines" || fail "watch: $n1 $n2 $n3"
 
-# watch must not push a file that existed at start (restore seeds the checksum)
+# a file present at watch start is pushed exactly once (first cycle), then not again while unchanged, then once on change
 reset; echo v1 > "$state"
 "$sync" watch > "$tmp/watch2.out" 2>&1 & wpid=$!; bgpids="$bgpids $wpid"
-await_watch "$tmp/watch2.out"; sleep 3; n="$(nsets)"; kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null
-[ "$n" = 0 ] && ok "watch: file present at start and unchanged -> no push" || fail "watch initial push: $n"
+await_watch "$tmp/watch2.out"; await_sets 1; n1="$(nsets)"; sleep 3; n2="$(nsets)"
+echo v2 > "$state"; await_sets 2; n3="$(nsets)"
+kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null
+[ "$n1" = 1 ] && [ "$n2" = 1 ] && [ "$n3" = 2 ] && ok "watch: file present at start -> pushed once, no repeat while unchanged, once more on change" || fail "watch initial: $n1 $n2 $n3"
+
+# watch with no file at all never pushes
+reset
+"$sync" watch > "$tmp/watch4.out" 2>&1 & wpid=$!; bgpids="$bgpids $wpid"
+await_watch "$tmp/watch4.out"; sleep 3; n="$(nsets)"; kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null
+[ "$n" = 0 ] && ok "watch: no state file -> no push" || fail "watch nofile: $n"
 
 # watch retries a failed SET on the next cycle
 reset

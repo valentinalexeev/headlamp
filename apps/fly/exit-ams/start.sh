@@ -18,12 +18,28 @@ ip6tables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
 # --tun=userspace-networking --socks5-server=localhost:1055
 # Persistent state (see fly.toml's [mounts]) -- was --state=mem:, which
 # meant every redeploy re-registered as a brand new tailnet identity.
-mkdir -p /var/lib/tailscale
+STATE_FILE="${STATE_FILE:-/var/lib/tailscale/tailscaled.state}"
+export STATE_FILE
+mkdir -p "$(dirname "$STATE_FILE")"
 # Optional Redis mode (REDIS_URL set): pull the encrypted state from Redis before tailscaled
 # starts. With REDIS_URL unset this is a no-op. A failure (e.g. Redis down and no local file)
 # aborts startup.
 /app/state-sync.sh restore || { echo "state-sync restore failed. exit!"; exit 1; }
-/app/tailscaled --verbose=1 --port 41641 --state=/var/lib/tailscale/tailscaled.state &
+TAILSCALED_PID=""
+WATCH_PID=""
+# Installed right after restore so a stop during boot still pushes. On stop: store the final
+# state, stop the watcher, then stop tailscaled. The idle loop backgrounds `sleep` and waits on it so the trap runs promptly. The watcher is not waited on
+# (it may only act on TERM after its poll interval); the container exits right after.
+shutdown() {
+    trap '' TERM INT
+    /app/state-sync.sh push || echo "final state push failed"
+    [ -z "$WATCH_PID" ] || kill "$WATCH_PID" 2>/dev/null
+    [ -z "$TAILSCALED_PID" ] || kill "$TAILSCALED_PID" 2>/dev/null
+    exit 0
+}
+trap shutdown TERM INT
+
+/app/tailscaled --verbose=1 --port 41641 --state="$STATE_FILE" &
 TAILSCALED_PID=$!
 sleep 5
 if [ ! -S /var/run/tailscale/tailscaled.sock ]; then
@@ -70,17 +86,6 @@ WATCH_PID=$!
     sleep 3h
     /app/update-direct-routes.sh || echo "update-direct-routes.sh failed, will retry next cycle"
   done ) &
-
-# On stop: store the final state, stop the watcher, then stop tailscaled. The idle loop
-# backgrounds `sleep` and waits on it so the trap runs promptly. The watcher is not waited on
-# (it may only act on TERM after its poll interval); the container exits right after.
-shutdown() {
-    /app/state-sync.sh push || echo "final state push failed"
-    kill "$WATCH_PID" 2>/dev/null
-    kill "$TAILSCALED_PID" 2>/dev/null
-    exit 0
-}
-trap shutdown TERM INT
 
 while :; do
     sleep 1 &

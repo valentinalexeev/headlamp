@@ -54,7 +54,8 @@ setup_identity() {
 wait_redis() {
   waited=0
   while :; do
-    if redis PING >/dev/null 2>&1; then return 0; fi
+    pong="$(redis PING 2>/dev/null)" || pong=""
+    if [ "$pong" = PONG ]; then return 0; fi
     [ "$waited" -lt "$BOOT_WAIT_SECONDS" ] || return 1
     sleep 1
     waited=$((waited + 1))
@@ -89,6 +90,10 @@ restore() {
     return 1
   fi
   exists="$(redis EXISTS "$STATE_REDIS_KEY")" || { err "EXISTS failed"; return 1; }
+  case "$exists" in
+    0|1) ;;
+    *) err "unexpected reply to EXISTS; refusing to continue"; return 1 ;;
+  esac
   if [ "$exists" = 1 ]; then
     redis GET "$STATE_REDIS_KEY" > "$WORK.enc" || { err "GET failed"; return 1; }
     if ! age -d -i "$IDFILE" < "$WORK.enc" > "$WORK"; then
@@ -104,14 +109,16 @@ restore() {
     log "restored state from Redis"
   elif [ -s "$STATE_FILE" ]; then
     log "no state in Redis; seeding it from the local state file"
-    push
+    push || err "seeding Redis failed; continuing with the local state file (the watcher retries)"
   else
     log "no state in Redis and no local file; starting fresh"
   fi
 }
 
 watch() {
-  last="$(file_sum)"
+  # Start from "none" so the first cycle pushes whatever the file holds by then (state written
+  # during boot, or a local file that diverged during an outage). No-op if the file is empty.
+  last=none
   log "watching"
   while :; do
     sleep "$STATE_POLL_SECONDS"

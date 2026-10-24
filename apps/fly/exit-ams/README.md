@@ -36,10 +36,12 @@ unset everything below is off and the node behaves exactly as described above.
   stored state cannot be decrypted. Values are never logged.
 - Key naming: one Redis key per node. Give each node its own `STATE_REDIS_KEY` if several share
   a Redis instance.
-- Boot: `restore` waits up to 60 s for Redis. If Redis is still down and there is no local state
-  file, startup exits 1 (the machine restarts and retries). If a local file exists, it is used.
-- Divergence after an outage: when Redis was unreachable and the node booted from its local
-  file, a local file that differs from what Redis holds is not pushed until the file changes
-  again. The watcher only pushes on change.
+- Boot: `restore` waits up to `BOOT_WAIT_SECONDS` (default 60 s) for Redis. If Redis is still down
+  and there is no local state file, startup exits 1 (the machine restarts and retries). If a local
+  file exists, it is used. A decrypt failure, a missing or invalid `STATE_AGE_IDENTITY`, or a
+  malformed Redis reply also abort startup.
+- Divergence after an outage: the first watcher cycle after boot pushes the current local file, so a
+  local file that diverged while Redis was down overwrites Redis once it is back. This is intended:
+  after a fallback the node's local state is the freshest.
 - The volume is optional once Redis mode is proven: after a restore from Redis has worked on a
   redeploy, the `[mounts]` section can be dropped. Keep it until then as a fallback.

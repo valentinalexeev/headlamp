@@ -1,0 +1,41 @@
+{
+  "nodes": {
+    "fly-c": {
+      "detailFields": [
+        {
+          "field": "machine_id",
+          "template": "machine {value}"
+        }
+      ],
+      "notConfiguredDetailFields": [
+        "detail"
+      ],
+      "prettyNotConfigured": true,
+      "provider": "Fly Machine",
+      "startStatus": "STARTED",
+      "stopStatus": "STOPPED",
+      "tailnetName": "node-c"
+    },
+    "vm-a": {
+      "detailFields": [
+        "detail"
+      ],
+      "provider": "Yandex Compute",
+      "startStatus": "RUNNING",
+      "stopStatus": "STOPPED",
+      "tailnetName": "node-a"
+    },
+    "vm-b": {
+      "detailFields": [
+        "detail",
+        "shape"
+      ],
+      "provider": "OCI Compute",
+      "startStatus": "RUNNING",
+      "stopStatus": "STOPPED",
+      "tailnetName": "node-b"
+    }
+  },
+  "subtitle": "on-demand control for my exit nodes",
+  "title": "node-control"
+}

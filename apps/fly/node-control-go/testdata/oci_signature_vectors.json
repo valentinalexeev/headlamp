@@ -1,0 +1,54 @@
+{
+  "_comment": "Public key, signing strings and signatures from the official OCI SDK signer; no private key is stored.",
+  "key_id": "ocid1.tenancy.oc1..exampletenancy/ocid1.user.oc1..exampleuser/aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99",
+  "public_key_pkix_der_b64": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqs7zgioTU3wRSXjpbrO4htz/T75cC9ftt2bPqgbgeuOE9AAgs1hnnHvOVcvIU438BUanZvcvHo4V+jvYRvZyxyvby2slaOJnF5w1Wza9dMEIHCwaYGlJu/Z5r+QXHyeqC1fOKZ7iggpBst1KX9MYqSJZEb7yCRGNbhkryV9sBWUN1OlhPEsMogAkSY9vb6kPUU54rnEQuuwI8+fIvkI2ccPsTXD6WbPeuiYpyhMAS2WdtsvNV6u73BxzjFLEUpoYbL5i+9OgKnU2cEC+cjT4no73uGwf7mFwKyQVLUHCL9JOVhU1w/4H2dw453etYGGRtCkcTiGpUaOIwYP0poO1EQIDAQAB",
+  "date": "Sat, 24 Oct 2026 12:00:00 GMT",
+  "cases": [
+    {
+      "name": "get_list",
+      "method": "GET",
+      "url": "https://iaas.region-1.oraclecloud.com/20160918/instances?compartmentId=ocid1.compartment.oc1..examplecomp&displayName=web-1",
+      "body": "",
+      "headers": {
+        "date": "Sat, 24 Oct 2026 12:00:00 GMT",
+        "host": "iaas.region-1.oraclecloud.com",
+        "authorization": "Signature algorithm=\"rsa-sha256\",headers=\"date (request-target) host\",keyId=\"ocid1.tenancy.oc1..exampletenancy/ocid1.user.oc1..exampleuser/aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99\",signature=\"FppMT+dveDBx4ZLk05ORkv1PeVCZx1eua8G+EBkoiOApMb4KszIZvUVpq9xxUulzoPJvUaLki3eJXSiFJ4dmNuHfPJ8+l2bdVlQKC76JswNYYNH5dCNM2LqOPiffdGW85uhexNyvqePwzdQWg1gpRXyubJwh7VjwGCEUEdQAvI+731LlmeEs9WezpLe7vulBkr89QR7jtNCq3Gjgq3iEVkD0R301NKgXw0QoHVg5JRKImeAc66UcSJtNOdSm7/EyHlmt4SwgSXyxmEBF352XHM7h/MPFSKFv6RZEqTqV7U2mQE3ESIVUKTbVBlgcecRzV/q42y5LWiwFMpBBYBuw7A==\",version=\"1\"",
+        "content-type": "application/json"
+      },
+      "signing_string": "date: Sat, 24 Oct 2026 12:00:00 GMT\n(request-target): get /20160918/instances?compartmentId=ocid1.compartment.oc1..examplecomp&displayName=web-1\nhost: iaas.region-1.oraclecloud.com",
+      "signature_b64": "FppMT+dveDBx4ZLk05ORkv1PeVCZx1eua8G+EBkoiOApMb4KszIZvUVpq9xxUulzoPJvUaLki3eJXSiFJ4dmNuHfPJ8+l2bdVlQKC76JswNYYNH5dCNM2LqOPiffdGW85uhexNyvqePwzdQWg1gpRXyubJwh7VjwGCEUEdQAvI+731LlmeEs9WezpLe7vulBkr89QR7jtNCq3Gjgq3iEVkD0R301NKgXw0QoHVg5JRKImeAc66UcSJtNOdSm7/EyHlmt4SwgSXyxmEBF352XHM7h/MPFSKFv6RZEqTqV7U2mQE3ESIVUKTbVBlgcecRzV/q42y5LWiwFMpBBYBuw7A=="
+    },
+    {
+      "name": "post_body",
+      "method": "POST",
+      "url": "https://iaas.region-1.oraclecloud.com/20160918/instances/ocid1.instance.oc1..exampleinst/actions",
+      "body": "{\"a\": 1, \"b\": \"x\"}",
+      "headers": {
+        "date": "Sat, 24 Oct 2026 12:00:00 GMT",
+        "host": "iaas.region-1.oraclecloud.com",
+        "authorization": "Signature algorithm=\"rsa-sha256\",headers=\"date (request-target) host content-length content-type x-content-sha256\",keyId=\"ocid1.tenancy.oc1..exampletenancy/ocid1.user.oc1..exampleuser/aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99\",signature=\"goUNws/LOarvadjAwsv0HSAhXDdWGrk5X9lcBgj5AImfcjluS3/5ilOGmhc9cHSFkTHwmG73hsQV9YqyVWEbKiPXa7N2D1nIDXbhghdCBG692xnj+VDdmyU4aox5ITf5Yt7Ue/wS4bjtNdpwR6CSZL69uMVZJ+5ipEa8KRo040Zqfz3jA+wC/97a4e6xGfPE+eK9nX+UvrbU0TmEnYJXS6BOS2hK3OYac8Abv+FtkVnp3O7EPauKh9SsEP/XN350/VANqfFlf16e2Vn3j3CeKBylxquXf8KEVjK7myRnAC+xbG1ny3QeBaTc5mXa9gVejrknMJ7WQ5xQ0rR8bUCoIQ==\",version=\"1\"",
+        "x-content-sha256": "zlxib7QDB0J88yO1wwej6iMIVvpLrWduqqJXe1qFeoU=",
+        "content-type": "application/json",
+        "content-length": "18"
+      },
+      "signing_string": "date: Sat, 24 Oct 2026 12:00:00 GMT\n(request-target): post /20160918/instances/ocid1.instance.oc1..exampleinst/actions\nhost: iaas.region-1.oraclecloud.com\ncontent-length: 18\ncontent-type: application/json\nx-content-sha256: zlxib7QDB0J88yO1wwej6iMIVvpLrWduqqJXe1qFeoU=",
+      "signature_b64": "goUNws/LOarvadjAwsv0HSAhXDdWGrk5X9lcBgj5AImfcjluS3/5ilOGmhc9cHSFkTHwmG73hsQV9YqyVWEbKiPXa7N2D1nIDXbhghdCBG692xnj+VDdmyU4aox5ITf5Yt7Ue/wS4bjtNdpwR6CSZL69uMVZJ+5ipEa8KRo040Zqfz3jA+wC/97a4e6xGfPE+eK9nX+UvrbU0TmEnYJXS6BOS2hK3OYac8Abv+FtkVnp3O7EPauKh9SsEP/XN350/VANqfFlf16e2Vn3j3CeKBylxquXf8KEVjK7myRnAC+xbG1ny3QeBaTc5mXa9gVejrknMJ7WQ5xQ0rR8bUCoIQ=="
+    },
+    {
+      "name": "post_empty",
+      "method": "POST",
+      "url": "https://iaas.region-1.oraclecloud.com/20160918/instances/ocid1.instance.oc1..exampleinst?action=STOP",
+      "body": "",
+      "headers": {
+        "date": "Sat, 24 Oct 2026 12:00:00 GMT",
+        "host": "iaas.region-1.oraclecloud.com",
+        "authorization": "Signature algorithm=\"rsa-sha256\",headers=\"date (request-target) host content-length content-type x-content-sha256\",keyId=\"ocid1.tenancy.oc1..exampletenancy/ocid1.user.oc1..exampleuser/aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99\",signature=\"d410TgtCDUWQ11Dk5pMLXCA2QJn8qmff58zB1duXiO8+sb1N1Ntk/y5IlM5BobmQGGhp2VHzOxpf+V6Ve5egVEuHsSMyv7gaTyQuFJDuR5uFoHeNKa7oG2UnQyn8kmbyRUkRreSYM45H4wF6pQfboLS/KBCyMp8VHZRgx6r/mJmJ27h1IjxB1JIRHavr0DSnJkc6SGqfgQxw5+eJ29qd7IyzSvuRDYJe9zWWoF/SCzAJ4BdLT5okr2R//7LUUbNIfVf24wgFkfL6+FEdRfcMvDb4mV4JL3WApyAA9telR75ikS2yi8uN9LujimJdZZNaNLG2QbVgChHGNmzqNfjxUw==\",version=\"1\"",
+        "x-content-sha256": "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+        "content-type": "application/json",
+        "content-length": "0"
+      },
+      "signing_string": "date: Sat, 24 Oct 2026 12:00:00 GMT\n(request-target): post /20160918/instances/ocid1.instance.oc1..exampleinst?action=STOP\nhost: iaas.region-1.oraclecloud.com\ncontent-length: 0\ncontent-type: application/json\nx-content-sha256: 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+      "signature_b64": "d410TgtCDUWQ11Dk5pMLXCA2QJn8qmff58zB1duXiO8+sb1N1Ntk/y5IlM5BobmQGGhp2VHzOxpf+V6Ve5egVEuHsSMyv7gaTyQuFJDuR5uFoHeNKa7oG2UnQyn8kmbyRUkRreSYM45H4wF6pQfboLS/KBCyMp8VHZRgx6r/mJmJ27h1IjxB1JIRHavr0DSnJkc6SGqfgQxw5+eJ29qd7IyzSvuRDYJe9zWWoF/SCzAJ4BdLT5okr2R//7LUUbNIfVf24wgFkfL6+FEdRfcMvDb4mV4JL3WApyAA9telR75ikS2yi8uN9LujimJdZZNaNLG2QbVgChHGNmzqNfjxUw=="
+    }
+  ]
+}

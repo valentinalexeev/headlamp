@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: hooks test-tf-run test-check-denylist test-exit-node-state lint
+.PHONY: hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy lint
 
 hooks:
 	@git config core.hooksPath .githooks
@@ -14,8 +14,11 @@ test-check-denylist:
 test-exit-node-state:
 	./scripts/test/exit-node-state/run_tests.sh
 
+test-headscale-policy:
+	sh scripts/test/headscale-policy/run.sh
+
 lint:
 	shellcheck -S error -x scripts/*.sh scripts/test/tf-run/run_tests.sh scripts/test/check-denylist/run_tests.sh \
-	  scripts/test/exit-node-state/run_tests.sh apps/fly/exit-ams/*.sh \
+	  scripts/test/exit-node-state/run_tests.sh scripts/test/headscale-policy/run.sh apps/fly/exit-ams/*.sh \
 	  .githooks/pre-commit .githooks/commit-msg \
 	  apps/tailguard/*.sh apps/fly/headscale/*.sh

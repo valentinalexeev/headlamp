@@ -11,6 +11,8 @@ noise:
 prefixes:
   v4: 100.64.0.0/10
 
+# With `mode: database` (and no `path`) the policy lives in headscale's database and can be changed without
+# rebuilding the image, through the node-control policy console / scripts/headscale-policy.sh.
 policy:
   mode: file
   path: "/etc/headscale/acl.json"

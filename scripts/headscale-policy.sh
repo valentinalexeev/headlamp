@@ -1,0 +1,211 @@
+#!/bin/sh
+# CLI client of the node-control policy console: check, diff, apply (with confirm-or-revert) and pull the headscale
+# ACL file. No credentials are used here: node-control identifies the caller by its tailnet identity, so run this from a
+# tailnet node whose user is on the console's allow-list.
+#
+#   headscale-policy.sh check     [--file F]                validate F on the server and show its warnings
+#   headscale-policy.sh diff      [--file F]                unified diff live -> F (exit 1 when they differ)
+#   headscale-policy.sh apply     [--file F] [--yes] [--allow-dirty]
+#                                                          check, show the diff, apply, verify access, confirm
+#   headscale-policy.sh pull      [--file F]                write the live policy to F
+#   headscale-policy.sh bootstrap [--file F] --yes          one-time / break-glass: load F through `fly ssh`
+#
+# Environment:
+#   NODE_CONTROL_URL  base URL of node-control on the tailnet (required, except for bootstrap)
+#   POLICY_FILE       policy file, default acl.json (--file overrides)
+#   HS_APP            Fly app running headscale (bootstrap only)
+#   RETRY_SLEEP       seconds between the post-apply access checks, default 2
+#
+# Exit codes: 0 ok / no diff; 1 diff present (diff); 2 usage or validation failure (also server refusals 409/413/422);
+# 3 remote failure; 4 apply was not confirmed (the server reverts it by itself at the deadline).
+set -eu
+
+MAX_BOOTSTRAP_BYTES=65536
+
+say() { printf '%s\n' "$*" >&2; }
+die() { code=$1; shift; say "headscale-policy: $*"; exit "$code"; }
+usage() { say "usage: headscale-policy.sh {check|diff|apply|pull|bootstrap} [--file FILE] [--yes] [--allow-dirty]"; exit 2; }
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT TERM
+
+command -v jq >/dev/null 2>&1 || die 2 "jq is required"
+
+cmd=${1:-}
+[ -n "$cmd" ] || usage
+shift
+case $cmd in check|diff|apply|pull|bootstrap) ;; *) usage ;; esac
+
+file=${POLICY_FILE:-acl.json}
+yes=0; allow_dirty=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --file) [ $# -ge 2 ] || die 2 "--file needs a value"; file=$2; shift 2 ;;
+    --yes) yes=1; shift ;;
+    --allow-dirty) allow_dirty=1; shift ;;
+    *) die 2 "unknown option: $1" ;;
+  esac
+done
+
+if [ "$cmd" != bootstrap ]; then
+  url=${NODE_CONTROL_URL:-}
+  [ -n "$url" ] || die 2 "NODE_CONTROL_URL is required"
+  case $url in -*) die 2 "NODE_CONTROL_URL must not start with '-'" ;; esac
+  url=${url%/}
+fi
+
+# req METHOD PATH [BODYFILE]: sets code (HTTP status) and leaves the answer in $tmp/resp; returns 1 on a transport failure.
+req() {
+  _m=$1; _p=$2; _b=${3:-}
+  : > "$tmp/resp"
+  if [ -n "$_b" ]; then
+    code=$(curl --silent --show-error --max-time 30 -X "$_m" -H 'Content-Type: application/json' \
+      --data-binary @"$_b" -o "$tmp/resp" -w '%{http_code}' "$url$_p") || return 1
+  else
+    code=$(curl --silent --show-error --max-time 30 -X "$_m" \
+      -o "$tmp/resp" -w '%{http_code}' "$url$_p") || return 1
+  fi
+}
+
+# remote METHOD PATH [BODYFILE]: like req, but a transport failure ends the run with exit 3.
+remote() { req "$@" || die 3 "cannot reach node-control ($1 $2)"; }
+
+detail() { jq -r '.detail // .error // empty' "$tmp/resp" 2>/dev/null || true; }
+
+# refuse: an HTTP status that is not the expected one ends the run with the matching exit code.
+refuse() {
+  case $code in
+    409) die 2 "the policy changed or another change is pending" ;;
+    413|422) _d=$(detail); die 2 "the server refused the policy (HTTP $code)${_d:+: $_d}" ;;
+    403) die 3 "node-control refused this identity (HTTP 403)" ;;
+    *) die 3 "unexpected answer from node-control (HTTP $code)" ;;
+  esac
+}
+
+need_file() { [ -f "$file" ] || die 2 "policy file not found: $file"; }
+
+do_check() {
+  need_file
+  jq -n --rawfile p "$file" '{policy:$p}' > "$tmp/body"
+  remote POST /policy/preview "$tmp/body"
+  [ "$code" = 200 ] || refuse
+  cp "$tmp/resp" "$tmp/preview.json"
+  jq -r '.warnings[]? | "warning: " + .' "$tmp/preview.json" >&2
+  if [ "$(jq -r '.valid' "$tmp/preview.json")" != true ]; then
+    die 2 "invalid policy: $(jq -r '.error // "no reason given"' "$tmp/preview.json")"
+  fi
+  say "policy is valid"
+}
+
+# live_policy: fetch the live policy text into $tmp/live (exactly, no newline added) and updated_at into $tmp/base.
+live_policy() {
+  remote GET /policy/state
+  [ "$code" = 200 ] || refuse
+  jq -e '.policy | type == "string"' "$tmp/resp" >/dev/null 2>&1 || die 3 "node-control returned no policy text"
+  jq -j '.policy' "$tmp/resp" > "$tmp/live"
+  jq -r '.updated_at // ""' "$tmp/resp" > "$tmp/base"
+}
+
+do_diff() {
+  need_file
+  live_policy
+  if jq -S . "$tmp/live" > "$tmp/live.n" 2>/dev/null && jq -S . "$file" > "$tmp/file.n" 2>/dev/null; then
+    :
+  else
+    cp "$tmp/live" "$tmp/live.n"; cp "$file" "$tmp/file.n"
+  fi
+  if diff -u -L live -L file "$tmp/live.n" "$tmp/file.n"; then
+    return 0
+  fi
+  return 1
+}
+
+do_apply() {
+  need_file
+  if [ "$allow_dirty" = 0 ]; then
+    _dir=$(dirname "$file")
+    if git -C "$_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      if [ -n "$(git -C "$_dir" status --porcelain -- "$file")" ]; then
+        die 2 "$file has uncommitted changes; commit it first or pass --allow-dirty"
+      fi
+    fi
+  fi
+  do_check
+  _d=$(jq -r '.diff // ""' "$tmp/preview.json")
+  if [ -n "$_d" ]; then printf '%s\n' "$_d"; else say "no difference from the live policy"; fi
+  if [ "$yes" = 0 ]; then
+    if [ -t 0 ]; then
+      printf 'Apply this policy? [y/N] ' >&2
+      read -r _a || _a=
+      case $_a in y|Y|yes) ;; *) die 2 "not applied" ;; esac
+    else
+      die 2 "refusing to apply without --yes"
+    fi
+  fi
+
+  live_policy
+  jq -n --rawfile p "$file" --arg b "$(cat "$tmp/base")" '{policy:$p, base_updated_at:$b}' > "$tmp/body"
+  remote POST /policy/apply "$tmp/body"
+  case $code in
+    200) ;;
+    202)
+      if [ "$(jq -r '.uncertain // false' "$tmp/resp" 2>/dev/null)" = true ]; then
+        say "warning: the outcome of the change is unknown; an automatic revert is armed, verifying"
+      else
+        refuse
+      fi ;;
+    *) refuse ;;
+  esac
+  say "applied; verifying access under the new rules"
+
+  _try=0; _reached=0
+  while [ "$_try" -lt 3 ]; do
+    _try=$((_try + 1))
+    if req GET /policy/state && [ "$code" = 200 ]; then _reached=1; break; fi
+    [ "$_try" -lt 3 ] && sleep "${RETRY_SLEEP:-2}"
+  done
+  if [ "$_reached" = 0 ]; then
+    say "cannot reach node-control under the new rules; NOT confirming."
+    say "the policy reverts automatically at the deadline"
+    exit 4
+  fi
+
+  req POST /policy/confirm "$tmp/body" || die 3 "could not send the confirmation; the change will revert at the deadline"
+  [ "$code" = 204 ] || die 3 "confirmation failed (HTTP $code); the change will revert at the deadline"
+  say "confirmed"
+}
+
+do_pull() {
+  live_policy
+  _dir=$(dirname "$file")
+  _t=$(mktemp "$_dir/.$(basename "$file").XXXXXX") || die 3 "cannot create a temporary file in $_dir"
+  if cp "$tmp/live" "$_t" && mv "$_t" "$file"; then
+    say "wrote $file"
+  else
+    rm -f "$_t"
+    die 3 "could not write $file"
+  fi
+}
+
+do_bootstrap() {
+  app=${HS_APP:-}
+  [ -n "$app" ] || die 2 "HS_APP is required for bootstrap"
+  case $app in -*) die 2 "HS_APP must not start with '-'" ;; esac
+  [ "$yes" = 1 ] || die 2 "bootstrap replaces the live policy: pass --yes"
+  need_file
+  _size=$(wc -c < "$file" | tr -d ' ')
+  [ "$_size" -le "$MAX_BOOTSTRAP_BYTES" ] || die 2 "$file is larger than $MAX_BOOTSTRAP_BYTES bytes"
+  _b64=$(base64 < "$file" | tr -d '\n')
+  flyctl ssh console -a "$app" -C "sh -c 'echo $_b64 | base64 -d > /tmp/policy-bootstrap.json && headscale policy set -f /tmp/policy-bootstrap.json; rc=\$?; rm -f /tmp/policy-bootstrap.json; exit \$rc'" \
+    || die 3 "flyctl ssh failed"
+  say "bootstrap done"
+}
+
+case $cmd in
+  check) do_check ;;
+  diff) do_diff ;;
+  apply) do_apply ;;
+  pull) do_pull ;;
+  bootstrap) do_bootstrap ;;
+esac

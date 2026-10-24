@@ -1,27 +1,26 @@
+# Build context: this directory (apps/fly/node-control).
+#
+# TSVERSION documents which tailscale.com module the image is built against and is checked against
+# go.mod, so a version bump in one place cannot drift from the other. The tailscale client itself is
+# compiled into the binary (tsnet); there is no tailscaled and no start script.
 ARG TSVERSION=1.98.10
-ARG TSFILE=tailscale_${TSVERSION}_amd64.tgz
 
-FROM alpine:3.18 as tailscale
-ARG TSFILE
-WORKDIR /app
-RUN wget https://pkgs.tailscale.com/stable/${TSFILE} && \
-  tar xzf ${TSFILE} --strip-components=1
+FROM golang:1.26.5-alpine AS build
+ARG TSVERSION
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN grep -q "tailscale.com v${TSVERSION}$" go.mod \
+  || { echo "go.mod does not pin tailscale.com v${TSVERSION}" >&2; exit 1; }
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/node-control ./cmd/node-control
 
-FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  ca-certificates iptables iproute2 \
-  && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /var/run/tailscale /var/cache/tailscale /var/lib/tailscale
-COPY --from=tailscale /app/tailscaled /app/tailscaled
-COPY --from=tailscale /app/tailscale /app/tailscale
-
+# alpine rather than a bare image: `fly ssh console` needs a shell.
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates
 WORKDIR /srv
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=build /out/node-control /usr/local/bin/node-control
+# app/ is empty in the public tree; the private overlay adds nodes.json (optional) and, for enrolment, enroll.json.
 COPY app ./app
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
-
-USER root
-CMD ["/app/start.sh"]
+ENTRYPOINT ["/usr/local/bin/node-control"]

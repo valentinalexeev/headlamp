@@ -88,7 +88,7 @@ commits on top of it or attempt a rewrite on your own.
 | `ansible/roles/{tailscale,route-provisioner}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; version bump / key rotation playbooks |
 | `apps/fly/headscale` | headscale server image; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. The route approver (`approve-gateway-routes.sh`, `cron-approve-routes.sh`) is shipped but OFF by default (commented `route_approver` process in `fly.toml`); prefer `autoApprovers.routes` in `acl.json` |
 | `apps/fly/exit-ams` | Fly tailscale exit node; `fly.toml`, `direct-hosts.txt` are **placeholders** |
-| `apps/fly/node-control` | start/stop web UI for the VM nodes; `fly.toml`, `app/nodes.json` are **placeholders** |
+| `apps/fly/node-control` | Go service (embedded tailscale): start/stop UI and API for the exit nodes (discovered from headscale), tailnet status, optional device enrolment; `fly.toml` is a **placeholder**, `app/nodes.json` is an optional overlay |
 | `apps/tailguard` | WireGuard server → tailnet exit node (Docker, operator-run) |
 | `scripts/tf-run.sh`, `.githooks/`, `scripts/test/` | state-in-git workflow, commit hook, tests |
 | `scripts/headscale-assign-host.sh` | helper to register a host under an existing pre-auth key (`HEADSCALE_APP`, `HEADSCALE_LOGIN_SERVER` env) |
@@ -288,13 +288,14 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
   `flyctl volumes create tailscale_state …`; `flyctl secrets set TAILSCALE_AUTH_KEY=… HEADSCALE_LOGIN_SERVER=…`;
   deploy via 2.5. Its `direct-hosts.txt` is a list of hostnames resolved to `/32` routes
   advertised through that node — yours, not the example.
-- `apps/fly/node-control`: a start/stop UI for your nodes, reachable only over the tailnet by design (no
-  public service). Which nodes it controls is the JSON config `app/nodes.json` (copy `nodes.example.json`,
-  keep the real file in your private repo and lay it over the placeholder with the overlay procedure).
-  Provider credentials are Fly secrets (`YANDEX_SA_KEY_JSON`, `FLY_API_TOKEN`, the OCI keys,
-  `HEADSCALE_API_KEY`); the OCI node is found by name in a compartment, so replacing the VM needs no config
-  change. Create the `tailscale_state` volume (see its `fly.toml`) so the app keeps one tailnet identity across
-  deploys. Details: `apps/fly/node-control/README.md`.
+- `apps/fly/node-control`: a Go service (one binary, embedded tailscale) with a start/stop UI and API for your exit nodes,
+  reachable only over the tailnet by design (no public service). Exit nodes are discovered from headscale: a node with
+  `tag:exit` is listed, and a `tag:cloud-<provider>` tag (`yandex`, `oci`, `selectel`, `fly`) plus its reported name
+  selects the VM or app to control. The optional JSON `app/nodes.json` (see `testdata/nodes.example.json`; keep the real file in
+  your private repo and lay it over the app dir with the overlay procedure) only adds overrides: explicit connection
+  blocks, labels, aliases, `hidden`. Provider credentials are Fly secrets (`YANDEX_SA_KEY_JSON`, `FLY_API_TOKEN`, the
+  OCI keys, `SELECTEL_*`, `HEADSCALE_API_KEY`). Tailnet identity: keep it on the `tailscale_state` volume (see its
+  `fly.toml`), or in a shared Redis with `REDIS_URL` and an encryption key. Details: `apps/fly/node-control/README.md`.
 
 ### 2.9 tailguard (optional, operator-run)
 

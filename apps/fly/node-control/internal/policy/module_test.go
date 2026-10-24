@@ -42,6 +42,7 @@ func baseEnv(t *testing.T) map[string]string {
 	return map[string]string{
 		"POLICY_DB":              filepath.Join(t.TempDir(), "policy.db"),
 		"POLICY_ADMIN_USERS":     "alice",
+		"ENROLL_ALLOWED_HOSTS":   "node-control.example.com,*.example.net",
 		"HEADSCALE_LOGIN_SERVER": "https://hs.example.com",
 		"HEADSCALE_API_KEY":      "secret-key-value",
 	}
@@ -88,6 +89,13 @@ func (h *harness) do(method, path, addr, body string, json bool) *httptest.Respo
 
 func (h *harness) post(path, body string) *httptest.ResponseRecorder {
 	return h.do("POST", path, adminAddr, body, true)
+}
+
+func (h *harness) confirm(t *testing.T) *httptest.ResponseRecorder {
+	t.Helper()
+	p, _ := h.state(t)["pending"].(map[string]any)
+	id, _ := p["id"].(float64)
+	return h.post("/policy/confirm", `{"change_id":`+itoa(int64(id))+`}`)
 }
 
 func (h *harness) state(t *testing.T) map[string]any {
@@ -248,7 +256,7 @@ func TestApplyConfirmFlowOverHTTP(t *testing.T) {
 	if h.state(t)["pending"] == nil {
 		t.Error("expected a pending change")
 	}
-	if rec := h.post("/policy/confirm", "{}"); rec.Code != 204 {
+	if rec := h.confirm(t); rec.Code != 204 {
 		t.Fatalf("confirm: %d %s", rec.Code, rec.Body)
 	}
 	st := h.state(t)
@@ -306,7 +314,7 @@ func TestApplyTooLarge413(t *testing.T) {
 	env := baseEnv(t)
 	env["POLICY_MAX_BYTES"] = "1024"
 	h := newHarness(t, env)
-	rec := h.post("/policy/apply", applyBody(strings.Repeat("a", 1024+4096+10), "v1"))
+	rec := h.post("/policy/apply", applyBody(strings.Repeat("a", 2*1024+8192+10), "v1"))
 	if rec.Code != 413 || jsonBody(t, rec)["detail"] == nil {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
@@ -382,17 +390,133 @@ func TestApplyUnreachable502(t *testing.T) {
 
 func TestConfirmNothingPending409(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
-	if rec := h.post("/policy/confirm", "{}"); rec.Code != 409 {
+	if rec := h.post("/policy/confirm", `{"change_id":1}`); rec.Code != 409 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestConfirmRequiresChangeID(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.apply(t, "x")
+	for _, b := range []string{"{}", `{"change_id":0}`, `{"change_id":-1}`, `{"change_id":"a"}`, ""} {
+		if rec := h.post("/policy/confirm", b); rec.Code != 422 {
+			t.Errorf("%q: %d", b, rec.Code)
+		}
+	}
+	if h.state(t)["pending"] == nil {
+		t.Error("confirmed without an id")
+	}
+}
+
+func TestConfirmWrongIDAndLiveMismatchAre409(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.apply(t, "x")
+	if rec := h.post("/policy/confirm", `{"change_id":99}`); rec.Code != 409 || !strings.Contains(rec.Body.String(), "not the pending") {
+		t.Errorf("wrong id: %d %s", rec.Code, rec.Body)
+	}
+	h.api.mu.Lock()
+	h.api.text = "other"
+	h.api.mu.Unlock()
+	if rec := h.confirm(t); rec.Code != 409 || !strings.Contains(rec.Body.String(), "live policy") {
+		t.Errorf("mismatch: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestConfirmAfterUncertainAndNotApplied409(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.api.fail(errors.New("connection reset"))
+	base := h.state(t)["updated_at"].(string)
+	if rec := h.post("/policy/apply", applyBody("new", base)); rec.Code != 202 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if rec := h.confirm(t); rec.Code != 409 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestApplyEmptyUpdatedAtRefusedOverHTTP(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.api.noVer = true
+	rec := h.post("/policy/apply", applyBody("x", ""))
+	if rec.Code != 422 || !strings.Contains(rec.Body.String(), "bootstrap") {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestStateShowsAttemptsAndOverdue(t *testing.T) {
+	env := baseEnv(t)
+	st, err := OpenStore(env["POLICY_DB"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := st.Begin("alice", "edit", "orig", "changed", time.Now().Add(-time.Minute))
+	st.MarkReverted(id, false)
+	st.MarkReverted(id, false)
+	st.Close()
+	h := newHarness(t, env)
+	p := h.state(t)["pending"].(map[string]any)
+	if p["attempts"].(float64) != 2 || p["overdue"] != true {
+		t.Errorf("pending %v", p)
+	}
+	h2 := newHarness(t, baseEnv(t))
+	h2.apply(t, "x")
+	p = h2.state(t)["pending"].(map[string]any)
+	if p["attempts"].(float64) != 0 || p["overdue"] != false {
+		t.Errorf("fresh pending %v", p)
+	}
+}
+
+func TestEmptyAllowedHostsStopsStartup(t *testing.T) {
+	env := baseEnv(t)
+	delete(env, "ENROLL_ALLOWED_HOSTS")
+	_, _, err := register(t, env, newFakeAPI("x"), nil)
+	if err == nil || !strings.Contains(err.Error(), "ENROLL_ALLOWED_HOSTS") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestWildcardAllowedHostsStopsStartup(t *testing.T) {
+	env := baseEnv(t)
+	env["ENROLL_ALLOWED_HOSTS"] = "node-control.example.com, *"
+	_, _, err := register(t, env, newFakeAPI("x"), nil)
+	if err == nil || !strings.Contains(err.Error(), "ENROLL_ALLOWED_HOSTS") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSuffixWildcardAccepted(t *testing.T) {
+	env := baseEnv(t)
+	env["ENROLL_ALLOWED_HOSTS"] = "*.example.com"
+	if _, m, err := register(t, env, newFakeAPI("x"), nil); err != nil {
+		t.Fatal(err)
+	} else {
+		m.(core.Stopper).Stop(context.Background())
+	}
+}
+
+func TestBodyLimitAllowsEscapedPolicyAndRejectsBeyond(t *testing.T) {
+	env := baseEnv(t)
+	env["POLICY_MAX_BYTES"] = "10000"
+	h := newHarness(t, env)
+	text := strings.Repeat("\"\n", 4000) // 8000 bytes, about 16000 once escaped
+	if rec := h.apply(t, text); rec.Code != 200 {
+		t.Fatalf("escaped policy: %d %s", rec.Code, rec.Body)
+	}
+	h.confirm(t)
+	if rec := h.apply(t, strings.Repeat("a", 10001)); rec.Code != 413 {
+		t.Fatalf("maxBytes+1: %d", rec.Code)
+	}
+	if rec := h.post("/policy/apply", applyBody(strings.Repeat("a", 2*10000+8192+10), "v1")); rec.Code != 413 {
+		t.Fatalf("over the body limit: %d", rec.Code)
 	}
 }
 
 func TestRevertFlow(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
 	h.apply(t, "second")
-	h.post("/policy/confirm", "{}")
+	h.confirm(t)
 	id := int64(jsonBody(t, h.apply(t, "third"))["change_id"].(float64))
-	h.post("/policy/confirm", "{}")
+	h.confirm(t)
 	rec := h.post("/policy/revert/"+itoa(id), "{}")
 	if rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
@@ -403,7 +527,7 @@ func TestRevertFlow(t *testing.T) {
 	if rec := h.post("/policy/revert/abc", "{}"); rec.Code != 422 {
 		t.Errorf("bad id: %d", rec.Code)
 	}
-	h.post("/policy/confirm", "{}")
+	h.confirm(t)
 	if rec := h.post("/policy/revert/9999", "{}"); rec.Code != 404 {
 		t.Errorf("unknown id: %d %s", rec.Code, rec.Body)
 	}
@@ -414,7 +538,7 @@ func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
 func TestStateNeverContainsPolicyTextInHistory(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
 	h.apply(t, "SECRET-POLICY-TEXT-ONE")
-	h.post("/policy/confirm", "{}")
+	h.confirm(t)
 	st := h.state(t)
 	raw, _ := json.Marshal(map[string]any{"history": st["history"], "pending": st["pending"], "last_edit": st["last_edit"]})
 	if bytes.Contains(raw, []byte("SECRET-POLICY-TEXT")) || bytes.Contains(raw, []byte(`{\"acls`)) {
@@ -615,7 +739,7 @@ func TestLogsNeverContainPolicyText(t *testing.T) {
 	h.post("/policy/preview", `{"policy":"TOP-SECRET-PREVIEW"}`)
 	api.checkErr = &headscale.APIError{Status: 400, Message: "boom"}
 	h.post("/policy/preview", `{"policy":"TOP-SECRET-PREVIEW"}`)
-	h.post("/policy/confirm", "{}")
+	h.confirm(t)
 	api.fail(&headscale.APIError{Status: 400, Message: "rejected"})
 	h.apply(t, "TOP-SECRET-REJECTED")
 	api.fail(errors.New("net down"))

@@ -15,6 +15,10 @@ import (
 // rereadTimeout bounds the read that follows an ambiguous write failure.
 const rereadTimeout = 10 * time.Second
 
+// writeTimeout bounds a policy write. The write runs detached from the caller's cancellation, so a
+// closed tab or a client timeout cannot abandon a half-sent change.
+const writeTimeout = 30 * time.Second
+
 // API is the part of the headscale client the service uses.
 type API interface {
 	GetPolicy(ctx context.Context) (text, updatedAt string, err error)
@@ -56,7 +60,11 @@ func (s *Service) ready(ctx context.Context) (cur, updatedAt string, err error) 
 	} else if pending {
 		return "", "", ErrBusy
 	}
-	return s.api.GetPolicy(ctx)
+	cur, updatedAt, err = s.api.GetPolicy(ctx)
+	if err == nil && updatedAt == "" {
+		return "", "", ErrNoVersion
+	}
+	return cur, updatedAt, err
 }
 
 // start stores the change and sends it to headscale; a rejected change leaves no trace. The
@@ -70,8 +78,10 @@ func (s *Service) start(ctx context.Context, actor, reason, before, after string
 	if err != nil {
 		return 0, time.Time{}, err
 	}
-	if err := s.api.SetPolicy(ctx, after); err != nil {
-		if err := s.settleWriteError(id, before, after, err); err != nil {
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	if err := s.api.SetPolicy(wctx, after); err != nil {
+		if err := s.settleWriteError(id, after, err); err != nil {
 			if errors.Is(err, ErrUncertain) {
 				return id, deadline, err
 			}
@@ -83,12 +93,12 @@ func (s *Service) start(ctx context.Context, actor, reason, before, after string
 	return id, deadline, nil
 }
 
-// settleWriteError decides what a failed SetPolicy means. A headscale rejection is definite: the
-// change is dropped. Any other failure is ambiguous (headscale may have applied it), so the live
-// policy is re-read: equal to after means success (nil), equal to before means not applied (the
-// change is dropped, err returned), anything else keeps the change pending with its revert armed
-// and returns ErrUncertain.
-func (s *Service) settleWriteError(id int64, before, after string, err error) error {
+// settleWriteError decides what a failed SetPolicy means. Only a headscale rejection is definite:
+// the change is dropped. Any other failure is ambiguous (headscale may have applied it, now or
+// later), so the live policy is re-read: equal to after means success (nil); in every other case,
+// including a failed re-read, the change stays pending with its revert armed (reverting a change
+// that never landed is harmless) and ErrUncertain is returned.
+func (s *Service) settleWriteError(id int64, after string, err error) error {
 	var ae *headscale.APIError
 	if errors.As(err, &ae) {
 		s.abort(id)
@@ -98,14 +108,9 @@ func (s *Service) settleWriteError(id int64, before, after string, err error) er
 	ctx, cancel := context.WithTimeout(context.Background(), rereadTimeout)
 	defer cancel()
 	live, _, rerr := s.api.GetPolicy(ctx)
-	switch {
-	case rerr == nil && live == after:
+	if rerr == nil && live == after {
 		slog.Warn("policy write reported an error but was applied", "id", id, "cause", errCause(err))
 		return nil
-	case rerr == nil && live == before:
-		s.abort(id)
-		slog.Warn("policy write failed and was not applied", "id", id, "bytes", len(after), "cause", errCause(err))
-		return err
 	}
 	slog.Error("policy write outcome unknown; revert armed", "id", id, "cause", errCause(err))
 	return fmt.Errorf("%w: %w", ErrUncertain, err)
@@ -170,8 +175,10 @@ func (s *Service) Change(ctx context.Context, actor string, transform func(curre
 	return s.start(ctx, actor, reason, cur, next)
 }
 
-// Confirm accepts the pending change so the watcher no longer reverts it.
-func (s *Service) Confirm(_ context.Context, actor string) error {
+// Confirm accepts the pending change id so the watcher no longer reverts it, provided headscale
+// still serves that change's policy. The deadline is deliberately not checked: a confirmation that
+// arrives after the deadline but before the watcher has reverted is still accepted.
+func (s *Service) Confirm(ctx context.Context, actor string, id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok, err := s.store.Pending()
@@ -180,6 +187,16 @@ func (s *Service) Confirm(_ context.Context, actor string) error {
 	}
 	if !ok {
 		return ErrNothingPending
+	}
+	if p.ID != id {
+		return ErrNotPending
+	}
+	live, _, err := s.api.GetPolicy(ctx)
+	if err != nil {
+		return err
+	}
+	if live != p.After {
+		return ErrNotLive
 	}
 	if err := s.store.Confirm(p.ID); err != nil {
 		return err

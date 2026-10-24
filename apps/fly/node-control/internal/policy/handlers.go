@@ -25,7 +25,7 @@ var pageCSS []byte
 
 const (
 	historyLimit = 50
-	bodySlack    = 4096 // room for the JSON wrapper around a policy of the maximum size
+	bodySlack    = 8192 // room for the JSON wrapper around a policy
 	cspValue     = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 
@@ -104,6 +104,12 @@ func fail(w http.ResponseWriter, err error, id int64, deadline time.Time) {
 		detail(w, http.StatusConflict, "another change is pending")
 	case errors.Is(err, ErrNothingPending):
 		detail(w, http.StatusConflict, "no change is pending")
+	case errors.Is(err, ErrNotPending):
+		detail(w, http.StatusConflict, "that change is not the pending one")
+	case errors.Is(err, ErrNotLive):
+		detail(w, http.StatusConflict, "the live policy is not the pending change; reload and check it")
+	case errors.Is(err, ErrNoVersion):
+		detail(w, http.StatusUnprocessableEntity, "headscale reports no policy version; load one first with the bootstrap command")
 	case errors.Is(err, ErrTooLarge):
 		detail(w, http.StatusRequestEntityTooLarge, "the policy is too large")
 	case errors.Is(err, ErrNoChange):
@@ -121,7 +127,7 @@ func fail(w http.ResponseWriter, err error, id int64, deadline time.Time) {
 // readJSON decodes a size-limited JSON object body into dst; unknown fields are ignored. It
 // answers the error itself and reports whether decoding succeeded.
 func (c *console) readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, int64(c.maxBytes+bodySlack))
+	r.Body = http.MaxBytesReader(w, r.Body, int64(2*c.maxBytes+bodySlack)) // JSON escaping can double the text
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		var mbe *http.MaxBytesError
 		if errors.As(err, &mbe) {
@@ -175,7 +181,8 @@ func (c *console) state(w http.ResponseWriter, r *http.Request) {
 	if pending {
 		left := max(int(time.Until(p.Deadline).Seconds()), 0)
 		out["pending"] = map[string]any{"id": p.ID, "actor": p.Actor, "reason": p.Reason,
-			"deadline": p.Deadline.UTC().Format(time.RFC3339), "seconds_left": left}
+			"deadline": p.Deadline.UTC().Format(time.RFC3339), "seconds_left": left,
+			"attempts": p.Attempts, "overdue": time.Now().After(p.Deadline)}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -227,7 +234,17 @@ func (c *console) apply(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *console) confirm(w http.ResponseWriter, r *http.Request) {
-	if err := c.svc.Confirm(r.Context(), authz.LoginFrom(r.Context())); err != nil {
+	var in struct {
+		ChangeID int64 `json:"change_id"`
+	}
+	if !c.readJSON(w, r, &in) {
+		return
+	}
+	if in.ChangeID < 1 {
+		detail(w, http.StatusUnprocessableEntity, "change_id must be a positive whole number")
+		return
+	}
+	if err := c.svc.Confirm(r.Context(), authz.LoginFrom(r.Context()), in.ChangeID); err != nil {
 		fail(w, err, 0, time.Time{})
 		return
 	}

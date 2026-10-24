@@ -21,6 +21,9 @@ var (
 	ErrBusy           = errors.New("another policy change is pending")
 	ErrNothingPending = errors.New("no policy change is pending")
 	ErrNotFound       = errors.New("policy change not found")
+	ErrNotPending     = errors.New("that change is not the pending one")
+	ErrNotLive        = errors.New("the live policy is not the pending change")
+	ErrNoVersion      = errors.New("headscale reports no policy version")
 	ErrNoChange       = errors.New("policy is unchanged")
 	ErrUncertain      = errors.New("policy write outcome unknown; an automatic revert is armed")
 )
@@ -41,6 +44,7 @@ type Pending struct {
 	Actor    string
 	Reason   string
 	Before   string
+	After    string
 	Deadline time.Time
 	Attempts int // failed revert attempts so far
 }
@@ -138,8 +142,8 @@ func (s *Store) Abort(id int64) error {
 func (s *Store) Pending() (Pending, bool, error) {
 	var p Pending
 	var dl int64
-	err := s.db.QueryRow(`SELECT id, actor, reason, before, deadline, attempts
-		FROM changes WHERE state = 'pending'`).Scan(&p.ID, &p.Actor, &p.Reason, &p.Before, &dl, &p.Attempts)
+	err := s.db.QueryRow(`SELECT id, actor, reason, before, after, deadline, attempts
+		FROM changes WHERE state = 'pending'`).Scan(&p.ID, &p.Actor, &p.Reason, &p.Before, &p.After, &dl, &p.Attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Pending{}, false, nil
 	}

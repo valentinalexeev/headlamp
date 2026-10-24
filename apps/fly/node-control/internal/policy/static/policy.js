@@ -3,6 +3,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var baseUpdatedAt = '';
   var timer = null;
+  var pendingId = 0;
 
   function show(el, text) {
     el.textContent = text || '';
@@ -51,6 +52,10 @@
 
   function renderPending(p) {
     clearInterval(timer);
+    pendingId = p ? p.id : 0;
+    show($('stuck'), p && (p.attempts > 0 || p.overdue)
+      ? 'The automatic revert is failing (' + p.attempts + ' attempts). Check headscale. Confirm keeps the change.'
+      : '');
     if (!p) { $('pending').hidden = true; return; }
     var left = p.seconds_left;
     var draw = function () {
@@ -127,7 +132,7 @@
   });
 
   $('confirm').addEventListener('click', function () {
-    request('POST', '/policy/confirm', {}).then(function (res) { say(res, 'Confirmed.'); load(); });
+    request('POST', '/policy/confirm', { change_id: pendingId }).then(function (res) { say(res, 'Confirmed.'); load(); });
   });
 
   $('reload').addEventListener('click', function () { show($('message'), ''); load(); });

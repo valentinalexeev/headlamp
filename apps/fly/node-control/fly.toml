@@ -24,7 +24,8 @@ kill_timeout = "25s"
   # ENROLL_CONFIG = "/srv/app/enroll.json"
   # AGENT_URL = "http://<agent-tailnet-ip>:<port>"
   # ENROLL_ALLOWED_HOSTS = "node-control.example.com,<this-node-tailnet-ip>"
-  # Policy console (optional, see README "Policy console (optional)"): needs HEADSCALE_API_KEY as a secret.
+  # Policy console (optional, see README "Policy console (optional)"): needs HEADSCALE_API_KEY as a secret and
+  # an ENROLL_ALLOWED_HOSTS without a bare "*" (DNS rebinding protection).
   # POLICY_DB = "/var/lib/tailscale/policy.db"
   # POLICY_ADMIN_USERS = "<tailnet-login>,<another-login>"
   # POLICY_REVERT_SECONDS = "120"

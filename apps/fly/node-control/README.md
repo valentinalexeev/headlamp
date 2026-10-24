@@ -203,6 +203,10 @@ Setting `POLICY_DB` serves `/policy` on the admin listener for the logins in `PO
 policy, preview the diff, apply, and confirm. An applied change reverts by itself after `POLICY_REVERT_SECONDS` unless
 it is confirmed, which also covers a restart of this app mid-window. Every route is refused (403) for other users and
 for tagged nodes; policy text is never logged. Headscale must run its policy in database mode.
+`ENROLL_ALLOWED_HOSTS` is required with `POLICY_DB` and must not contain a bare `*` (a `*.example.com` suffix is fine):
+the core's Host guard is what protects the console from DNS rebinding. Confirm names the pending change and succeeds
+only while headscale still serves that change's policy. If the automatic revert keeps failing, the page shows a warning;
+Confirm is then the way out, keeping the change.
 
 ## Build and run
 

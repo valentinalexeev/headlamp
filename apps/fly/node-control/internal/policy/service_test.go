@@ -30,6 +30,9 @@ type fakeAPI struct {
 	gets     int
 	sets     []string
 	checks   int
+	noVer    bool          // GetPolicy reports an empty version
+	entered  chan struct{} // signalled when SetPolicy starts, if set
+	block    chan struct{} // SetPolicy waits for it (or its ctx), if set
 }
 
 func newFakeAPI(text string) *fakeAPI { return &fakeAPI{text: text, version: 1} }
@@ -41,10 +44,23 @@ func (f *fakeAPI) GetPolicy(context.Context) (string, string, error) {
 	if f.getErr != nil {
 		return "", "", f.getErr
 	}
+	if f.noVer {
+		return f.text, "", nil
+	}
 	return f.text, fmt.Sprintf("v%d", f.version), nil
 }
 
-func (f *fakeAPI) SetPolicy(_ context.Context, text string) error {
+func (f *fakeAPI) SetPolicy(ctx context.Context, text string) error {
+	if f.entered != nil {
+		f.entered <- struct{}{}
+	}
+	if f.block != nil {
+		select {
+		case <-f.block:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sets = append(f.sets, text)
@@ -239,7 +255,7 @@ func TestConfirmClearsPending(t *testing.T) {
 	api := newFakeAPI("old")
 	svc, _, _ := newTestService(t, api)
 	id := applyOK(t, svc, "new")
-	if err := svc.Confirm(context.Background(), "alice"); err != nil {
+	if err := confirmCur(svc); err != nil {
 		t.Fatal(err)
 	}
 	if svc.Outcome(id) != OutcomeConfirmed {
@@ -252,7 +268,7 @@ func TestConfirmClearsPending(t *testing.T) {
 
 func TestConfirmWithNothingPending(t *testing.T) {
 	svc, _, _ := newTestService(t, newFakeAPI("old"))
-	if err := svc.Confirm(context.Background(), "alice"); !errors.Is(err, ErrNothingPending) {
+	if err := confirmCur(svc); !errors.Is(err, ErrNothingPending) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -363,7 +379,7 @@ func TestRevertToReappliesBefore(t *testing.T) {
 	api := newFakeAPI("v-one")
 	svc, _, _ := newTestService(t, api)
 	first := applyOK(t, svc, "v-two")
-	if err := svc.Confirm(context.Background(), "alice"); err != nil {
+	if err := confirmCur(svc); err != nil {
 		t.Fatal(err)
 	}
 	id, _, err := svc.RevertTo(context.Background(), "alice", first)
@@ -390,7 +406,7 @@ func TestPolicyTextNeverLogged(t *testing.T) {
 	svc, clk, _ := newTestService(t, api)
 	ctx := context.Background()
 	id := applyOK(t, svc, `{"note":"`+marker+`-new"}`)
-	if err := svc.Confirm(ctx, "alice"); err != nil {
+	if err := confirmCur(svc); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := svc.RevertTo(ctx, "alice", id); err != nil {
@@ -447,24 +463,114 @@ func TestApplyAmbiguousErrorThenPolicyAppliedKeepsPending(t *testing.T) {
 	if svc.Outcome(id) != OutcomePending {
 		t.Fatalf("outcome = %q", svc.Outcome(id))
 	}
-	if err := svc.Confirm(context.Background(), "alice"); err != nil {
+	if err := confirmCur(svc); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestApplyAmbiguousErrorNotAppliedAborts(t *testing.T) {
+func confirmCur(svc *Service) error {
+	p, _, _ := svc.store.Pending()
+	return svc.Confirm(context.Background(), "alice", p.ID)
+}
+
+func TestApplyAmbiguousErrorNotYetVisibleKeepsPendingAndReturnsErrUncertain(t *testing.T) {
 	api := newFakeAPI("old")
 	api.fail(errors.New("connection reset"))
 	svc, _, _ := newTestService(t, api)
-	_, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit")
-	if err == nil || errors.Is(err, ErrUncertain) || !strings.Contains(err.Error(), "connection reset") {
+	id, dl, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit")
+	if !errors.Is(err, ErrUncertain) || !strings.Contains(err.Error(), "connection reset") {
 		t.Fatalf("err = %v", err)
 	}
-	if _, ok, _ := svc.store.Pending(); ok {
-		t.Fatal("pending left behind")
+	if p, ok, _ := svc.store.Pending(); !ok || p.ID != id || id == 0 || dl.IsZero() {
+		t.Fatalf("pending = %+v %v id=%d", p, ok, id)
 	}
-	if h, _ := svc.store.History(5); len(h) != 0 {
-		t.Fatalf("history = %v", h)
+}
+
+func TestApplyClientCancelStillWritesAndKeepsPending(t *testing.T) {
+	api := newFakeAPI("old")
+	api.entered, api.block = make(chan struct{}), make(chan struct{})
+	svc, _, _ := newTestService(t, api)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := svc.Apply(ctx, "alice", "new", "v1", "edit")
+		done <- err
+	}()
+	<-api.entered
+	cancel()
+	close(api.block)
+	if err := <-done; err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if api.current() != "new" {
+		t.Fatalf("text = %q", api.current())
+	}
+	if _, ok, _ := svc.store.Pending(); !ok {
+		t.Fatal("change not pending")
+	}
+}
+
+func TestWatcherRevertOfNeverAppliedChangeIsHarmless(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(errors.New("reset"))
+	svc, clk, _ := newTestService(t, api)
+	id, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit")
+	if !errors.Is(err, ErrUncertain) {
+		t.Fatalf("err = %v", err)
+	}
+	api.fail(nil)
+	clk.Advance(testRevert)
+	svc.checkRevert(context.Background())
+	if api.current() != "old" || svc.Outcome(id) != OutcomeReverted {
+		t.Fatalf("text = %q, outcome = %q", api.current(), svc.Outcome(id))
+	}
+}
+
+func TestApplyEmptyUpdatedAtIsRefused(t *testing.T) {
+	api := newFakeAPI("old")
+	api.noVer = true
+	svc, _, _ := newTestService(t, api)
+	if _, _, err := svc.Apply(context.Background(), "alice", "new", "", "edit"); !errors.Is(err, ErrNoVersion) {
+		t.Fatalf("apply err = %v", err)
+	}
+	tr := func(string) (string, error) { return "x", nil }
+	if _, _, err := svc.Change(context.Background(), "alice", tr, "r"); !errors.Is(err, ErrNoVersion) {
+		t.Fatalf("change err = %v", err)
+	}
+	if api.setCount() != 0 {
+		t.Fatal("a write was sent")
+	}
+}
+
+func TestConfirmWrongIDIs409(t *testing.T) {
+	svc, _, _ := newTestService(t, newFakeAPI("old"))
+	id := applyOK(t, svc, "new")
+	if err := svc.Confirm(context.Background(), "alice", id+1); !errors.Is(err, ErrNotPending) {
+		t.Fatalf("err = %v", err)
+	}
+	if svc.Outcome(id) != OutcomePending {
+		t.Fatal("confirmed anyway")
+	}
+}
+
+func TestConfirmWhenLivePolicyDiffersIs409(t *testing.T) {
+	api := newFakeAPI("old")
+	svc, _, _ := newTestService(t, api)
+	id := applyOK(t, svc, "new")
+	api.mu.Lock()
+	api.text = "somebody else's"
+	api.mu.Unlock()
+	if err := svc.Confirm(context.Background(), "alice", id); !errors.Is(err, ErrNotLive) {
+		t.Fatalf("err = %v", err)
+	}
+	api.mu.Lock()
+	api.getErr = errors.New("down")
+	api.mu.Unlock()
+	if err := svc.Confirm(context.Background(), "alice", id); err == nil || errors.Is(err, ErrNotLive) {
+		t.Fatalf("err = %v", err)
+	}
+	if svc.Outcome(id) != OutcomePending {
+		t.Fatal("confirmed anyway")
 	}
 }
 
@@ -509,7 +615,7 @@ func TestAmbiguousErrorThroughChangeAndRevertTo(t *testing.T) {
 	api := newFakeAPI("old")
 	svc, _, _ := newTestService(t, api)
 	id := applyOK(t, svc, "new")
-	if err := svc.Confirm(context.Background(), "alice"); err != nil {
+	if err := confirmCur(svc); err != nil {
 		t.Fatal(err)
 	}
 	api.applyErr = errors.New("timeout")
@@ -517,7 +623,7 @@ func TestAmbiguousErrorThroughChangeAndRevertTo(t *testing.T) {
 	if err != nil || svc.Outcome(rid) != OutcomePending || api.current() != "old" {
 		t.Fatalf("revert: id=%d err=%v", rid, err)
 	}
-	if err := svc.Confirm(context.Background(), "alice"); err != nil {
+	if err := confirmCur(svc); err != nil {
 		t.Fatal(err)
 	}
 	cid, _, err := svc.Change(context.Background(), "alice", func(string) (string, error) { return "third", nil }, "r")

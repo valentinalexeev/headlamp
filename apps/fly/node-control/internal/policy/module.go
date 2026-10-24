@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,11 @@ func (m *Module) Register(r *core.Routes) error {
 	allowed := authz.ParseAllowed(m.env.Getenv("POLICY_ADMIN_USERS"))
 	if !allowed.Has(firstLogin(m.env.Getenv("POLICY_ADMIN_USERS"))) {
 		return errors.New("policy console enabled (POLICY_DB set) but POLICY_ADMIN_USERS names no login")
+	}
+	hosts := m.env.List("ENROLL_ALLOWED_HOSTS")
+	if len(hosts) == 0 || slices.Contains(hosts, "*") {
+		return errors.New("policy console enabled (POLICY_DB set) but ENROLL_ALLOWED_HOSTS is empty or contains \"*\"; " +
+			"list the host names the admin listener answers to (the core's Host guard protects the console from DNS rebinding)")
 	}
 	for _, k := range []string{"HEADSCALE_LOGIN_SERVER", "HEADSCALE_API_KEY"} {
 		if m.env.Getenv(k) == "" {

@@ -11,7 +11,7 @@ COPY . ./
 
 
 FROM alpine:3.18
-RUN apk update && apk add ca-certificates iptables ip6tables iproute2 ethtool bind-tools && rm -rf /var/cache/apk/*
+RUN apk update && apk add ca-certificates iptables ip6tables iproute2 ethtool bind-tools redis age && rm -rf /var/cache/apk/*
 
 # creating directories for tailscale
 RUN mkdir -p /var/run/tailscale
@@ -24,6 +24,7 @@ COPY --from=tailscale /app/tailscale /app/tailscale
 COPY --from=tailscale /app/start.sh /app/start.sh
 COPY --from=tailscale /app/direct-hosts.txt /app/direct-hosts.txt
 COPY --from=tailscale /app/update-direct-routes.sh /app/update-direct-routes.sh
+COPY --from=tailscale /app/state-sync.sh /app/state-sync.sh
 
 # Run on container startup.
 USER root

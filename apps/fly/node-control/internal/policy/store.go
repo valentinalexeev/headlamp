@@ -20,6 +20,7 @@ var (
 	ErrTooLarge       = errors.New("policy is too large")
 	ErrBusy           = errors.New("another policy change is pending")
 	ErrNothingPending = errors.New("no policy change is pending")
+	ErrNotFound       = errors.New("policy change not found")
 	ErrNoChange       = errors.New("policy is unchanged")
 	ErrUncertain      = errors.New("policy write outcome unknown; an automatic revert is armed")
 )
@@ -218,7 +219,7 @@ func (s *Store) TextOf(id int64, which string) (string, error) {
 	var text string
 	if err := s.db.QueryRow("SELECT "+which+" FROM changes WHERE id = ?", id).Scan(&text); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", fmt.Errorf("change %d not found", id)
+			return "", fmt.Errorf("change %d: %w", id, ErrNotFound)
 		}
 		return "", err
 	}

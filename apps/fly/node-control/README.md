@@ -30,6 +30,10 @@ Secrets go in Fly secrets; plain settings in `fly.toml`.
 | `ENROLL_CONFIG` | enrolment ingress description, for example `/srv/app/enroll.json` (required with `ENROLL_DB`) |
 | `ENROLL_SECRET_KEY` | secret, at least 16 bytes; derives subscription secrets (required with `ENROLL_DB`) |
 | `AGENT_URL`, `AGENT_TOKEN` | address (dialled through the tailnet) and bearer token of the ingress agent (required with `ENROLL_DB`) |
+| `POLICY_DB` | path of the SQLite change history; enables the policy console (`/policy`). On the state volume: `/var/lib/tailscale/policy.db`. Needs `HEADSCALE_LOGIN_SERVER` and `HEADSCALE_API_KEY` |
+| `POLICY_ADMIN_USERS` | comma-separated tailnet logins allowed to use the console (required with `POLICY_DB`); tagged nodes are never allowed |
+| `POLICY_REVERT_SECONDS` | seconds to confirm a change before it is reverted automatically, 30 to 900, default 120 |
+| `POLICY_MAX_BYTES` | largest policy accepted, 1024 to 4194304, default 262144 |
 | `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | Yandex service account key; folder for the lookup by name (the account needs `compute.operator` and `compute.viewer`) |
 | `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | OCI credentials and the default region and compartment |
 | `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | Selectel (OpenStack) service user, default region, optional auth URL |
@@ -192,6 +196,13 @@ in `exit` mode a site that is unreachable from the client's own network must ope
 Differences from the Python app this replaced: the agent is dialled through the embedded tailnet node, and the
 database is closed only after both listeners have drained on shutdown. A misconfigured enrolment (a missing variable,
 an unreadable or invalid `ENROLL_CONFIG`) stops startup with a message naming the problem, never a secret.
+
+## Policy console (optional)
+
+Setting `POLICY_DB` serves `/policy` on the admin listener for the logins in `POLICY_ADMIN_USERS`: edit the headscale
+policy, preview the diff, apply, and confirm. An applied change reverts by itself after `POLICY_REVERT_SECONDS` unless
+it is confirmed, which also covers a restart of this app mid-window. Every route is refused (403) for other users and
+for tagged nodes; policy text is never logged. Headscale must run its policy in database mode.
 
 ## Build and run
 

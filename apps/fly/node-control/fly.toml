@@ -24,6 +24,10 @@ kill_timeout = "25s"
   # ENROLL_CONFIG = "/srv/app/enroll.json"
   # AGENT_URL = "http://<agent-tailnet-ip>:<port>"
   # ENROLL_ALLOWED_HOSTS = "node-control.example.com,<this-node-tailnet-ip>"
+  # Policy console (optional, see README "Policy console (optional)"): needs HEADSCALE_API_KEY as a secret.
+  # POLICY_DB = "/var/lib/tailscale/policy.db"
+  # POLICY_ADMIN_USERS = "<tailnet-login>,<another-login>"
+  # POLICY_REVERT_SECONDS = "120"
 
 # Tailscale state in the shared Redis (optional, see README "Tailscale state"). Secrets, never values here:
 #   flyctl secrets set -a <app> REDIS_URL=... NODE_CONTROL_STATE_KEY="$(openssl rand -base64 32)"

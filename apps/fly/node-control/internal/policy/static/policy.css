@@ -1,0 +1,10 @@
+body { font-family: system-ui, sans-serif; margin: 1rem auto; max-width: 60rem; padding: 0 1rem; }
+textarea { width: 100%; box-sizing: border-box; height: 24rem; font-family: ui-monospace, monospace; font-size: 0.85rem; }
+pre { background: #f4f4f4; padding: 0.5rem; overflow-x: auto; }
+.row { margin: 0.5rem 0; display: flex; gap: 0.5rem; }
+.banner { padding: 0.5rem 1rem; margin: 0.5rem 0; border: 1px solid #999; }
+.banner.warn { background: #fff3cd; border-color: #d4a017; }
+.banner.pending { background: #e7f1ff; border-color: #4a7fc1; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border-bottom: 1px solid #ddd; padding: 0.25rem 0.5rem; text-align: left; }
+[hidden] { display: none; }

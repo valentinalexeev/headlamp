@@ -254,8 +254,8 @@ Adding an ingress, step by step:
 3. Set the token as a secret named `AGENT_TOKEN_<NAME>` and redeploy node-control (or use an `enroll.json` entry
    instead, see above, which needs no approval).
 4. Open `/enroll`. The ingress appears as `pending` with its host, the node id, tailnet address and names, a short
-   prefix of its public key and short id and a fingerprint. Compare the node id, address and name with
-   `headscale nodes list`: an impostor holding the name can publish the real ingress's public values, so the node
+   prefix of its public key and short id, a short prefix of its machine key and a fingerprint. Compare the node id,
+   address, name and machine key with `headscale nodes list`: an impostor holding the name can publish the real ingress's public values, so the node
    itself must be the one you registered. The agent does not report a fingerprint: it is node-control's SHA-256 over the canonical JSON of
    `name`, `host`, `port`, `sni`, `public_key` and `short_id`. Compare the host, public key and short id that
    `GET /v1/info` on the agent reports (over a channel you trust) with what the page shows, then press Approve. The
@@ -273,13 +273,20 @@ Adding an ingress, step by step:
   and headscale re-derives it whenever that hostname changes, as long as the given name still follows it (equals the
   hostname, or the hostname plus `-<digits>`). Only a name set with `headscale nodes rename <id> <name>` to something
   the hostname does not produce stays put. So:
+  - **Set an explicit `agent_url` (the node's tailnet IP, for example `http://100.64.0.12:9000`) on every configured
+    ingress.** It removes the headscale lookup altogether: the token goes only to that address, which no machine
+    can influence. (`AGENT_URL` does the same for the first entry.) The name lookup is only the fallback, and it
+    is the weaker setting.
   - For a CONFIGURED ingress without `agent_url`, the lookup accepts a tagged node only when its given name does not
-    follow its hostname; run `headscale nodes rename` on the ingress node first (the log says so when a lookup is
-    refused). When several nodes share the name the lookup fails and nothing is sent to any of them. An explicit
-    `agent_url` in an `enroll.json` entry (or `AGENT_URL` for the first one) removes the headscale lookup for that
-    ingress altogether: the token then goes only to that address. This is the safest setting.
-  - A DISCOVERED ingress is identified by the node id it was approved on, not by its name: the agent is found by that
-    id, and no other node is ever sent its token or credentials. If that node disappears, the row turns `invalid`
+    follow its hostname, by headscale's own rule (the given name equals what headscale derives from the hostname,
+    optionally followed by `-<number>`; hostnames that sanitise to nothing are refused too). Run
+    `headscale nodes rename <id> <name>` on the ingress node first (the log says so when a lookup is refused). When
+    several nodes share the name the lookup fails and nothing is sent to any of them.
+  - A DISCOVERED ingress is identified by the node id AND the machine key it was approved on, not by its name: the
+    agent is found by that pair, and no other node is ever sent its token or credentials. The id alone is not enough
+    (ids can repeat after a headscale database is rebuilt or restored); the machine key is what a node cannot
+    choose. If the node list does not report machine keys, an ingress cannot be approved. Approvals made before
+    machine keys were pinned show `changed` ("approve again") until you approve them once more. If that node disappears, the row turns `invalid`
     ("the approved node is not present") and nothing is contacted until you remove the approval; a different node that
     now carries the name can then be reviewed and approved.
 - Before approval, the token variable `AGENT_TOKEN_<NAME>` is already sent (as the bearer of `GET /v1/info`) to a

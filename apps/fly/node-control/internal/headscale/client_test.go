@@ -1,8 +1,8 @@
 package headscale
 
 import (
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"

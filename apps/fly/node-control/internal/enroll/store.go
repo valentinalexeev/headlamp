@@ -519,7 +519,9 @@ func (s *Store) Approvals() (map[string]string, error) {
 }
 
 // Approve records the approval of a discovered ingress without a node pin.
-func (s *Store) Approve(name, fingerprint string) error { return s.ApproveNode(name, fingerprint, 0, "") }
+func (s *Store) Approve(name, fingerprint string) error {
+	return s.ApproveNode(name, fingerprint, 0, "")
+}
 
 // ApproveNode records (or replaces) the approval of a discovered ingress: its parameters and the
 // headscale node that published them.

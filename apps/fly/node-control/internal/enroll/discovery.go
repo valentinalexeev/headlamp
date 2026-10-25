@@ -96,11 +96,16 @@ type DiscoveryStatus struct {
 
 // Current is one consistent view of the ingress set.
 type Current struct {
-	Cfg       IngressConfig // configured + approved discovered ingresses, for profiles and sync
-	Targets   []SyncTarget  // the same ingresses as sync targets, in the same order
-	Views     []IngressView // everything, configured first, then discovered by name
-	Pending   []string      // discovered ingresses that are not approved
-	Discovery DiscoveryStatus
+	Cfg     IngressConfig // configured + approved discovered ingresses, for profiles and sync
+	Targets []SyncTarget  // the same ingresses as sync targets, in the same order
+	// SyncTargets are Targets plus approved discovered ingresses whose parameters have not been
+	// read (yet) but whose pinned node is in the node list. They only keep the credential set of an
+	// ingress that was approved before, so a revocation reaches it right after a restart; they are
+	// never offered in profiles.
+	SyncTargets []SyncTarget
+	Views       []IngressView // everything, configured first, then discovered by name
+	Pending     []string      // discovered ingresses that are not approved
+	Discovery   DiscoveryStatus
 }
 
 // probe is what is known about one discovered node.
@@ -131,10 +136,11 @@ type Registry struct {
 	now          func() time.Time
 	discoveryOff string
 
-	nodes  []headscale.Node
-	probes map[string]*probe
-	dstate map[string]*SyncState
-	dagent map[string]nodeAgent
+	nodes       []headscale.Node
+	nodesLoaded bool
+	probes      map[string]*probe
+	dstate      map[string]*SyncState
+	dagent      map[string]nodeAgent
 }
 
 // nodeAgent is the agent of a discovered ingress, bound to the node id it was approved on.
@@ -305,10 +311,32 @@ func (r *Registry) First() SyncTarget { return r.configured[0] }
 func (r *Registry) Current(ctx context.Context, fresh bool) Current {
 	if fresh {
 		r.refresh(ctx, "")
+	} else {
+		r.loadNodesOnce(ctx)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.buildLocked()
+}
+
+// loadNodesOnce reads the node list the first time a caller that does not refresh needs it (the
+// node list is cached by its source; no /v1/info is read).
+func (r *Registry) loadNodesOnce(ctx context.Context) {
+	if r.src == nil {
+		return
+	}
+	r.mu.Lock()
+	done := r.nodesLoaded
+	r.mu.Unlock()
+	if done {
+		return
+	}
+	nodes, err := r.src.Nodes(ctx)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err == nil {
+		r.nodes, r.nodesLoaded = nodes, true
+	}
 }
 
 // refresh reloads the node list and re-reads the stale probes; force names a node whose
@@ -319,7 +347,7 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 	if r.src != nil {
 		if nodes, err := r.src.Nodes(ctx); err == nil {
 			r.mu.Lock()
-			r.nodes = nodes
+			r.nodes, r.nodesLoaded = nodes, true
 			r.mu.Unlock()
 		}
 	}
@@ -358,6 +386,10 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 			continue
 		}
 		n := ns[0]
+		if n.ID == 0 { // an id of 0 can never be pinned
+			r.probes[name] = &probe{at: now, state: stInvalid, detail: "the node has no id"}
+			continue
+		}
 		token := r.getenv(tokenVar(name))
 		if token == "" {
 			r.probes[name] = &probe{at: now, nodeID: n.ID, state: stNoToken, detail: "no token variable for this ingress"}
@@ -505,6 +537,7 @@ func (r *Registry) buildLocked() Current {
 		cur.Views = append(cur.Views, IngressView{Name: t.Name, Host: t.Ingress.Host, Source: "configured",
 			Approval: stConfigured, Active: true, Online: r.onlineLocked(t.Name), Sync: &snap})
 	}
+	cur.SyncTargets = cur.Targets
 	if r.discoveryOff != "" {
 		return cur
 	}
@@ -553,6 +586,11 @@ func (r *Registry) buildLocked() Current {
 			switch {
 			case !approved:
 				v.Approval = stPending
+			case row.NodeID == 0 || p.nodeID == 0:
+				v.Approval = stChanged
+				if row.Fingerprint == p.info.fp {
+					v.Detail = "approval predates node pinning, approve again"
+				}
 			case row.Fingerprint == p.info.fp && row.NodeID == p.nodeID:
 				v.Approval = stApproved
 			case row.Fingerprint == p.info.fp:
@@ -592,6 +630,14 @@ func (r *Registry) buildLocked() Current {
 			claim(k)
 		}
 	}
+	var extra []SyncTarget
+	for k, v := range views {
+		if v.Approval != stApproved && r.unverifiedLocked(v.Name, approvals[v.Name]) {
+			// approved on this very node, parameters not read: keep its set current, nothing more
+			extra = append(extra, r.discoveredTarget(v.Name, approvals[v.Name].NodeID, Ingress{Name: v.Name, UUIDs: uuidsDerived}))
+			views[k].Detail = "approved; the parameters have not been verified yet"
+		}
+	}
 	for k, v := range views {
 		if v.Approval == stApproved {
 			v.Active = true
@@ -606,7 +652,26 @@ func (r *Registry) buildLocked() Current {
 		}
 		cur.Views = append(cur.Views, v)
 	}
+	cur.SyncTargets = append(append([]SyncTarget(nil), cur.Targets...), extra...)
 	return cur
+}
+
+// unverifiedLocked reports whether an approved discovered ingress has no reading of its parameters
+// (none yet, or the last one failed) while the node the approval is pinned to is in the node list
+// and its token variable is set.
+func (r *Registry) unverifiedLocked(name string, row ApprovalRow) bool {
+	if row.NodeID == 0 || r.getenv(tokenVar(name)) == "" {
+		return false
+	}
+	if p := r.probes[name]; p != nil && !(p.info == nil && p.state == stUnreachable && p.nodeID == row.NodeID) {
+		return false
+	}
+	for _, n := range r.nodes {
+		if n.ID == row.NodeID && isIngressNode(n, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // discoveredTarget is the sync target of an approved discovered ingress; its state lives as long as

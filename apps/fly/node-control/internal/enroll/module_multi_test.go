@@ -685,3 +685,19 @@ func TestHangingInfoDoesNotDelayARevoke(t *testing.T) {
 		t.Fatalf("a hanging /v1/info delayed the revoke: %d after %v", code, time.Since(start))
 	}
 }
+
+func TestRevokeReachesApprovedIngressRightAfterARestart(t *testing.T) {
+	f := newMultiFx(t)
+	f.withDiscovered(t)
+	f.register()
+	id, _ := f.create()
+	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
+	f.mod.Stop(context.Background())
+
+	f.register() // a fresh process: no reading of /v1/info has happened yet
+	before := f.a3.putCount()
+	code, _ := f.do("POST", fmt.Sprintf("/enroll/devices/%d/revoke", id), "{}")
+	if code != 200 || f.a3.putCount() != before+1 || len(f.a3.lastPut()) != 0 {
+		t.Fatalf("%d: the revocation did not reach the approved ingress (pushes %d -> %d)", code, before, f.a3.putCount())
+	}
+}

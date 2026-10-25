@@ -891,3 +891,88 @@ func TestFirstIngressTokenErrorNamesTheFallback(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestNodeIDZeroNeverPins(t *testing.T) {
+	a := newInfoAgent(t, "ingress-3")
+	usePort(t, a)
+	f := newRegFx(t, nil)
+	f.nodes.set(ingressNodeID("ingress-3", 0, true))
+	v := f.view("ingress-3")
+	if v.Approval != stInvalid || v.Active {
+		t.Fatalf("%+v", v)
+	}
+	if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint); err == nil {
+		t.Fatal("approved a node without an id")
+	}
+	// a stored approval without a pin never matches, whatever the node id
+	f.nodes.set(ingressNode("ingress-3", true))
+	f.clk.advance(infoTTL + time.Second)
+	fp := f.view("ingress-3").Fingerprint
+	f.store.ApproveNode("ingress-3", fp, 0)
+	if v := f.view("ingress-3"); v.Active || v.Approval == stApproved {
+		t.Fatalf("%+v", v)
+	}
+}
+
+func TestApprovalPredatingPinningNeedsReapproval(t *testing.T) {
+	a := newInfoAgent(t, "ingress-3")
+	usePort(t, a)
+	f := newRegFx(t, nil)
+	f.nodes.set(ingressNode("ingress-3", true))
+	f.store.Approve("ingress-3", f.view("ingress-3").Fingerprint) // a row from before node pinning
+	v := f.view("ingress-3")
+	if v.Approval != stChanged || v.Active || v.Detail != "approval predates node pinning, approve again" {
+		t.Fatalf("%+v", v)
+	}
+	if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.view("ingress-3"); v.Approval != stApproved || !v.Active {
+		t.Fatalf("%+v", v)
+	}
+}
+
+func TestSyncReachesApprovedIngressBeforeTheFirstProbe(t *testing.T) {
+	ctx := context.Background()
+	setup := func(t *testing.T, rowNode uint64, nodes ...headscale.Node) (*regFx, *infoAgent) {
+		a := newInfoAgent(t, "ingress-3")
+		usePort(t, a)
+		f := newRegFx(t, nil)
+		f.nodes.set(nodes...)
+		f.store.ApproveNode("ingress-3", "fingerprint-from-before-the-restart", rowNode)
+		f.store.CreateDevice("n", "o", "sing-box", adminFuture)
+		return f, a
+	}
+	t.Run("the approved node receives the set without any /v1/info reading", func(t *testing.T) {
+		f, a := setup(t, 3, ingressNode("ingress-3", true))
+		cur := f.reg.Current(ctx, false)
+		if len(cur.Pending) != 1 || cur.Views[1].Active {
+			t.Fatalf("an unverified ingress must not be active: %+v", cur.Views)
+		}
+		if !SyncAll(ctx, f.store, cur.Cfg, cur.SyncTargets) || a.putCount() != 1 {
+			t.Fatalf("pushes %d", a.putCount())
+		}
+		if a.hits() != 0 {
+			t.Fatal("the sync path read /v1/info")
+		}
+		if len(cur.Cfg.Ingresses) != 1 {
+			t.Fatal("an unverified ingress must not be offered in profiles")
+		}
+	})
+	t.Run("a node with another id is not reached", func(t *testing.T) {
+		f, a := setup(t, 3, ingressNodeID("ingress-3", 30, true))
+		cur := f.reg.Current(ctx, false)
+		SyncAll(ctx, f.store, cur.Cfg, cur.SyncTargets)
+		if a.putCount() != 0 {
+			t.Fatal("pushed to a node that is not the approved one")
+		}
+	})
+	t.Run("an approval without a pin is not reached", func(t *testing.T) {
+		f, a := setup(t, 0, ingressNodeID("ingress-3", 3, true))
+		cur := f.reg.Current(ctx, false)
+		SyncAll(ctx, f.store, cur.Cfg, cur.SyncTargets)
+		if a.putCount() != 0 {
+			t.Fatal("pushed on an unpinned approval")
+		}
+	})
+}

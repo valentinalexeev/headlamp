@@ -250,14 +250,18 @@ type ingressRow struct {
 }
 
 // rowsOf pairs the current ingresses with sync snapshots (same order as cur.Targets).
-func rowsOf(cur Current, snaps []SyncSnapshot) []ingressRow {
+func rowsOf(cur Current, targets []SyncTarget, snaps []SyncSnapshot) []ingressRow {
 	online := map[string]*bool{}
 	for _, v := range cur.Views {
 		online[v.Name] = v.Online
 	}
-	rows := make([]ingressRow, 0, len(cur.Targets))
-	for i, t := range cur.Targets {
-		rows = append(rows, ingressRow{Name: t.Name, Host: cur.Cfg.Ingresses[i].Host, Sync: snaps[i], Online: online[t.Name]})
+	host := map[string]string{}
+	for _, in := range cur.Cfg.Ingresses {
+		host[in.Name] = in.Host
+	}
+	rows := make([]ingressRow, 0, len(targets))
+	for i, t := range targets {
+		rows = append(rows, ingressRow{Name: t.Name, Host: host[t.Name], Sync: snaps[i], Online: online[t.Name]})
 	}
 	return rows
 }
@@ -292,7 +296,7 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 		pending = []string{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"devices": rows, "sync": summarize(snaps),
-		"ingresses": rowsOf(cur, snaps), "pending_ingresses": pending, "stats_partial": partial})
+		"ingresses": rowsOf(cur, cur.Targets, snaps), "pending_ingresses": pending, "stats_partial": partial})
 }
 
 // syncResult is what a change reports about the ingresses.
@@ -313,8 +317,9 @@ func (s syncResult) body(m map[string]any) map[string]any {
 func (a *Admin) syncNow(r *http.Request) syncResult {
 	ctx := context.WithoutCancel(r.Context())
 	cur := a.reg.Current(ctx, false) // no /v1/info reading on the revoke path: it must not wait for one
-	before := make([]uint64, len(cur.Targets))
-	for i, t := range cur.Targets {
+	targets := cur.SyncTargets
+	before := make([]uint64, len(targets))
+	for i, t := range targets {
 		before[i] = t.State.version()
 	}
 	done := make(chan struct{})
@@ -323,12 +328,12 @@ func (a *Admin) syncNow(r *http.Request) syncResult {
 		defer func() {
 			if rec := recover(); rec != nil {
 				slog.Error("enrolment sync failed", "error_type", typeName(rec))
-				for _, t := range cur.Targets {
+				for _, t := range targets {
 					t.State.Failed("error")
 				}
 			}
 		}()
-		SyncAll(ctx, a.store, cur.Cfg, cur.Targets)
+		SyncAll(ctx, a.store, cur.Cfg, targets)
 	}()
 	timer := time.NewTimer(syncWait)
 	defer timer.Stop()
@@ -338,16 +343,16 @@ func (a *Admin) syncNow(r *http.Request) syncResult {
 		finished = true
 	case <-timer.C:
 	}
-	snaps := snapshotsOf(cur.Targets)
+	snaps := snapshotsOf(targets)
 	if !finished {
 		now := a.store.clock().Unix()
-		for i, t := range cur.Targets {
+		for i, t := range targets {
 			if t.State.version() == before[i] && !snaps[i].Pending {
 				snaps[i] = SyncSnapshot{Pending: true, State: "unknown", Since: &now}
 			}
 		}
 	}
-	return syncResult{Snap: summarize(snaps), Rows: rowsOf(cur, snaps)}
+	return syncResult{Snap: summarize(snaps), Rows: rowsOf(cur, targets, snaps)}
 }
 
 func (a *Admin) createDevice(w http.ResponseWriter, r *http.Request) {

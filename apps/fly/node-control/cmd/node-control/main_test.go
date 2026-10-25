@@ -68,7 +68,7 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll" {
+	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy" {
 		t.Fatalf("module order %s", got)
 	}
 	tn, _ := serve(t, env, mods)

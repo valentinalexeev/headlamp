@@ -146,3 +146,64 @@ func TestLoadErrorsNeverEchoSecrets(t *testing.T) {
 		}
 	}
 }
+
+func sidecarBase() map[string]string {
+	return map[string]string{"FUNNEL_NS": "pdl", "FUNNEL_SERVICES": "admin=8080", "FUNNEL_API_URL": "http://funnel-ingress:9100", "TS_AUTHKEY": "tskey-auth-secret"}
+}
+
+func TestLoadSidecarDefaultsAndOverrides(t *testing.T) {
+	c, err := LoadSidecar(env(sidecarBase()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NS != "pdl" || c.Services != "admin=8080" || c.APIURL != "http://funnel-ingress:9100" || c.Hostname != "funnel-sidecar" ||
+		c.StateDir != "/tmp/funnel-sidecar" || c.ReadyAddr != ":8081" || c.ReregisterInterval != 5*time.Minute {
+		t.Fatalf("defaults: %+v", c)
+	}
+	m := sidecarBase()
+	m["HOSTNAME"] = "pod-1"
+	m["FUNNEL_API_URL"] = "http://funnel-ingress:9100/"
+	m["FUNNEL_REREGISTER_INTERVAL"] = "30s"
+	m["FUNNEL_CONTROL_URL"] = "https://hs.example.com"
+	c, err = LoadSidecar(env(m))
+	if err != nil || c.Hostname != "pod-1" || c.APIURL != "http://funnel-ingress:9100" || c.ReregisterInterval != 30*time.Second || c.ControlURL != "https://hs.example.com" {
+		t.Fatalf("overrides: %+v %v", c, err)
+	}
+	m["FUNNEL_HOSTNAME"] = "explicit"
+	if c, _ = LoadSidecar(env(m)); c.Hostname != "explicit" {
+		t.Fatalf("FUNNEL_HOSTNAME must win over HOSTNAME: %q", c.Hostname)
+	}
+}
+
+func TestLoadSidecarRejects(t *testing.T) {
+	for name, drop := range map[string]string{"namespace": "FUNNEL_NS", "services": "FUNNEL_SERVICES", "api url": "FUNNEL_API_URL", "auth key": "TS_AUTHKEY"} {
+		m := sidecarBase()
+		delete(m, drop)
+		if _, err := LoadSidecar(env(m)); err == nil {
+			t.Errorf("missing %s accepted", name)
+		}
+	}
+	for name, kv := range map[string][2]string{
+		"api url not http": {"FUNNEL_API_URL", "funnel-ingress:9100"},
+		"control url":      {"FUNNEL_CONTROL_URL", "headscale"},
+		"interval short":   {"FUNNEL_REREGISTER_INTERVAL", "1s"},
+		"interval garbage": {"FUNNEL_REREGISTER_INTERVAL", "often"},
+	} {
+		m := sidecarBase()
+		m[kv[0]] = kv[1]
+		if _, err := LoadSidecar(env(m)); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+func TestLoadSidecarErrorsNeverEchoTheKey(t *testing.T) {
+	m := sidecarBase()
+	m["TS_AUTHKEY"] = "tskey-auth-topsecret"
+	m["FUNNEL_API_URL"] = "://user:topsecret@x"
+	delete(m, "FUNNEL_NS")
+	_, err := LoadSidecar(env(m))
+	if err == nil || strings.Contains(err.Error(), "topsecret") {
+		t.Fatalf("%v", err)
+	}
+}

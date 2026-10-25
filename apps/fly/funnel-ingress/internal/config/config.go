@@ -163,3 +163,64 @@ func httpURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
+
+// SidecarConfig holds the settings of funnel-sidecar, the Kubernetes registration sidecar.
+type SidecarConfig struct {
+	NS                                                 string        // namespace the sidecar publishes into
+	Services                                           string        // "name=port[@host:port],..." (parsed by the sidecar package)
+	APIURL                                             string        // funnel-ingress registration API, e.g. http://funnel-ingress:9100
+	ControlURL, AuthKey, Hostname, StateDir, ReadyAddr string        // ControlURL optional; StateDir is scratch space for the ephemeral node
+	ReregisterInterval                                 time.Duration // how often registrations are re-asserted
+}
+
+// LoadSidecar builds a SidecarConfig from getenv. Like Load, errors name settings, never values.
+func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
+	var errs []error
+	fail := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
+	str := func(name, def string) string {
+		if v := strings.TrimSpace(getenv(name)); v != "" {
+			return v
+		}
+		return def
+	}
+	c := SidecarConfig{
+		NS:         str("FUNNEL_NS", ""),
+		Services:   str("FUNNEL_SERVICES", ""),
+		APIURL:     strings.TrimRight(str("FUNNEL_API_URL", ""), "/"),
+		ControlURL: str("FUNNEL_CONTROL_URL", ""),
+		AuthKey:    strings.TrimSpace(getenv("TS_AUTHKEY")),
+		Hostname:   str("FUNNEL_HOSTNAME", str("HOSTNAME", "funnel-sidecar")),
+		StateDir:   str("FUNNEL_STATE_DIR", "/tmp/funnel-sidecar"),
+		ReadyAddr:  str("FUNNEL_READY_ADDR", ":8081"),
+	}
+	c.ReregisterInterval = 5 * time.Minute
+	if v := strings.TrimSpace(getenv("FUNNEL_REREGISTER_INTERVAL")); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 10*time.Second {
+			fail("FUNNEL_REREGISTER_INTERVAL must be a duration of at least 10s")
+		} else {
+			c.ReregisterInterval = d
+		}
+	}
+	if c.NS == "" {
+		fail("FUNNEL_NS is required")
+	}
+	if c.Services == "" {
+		fail("FUNNEL_SERVICES is required")
+	}
+	if c.AuthKey == "" {
+		fail("TS_AUTHKEY is required")
+	}
+	if c.APIURL == "" {
+		fail("FUNNEL_API_URL is required")
+	} else if !httpURL(c.APIURL) {
+		fail("FUNNEL_API_URL must be an http(s) URL")
+	}
+	if c.ControlURL != "" && !httpURL(c.ControlURL) {
+		fail("FUNNEL_CONTROL_URL must be an http(s) URL")
+	}
+	if len(errs) > 0 {
+		return SidecarConfig{}, errors.Join(errs...)
+	}
+	return c, nil
+}

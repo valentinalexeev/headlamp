@@ -46,9 +46,31 @@ type Agent interface {
 }
 
 type agentClient struct {
-	base  string
-	token string
-	hc    *http.Client
+	base    string
+	resolve func(ctx context.Context) (string, error) // when set, the base URL is resolved on every call
+	token   string
+	hc      *http.Client
+}
+
+// baseURL is the agent's base URL for this call.
+func (a *agentClient) baseURL(ctx context.Context) (string, error) {
+	if a.resolve == nil {
+		return a.base, nil
+	}
+	b, err := a.resolve(ctx)
+	if err != nil || b == "" {
+		return "", &AgentUnavailable{Outcome: OutcomeUnreachable}
+	}
+	return strings.TrimRight(b, "/"), nil
+}
+
+// NewAgentFunc is NewAgent with the base URL resolved on every call (the address of a discovered
+// node can change). A resolve failure is an "unreachable" outcome; its text is never reported.
+func NewAgentFunc(resolve func(ctx context.Context) (string, error), token string, hc *http.Client) Agent {
+	if hc == nil {
+		hc = newHTTPClient(nil)
+	}
+	return &agentClient{resolve: resolve, token: token, hc: hc}
 }
 
 // maxAgentBody caps how much of an agent response is read.
@@ -87,7 +109,11 @@ func (a *agentClient) PutCredentials(ctx context.Context, creds []Credential, co
 	}
 	ctx, cancel := context.WithTimeout(ctx, putTimeout)
 	defer cancel()
-	url := a.base + "/v1/credentials"
+	base, err := a.baseURL(ctx)
+	if err != nil {
+		return err
+	}
+	url := base + "/v1/credentials"
 	if confirmEmpty {
 		url += "?confirm_empty=true"
 	}
@@ -124,7 +150,11 @@ func (a *agentClient) Stats(ctx context.Context) map[string]any {
 	empty := map[string]any{}
 	ctx, cancel := context.WithTimeout(ctx, statsTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.base+"/v1/stats", nil)
+	base, err := a.baseURL(ctx)
+	if err != nil {
+		return empty
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/stats", nil)
 	if err != nil {
 		return empty
 	}

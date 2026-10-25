@@ -43,6 +43,7 @@ type SyncState struct {
 	pending bool
 	state   string
 	since   *int64
+	ver     uint64 // bumped on every outcome: lets a caller tell "no result yet" from "same result"
 }
 
 // NewSyncState returns a state in "unknown". A nil clock means time.Now.
@@ -57,6 +58,7 @@ func (s *SyncState) OK(state string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pending, s.state, s.since = false, state, nil
+	s.ver++
 }
 
 func (s *SyncState) Failed(state string) {
@@ -67,6 +69,14 @@ func (s *SyncState) Failed(state string) {
 		s.since = &t
 	}
 	s.pending, s.state = true, state
+	s.ver++
+}
+
+// version counts the outcomes recorded so far.
+func (s *SyncState) version() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ver
 }
 
 func (s *SyncState) Snapshot() SyncSnapshot {
@@ -222,10 +232,18 @@ var stateRank = map[string]int{"error": 0, "unauthorized": 1, "rejected": 2, "co
 // Summary folds the targets' states: pending if any is pending, the worst state, and the earliest
 // "since" among the pending ones.
 func Summary(targets []SyncTarget) SyncSnapshot {
+	snaps := make([]SyncSnapshot, len(targets))
+	for i, t := range targets {
+		snaps[i] = t.State.Snapshot()
+	}
+	return summarize(snaps)
+}
+
+// summarize is Summary over snapshots already taken.
+func summarize(snaps []SyncSnapshot) SyncSnapshot {
 	out := SyncSnapshot{State: "empty"}
 	worst := len(stateRank)
-	for _, t := range targets {
-		s := t.State.Snapshot()
+	for _, s := range snaps {
 		r, known := stateRank[s.State]
 		if !known {
 			r = 0

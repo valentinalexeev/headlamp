@@ -25,7 +25,7 @@ const defaultNodesConfig = "/srv/app/nodes.json"
 const trackedTimeout = 10 * time.Second
 
 // buildModules wires the modules in registration order: tailnet, nodes, enroll. One cached
-// headscale source feeds both the tailnet and the nodes module, so a page load costs one fetch.
+// headscale source feeds the tailnet, the nodes and the enroll module, so a page load costs one fetch.
 func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	cfg, err := nodes.LoadConfig(env.Default("NODES_CONFIG", defaultNodesConfig))
 	if err != nil {
@@ -59,7 +59,7 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	return []core.Module{
 		tailnet.New(src, tracked),
 		nm,
-		enroll.New(env),
+		enroll.New(env, enroll.WithNodeSource(src)),
 	}, nil
 }
 

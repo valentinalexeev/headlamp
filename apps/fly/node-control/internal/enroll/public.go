@@ -1,6 +1,7 @@
 package enroll
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -61,10 +62,25 @@ type publicStore interface {
 type Public struct {
 	store publicStore
 	cfg   IngressConfig
+	// profileCfg, when set, gives the ingresses of the moment for a profile (the approved set can
+	// change at run time); cfg then only supplies the link host.
+	profileCfg func(ctx context.Context) IngressConfig
 }
 
 // NewPublic returns the public handler over store.
 func NewPublic(store *Store, cfg IngressConfig) *Public { return newPublic(store, cfg) }
+
+// NewPublicFor returns the public handler over store whose profiles list the ingresses the
+// registry has approved at the time of the request.
+func NewPublicFor(store *Store, reg *Registry) *Public {
+	p := newPublic(store, reg.LinkConfig())
+	p.profileCfg = func(ctx context.Context) IngressConfig {
+		// reading the discovered ingresses can take a few seconds when the cached readings are
+		// stale; without discovery there is nothing to read
+		return reg.Current(ctx, reg.DiscoveryEnabled()).Cfg
+	}
+	return p
+}
 
 func newPublic(store publicStore, cfg IngressConfig) *Public { return &Public{store: store, cfg: cfg} }
 
@@ -150,11 +166,15 @@ func (p *Public) subscription(w http.ResponseWriter, r *http.Request, secret str
 	}
 	var body []byte
 	var ctype string
+	cfg := p.cfg
+	if p.profileCfg != nil {
+		cfg = p.profileCfg(r.Context())
+	}
 	if d.Client == "clash" {
-		body, err = RenderClashProfile(p.cfg, *d)
+		body, err = RenderClashProfile(cfg, *d)
 		ctype = "text/yaml; charset=utf-8"
 	} else {
-		body, err = RenderProfile(p.cfg, *d)
+		body, err = RenderProfile(cfg, *d)
 		ctype = "application/json"
 	}
 	if err != nil {

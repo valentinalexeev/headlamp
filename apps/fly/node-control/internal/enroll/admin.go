@@ -24,9 +24,15 @@ import (
 // send: this is the CSRF protection. Request bodies are limited to 1 MiB.
 //
 // Sync visibility: GET /enroll/devices returns {"devices": [...], "sync": {"pending", "state",
-// "since"}}; the create/revoke/extend responses carry sync_pending and sync.
+// "since"}, "ingresses": [{"name", "host", "sync", "online"}], "pending_ingresses": [...],
+// "stats_partial"}; the create/revoke/extend responses carry sync_pending, sync (the aggregate:
+// pending if any ingress is pending, the worst state) and ingresses (one entry each).
 //
-// Traffic is keyed by an opaque id, the first 8 hex chars of SHA-256 of the device's "auto" UUID.
+// A change returns once the ingresses answered, or after syncWait at the latest: an ingress that
+// is slow or down never holds a revocation back; it stays pending on the page until it acknowledges.
+//
+// Traffic is keyed by an opaque id, the first 8 hex chars of SHA-256 of the device's "auto" UUID
+// (of that ingress's own UUID for a derived ingress) and summed over the ingresses.
 // The agent reports stats under that id so the UUID itself never leaves the agent and the store.
 
 //go:embed static/enroll.html
@@ -40,21 +46,26 @@ const (
 	maxBodyBytes = 1 << 20
 )
 
+// syncWait bounds how long a change waits for the ingresses before answering.
+var syncWait = 3 * time.Second
+
 // Admin serves the operator API.
 type Admin struct {
 	store *Store
-	cfg   IngressConfig
-	agent Agent
-	state *SyncState
+	reg   *Registry
 }
 
-// NewAdmin returns the operator API over store and agent. Its sync state takes time from the store's clock.
+// NewAdmin returns the operator API over store and one agent that serves every configured
+// ingress. Its sync state takes time from the store's clock.
 func NewAdmin(store *Store, cfg IngressConfig, agent Agent) *Admin {
-	return &Admin{store: store, cfg: cfg, agent: agent, state: NewSyncState(store.clock)}
+	return &Admin{store: store, reg: newStaticRegistry(store, cfg, agent)}
 }
 
-// State is the sync state shown on the page; the reconcile loop must share it.
-func (a *Admin) State() *SyncState { return a.state }
+// NewAdminFor returns the operator API over the ingress registry.
+func NewAdminFor(store *Store, reg *Registry) *Admin { return &Admin{store: store, reg: reg} }
+
+// State is the sync state of the first configured ingress.
+func (a *Admin) State() *SyncState { return a.reg.First().State }
 
 // Register adds the admin routes to mux.
 func (a *Admin) Register(mux *http.ServeMux) {
@@ -65,6 +76,9 @@ func (a *Admin) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /enroll/devices/{id}/revoke", a.jsonOnly(a.revoke))
 	mux.HandleFunc("POST /enroll/devices/{id}/extend", a.jsonOnly(a.extend))
 	mux.HandleFunc("POST /enroll/devices/{id}/rotate-secret", a.jsonOnly(a.rotate))
+	mux.HandleFunc("GET /enroll/ingresses", a.listIngresses)
+	mux.HandleFunc("POST /enroll/ingresses/{name}/approve", a.jsonOnly(a.approve))
+	mux.HandleFunc("POST /enroll/ingresses/{name}/unapprove", a.jsonOnly(a.unapprove))
 }
 
 // opaqueID is the id the agent reports traffic under.
@@ -227,25 +241,113 @@ type deviceRow struct {
 	Traffic   any    `json:"traffic"`
 }
 
+// ingressRow is one active ingress in the responses.
+type ingressRow struct {
+	Name   string       `json:"name"`
+	Host   string       `json:"host"`
+	Sync   SyncSnapshot `json:"sync"`
+	Online *bool        `json:"online"`
+}
+
+// rowsOf pairs the current ingresses with sync snapshots (same order as cur.Targets).
+func rowsOf(cur Current, snaps []SyncSnapshot) []ingressRow {
+	online := map[string]*bool{}
+	for _, v := range cur.Views {
+		online[v.Name] = v.Online
+	}
+	rows := make([]ingressRow, 0, len(cur.Targets))
+	for i, t := range cur.Targets {
+		rows = append(rows, ingressRow{Name: t.Name, Host: cur.Cfg.Ingresses[i].Host, Sync: snaps[i], Online: online[t.Name]})
+	}
+	return rows
+}
+
+func snapshotsOf(targets []SyncTarget) []SyncSnapshot {
+	snaps := make([]SyncSnapshot, len(targets))
+	for i, t := range targets {
+		snaps[i] = t.State.Snapshot()
+	}
+	return snaps
+}
+
 func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
-	stats := a.agent.Stats(r.Context())
+	cur := a.reg.Current(r.Context(), true)
 	devs, err := a.store.ListDevices()
 	if err != nil {
 		a.internal(w, err)
 		return
 	}
+	stats, partial := MergedStats(r.Context(), cur.Targets, cur.Cfg, devs)
 	rows := make([]deviceRow, 0, len(devs))
 	for _, d := range devs {
-		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, d.Client, d.ExpiresAt, d.Revoked, stats[opaqueID(d)]})
+		var traffic any
+		if tr, ok := stats[d.ID]; ok {
+			traffic = map[string]any{"up": tr.Up, "down": tr.Down}
+		}
+		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, d.Client, d.ExpiresAt, d.Revoked, traffic})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"devices": rows, "sync": a.state.Snapshot()})
+	snaps := snapshotsOf(cur.Targets)
+	pending := cur.Pending
+	if pending == nil {
+		pending = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"devices": rows, "sync": summarize(snaps),
+		"ingresses": rowsOf(cur, snaps), "pending_ingresses": pending, "stats_partial": partial})
+}
+
+// syncResult is what a change reports about the ingresses.
+type syncResult struct {
+	Snap SyncSnapshot
+	Rows []ingressRow
+}
+
+// body is the part of a change response that describes the sync.
+func (s syncResult) body(m map[string]any) map[string]any {
+	m["sync_pending"], m["sync"], m["ingresses"] = s.Snap.Pending, s.Snap, s.Rows
+	return m
 }
 
 // syncNow pushes after a change. It outlives the request: a client that gives up must not leave
-// the push half done.
-func (a *Admin) syncNow(r *http.Request) SyncSnapshot {
-	Sync(context.WithoutCancel(r.Context()), a.store, a.agent, a.state)
-	return a.state.Snapshot()
+// the push half done. It answers when every ingress has answered or after syncWait; an ingress
+// that has not answered by then reads as pending (state "unknown") until its push ends.
+func (a *Admin) syncNow(r *http.Request) syncResult {
+	ctx := context.WithoutCancel(r.Context())
+	cur := a.reg.Current(ctx, true)
+	before := make([]uint64, len(cur.Targets))
+	for i, t := range cur.Targets {
+		before[i] = t.State.version()
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("enrolment sync failed", "error_type", typeName(rec))
+				for _, t := range cur.Targets {
+					t.State.Failed("error")
+				}
+			}
+		}()
+		SyncAll(ctx, a.store, cur.Cfg, cur.Targets)
+	}()
+	timer := time.NewTimer(syncWait)
+	defer timer.Stop()
+	finished := false
+	select {
+	case <-done:
+		finished = true
+	case <-timer.C:
+	}
+	snaps := snapshotsOf(cur.Targets)
+	if !finished {
+		now := a.store.clock().Unix()
+		for i, t := range cur.Targets {
+			if t.State.version() == before[i] && !snaps[i].Pending {
+				snaps[i] = SyncSnapshot{Pending: true, State: "unknown", Since: &now}
+			}
+		}
+	}
+	return syncResult{Snap: summarize(snaps), Rows: rowsOf(cur, snaps)}
 }
 
 func (a *Admin) createDevice(w http.ResponseWriter, r *http.Request) {
@@ -278,9 +380,8 @@ func (a *Admin) createDevice(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	snap := a.syncNow(r)
-	writeJSON(w, http.StatusOK, map[string]any{"id": d.ID, "subscription_url": SubURL(a.cfg, secret),
-		"sync_pending": snap.Pending, "sync": snap})
+	res := a.syncNow(r)
+	writeJSON(w, http.StatusOK, res.body(map[string]any{"id": d.ID, "subscription_url": SubURL(a.reg.LinkConfig(), secret)}))
 }
 
 func (a *Admin) future(w http.ResponseWriter, ts int64) bool {
@@ -337,7 +438,7 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"url": "https://" + a.cfg.LinkHost + "/e/" + tok})
+	writeJSON(w, http.StatusOK, map[string]any{"url": "https://" + a.reg.LinkConfig().LinkHost + "/e/" + tok})
 }
 
 func (a *Admin) revoke(w http.ResponseWriter, r *http.Request) {
@@ -349,8 +450,7 @@ func (a *Admin) revoke(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	snap := a.syncNow(r)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sync_pending": snap.Pending, "sync": snap})
+	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }
 
 func (a *Admin) extend(w http.ResponseWriter, r *http.Request) {
@@ -375,8 +475,7 @@ func (a *Admin) extend(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	snap := a.syncNow(r)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sync_pending": snap.Pending, "sync": snap})
+	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }
 
 func (a *Admin) rotate(w http.ResponseWriter, r *http.Request) {
@@ -393,5 +492,72 @@ func (a *Admin) rotate(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"subscription_url": SubURL(a.cfg, secret)})
+	writeJSON(w, http.StatusOK, map[string]any{"subscription_url": SubURL(a.reg.LinkConfig(), secret)})
+}
+
+// listIngresses shows every ingress with its approval state. Unapproved ones show only a short
+// prefix of their key and short id.
+func (a *Admin) listIngresses(w http.ResponseWriter, r *http.Request) {
+	cur := a.reg.Current(r.Context(), true)
+	pending := cur.Pending
+	if pending == nil {
+		pending = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ingresses": cur.Views, "pending_ingresses": pending, "discovery": cur.Discovery})
+}
+
+// ingressName answers 404 for a name that cannot be an ingress.
+func ingressName(w http.ResponseWriter, r *http.Request) (string, bool) {
+	name := r.PathValue("name")
+	if !ingressNameRe.MatchString(name) {
+		detail(w, http.StatusNotFound, "unknown ingress")
+		return "", false
+	}
+	return name, true
+}
+
+func (a *Admin) approvalFailed(w http.ResponseWriter, err error) {
+	var ae *ApprovalError
+	if errors.As(err, &ae) {
+		detail(w, ae.Status, ae.Msg)
+		return
+	}
+	a.internal(w, err)
+}
+
+func (a *Admin) approve(w http.ResponseWriter, r *http.Request) {
+	name, ok := ingressName(w, r)
+	if !ok {
+		return
+	}
+	obj, ok := readObject(w, r)
+	if !ok {
+		return
+	}
+	var v validator
+	fp := v.str(obj, "fingerprint", 1, 128)
+	if len(v.errs) > 0 {
+		invalid(w, v.errs...)
+		return
+	}
+	if err := a.reg.Approve(r.Context(), name, fp); err != nil {
+		a.approvalFailed(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
+}
+
+func (a *Admin) unapprove(w http.ResponseWriter, r *http.Request) {
+	name, ok := ingressName(w, r)
+	if !ok {
+		return
+	}
+	if _, ok := readObject(w, r); !ok {
+		return
+	}
+	if err := a.reg.Unapprove(r.Context(), name); err != nil {
+		a.approvalFailed(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }

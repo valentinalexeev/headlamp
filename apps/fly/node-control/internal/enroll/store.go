@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS ingress_approvals (
     name TEXT PRIMARY KEY,
     fingerprint TEXT NOT NULL,
     approved_at INTEGER NOT NULL,
-    node_id INTEGER NOT NULL DEFAULT 0
+    node_id INTEGER NOT NULL DEFAULT 0,
+    machine_key TEXT NOT NULL DEFAULT ''
 );
 `
 
@@ -120,8 +121,10 @@ func (s *Store) init() error {
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return err
 	}
-	if err := s.addColumnIfMissing(ctx, "ingress_approvals", "node_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
+	for col, decl := range map[string]string{"node_id": "INTEGER NOT NULL DEFAULT 0", "machine_key": "TEXT NOT NULL DEFAULT ''"} {
+		if err := s.addColumnIfMissing(ctx, "ingress_approvals", col, decl); err != nil {
+			return err
+		}
 	}
 	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(devices)")
 	if err != nil {
@@ -473,15 +476,17 @@ func (s *Store) addColumnIfMissing(ctx context.Context, table, col, decl string)
 }
 
 // ApprovalRow is a stored approval: the fingerprint of the approved parameters and the headscale
-// node id they were approved on (0: not pinned to a node).
+// node id and machine key they were approved on (0 and "": not pinned to a node). The id can be
+// recycled by a rebuilt headscale database; the machine key cannot be chosen by another node.
 type ApprovalRow struct {
 	Fingerprint string
 	NodeID      uint64
+	MachineKey  string
 }
 
 // ApprovalRows returns every stored approval by ingress name.
 func (s *Store) ApprovalRows() (map[string]ApprovalRow, error) {
-	rows, err := s.db.Query("SELECT name, fingerprint, node_id FROM ingress_approvals")
+	rows, err := s.db.Query("SELECT name, fingerprint, node_id, machine_key FROM ingress_approvals")
 	if err != nil {
 		return nil, err
 	}
@@ -491,7 +496,7 @@ func (s *Store) ApprovalRows() (map[string]ApprovalRow, error) {
 		var name string
 		var r ApprovalRow
 		var id int64
-		if err := rows.Scan(&name, &r.Fingerprint, &id); err != nil {
+		if err := rows.Scan(&name, &r.Fingerprint, &id, &r.MachineKey); err != nil {
 			return nil, err
 		}
 		r.NodeID = uint64(id)
@@ -514,15 +519,16 @@ func (s *Store) Approvals() (map[string]string, error) {
 }
 
 // Approve records the approval of a discovered ingress without a node pin.
-func (s *Store) Approve(name, fingerprint string) error { return s.ApproveNode(name, fingerprint, 0) }
+func (s *Store) Approve(name, fingerprint string) error { return s.ApproveNode(name, fingerprint, 0, "") }
 
 // ApproveNode records (or replaces) the approval of a discovered ingress: its parameters and the
 // headscale node that published them.
-func (s *Store) ApproveNode(name, fingerprint string, nodeID uint64) error {
+func (s *Store) ApproveNode(name, fingerprint string, nodeID uint64, machineKey string) error {
 	_, err := s.db.Exec(
-		"INSERT INTO ingress_approvals (name, fingerprint, approved_at, node_id) VALUES (?, ?, ?, ?)"+
-			" ON CONFLICT(name) DO UPDATE SET fingerprint=excluded.fingerprint, approved_at=excluded.approved_at, node_id=excluded.node_id",
-		name, fingerprint, s.clock().Unix(), int64(nodeID))
+		"INSERT INTO ingress_approvals (name, fingerprint, approved_at, node_id, machine_key) VALUES (?, ?, ?, ?, ?)"+
+			" ON CONFLICT(name) DO UPDATE SET fingerprint=excluded.fingerprint, approved_at=excluded.approved_at,"+
+			" node_id=excluded.node_id, machine_key=excluded.machine_key",
+		name, fingerprint, s.clock().Unix(), int64(nodeID), machineKey)
 	return err
 }
 

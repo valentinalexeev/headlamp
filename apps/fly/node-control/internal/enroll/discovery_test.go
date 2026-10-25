@@ -145,15 +145,18 @@ func ingressNode(name string, online bool) headscale.Node {
 	return ingressNodeID(name, uint64(name[len(name)-1]-'0'), online)
 }
 
+// mkey is the machine key of the fake node with this id.
+func mkey(id uint64) string { return fmt.Sprintf("mkey:%064x", id) }
+
 // renamedNode is a node the administrator renamed (`headscale nodes rename`): its given name no
 // longer follows the hostname the machine reports.
 func renamedNode(name string, id uint64, ip string) headscale.Node {
-	return headscale.Node{ID: id, Name: fmt.Sprintf("box-%d", id), GivenName: name, Online: true,
+	return headscale.Node{ID: id, MachineKey: mkey(id), Name: fmt.Sprintf("box-%d", id), GivenName: name, Online: true,
 		Tags: []string{"tag:ingress"}, IPAddresses: []string{ip}}
 }
 
 func ingressNodeID(name string, id uint64, online bool) headscale.Node {
-	return headscale.Node{ID: id, Name: name, GivenName: name, Online: online, Tags: []string{"tag:ingress"}, IPAddresses: []string{"fd7a:115c::1", "127.0.0.1"}}
+	return headscale.Node{ID: id, MachineKey: mkey(id), Name: name, GivenName: name, Online: online, Tags: []string{"tag:ingress"}, IPAddresses: []string{"fd7a:115c::1", "127.0.0.1"}}
 }
 
 type clock struct{ t atomic.Int64 }
@@ -863,11 +866,11 @@ func TestApprovalPinsTheNode(t *testing.T) {
 	t.Run("the agent is found by the pinned node id", func(t *testing.T) {
 		f, _ := approvedIngress3(t)
 		f.nodes.set(ingressNodeID("ingress-3", 3, true))
-		res := f.reg.resolverFor("ingress-3", 3)
+		res := f.reg.resolverFor("ingress-3", 3, mkey(3))
 		if u, err := res(ctx); err != nil || !strings.HasPrefix(u, "http://127.0.0.1:") {
 			t.Fatalf("%q %v", u, err)
 		}
-		if _, err := f.reg.resolverFor("ingress-3", 30)(ctx); err == nil {
+		if _, err := f.reg.resolverFor("ingress-3", 30, mkey(30))(ctx); err == nil {
 			t.Fatal("a node with another id was resolved")
 		}
 	})
@@ -942,7 +945,7 @@ func TestNodeIDZeroNeverPins(t *testing.T) {
 	f.nodes.set(ingressNode("ingress-3", true))
 	f.clk.advance(infoTTL + time.Second)
 	fp := f.view("ingress-3").Fingerprint
-	f.store.ApproveNode("ingress-3", fp, 0)
+	f.store.ApproveNode("ingress-3", fp, 0, "")
 	if v := f.view("ingress-3"); v.Active || v.Approval == stApproved {
 		t.Fatalf("%+v", v)
 	}
@@ -973,7 +976,7 @@ func TestSyncReachesApprovedIngressBeforeTheFirstProbe(t *testing.T) {
 		usePort(t, a)
 		f := newRegFx(t, nil)
 		f.nodes.set(nodes...)
-		f.store.ApproveNode("ingress-3", "fingerprint-from-before-the-restart", rowNode)
+		f.store.ApproveNode("ingress-3", "fingerprint-from-before-the-restart", rowNode, mkey(rowNode))
 		f.store.CreateDevice("n", "o", "sing-box", adminFuture)
 		return f, a
 	}
@@ -1093,19 +1096,37 @@ func configuredByHeadscale(t *testing.T, nodes *nodeList) *Registry {
 }
 
 func TestAutoDerivedGivenName(t *testing.T) {
+	// Every case is decided by headscale v0.29.3 (state.go isAutoDerivedGivenName over
+	// dnsname.SanitizeHostname; tailscale.com util/dnsname is identical in v1.98.10 and v1.101.0-pre).
 	cases := []struct {
 		given, hostname string
 		want            bool
 	}{
 		{"ingress-2", "ingress-2", true},
 		{"ingress-2", "Ingress-2", true},
+		{"ingress-2", "INGRESS-2", true},
+		{"ingress-2", "ingress_2", true},
+		{"ingress-2", "ingress 2", true},
+		{"ingress-2", "ingress@2", true},
+		{"ingress-2", "ingr!ess-2", true},
+		{"ingress-2", "ingress-2.local", true},
+		{"ingress-2", "ingress-2.lan", true},
+		{"ingress-2", "ingress-2.localdomain", true},
+		{"ingress2", "ingress+2", true},
+		{"ingrss-2", "ingr\u00e9ss-2", true},
+		{"ingress-2", "ingress-2" + strings.Repeat("!", 60) + "zz", true}, // cut to 63 bytes first
 		{"ingress-2-1", "ingress-2", true},
 		{"ingress-2-17", "ingress-2", true},
-		{"ingress-2", "ingress_2", true}, // sanitised hostname
+		{"ingress-2--3", "ingress-2", true}, // headscale parses the suffix with Atoi
+		{"ingress-2-+5", "ingress-2", true},
+		{"ingress-2", "", true}, // an empty hostname makes headscale name the node "node": refuse
+		{"node", "", true},
 		{"ingress-2", "my laptop", false},
 		{"ingress-2-x", "ingress-2", false},
 		{"ingress-22", "ingress-2", false},
 		{"ingress-2", "box-2", false},
+		{"ingress-2", "ingress-3", false},
+		{"", "ingress-2", false},
 	}
 	for _, c := range cases {
 		t.Run(c.given+"/"+c.hostname, func(t *testing.T) {
@@ -1291,4 +1312,135 @@ func TestApproveBindsTheNodeTheOperatorSaw(t *testing.T) {
 			t.Fatalf("%v", rows)
 		}
 	})
+}
+
+func TestMachineKeyPinsTheNode(t *testing.T) {
+	ctx := context.Background()
+	t.Run("the same id with another machine key is neither asked nor synced", func(t *testing.T) {
+		f, a, log := pinnedFx(t)
+		hits := a.hits()
+		x := ingressNodeID("ingress-3", 3, true) // the id was recycled by another machine
+		x.MachineKey = "mkey:attacker"
+		x.IPAddresses = []string{"100.64.0.77"}
+		f.nodes.set(x)
+		f.clk.advance(infoTTL + time.Second)
+		cur := f.reg.Current(ctx, true)
+		v := f.view("ingress-3")
+		if v.Active || v.Approval != stChanged {
+			t.Fatalf("%+v", v)
+		}
+		if a.hits() != hits || log.dialed("100.64.0.77") {
+			t.Fatal("the token went to a node with another machine key")
+		}
+		if len(cur.SyncTargets) != 1 || a.putCount() != 0 {
+			t.Fatalf("targets %d", len(cur.SyncTargets))
+		}
+		// not even as an unverified target after a failed reading
+		SyncAll(ctx, f.store, cur.Cfg, cur.SyncTargets)
+		if a.putCount() != 0 {
+			t.Fatal("credentials were pushed to a node with another machine key")
+		}
+	})
+	t.Run("the pinned agent is found by id and machine key", func(t *testing.T) {
+		f, _, _ := pinnedFx(t)
+		n := ingressNodeID("ingress-3", 3, true)
+		n.MachineKey = "mkey:other"
+		f.nodes.set(n)
+		if _, err := f.reg.resolverFor("ingress-3", 3, mkey(3))(ctx); err == nil {
+			t.Fatal("resolved a node with another machine key")
+		}
+		f.nodes.set(ingressNodeID("ingress-3", 3, true))
+		if _, err := f.reg.resolverFor("ingress-3", 3, mkey(3))(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.reg.resolverFor("ingress-3", 3, "")(ctx); err == nil {
+			t.Fatal("an empty machine key pinned something")
+		}
+	})
+	t.Run("an API that omits the key: refused", func(t *testing.T) {
+		a := newInfoAgent(t, "ingress-3")
+		usePort(t, a)
+		f := newRegFx(t, nil)
+		n := ingressNodeID("ingress-3", 3, true)
+		n.MachineKey = ""
+		f.nodes.set(n)
+		v := f.view("ingress-3")
+		var ae *ApprovalError
+		if err := f.reg.Approve(ctx, "ingress-3", v.Fingerprint, v.NodeID); !errors.As(err, &ae) || ae.Status != 409 {
+			t.Fatalf("approved a node without a machine key: %v", err)
+		}
+		// and a stored approval is not honoured when the key is no longer reported
+		f.store.ApproveNode("ingress-3", v.Fingerprint, 3, mkey(3))
+		f.clk.advance(infoTTL + time.Second)
+		if v := f.view("ingress-3"); v.Active {
+			t.Fatalf("%+v", v)
+		}
+	})
+	t.Run("an approval from before machine key pinning needs approving again", func(t *testing.T) {
+		a := newInfoAgent(t, "ingress-3")
+		usePort(t, a)
+		f := newRegFx(t, nil)
+		f.nodes.set(ingressNodeID("ingress-3", 3, true))
+		f.store.ApproveNode("ingress-3", f.view("ingress-3").Fingerprint, 3, "")
+		v := f.view("ingress-3")
+		if v.Active || v.Approval != stChanged || !strings.Contains(v.Detail, "machine key") {
+			t.Fatalf("%+v", v)
+		}
+		if err := f.approve("ingress-3"); err != nil {
+			t.Fatal(err)
+		}
+		if v := f.view("ingress-3"); !v.Active {
+			t.Fatalf("%+v", v)
+		}
+	})
+	t.Run("the row shows a short prefix of the key", func(t *testing.T) {
+		a := newInfoAgent(t, "ingress-3")
+		usePort(t, a)
+		f := newRegFx(t, nil)
+		f.nodes.set(ingressNodeID("ingress-3", 3, true))
+		v := f.view("ingress-3")
+		if v.MachineKeyPref == "" || len(v.MachineKeyPref) > 8 || strings.Contains(fmt.Sprint(v), mkey(3)) {
+			t.Fatalf("%+v", v)
+		}
+	})
+}
+
+func TestHostnameInTheRowIsPlainAndShort(t *testing.T) {
+	a := newInfoAgent(t, "ingress-3")
+	usePort(t, a)
+	f := newRegFx(t, nil)
+	n := ingressNodeID("ingress-3", 3, true)
+	n.Name = "evil\x1b[31m\u202ehost\n" + strings.Repeat("x", 200)
+	f.nodes.set(n)
+	v := f.view("ingress-3")
+	for _, r := range v.Hostname + v.GivenName {
+		if r < 0x20 || r == 0x7f || r == 0x202e || r == 0x1b {
+			t.Fatalf("control character in %q", v.Hostname)
+		}
+	}
+	if len(v.Hostname) > 63 || !strings.HasPrefix(v.Hostname, "evil[31mhost") {
+		t.Fatalf("%q", v.Hostname)
+	}
+}
+
+func TestPinnedNodeIsNotAlsoACandidateUnderItsNewName(t *testing.T) {
+	ctx := context.Background()
+	f, a, _ := pinnedFx(t)
+	f.env["AGENT_TOKEN_INGRESS_9"] = "token-for-ingress-9"
+	x := ingressNodeID("ingress-9", 3, true) // renamed since the approval
+	f.nodes.set(x)
+	f.clk.advance(infoTTL + time.Second)
+	cur := f.reg.Current(ctx, true)
+	for _, v := range cur.Views {
+		if v.Name == "ingress-9" {
+			t.Fatalf("the pinned node became a second candidate: %+v", v)
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, h := range a.infoAuth {
+		if strings.Contains(h, "ingress-9") {
+			t.Fatal("the token of another ingress was sent to the pinned node")
+		}
+	}
 }

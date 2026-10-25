@@ -1,6 +1,7 @@
 package headscale
 
 import (
+	"encoding/json"
 	"context"
 	"errors"
 	"fmt"
@@ -138,4 +139,24 @@ func TestMultiByteBodyCutIsRuneSafe(t *testing.T) {
 	if err == nil || !utf8.ValidString(err.Error()) {
 		t.Fatalf("%v", err)
 	}
+}
+
+func TestNodeMachineKey(t *testing.T) {
+	for name, doc := range map[string]string{
+		"camel": `{"id":"1","machineKey":"mkey:abc"}`,
+		"snake": `{"id":"1","machine_key":"mkey:abc"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var n Node
+			if err := json.Unmarshal([]byte(doc), &n); err != nil || n.MachineKey != "mkey:abc" {
+				t.Fatalf("%+v %v", n, err)
+			}
+		})
+	}
+	t.Run("absent", func(t *testing.T) {
+		var n Node
+		if err := json.Unmarshal([]byte(`{"id":"1"}`), &n); err != nil || n.MachineKey != "" {
+			t.Fatalf("%+v %v", n, err)
+		}
+	})
 }

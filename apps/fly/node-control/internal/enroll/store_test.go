@@ -775,11 +775,11 @@ func TestOldDatabaseOpensWithoutApprovalsTable(t *testing.T) {
 
 func TestApprovalPinsTheNodeID(t *testing.T) {
 	s := newStore(t, 1_800_000_000)
-	if err := s.ApproveNode("ingress-3", "fp1", 7); err != nil {
+	if err := s.ApproveNode("ingress-3", "fp1", 7, "mkey:aa"); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := s.ApprovalRows()
-	if err != nil || rows["ingress-3"] != (ApprovalRow{Fingerprint: "fp1", NodeID: 7}) {
+	if err != nil || rows["ingress-3"] != (ApprovalRow{Fingerprint: "fp1", NodeID: 7, MachineKey: "mkey:aa"}) {
 		t.Fatalf("%v %v", rows, err)
 	}
 }
@@ -805,10 +805,36 @@ func TestApprovalsTableWithoutNodeIDIsMigrated(t *testing.T) {
 	}
 	defer s.Close()
 	rows, _ := s.ApprovalRows()
-	if rows["ingress-3"].Fingerprint != "fp1" || rows["ingress-3"].NodeID != 0 {
+	if rows["ingress-3"].Fingerprint != "fp1" || rows["ingress-3"].NodeID != 0 || rows["ingress-3"].MachineKey != "" {
 		t.Fatalf("%v", rows)
 	}
-	if err := s.ApproveNode("ingress-4", "fp2", 4); err != nil {
+	if err := s.ApproveNode("ingress-4", "fp2", 4, "mkey:bb"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestApprovalsTableWithNodeIDButNoMachineKeyIsMigrated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mid2.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`CREATE TABLE ingress_approvals (name TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, approved_at INTEGER NOT NULL, node_id INTEGER NOT NULL DEFAULT 0)`,
+		`INSERT INTO ingress_approvals VALUES ('ingress-3','fp1',1,7)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	s, err := OpenStore(path, testKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	rows, _ := s.ApprovalRows()
+	if rows["ingress-3"] != (ApprovalRow{Fingerprint: "fp1", NodeID: 7}) {
+		t.Fatalf("%v", rows)
 	}
 }

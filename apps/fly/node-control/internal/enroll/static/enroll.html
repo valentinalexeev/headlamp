@@ -103,6 +103,8 @@ function showSync(s, rows) {
   }
   b.style.display = "block";
 }
+// text a machine reports about itself: printable characters only, shortened
+const plain = (t, n) => String(t === undefined || t === null ? "" : t).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, "").slice(0, n || 63);
 const yesNo = (v) => v === null || v === undefined ? "-" : (v ? "yes" : "no");
 // The ingress table is shown only when it has something to say: several active ingresses, or a
 // discovered one that is not approved. With one ingress and nothing pending the page stays as it was.
@@ -119,7 +121,7 @@ async function loadIngresses(j) {
     const since = v.sync && v.sync.since ? new Date(v.sync.since * 1000).toLocaleString() : "-";
     let appr = v.approval;
     if (v.public_key_prefix && v.approval !== "approved") appr += " (key " + v.public_key_prefix + "\u2026, id " + (v.short_id_prefix || "") + "\u2026, fingerprint " + (v.fingerprint ? v.fingerprint.slice(0, 12) : "") + "\u2026)";
-    if (v.node_id && v.approval !== "approved") appr += " [node " + v.node_id + ", " + (v.address || "?") + ", hostname " + (v.hostname || "?") + ", name " + (v.given_name || "?") + "]";
+    if (v.node_id && v.approval !== "approved") appr += " [node " + v.node_id + ", key " + plain(v.machine_key_prefix, 12) + "\u2026, " + plain(v.address, 45) + ", hostname " + (plain(v.hostname) || "?") + ", name " + (plain(v.given_name) || "?") + "]";
     if (v.detail) appr += ": " + v.detail;
     [v.name, v.host || "-", yesNo(v.online), sync, since, appr].forEach((t, i) => {
       const td = document.createElement("td"); td.textContent = t; if (i === 5) td.className = "wrap"; tr.appendChild(td);
@@ -129,7 +131,7 @@ async function loadIngresses(j) {
     const base = "/enroll/ingresses/" + encodeURIComponent(v.name);
     if (v.source === "discovered" && v.fingerprint && (v.approval === "pending" || v.approval === "changed")) {
       btn("Approve", "", async () => {
-        if (!confirm("Approve " + v.name + " (" + v.host + ")?\nNode " + v.node_id + ", address " + v.address + ", hostname " + v.hostname + ", name " + v.given_name
+        if (!confirm("Approve " + v.name + " (" + v.host + ")?\nNode " + v.node_id + ", address " + plain(v.address, 45) + ", machine key " + plain(v.machine_key_prefix, 12) + "\u2026, hostname " + plain(v.hostname) + ", name " + plain(v.given_name)
           + "\nFingerprint " + v.fingerprint + "\nCompare the node with `headscale nodes list`. It will receive credentials and appear in every profile.")) return;
         try { const r = await post(base + "/approve", {fingerprint: v.fingerprint, node_id: v.node_id}); showSync(r.sync, r.ingresses); load(); } catch (e) { say(e.message, true); }
       });

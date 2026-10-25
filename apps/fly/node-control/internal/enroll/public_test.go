@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-var publicCfg = IngressCfg{Host: "ingress.example.com", PublicKey: "PUBKEY", ShortID: "ab12", SNI: "www.example.com", Port: 443, ProfileName: "tunnel"}
+var publicCfg = singleOf(IngressCfg{Host: "ingress.example.com", PublicKey: "PUBKEY", ShortID: "ab12", SNI: "www.example.com", Port: 443, ProfileName: "tunnel"})
 
 type pubFx struct {
 	t      *testing.T
@@ -525,7 +525,7 @@ func TestResponsesMatchPythonGoldens(t *testing.T) {
 	if err := json.Unmarshal(raw, &golden); err != nil {
 		t.Fatal(err)
 	}
-	cfg := IngressCfg{Host: "ingress.example.test", PublicKey: "PUBKEY", ShortID: "ab12", SNI: "www.example.test", Port: 443, ProfileName: "tunnel"}
+	cfg := singleOf(IngressCfg{Host: "ingress.example.test", PublicKey: "PUBKEY", ShortID: "ab12", SNI: "www.example.test", Port: 443, ProfileName: "tunnel"})
 	gs := newGoldenStore()
 	mux := http.NewServeMux()
 	newPublic(gs, cfg).Register(mux)

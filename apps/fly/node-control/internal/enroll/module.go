@@ -54,9 +54,12 @@ func (m *Module) Register(r *core.Routes) error {
 		}
 		return fmt.Errorf("ENROLL_CONFIG: cannot read the file: %w", err)
 	}
-	cfg, err := ParseIngressCfg(data)
+	cfg, err := ParseIngressConfig(data)
 	if err != nil {
 		return err
+	}
+	if !cfg.Single() {
+		return errors.New("ENROLL_CONFIG: several ingresses are not wired into the module yet")
 	}
 	key := m.env.Getenv("ENROLL_SECRET_KEY")
 	if len(key) < 16 {

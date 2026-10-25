@@ -43,13 +43,13 @@ const (
 // Admin serves the operator API.
 type Admin struct {
 	store *Store
-	cfg   IngressCfg
+	cfg   IngressConfig
 	agent Agent
 	state *SyncState
 }
 
 // NewAdmin returns the operator API over store and agent. Its sync state takes time from the store's clock.
-func NewAdmin(store *Store, cfg IngressCfg, agent Agent) *Admin {
+func NewAdmin(store *Store, cfg IngressConfig, agent Agent) *Admin {
 	return &Admin{store: store, cfg: cfg, agent: agent, state: NewSyncState(store.clock)}
 }
 
@@ -337,7 +337,7 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"url": "https://" + a.cfg.Host + "/e/" + tok})
+	writeJSON(w, http.StatusOK, map[string]any{"url": "https://" + a.cfg.LinkHost + "/e/" + tok})
 }
 
 func (a *Admin) revoke(w http.ResponseWriter, r *http.Request) {

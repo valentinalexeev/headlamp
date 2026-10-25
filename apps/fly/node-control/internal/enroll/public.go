@@ -60,13 +60,13 @@ type publicStore interface {
 // Public is the public enrolment handler.
 type Public struct {
 	store publicStore
-	cfg   IngressCfg
+	cfg   IngressConfig
 }
 
 // NewPublic returns the public handler over store.
-func NewPublic(store *Store, cfg IngressCfg) *Public { return newPublic(store, cfg) }
+func NewPublic(store *Store, cfg IngressConfig) *Public { return newPublic(store, cfg) }
 
-func newPublic(store publicStore, cfg IngressCfg) *Public { return &Public{store: store, cfg: cfg} }
+func newPublic(store publicStore, cfg IngressConfig) *Public { return &Public{store: store, cfg: cfg} }
 
 // Register routes everything on mux to the handler, which answers an empty 404 to all but the two
 // routes.

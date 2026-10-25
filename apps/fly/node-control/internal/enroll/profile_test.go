@@ -86,7 +86,7 @@ func TestRenderSingBoxMatchesGolden(t *testing.T) {
 	cases, _ := loadProfileExpected(t)
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, err := RenderProfile(c.ingress(), c.device())
+			got, err := RenderProfile(c.config(), c.device())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -101,7 +101,7 @@ func TestRenderClashMatchesGolden(t *testing.T) {
 	cases, _ := loadProfileExpected(t)
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, err := RenderClashProfile(c.ingress(), c.device())
+			got, err := RenderClashProfile(c.config(), c.device())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -115,11 +115,11 @@ func TestRenderClashMatchesGolden(t *testing.T) {
 func TestProfilesCarryNoNameOrOwner(t *testing.T) {
 	cases, _ := loadProfileExpected(t)
 	c := cases["unusual"]
-	sb, err := RenderProfile(c.ingress(), c.device())
+	sb, err := RenderProfile(c.config(), c.device())
 	if err != nil {
 		t.Fatal(err)
 	}
-	cl, err := RenderClashProfile(c.ingress(), c.device())
+	cl, err := RenderClashProfile(c.config(), c.device())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestDeepLink(t *testing.T) {
 	cases, _ := loadProfileExpected(t)
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			cfg := c.ingress()
+			cfg := c.config()
 			if got := SubURL(cfg, c.Secret); got != c.SubURL {
 				t.Errorf("SubURL = %q, want %q", got, c.SubURL)
 			}
@@ -184,7 +184,7 @@ func TestDeepLink(t *testing.T) {
 		if _, err := DeepLinkFor("v2rayn", "https://h/sub/x", "n"); err == nil {
 			t.Error("unknown client accepted")
 		}
-		cfg := IngressCfg{Host: "ingress.example.com"}
+		cfg := singleOf(IngressCfg{Host: "ingress.example.com"})
 		if got := SubURL(cfg, "sec"); got != "https://ingress.example.com/sub/sec" {
 			t.Errorf("SubURL = %q", got)
 		}
@@ -233,14 +233,14 @@ func TestMissingModeFails(t *testing.T) {
 	d := c.device()
 	d.UUIDs = map[string]string{"auto": "a", "direct": "d"}
 	want := "device lacks uuids for modes: exit"
-	if _, err := RenderProfile(c.ingress(), d); err == nil || err.Error() != want {
+	if _, err := RenderProfile(c.config(), d); err == nil || err.Error() != want {
 		t.Errorf("singbox: %v", err)
 	}
-	if _, err := RenderClashProfile(c.ingress(), d); err == nil || err.Error() != want {
+	if _, err := RenderClashProfile(c.config(), d); err == nil || err.Error() != want {
 		t.Errorf("clash: %v", err)
 	}
 	d.UUIDs = map[string]string{"auto": "a", "direct": "", "exit": "e"}
-	if _, err := RenderProfile(c.ingress(), d); err == nil {
+	if _, err := RenderProfile(c.config(), d); err == nil {
 		t.Error("empty uuid accepted")
 	}
 }
@@ -248,7 +248,7 @@ func TestMissingModeFails(t *testing.T) {
 func TestCustomPort(t *testing.T) {
 	cases, _ := loadProfileExpected(t)
 	c := cases["custom"]
-	out, _ := RenderProfile(c.ingress(), c.device())
+	out, _ := RenderProfile(c.config(), c.device())
 	if n := strings.Count(string(out), `"server_port":8443`); n != 3 {
 		t.Errorf("server_port count = %d", n)
 	}

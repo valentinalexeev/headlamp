@@ -162,6 +162,22 @@ create/revoke/extend responses carry `sync_pending` and `sync`. While `pending`,
 the ingress host. A store with no devices at all is never pushed (state `empty`): the agent would refuse an
 unconfirmed empty set, and an empty store must never wipe the agent.
 
+### Discovered ingresses, approval and slow agents
+
+Nodes tagged `tag:ingress` in headscale that are not listed in `enroll.json` are discovered (needs `link_host` in the
+file) and shown on the `/enroll` page. A discovered ingress is used only after the operator approves it; the approval
+pins the fingerprint of its published parameters AND the headscale node id that published them.
+
+- A `changed` ingress (its parameters differ, or another node id publishes them) is frozen: it is out of profiles
+  and no longer synced, so it keeps its old credential set until it is approved again or un-approved. A revocation
+  does not reach it meanwhile.
+- Before approval, the token variable `AGENT_TOKEN_<NAME>` is already sent (as the bearer of `GET /v1/info`) to a
+  tagged node whose name matches it. Pinning the node id after approval reduces this exposure but cannot remove it:
+  anyone who can register a tagged node with that name receives that one token. Do not set the variable before you
+  expect the node.
+- A create, revoke, extend or approval answers after at most 3 seconds. If an agent has not answered by then, its row
+  reads `pending` with state `unknown` until the push ends; the change itself is already recorded and never fails.
+
 ### What the ingress host sees
 
 The one-time link (`/e/<token>`), its redirect and the subscription (`/sub/<secret>`) all pass through the ingress

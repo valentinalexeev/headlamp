@@ -312,7 +312,7 @@ func (s syncResult) body(m map[string]any) map[string]any {
 // that has not answered by then reads as pending (state "unknown") until its push ends.
 func (a *Admin) syncNow(r *http.Request) syncResult {
 	ctx := context.WithoutCancel(r.Context())
-	cur := a.reg.Current(ctx, true)
+	cur := a.reg.Current(ctx, false) // no /v1/info reading on the revoke path: it must not wait for one
 	before := make([]uint64, len(cur.Targets))
 	for i, t := range cur.Targets {
 		before[i] = t.State.version()

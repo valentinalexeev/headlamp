@@ -660,3 +660,28 @@ func TestDiscoveryOffWithoutLinkHostThroughTheModule(t *testing.T) {
 		t.Fatalf("%v hits=%d", m, a3.hits())
 	}
 }
+
+func TestHangingInfoDoesNotDelayARevoke(t *testing.T) {
+	oldWait := syncWait
+	syncWait = 300 * time.Millisecond
+	defer func() { syncWait = oldWait }()
+	oldTO := infoTimeout
+	infoTimeout = 5 * time.Second
+	defer func() { infoTimeout = oldTO }()
+	f := newMultiFx(t)
+	f.withDiscovered(t)
+	f.register()
+	id, _ := f.create()
+	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
+	release := make(chan struct{})
+	f.a3.mu.Lock()
+	f.a3.handler = func(w http.ResponseWriter, r *http.Request) { <-release }
+	f.a3.mu.Unlock()
+	t.Cleanup(func() { close(release) })
+	f.clk.advance(infoTTL + time.Second) // the next reading is due, and it hangs
+	start := time.Now()
+	code, m := f.do("POST", fmt.Sprintf("/enroll/devices/%d/revoke", id), "{}")
+	if code != 200 || time.Since(start) > 2*time.Second || m["sync_pending"] == nil {
+		t.Fatalf("a hanging /v1/info delayed the revoke: %d after %v", code, time.Since(start))
+	}
+}

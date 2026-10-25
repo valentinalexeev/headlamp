@@ -118,7 +118,7 @@ async function loadIngresses(j) {
     const sync = v.sync ? v.sync.state + (v.sync.pending ? " (pending)" : "") : "-";
     const since = v.sync && v.sync.since ? new Date(v.sync.since * 1000).toLocaleString() : "-";
     let appr = v.approval;
-    if (v.public_key_prefix && v.approval !== "approved") appr += " (key " + v.public_key_prefix + "\u2026, id " + (v.short_id_prefix || "") + "\u2026)";
+    if (v.public_key_prefix && v.approval !== "approved") appr += " (key " + v.public_key_prefix + "\u2026, id " + (v.short_id_prefix || "") + "\u2026, fingerprint " + (v.fingerprint ? v.fingerprint.slice(0, 12) : "") + "\u2026)";
     if (v.detail) appr += ": " + v.detail;
     [v.name, v.host || "-", yesNo(v.online), sync, since, appr].forEach((t, i) => {
       const td = document.createElement("td"); td.textContent = t; if (i === 5) td.className = "wrap"; tr.appendChild(td);
@@ -128,7 +128,7 @@ async function loadIngresses(j) {
     const base = "/enroll/ingresses/" + encodeURIComponent(v.name);
     if (v.source === "discovered" && v.fingerprint && (v.approval === "pending" || v.approval === "changed")) {
       btn("Approve", "", async () => {
-        if (!confirm("Approve " + v.name + " (" + v.host + ")? It will receive credentials and appear in every profile.")) return;
+        if (!confirm("Approve " + v.name + " (" + v.host + ", fingerprint " + v.fingerprint.slice(0, 12) + "\u2026)? It will receive credentials and appear in every profile.")) return;
         try { const r = await post(base + "/approve", {fingerprint: v.fingerprint}); showSync(r.sync, r.ingresses); load(); } catch (e) { say(e.message, true); }
       });
     }

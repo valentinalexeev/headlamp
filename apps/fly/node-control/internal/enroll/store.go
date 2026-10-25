@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS tokens (
 CREATE TABLE IF NOT EXISTS ingress_approvals (
     name TEXT PRIMARY KEY,
     fingerprint TEXT NOT NULL,
-    approved_at INTEGER NOT NULL
+    approved_at INTEGER NOT NULL,
+    node_id INTEGER NOT NULL DEFAULT 0
 );
 `
 
@@ -117,6 +118,9 @@ func OpenStore(path string, secretKey []byte, clock func() time.Time) (*Store, e
 func (s *Store) init() error {
 	ctx := context.Background()
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing(ctx, "ingress_approvals", "node_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(devices)")
@@ -442,31 +446,83 @@ func (s *Store) ActiveCredentials() ([]Credential, error) {
 	return out, rows.Err()
 }
 
-// Approvals returns the approved discovered ingresses: name -> the fingerprint of the published
-// parameters that the operator approved.
-func (s *Store) Approvals() (map[string]string, error) {
-	rows, err := s.db.Query("SELECT name, fingerprint FROM ingress_approvals")
+// addColumnIfMissing adds a column to a table created by an earlier version.
+func (s *Store) addColumnIfMissing(ctx context.Context, table, col, decl string) error {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return err
+	}
+	has := false
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		has = has || name == col
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || has {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+col+" "+decl)
+	return err
+}
+
+// ApprovalRow is a stored approval: the fingerprint of the approved parameters and the headscale
+// node id they were approved on (0: not pinned to a node).
+type ApprovalRow struct {
+	Fingerprint string
+	NodeID      uint64
+}
+
+// ApprovalRows returns every stored approval by ingress name.
+func (s *Store) ApprovalRows() (map[string]ApprovalRow, error) {
+	rows, err := s.db.Query("SELECT name, fingerprint, node_id FROM ingress_approvals")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]string{}
+	out := map[string]ApprovalRow{}
 	for rows.Next() {
-		var name, fp string
-		if err := rows.Scan(&name, &fp); err != nil {
+		var name string
+		var r ApprovalRow
+		var id int64
+		if err := rows.Scan(&name, &r.Fingerprint, &id); err != nil {
 			return nil, err
 		}
-		out[name] = fp
+		r.NodeID = uint64(id)
+		out[name] = r
 	}
 	return out, rows.Err()
 }
 
-// Approve records (or replaces) the approval of a discovered ingress.
-func (s *Store) Approve(name, fingerprint string) error {
+// Approvals returns the approved fingerprints by ingress name.
+func (s *Store) Approvals() (map[string]string, error) {
+	rows, err := s.ApprovalRows()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for n, r := range rows {
+		out[n] = r.Fingerprint
+	}
+	return out, nil
+}
+
+// Approve records the approval of a discovered ingress without a node pin.
+func (s *Store) Approve(name, fingerprint string) error { return s.ApproveNode(name, fingerprint, 0) }
+
+// ApproveNode records (or replaces) the approval of a discovered ingress: its parameters and the
+// headscale node that published them.
+func (s *Store) ApproveNode(name, fingerprint string, nodeID uint64) error {
 	_, err := s.db.Exec(
-		"INSERT INTO ingress_approvals (name, fingerprint, approved_at) VALUES (?, ?, ?)"+
-			" ON CONFLICT(name) DO UPDATE SET fingerprint=excluded.fingerprint, approved_at=excluded.approved_at",
-		name, fingerprint, s.clock().Unix())
+		"INSERT INTO ingress_approvals (name, fingerprint, approved_at, node_id) VALUES (?, ?, ?, ?)"+
+			" ON CONFLICT(name) DO UPDATE SET fingerprint=excluded.fingerprint, approved_at=excluded.approved_at, node_id=excluded.node_id",
+		name, fingerprint, s.clock().Unix(), int64(nodeID))
 	return err
 }
 

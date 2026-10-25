@@ -65,6 +65,7 @@ type RegistryConfig struct {
 	Now         func() time.Time
 	AgentURL    string // AGENT_URL, the agent of the first configured ingress without an agent_url
 	LinkHostSet bool   // enroll.json names link_host: discovery needs the shared host
+	Legacy      bool   // the old single-host file: its token is AGENT_TOKEN and nothing else
 	// Agents are ready-made agents by ingress name (tests and the single-agent constructor); an
 	// ingress listed here needs no URL and no token variable.
 	Agents map[string]Agent
@@ -105,6 +106,7 @@ type Current struct {
 // probe is what is known about one discovered node.
 type probe struct {
 	at     time.Time
+	nodeID uint64      // the headscale node that was asked
 	info   *infoResult // the last parameters read successfully
 	state  string      // "" when the last attempt succeeded
 	detail string
@@ -117,7 +119,9 @@ type infoResult struct {
 
 // Registry is the dynamic ingress set. It is safe for concurrent use.
 type Registry struct {
-	mu           sync.Mutex
+	fmu          sync.Mutex // serialises refreshes (network); never held while mu is wanted by a reader
+	mu           sync.Mutex // guards everything below, held only for memory work
+	legacy       bool
 	store        *Store
 	base         IngressConfig
 	configured   []SyncTarget
@@ -130,14 +134,20 @@ type Registry struct {
 	nodes  []headscale.Node
 	probes map[string]*probe
 	dstate map[string]*SyncState
-	dagent map[string]Agent
+	dagent map[string]nodeAgent
+}
+
+// nodeAgent is the agent of a discovered ingress, bound to the node id it was approved on.
+type nodeAgent struct {
+	id    uint64
+	agent Agent
 }
 
 // NewRegistry validates the configured ingresses and builds their agents. Errors name an ingress
 // and a variable, never a value.
 func NewRegistry(rc RegistryConfig) (*Registry, error) {
 	r := &Registry{base: rc.Cfg, src: rc.Src, getenv: rc.Getenv, hc: rc.HC, now: rc.Now,
-		probes: map[string]*probe{}, dstate: map[string]*SyncState{}, dagent: map[string]Agent{}}
+		probes: map[string]*probe{}, dstate: map[string]*SyncState{}, dagent: map[string]nodeAgent{}, legacy: rc.Legacy}
 	if r.getenv == nil {
 		r.getenv = func(string) string { return "" }
 	}
@@ -191,8 +201,15 @@ func tokenVar(name string) string {
 }
 
 // configuredToken finds the token of a configured ingress: its token_env, else AGENT_TOKEN_<NAME>,
-// else (first ingress only) AGENT_TOKEN. The error names the variable, never a value.
+// else (first ingress only) AGENT_TOKEN. The old single-host form uses AGENT_TOKEN only. The
+// error names the variable(s), never a value.
 func (r *Registry) configuredToken(i int, ing Ingress) (string, error) {
+	if r.legacy {
+		if v := r.getenv("AGENT_TOKEN"); v != "" {
+			return v, nil
+		}
+		return "", fmt.Errorf("ingress %s: token variable AGENT_TOKEN is not set", ing.Name)
+	}
 	if ing.TokenEnv != "" {
 		if v := r.getenv(ing.TokenEnv); v != "" {
 			return v, nil
@@ -206,20 +223,31 @@ func (r *Registry) configuredToken(i int, ing Ingress) (string, error) {
 		if v := r.getenv("AGENT_TOKEN"); v != "" {
 			return v, nil
 		}
+		return "", fmt.Errorf("ingress %s: token variable %s is not set (nor AGENT_TOKEN)", ing.Name, tokenVar(ing.Name))
 	}
 	return "", fmt.Errorf("ingress %s: token variable %s is not set", ing.Name, tokenVar(ing.Name))
 }
 
-// resolver finds an agent's address at every call: the tailnet IPv4 of the node named like the
-// ingress that carries tag:ingress.
+// resolver finds the agent of a configured ingress at every call: the tailnet IPv4 of the node
+// named like the ingress that carries tag:ingress.
 func (r *Registry) resolver(name string) func(ctx context.Context) (string, error) {
+	return r.resolve(func(n headscale.Node) bool { return isIngressNode(n, name) })
+}
+
+// resolverFor finds the agent of a discovered ingress: the node with the id the approval is pinned
+// to (a node that merely carries the same name is not that ingress).
+func (r *Registry) resolverFor(name string, id uint64) func(ctx context.Context) (string, error) {
+	return r.resolve(func(n headscale.Node) bool { return n.ID == id && isIngressNode(n, name) })
+}
+
+func (r *Registry) resolve(match func(headscale.Node) bool) func(ctx context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
 		nodes, err := r.src.Nodes(ctx)
 		if err != nil {
 			return "", errors.New("node list unavailable")
 		}
 		for _, n := range nodes {
-			if isIngressNode(n, name) {
+			if match(n) {
 				if ip := nodeIP(n); ip != "" {
 					return "http://" + net.JoinHostPort(ip, ingressAgentPort), nil
 				}
@@ -272,42 +300,50 @@ func (r *Registry) LinkConfig() IngressConfig { return r.base }
 func (r *Registry) First() SyncTarget { return r.configured[0] }
 
 // Current returns the ingress set. With fresh it first refreshes the node list and reads the
-// parameters of discovered nodes whose last reading is older than a minute.
+// parameters of discovered nodes whose last reading is older than a minute; the network work
+// happens outside the registry lock, so readers that do not ask for it never wait for it.
 func (r *Registry) Current(ctx context.Context, fresh bool) Current {
+	if fresh {
+		r.refresh(ctx, "")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if fresh {
-		r.refreshLocked(ctx, "")
-	}
 	return r.buildLocked()
 }
 
-// refreshLocked reloads the node list and re-reads the stale probes; force names a node whose
-// parameters are read again whatever their age.
-func (r *Registry) refreshLocked(ctx context.Context, force string) {
+// refresh reloads the node list and re-reads the stale probes; force names a node whose
+// parameters are read again whatever their age. Refreshes run one at a time.
+func (r *Registry) refresh(ctx context.Context, force string) {
+	r.fmu.Lock()
+	defer r.fmu.Unlock()
 	if r.src != nil {
 		if nodes, err := r.src.Nodes(ctx); err == nil {
+			r.mu.Lock()
 			r.nodes = nodes
+			r.mu.Unlock()
 		}
 	}
 	if r.discoveryOff != "" {
 		return
 	}
+	type job struct {
+		name  string
+		node  headscale.Node
+		token string
+	}
+	var jobs []job
+	r.mu.Lock()
 	configured := map[string]bool{}
 	for _, t := range r.configured {
 		configured[t.Name] = true
 	}
-	cands := map[string]headscale.Node{}
+	cands := map[string][]headscale.Node{}
 	for _, n := range r.nodes {
 		if !hasIngressTag(n) {
 			continue
 		}
-		name := nodeName(n)
-		if name == "" || configured[name] {
-			continue
-		}
-		if _, dup := cands[name]; !dup {
-			cands[name] = n
+		if name := nodeName(n); name != "" && !configured[name] {
+			cands[name] = append(cands[name], n)
 		}
 	}
 	for name := range r.probes {
@@ -315,35 +351,49 @@ func (r *Registry) refreshLocked(ctx context.Context, force string) {
 			delete(r.probes, name) // the node is gone
 		}
 	}
+	now := r.now()
+	for name, ns := range cands {
+		if len(ns) > 1 { // an ambiguous name is never an ingress
+			r.probes[name] = &probe{at: now, state: stInvalid, detail: "several nodes carry this name"}
+			continue
+		}
+		n := ns[0]
+		token := r.getenv(tokenVar(name))
+		if token == "" {
+			r.probes[name] = &probe{at: now, nodeID: n.ID, state: stNoToken, detail: "no token variable for this ingress"}
+			continue
+		}
+		if p := r.probes[name]; p != nil && p.nodeID == n.ID && p.state != stNoToken &&
+			now.Sub(p.at) < infoTTL && force != name {
+			continue
+		}
+		jobs = append(jobs, job{name, n, token})
+	}
+	r.mu.Unlock()
+
 	type result struct {
 		name string
 		p    *probe
 	}
 	var wg sync.WaitGroup
-	out := make(chan result, len(cands))
-	now := r.now()
-	for name, n := range cands {
-		token := r.getenv(tokenVar(name))
-		if token == "" {
-			r.probes[name] = &probe{at: now, state: stNoToken, detail: "no token variable for this ingress"}
-			continue
-		}
-		if p := r.probes[name]; p != nil && p.state != stNoToken && now.Sub(p.at) < infoTTL && force != name {
-			continue
-		}
+	out := make(chan result, len(jobs))
+	for _, j := range jobs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			info, state, detail := r.fetchInfo(ctx, n, name, token)
-			out <- result{name, &probe{info: info, state: state, detail: detail}}
+			info, state, detail := r.fetchInfo(ctx, j.node, j.name, j.token)
+			out <- result{j.name, &probe{nodeID: j.node.ID, info: info, state: state, detail: detail}}
 		}()
 	}
 	wg.Wait()
 	close(out)
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for res := range out {
 		res.p.at = r.now()
-		if old := r.probes[res.name]; old != nil && res.p.state == stUnreachable {
-			res.p.info = old.info // a failed reading keeps the last good parameters
+		// a failed reading keeps the last good parameters, but only of the same node
+		if old := r.probes[res.name]; old != nil && res.p.state == stUnreachable && old.nodeID == res.p.nodeID {
+			res.p.info = old.info
 		}
 		r.probes[res.name] = res.p
 	}
@@ -440,7 +490,9 @@ func prefix(s string) string {
 }
 
 // buildLocked assembles the current view from the cached readings and the stored approvals. The
-// approvals are read every time, so an approval change takes effect at once.
+// approvals are read every time, so an approval change takes effect at once. An approval pins the
+// parameters AND the headscale node that published them: another node with the same name and the
+// same parameters is "changed", and one that publishes nothing is not used at all.
 func (r *Registry) buildLocked() Current {
 	cur := Current{Cfg: r.base, Discovery: DiscoveryStatus{Enabled: r.discoveryOff == "", Reason: r.discoveryOff}}
 	cur.Cfg.Ingresses = nil
@@ -456,13 +508,13 @@ func (r *Registry) buildLocked() Current {
 	if r.discoveryOff != "" {
 		return cur
 	}
-	approvals := map[string]string{}
+	approvals := map[string]ApprovalRow{}
 	var aerr error
 	if r.store != nil {
-		approvals, aerr = r.store.Approvals()
+		approvals, aerr = r.store.ApprovalRows()
 		if aerr != nil {
 			slog.Warn("enrolment approvals unreadable", "error_type", errType(aerr))
-			approvals = map[string]string{} // fail closed: nothing discovered is approved
+			approvals = map[string]ApprovalRow{} // fail closed: nothing discovered is approved
 		}
 	}
 	configured := map[string]bool{}
@@ -481,10 +533,12 @@ func (r *Registry) buildLocked() Current {
 		}
 	}
 	sort.Strings(names)
-	for _, name := range names {
+	views := make([]IngressView, len(names))
+	infos := make([]*infoResult, len(names))
+	for k, name := range names {
 		v := IngressView{Name: name, Source: "discovered", Online: r.onlineLocked(name)}
 		p := r.probes[name]
-		storedFP, approved := approvals[name]
+		row, approved := approvals[name]
 		v.Approved = approved
 		switch {
 		case p == nil:
@@ -493,19 +547,19 @@ func (r *Registry) buildLocked() Current {
 			v.Approval, v.Detail = p.state, p.detail
 		default:
 			ing := p.info.ing
+			infos[k] = p.info
 			v.Host, v.Fingerprint = ing.Host, p.info.fp
 			v.PublicKeyPref, v.ShortIDPref = prefix(ing.PublicKey), prefix(ing.ShortID)
 			switch {
-			case hosts[ing.Host]:
-				v.Approval, v.Detail = stInvalid, "the host is already used by another ingress"
 			case !approved:
 				v.Approval = stPending
-			case storedFP == p.info.fp:
+			case row.Fingerprint == p.info.fp && row.NodeID == p.nodeID:
 				v.Approval = stApproved
+			case row.Fingerprint == p.info.fp:
+				v.Approval, v.Detail = stChanged, "another node publishes these parameters"
 			default:
 				v.Approval = stChanged
 			}
-			hosts[ing.Host] = true
 			if p.state != "" {
 				v.Detail = "the last check failed: " + p.detail
 			}
@@ -513,35 +567,62 @@ func (r *Registry) buildLocked() Current {
 		if aerr != nil && v.Approval == stPending {
 			v.Detail = "the stored approvals could not be read"
 		}
+		views[k] = v
+	}
+	// Hosts are claimed in passes: configured ingresses first (above), then approved ones, then the
+	// rest, so a node that is not approved can never invalidate one that is.
+	claim := func(k int) {
+		if infos[k] == nil {
+			return
+		}
+		host := infos[k].ing.Host
+		if hosts[host] {
+			views[k].Approval, views[k].Detail = stInvalid, "the host is already used by another ingress"
+			return
+		}
+		hosts[host] = true
+	}
+	for k := range views {
+		if views[k].Approval == stApproved {
+			claim(k)
+		}
+	}
+	for k := range views {
+		if views[k].Approval != stApproved {
+			claim(k)
+		}
+	}
+	for k, v := range views {
 		if v.Approval == stApproved {
 			v.Active = true
-			t := r.discoveredTarget(name, p.info.ing)
+			p := r.probes[v.Name]
+			t := r.discoveredTarget(v.Name, p.nodeID, infos[k].ing)
 			cur.Cfg.Ingresses = append(cur.Cfg.Ingresses, t.Ingress)
 			cur.Targets = append(cur.Targets, t)
 			snap := t.State.Snapshot()
 			v.Sync = &snap
 		} else {
-			cur.Pending = append(cur.Pending, name)
+			cur.Pending = append(cur.Pending, v.Name)
 		}
 		cur.Views = append(cur.Views, v)
 	}
 	return cur
 }
 
-// discoveredTarget is the sync target of an approved discovered ingress; its state and agent live
-// as long as the registry.
-func (r *Registry) discoveredTarget(name string, ing Ingress) SyncTarget {
+// discoveredTarget is the sync target of an approved discovered ingress; its state lives as long as
+// the registry, its agent as long as the node id it talks to.
+func (r *Registry) discoveredTarget(name string, nodeID uint64, ing Ingress) SyncTarget {
 	st := r.dstate[name]
 	if st == nil {
 		st = NewSyncState(r.now)
 		r.dstate[name] = st
 	}
-	ag := r.dagent[name]
-	if ag == nil {
-		ag = NewAgentFunc(r.resolver(name), r.getenv(tokenVar(name)), r.hc)
-		r.dagent[name] = ag
+	na, ok := r.dagent[name]
+	if !ok || na.id != nodeID {
+		na = nodeAgent{nodeID, NewAgentFunc(r.resolverFor(name, nodeID), r.getenv(tokenVar(name)), r.hc)}
+		r.dagent[name] = na
 	}
-	return SyncTarget{Name: name, Agent: ag, State: st, Ingress: ing}
+	return SyncTarget{Name: name, Agent: na.agent, State: st, Ingress: ing}
 }
 
 // onlineLocked is the headscale online flag of the node named like the ingress, or nil.
@@ -565,17 +646,21 @@ func (r *Registry) isConfigured(name string) bool {
 }
 
 // Approve approves a discovered ingress, but only when the parameters it publishes RIGHT NOW (read
-// again, not from the cache) have the posted fingerprint.
+// again, not from the cache) have the posted fingerprint. The approval pins the node it read them
+// from.
 func (r *Registry) Approve(ctx context.Context, name, fingerprint string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.isConfigured(name) {
 		return &ApprovalError{http.StatusConflict, "already configured"}
 	}
-	if r.discoveryOff != "" || r.store == nil {
+	r.mu.Lock()
+	off, st := r.discoveryOff != "", r.store
+	r.mu.Unlock()
+	if off || st == nil {
 		return &ApprovalError{http.StatusNotFound, "unknown ingress"}
 	}
-	r.refreshLocked(ctx, name)
+	r.refresh(ctx, name) // network, outside the lock
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	p := r.probes[name]
 	if p == nil {
 		return &ApprovalError{http.StatusNotFound, "unknown ingress"}
@@ -591,10 +676,7 @@ func (r *Registry) Approve(ctx context.Context, name, fingerprint string) error 
 	if p.info.fp != fingerprint {
 		return &ApprovalError{http.StatusConflict, "the fingerprint does not match the parameters the ingress publishes now; reload and review them"}
 	}
-	if err := r.store.Approve(name, fingerprint); err != nil {
-		return err
-	}
-	return nil
+	return r.store.ApproveNode(name, fingerprint, p.nodeID)
 }
 
 // Unapprove removes the approval: the ingress leaves profiles and stops being synced (its agent

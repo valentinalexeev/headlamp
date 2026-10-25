@@ -134,8 +134,13 @@ func (n *nodeList) set(nodes ...headscale.Node) {
 	n.nodes = nodes
 }
 
+// ingressNode is the node of "ingress-N" with the headscale id N.
 func ingressNode(name string, online bool) headscale.Node {
-	return headscale.Node{Name: name, Online: online, Tags: []string{"tag:ingress"}, IPAddresses: []string{"fd7a:115c::1", "127.0.0.1"}}
+	return ingressNodeID(name, uint64(name[len(name)-1]-'0'), online)
+}
+
+func ingressNodeID(name string, id uint64, online bool) headscale.Node {
+	return headscale.Node{ID: id, Name: name, Online: online, Tags: []string{"tag:ingress"}, IPAddresses: []string{"fd7a:115c::1", "127.0.0.1"}}
 }
 
 type clock struct{ t atomic.Int64 }
@@ -722,4 +727,167 @@ func TestNewRegistryTokenErrorsNameTheVariableOnly(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	})
+}
+
+// swapInfo serves per-token info documents from one fake server (every fake node has the same
+// address, so the token tells the ingresses apart).
+func swapInfo(a *infoAgent, byToken map[string]map[string]any) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.handler = func(w http.ResponseWriter, r *http.Request) {
+		doc, ok := byToken[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+		if !ok {
+			w.WriteHeader(404)
+			return
+		}
+		json.NewEncoder(w).Encode(doc)
+	}
+}
+
+func approvedIngress3(t *testing.T) (*regFx, *infoAgent) {
+	t.Helper()
+	a := newInfoAgent(t, "ingress-3")
+	usePort(t, a)
+	f := newRegFx(t, nil)
+	f.nodes.set(ingressNode("ingress-3", true))
+	f.store.CreateDevice("n", "o", "sing-box", adminFuture)
+	if err := f.reg.Approve(context.Background(), "ingress-3", f.view("ingress-3").Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	cur := f.reg.Current(context.Background(), true)
+	if !SyncAll(context.Background(), f.store, cur.Cfg, cur.Targets) || a.putCount() != 1 {
+		t.Fatal("setup: the approved ingress was not synced")
+	}
+	return f, a
+}
+
+func TestApprovalPinsTheNode(t *testing.T) {
+	ctx := context.Background()
+	t.Run("a replacement node whose info fails is not synced", func(t *testing.T) {
+		f, a := approvedIngress3(t)
+		a.mu.Lock()
+		a.status = 503
+		a.mu.Unlock()
+		f.nodes.set(ingressNodeID("ingress-3", 30, true))
+		f.clk.advance(infoTTL + time.Second)
+		cur := f.reg.Current(ctx, true)
+		if v := f.view("ingress-3"); v.Active || v.Approval != stUnreachable || v.Fingerprint != "" {
+			t.Fatalf("the old node's parameters must not be shown for the new node: %+v", v)
+		}
+		SyncAll(ctx, f.store, cur.Cfg, cur.Targets)
+		if a.putCount() != 1 {
+			t.Fatal("credentials were pushed to a node that replaced the approved one")
+		}
+	})
+	t.Run("identical parameters on another node id need re-approval", func(t *testing.T) {
+		f, a := approvedIngress3(t)
+		f.nodes.set(ingressNodeID("ingress-3", 30, true))
+		f.clk.advance(infoTTL + time.Second)
+		cur := f.reg.Current(ctx, true)
+		if v := f.view("ingress-3"); v.Approval != stChanged || v.Active {
+			t.Fatalf("%+v", v)
+		}
+		SyncAll(ctx, f.store, cur.Cfg, cur.Targets)
+		if a.putCount() != 1 {
+			t.Fatal("a changed node was synced")
+		}
+		// the same parameters, approved again for the new node, work again
+		if err := f.reg.Approve(ctx, "ingress-3", f.view("ingress-3").Fingerprint); err != nil {
+			t.Fatal(err)
+		}
+		if v := f.view("ingress-3"); v.Approval != stApproved || !v.Active {
+			t.Fatalf("%+v", v)
+		}
+	})
+	t.Run("last good parameters are kept only for the same node", func(t *testing.T) {
+		f, a := approvedIngress3(t)
+		a.mu.Lock()
+		a.status = 503
+		a.mu.Unlock()
+		f.clk.advance(infoTTL + time.Second)
+		if v := f.view("ingress-3"); !v.Active || v.Approval != stApproved {
+			t.Fatalf("same node: %+v", v)
+		}
+	})
+	t.Run("two nodes with one name are invalid", func(t *testing.T) {
+		f, a := approvedIngress3(t)
+		f.nodes.set(ingressNodeID("ingress-3", 3, true), ingressNodeID("ingress-3", 30, true))
+		f.clk.advance(infoTTL + time.Second)
+		cur := f.reg.Current(ctx, true)
+		if v := f.view("ingress-3"); v.Approval != stInvalid || v.Active {
+			t.Fatalf("%+v", v)
+		}
+		SyncAll(ctx, f.store, cur.Cfg, cur.Targets)
+		if a.putCount() != 1 {
+			t.Fatal("an ambiguous name was synced")
+		}
+		var ae *ApprovalError
+		if err := f.reg.Approve(ctx, "ingress-3", strings.Repeat("0", 64)); !errors.As(err, &ae) {
+			t.Fatal(err)
+		}
+	})
+	t.Run("the agent is found by the pinned node id", func(t *testing.T) {
+		f, _ := approvedIngress3(t)
+		f.nodes.set(ingressNodeID("ingress-3", 3, true))
+		res := f.reg.resolverFor("ingress-3", 3)
+		if u, err := res(ctx); err != nil || !strings.HasPrefix(u, "http://127.0.0.1:") {
+			t.Fatalf("%q %v", u, err)
+		}
+		if _, err := f.reg.resolverFor("ingress-3", 30)(ctx); err == nil {
+			t.Fatal("a node with another id was resolved")
+		}
+	})
+}
+
+func TestUnapprovedNodeCannotInvalidateAnApprovedOne(t *testing.T) {
+	ctx := context.Background()
+	a := newInfoAgent(t, "ingress-5")
+	usePort(t, a)
+	doc := func(name, host string) map[string]any {
+		return map[string]any{"name": name, "host": host, "port": 443, "sni": host, "public_key": discKey, "short_id": discSID}
+	}
+	swapInfo(a, map[string]map[string]any{
+		discToken: doc("ingress-5", "ingress-5.example.com"),
+		"tok4":    doc("ingress-4", "ingress-5.example.com"), // claims the approved ingress's host
+	})
+	f := newRegFx(t, nil)
+	f.env["AGENT_TOKEN_INGRESS_5"] = discToken
+	f.env["AGENT_TOKEN_INGRESS_4"] = "tok4"
+	f.nodes.set(ingressNode("ingress-5", true))
+	if err := f.reg.Approve(ctx, "ingress-5", f.view("ingress-5").Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	f.nodes.set(ingressNode("ingress-5", true), ingressNode("ingress-4", true)) // sorts first
+	f.clk.advance(infoTTL + time.Second)
+	f.reg.Current(ctx, true)
+	if v := f.view("ingress-5"); v.Approval != stApproved || !v.Active {
+		t.Fatalf("an unapproved node invalidated an approved one: %+v", v)
+	}
+	if v := f.view("ingress-4"); v.Approval != stInvalid || v.Active {
+		t.Fatalf("%+v", v)
+	}
+}
+
+func TestLegacyFormUsesOnlyAgentToken(t *testing.T) {
+	cfg := IngressConfig{LinkHost: "h.example.com", Ingresses: []Ingress{
+		{Name: "default", Host: "h.example.com", PublicKey: "P", ShortID: "a1", Port: 443, UUIDs: uuidsBase}}}
+	env := map[string]string{"AGENT_TOKEN_DEFAULT": "wrong-variable"}
+	_, err := NewRegistry(RegistryConfig{Cfg: cfg, Legacy: true, AgentURL: "http://a.example.com", Getenv: func(k string) string { return env[k] }})
+	if err == nil || !strings.Contains(err.Error(), "AGENT_TOKEN is not set") || strings.Contains(err.Error(), "wrong-variable") {
+		t.Fatalf("%v", err)
+	}
+	env["AGENT_TOKEN"] = "ok"
+	if _, err := NewRegistry(RegistryConfig{Cfg: cfg, Legacy: true, AgentURL: "http://a.example.com", Getenv: func(k string) string { return env[k] }}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFirstIngressTokenErrorNamesTheFallback(t *testing.T) {
+	cfg := IngressConfig{LinkHost: "h.example.com", Ingresses: []Ingress{
+		{Name: "ingress-1", Host: "h.example.com", PublicKey: "P", ShortID: "a1", Port: 443, UUIDs: uuidsBase, AgentURL: "http://a.example.com"}}}
+	_, err := NewRegistry(RegistryConfig{Cfg: cfg, Getenv: func(string) string { return "" }})
+	want := "ingress ingress-1: token variable AGENT_TOKEN_INGRESS_1 is not set (nor AGENT_TOKEN)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("%v", err)
+	}
 }

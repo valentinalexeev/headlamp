@@ -51,18 +51,18 @@ var syncWait = 3 * time.Second
 
 // Admin serves the operator API.
 type Admin struct {
-	store *Store
+	store Backend
 	reg   *Registry
 }
 
 // NewAdmin returns the operator API over store and one agent that serves every configured
 // ingress. Its sync state takes time from the store's clock.
-func NewAdmin(store *Store, cfg IngressConfig, agent Agent) *Admin {
+func NewAdmin(store Backend, cfg IngressConfig, agent Agent) *Admin {
 	return &Admin{store: store, reg: newStaticRegistry(store, cfg, agent)}
 }
 
 // NewAdminFor returns the operator API over the ingress registry.
-func NewAdminFor(store *Store, reg *Registry) *Admin { return &Admin{store: store, reg: reg} }
+func NewAdminFor(store Backend, reg *Registry) *Admin { return &Admin{store: store, reg: reg} }
 
 // State is the sync state of the first configured ingress.
 func (a *Admin) State() *SyncState { return a.reg.First().State }
@@ -345,7 +345,7 @@ func (a *Admin) syncNow(r *http.Request) syncResult {
 	}
 	snaps := snapshotsOf(targets)
 	if !finished {
-		now := a.store.clock().Unix()
+		now := a.store.Clock()().Unix()
 		for i, t := range targets {
 			if t.State.version() == before[i] && !snaps[i].Pending {
 				snaps[i] = SyncSnapshot{Pending: true, State: "unknown", Since: &now}
@@ -390,7 +390,7 @@ func (a *Admin) createDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Admin) future(w http.ResponseWriter, ts int64) bool {
-	if float64(ts) <= a.store.nowSec() {
+	if float64(ts) <= nowSec(a.store) {
 		detail(w, http.StatusUnprocessableEntity, "expires_at must be in the future")
 		return false
 	}

@@ -27,6 +27,9 @@ Secrets go in Fly secrets; plain settings in `fly.toml`.
 | `NODES_CONFIG` | optional overrides file, default `/srv/app/nodes.json`; a missing file is fine, a malformed one stops startup |
 | `ENROLL_ALLOWED_HOSTS` | optional, comma-separated Host values the admin listener accepts (anything else gets 400); set it to block DNS rebinding. `*` allows any host and `*.example.com` any host ending in `.example.com` (list `example.com` too for the bare name), as in the Python app |
 | `ENROLL_DB` | path of the SQLite database; enables enrolment. Put it on the state volume: `/var/lib/tailscale/enroll.db` |
+| `ENROLL_REDIS` | `1` keeps the enrolment data in Redis instead of SQLite: no volume needed (see "Enrolment in Redis"). Needs `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `ENROLL_SECRET_KEY`; `ENROLL_DB` is then not used |
+| `ENROLL_REDIS_KEY` | key prefix of the enrolment data, `<app>:<name>`. Default `<app>:enroll` |
+| `ENROLL_IMPORT_FROM` | with `ENROLL_REDIS=1`: path of an old enrolment SQLite file, copied into Redis once when Redis holds no enrolment data (the file is opened read-only and left untouched) |
 | `ENROLL_CONFIG` | enrolment ingress description, for example `/srv/app/enroll.json` (required with `ENROLL_DB`; shape under "Enrolment") |
 | `ENROLL_SECRET_KEY` | secret, at least 16 bytes; derives subscription secrets (required with `ENROLL_DB`) |
 | `AGENT_URL`, `AGENT_TOKEN` | address (dialled through the tailnet) and bearer token of the first ingress's agent. Required with `ENROLL_DB` only for the old single-host `enroll.json`; in the list shape they are the optional fallback of the FIRST entry (no `agent_url` / no `AGENT_TOKEN_<NAME>`) |
@@ -80,8 +83,37 @@ file in the JSON format above (field name -> base64 value) and run `state-import
 (`-force` replaces the whole identity: the marker lists the file's keys plus every key already in the hash, the old extra keys are deleted before the new ones are written, and a failed or interrupted forced import leaves no real keys at all; the previous identity is gone and the error says so), or delete the hash and let the node register
 again with `TAILSCALE_AUTH_KEY` (it then gets a new identity).
 
-What is **not** in Redis: the SQLite enrolment database (`ENROLL_DB`) stays on the volume, because it is a database
-file and a Machine mounts one volume.
+The enrolment data can live in Redis too (`ENROLL_REDIS=1`, below). Without it the SQLite database (`ENROLL_DB`) stays
+on the volume, because it is a database file and a Machine mounts one volume. The policy console history (`POLICY_DB`)
+is still a SQLite file on the volume.
+
+### Enrolment in Redis
+
+`ENROLL_REDIS=1` replaces the SQLite file, so the machine needs no volume for enrolment. Environment: `REDIS_URL` and
+`NODE_CONTROL_STATE_KEY` (the same variables as the tailscale state; the records are encrypted with that key, and the
+store refuses to start without it unless `STATE_ALLOW_PLAINTEXT=1`), `ENROLL_SECRET_KEY` (unchanged: subscription
+secrets are derived from it, device id and epoch), optional `ENROLL_REDIS_KEY`.
+
+Layout under the prefix `P` (all DB 0): `P:meta` (hash; `seq` is the last device id, never reused), `P:d:<id>` (one hash
+per device, no TTL: sealed name/owner/client/UUIDs plus plain `expires_at`, `revoked`, `epoch`, so revoke, extend and
+rotate are single atomic commands), `P:t:<hash>` (one hash per one-time link, **with a TTL**), `P:approvals` (sealed).
+A link's key expires through its TTL, and every spend also checks the stored expiry. Spending is one Lua script that
+writes nothing unless the key exists, has a use left and has not expired (a bare `HINCRBY` on an expired key would
+recreate it without a TTL). Commands sent: `EVAL` (never `EVALSHA`), `HGET`, `HGETALL`, `HINCRBY`, `HSET`, `HDEL`,
+`HEXISTS`; the scripts also use `EXISTS`, `HSET`, `HINCRBY` and `PEXPIRE`. Nothing scans, selects a database or
+flushes. A Redis error is an error, never an empty set: the sync to the agents does not push when the store cannot be
+read.
+
+Moving an existing SQLite database: set `ENROLL_IMPORT_FROM` to the file (a start with no enrolment data in Redis copies
+it once, verifies the copy and logs counts only), or run `node-control enroll-import -from <enroll.db> [-force]`. The
+file is opened read-only and never modified, so the previous release can still run against it. Ids, epochs, UUIDs and
+link hashes are carried over verbatim, so issued subscription secrets and one-time links keep working. `-force`
+overwrites records with the same ids and never deletes others. An interrupted import leaves no device counter, so the
+store still reads as empty and the import can simply be run again.
+
+Backup: `node-control enroll-export [-to <file>]` writes the devices, UUIDs and approvals as JSON (one-time links are not
+included: Redis cannot list them without a scan). The output holds device names, owners and credentials; encrypt it
+before it is stored anywhere.
 
 ## Node discovery
 
@@ -141,6 +173,7 @@ Environment (secrets via Fly secrets, the rest in `fly.toml`):
   at `/var/lib/tailscale`, see above); do not create a second one. That volume's snapshots then also hold the
   enrolment database (device names and owners, not the subscription secrets, which are derived from
   `ENROLL_SECRET_KEY`); treat them accordingly. Back it up with `sqlite3 ... .backup` before risky changes.
+- `ENROLL_REDIS=1`: store the enrolment data in Redis instead (next subsection). `ENROLL_DB` is then not used.
 - `ENROLL_CONFIG`: path of a JSON file describing the ingress nodes (shape below). Keep the real file in your
   private repo and overlay it.
 - `ENROLL_SECRET_KEY`: at least 16 bytes; derives the subscription secrets and the per-ingress credentials. Changing

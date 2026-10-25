@@ -137,7 +137,7 @@ type Registry struct {
 	fmu          sync.Mutex // serialises refreshes (network); never held while mu is wanted by a reader
 	mu           sync.Mutex // guards everything below, held only for memory work
 	legacy       bool
-	store        *Store
+	store        Backend
 	base         IngressConfig
 	configured   []SyncTarget
 	src          headscale.NodeSource
@@ -207,7 +207,7 @@ func NewRegistry(rc RegistryConfig) (*Registry, error) {
 }
 
 // SetStore attaches the store that holds the approvals.
-func (r *Registry) SetStore(s *Store) {
+func (r *Registry) SetStore(s Backend) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.store = s
@@ -976,7 +976,7 @@ func (r *Registry) Unapprove(ctx context.Context, name string) error {
 
 // newStaticRegistry is the registry of the single-agent constructors: the configured ingresses,
 // all served by one given agent, and no discovery.
-func newStaticRegistry(store *Store, cfg IngressConfig, agent Agent) *Registry {
+func newStaticRegistry(store Backend, cfg IngressConfig, agent Agent) *Registry {
 	agents := map[string]Agent{}
 	for _, ing := range cfg.Ingresses {
 		agents[ing.Name] = agent
@@ -985,7 +985,7 @@ func newStaticRegistry(store *Store, cfg IngressConfig, agent Agent) *Registry {
 		cfg.Ingresses = []Ingress{{UUIDs: uuidsBase}}
 		agents[""] = agent
 	}
-	r, _ := NewRegistry(RegistryConfig{Cfg: cfg, Agents: agents, Now: store.clock})
+	r, _ := NewRegistry(RegistryConfig{Cfg: cfg, Agents: agents, Now: store.Clock()})
 	r.store = store
 	return r
 }

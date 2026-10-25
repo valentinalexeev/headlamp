@@ -560,7 +560,7 @@ func openFixture(t *testing.T, name string, x expectedFile) *Store {
 	return s
 }
 
-func checkSet(t *testing.T, s *Store, want expectedSet) {
+func checkSet(t *testing.T, s Backend, want expectedSet) {
 	t.Helper()
 	list, err := s.ListDevices()
 	if err != nil {

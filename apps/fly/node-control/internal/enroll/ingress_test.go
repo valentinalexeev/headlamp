@@ -13,6 +13,9 @@ const fakeSID = "fakesid99"
 // ing builds one ingress object for the new shape; extra is appended verbatim.
 func ing(name, host, extra string) string {
 	s := fmt.Sprintf(`{"name":%q,"host":%q,"public_key":%q,"short_id":%q`, name, host, fakeKey, fakeSID)
+	if !strings.Contains(extra, `"uuids"`) {
+		s += `,"uuids":"derived"`
+	}
 	if extra != "" {
 		s += "," + extra
 	}

@@ -13,7 +13,7 @@ import (
 // singleOf wraps a single-host fixture in the list shape: one ingress named "default".
 func singleOf(g IngressCfg) IngressConfig {
 	return IngressConfig{ProfileName: g.ProfileName, LinkHost: g.Host, Ingresses: []Ingress{{
-		Name: "default", Host: g.Host, PublicKey: g.PublicKey, ShortID: g.ShortID, SNI: g.SNI, Port: g.Port}}}
+		Name: "default", Host: g.Host, PublicKey: g.PublicKey, ShortID: g.ShortID, SNI: g.SNI, Port: g.Port, UUIDs: "base"}}}
 }
 
 func (c expectedCase) config() IngressConfig { return singleOf(c.ingress()) }

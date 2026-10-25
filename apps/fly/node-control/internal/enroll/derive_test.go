@@ -93,62 +93,39 @@ func uuidsCfg(extra ...string) []byte {
 	return cfgOf(`"link_host":"links.example.com"`, extra...)
 }
 
-func TestUUIDsFieldValidationAndDefaults(t *testing.T) {
-	two := func(a, b string) []byte {
-		return uuidsCfg(ing("ingress-1", "ingress-1.example.com", a), ing("ingress-2", "ingress-2.example.com", b))
+func uuidsTwo(a, b string) []byte {
+	return uuidsCfg(ing("ingress-1", "ingress-1.example.com", a), ing("ingress-2", "ingress-2.example.com", b))
+}
+
+func uuidsOf(t *testing.T, data []byte) []string {
+	t.Helper()
+	c, err := ParseIngressConfig(data)
+	if err != nil {
+		t.Fatal(err)
 	}
-	modes := func(t *testing.T, data []byte) []string {
-		t.Helper()
-		c, err := ParseIngressConfig(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out []string
-		for _, i := range c.Ingresses {
-			out = append(out, i.UUIDs)
-		}
-		return out
+	var out []string
+	for _, i := range c.Ingresses {
+		out = append(out, i.UUIDs)
 	}
-	t.Run("old single-host shape is base", func(t *testing.T) {
-		cases, _ := loadProfileExpected(t)
-		for name, c := range cases {
-			raw, _ := json.Marshal(c.Cfg)
-			c, err := ParseIngressConfig(raw)
-			if err != nil {
-				continue
-			}
-			if c.Ingresses[0].UUIDs != "base" {
-				t.Errorf("%s: %q", name, c.Ingresses[0].UUIDs)
-			}
-		}
-	})
-	t.Run("one ingress in the new shape is base", func(t *testing.T) {
-		got := modes(t, cfgOf(``, ing("ingress-1", "ingress-1.example.com", "")))
-		if len(got) != 1 || got[0] != "base" {
-			t.Errorf("%v", got)
-		}
-	})
-	t.Run("two ingresses default to derived", func(t *testing.T) {
-		got := modes(t, two("", ""))
-		if got[0] != "derived" || got[1] != "derived" {
-			t.Errorf("%v", got)
-		}
-	})
+	return out
+}
+
+func TestUUIDsFieldValidation(t *testing.T) {
 	t.Run("explicit values are kept", func(t *testing.T) {
-		got := modes(t, two(`"uuids":"base"`, `"uuids":"derived"`))
+		got := uuidsOf(t, uuidsTwo(`"uuids":"base"`, `"uuids":"derived"`))
 		if got[0] != "base" || got[1] != "derived" {
 			t.Errorf("%v", got)
 		}
 	})
 	t.Run("at most one base", func(t *testing.T) {
-		_, err := ParseIngressConfig(two(`"uuids":"base"`, `"uuids":"base"`))
+		_, err := ParseIngressConfig(uuidsTwo(`"uuids":"base"`, `"uuids":"base"`))
 		if err == nil || !strings.Contains(err.Error(), "ingress-2") || !strings.Contains(err.Error(), "base") {
 			t.Errorf("err = %v", err)
 		}
 	})
 	t.Run("unknown value names the ingress and not the key", func(t *testing.T) {
 		for _, bad := range []string{`"uuids":"shared"`, `"uuids":""`, `"uuids":1`, `"uuids":"Base"`} {
-			_, err := ParseIngressConfig(two("", bad))
+			_, err := ParseIngressConfig(uuidsTwo("", bad))
 			if err == nil || !strings.Contains(err.Error(), "ingress-2") || !strings.Contains(err.Error(), "uuids") {
 				t.Errorf("%s: err = %v", bad, err)
 				continue
@@ -156,6 +133,97 @@ func TestUUIDsFieldValidationAndDefaults(t *testing.T) {
 			if strings.Contains(err.Error(), fakeKey) || strings.Contains(err.Error(), fakeSID) {
 				t.Errorf("%s: error echoes key material: %v", bad, err)
 			}
+		}
+	})
+}
+
+// rawIng builds an ingress object without the helper's uuids handling.
+func rawIng(name, host, extra string) string {
+	s := fmt.Sprintf(`{"name":%q,"host":%q,"public_key":%q,"short_id":%q`, name, host, fakeKey, fakeSID)
+	if extra != "" {
+		s += "," + extra
+	}
+	return s + "}"
+}
+
+func TestNewShapeRequiresExplicitUUIDs(t *testing.T) {
+	want := func(t *testing.T, data []byte, idx, name string) {
+		t.Helper()
+		_, err := ParseIngressConfig(data)
+		exp := "ingresses[" + idx + "] " + name + `: uuids must be "base" or "derived"`
+		if err == nil || !strings.Contains(err.Error(), exp) {
+			t.Fatalf("err = %v, want it to contain %q", err, exp)
+		}
+		if strings.Contains(err.Error(), fakeKey) || strings.Contains(err.Error(), fakeSID) {
+			t.Errorf("error echoes key material: %v", err)
+		}
+	}
+	t.Run("missing on one of two entries", func(t *testing.T) {
+		want(t, uuidsCfg(rawIng("ingress-1", "ingress-1.example.com", `"uuids":"base"`),
+			rawIng("ingress-2", "ingress-2.example.com", "")), "1", "ingress-2")
+	})
+	t.Run("missing on the single entry", func(t *testing.T) {
+		want(t, cfgOf(``, rawIng("ingress-1", "ingress-1.example.com", "")), "0", "ingress-1")
+	})
+	t.Run("invalid value", func(t *testing.T) {
+		want(t, cfgOf(``, rawIng("ingress-1", "ingress-1.example.com", `"uuids":"shared"`)), "0", "ingress-1")
+	})
+}
+
+func TestOldShapeStillBase(t *testing.T) {
+	cases, _ := loadProfileExpected(t)
+	n := 0
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(c.Cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := ParseIngressConfig(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(cfg.Ingresses) != 1 || cfg.Ingresses[0].UUIDs != "base" {
+				t.Errorf("%+v", cfg.Ingresses)
+			}
+			n++
+		})
+	}
+	if n == 0 {
+		t.Fatal("no fixtures")
+	}
+}
+
+func TestUUIDForUnsetErrors(t *testing.T) {
+	for _, c := range []IngressConfig{multiCfg, singleOf(IngressCfg{Host: "ingress-1.example.com"}).WithKey(testKey)} {
+		in := c.Ingresses[0]
+		in.UUIDs = ""
+		_, err := c.UUIDFor(in, "auto", "11111111-1111-4111-8111-111111111111")
+		if err == nil || !strings.Contains(err.Error(), "uuids is not set for ingress "+in.Name) {
+			t.Errorf("err = %v", err)
+		}
+	}
+}
+
+func TestRemovingAnEntryCannotFlipTheSurvivor(t *testing.T) {
+	first := rawIng("ingress-1", "ingress-1.example.com", `"uuids":"base"`)
+	second := rawIng("ingress-2", "ingress-2.example.com", `"uuids":"derived"`)
+	t.Run("two entries parse", func(t *testing.T) {
+		got := uuidsOf(t, uuidsCfg(first, second))
+		if got[0] != "base" || got[1] != "derived" {
+			t.Errorf("%v", got)
+		}
+	})
+	t.Run("survivor keeps its explicit value", func(t *testing.T) {
+		got := uuidsOf(t, cfgOf(``, second))
+		if len(got) != 1 || got[0] != "derived" {
+			t.Errorf("%v", got)
+		}
+	})
+	t.Run("survivor without an explicit value is rejected", func(t *testing.T) {
+		_, err := ParseIngressConfig(cfgOf(``, rawIng("ingress-2", "ingress-2.example.com", "")))
+		if err == nil {
+			t.Fatal("accepted")
 		}
 	})
 }
@@ -221,15 +289,6 @@ func TestUUIDForChoices(t *testing.T) {
 	t.Run("derived returns the derivation", func(t *testing.T) {
 		got, err := multiCfg.UUIDFor(multiCfg.Ingresses[1], "auto", base)
 		if err != nil || got != DeriveUUID(testKey, "ingress-2", "auto", base) {
-			t.Errorf("%q %v", got, err)
-		}
-	})
-	t.Run("unset field in a many-ingress config is derived", func(t *testing.T) {
-		c := multiCfg.WithKey(testKey)
-		in := c.Ingresses[0]
-		in.UUIDs = ""
-		got, err := c.UUIDFor(in, "auto", base)
-		if err != nil || got == base {
 			t.Errorf("%q %v", got, err)
 		}
 	})

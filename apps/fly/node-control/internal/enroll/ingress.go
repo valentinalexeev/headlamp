@@ -121,12 +121,6 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 	firstBase := ""
 	for i := range cfg.Ingresses {
 		in := &cfg.Ingresses[i]
-		if in.UUIDs == "" {
-			in.UUIDs = uuidsDerived
-			if len(cfg.Ingresses) == 1 {
-				in.UUIDs = uuidsBase
-			}
-		}
 		if in.UUIDs == uuidsBase {
 			if firstBase != "" {
 				return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: ingress %s: uuids \"base\" is already used by ingress %s (at most one ingress may use the stored credentials)", in.Name, firstBase)
@@ -201,13 +195,12 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 		}
 		in.TokenEnv = s
 	}
-	if v, present := raw["uuids"]; present {
-		s, _ := rawString(v)
-		if s != uuidsBase && s != uuidsDerived {
-			return fail("uuids must be %q or %q", uuidsBase, uuidsDerived)
-		}
-		in.UUIDs = s
+	// No implicit default: a missing value would change meaning when entries are added or removed.
+	s, _ := rawString(raw["uuids"])
+	if s != uuidsBase && s != uuidsDerived {
+		return Ingress{}, fmt.Errorf("ENROLL_CONFIG: ingresses[%d] %s: uuids must be %q or %q", i, name, uuidsBase, uuidsDerived)
 	}
+	in.UUIDs = s
 	return in, nil
 }
 

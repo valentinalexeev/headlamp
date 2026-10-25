@@ -43,22 +43,18 @@ func (c IngressConfig) WithKey(key []byte) IngressConfig {
 }
 
 // UUIDFor is the only place that decides which UUID an ingress uses for a device mode: the stored
-// base UUID for a "base" ingress, the derived one otherwise. An ingress whose field is unset is
-// "base" when it is the only one and "derived" when there are several (the safe default).
+// base UUID for a "base" ingress, the derived one for a "derived" ingress. There is no default: an
+// ingress without a setting is an error.
 func (c IngressConfig) UUIDFor(ing Ingress, mode, base string) (string, error) {
-	kind := ing.UUIDs
-	if kind == "" {
-		kind = uuidsDerived
-		if c.Single() {
-			kind = uuidsBase
-		}
-	}
-	if kind == uuidsBase {
+	switch ing.UUIDs {
+	case uuidsBase:
 		return base, nil
+	case uuidsDerived:
+		u := DeriveUUID(c.key, ing.Name, mode, base)
+		if u == "" {
+			return "", errors.New("derived credentials need ENROLL_SECRET_KEY")
+		}
+		return u, nil
 	}
-	u := DeriveUUID(c.key, ing.Name, mode, base)
-	if u == "" {
-		return "", errors.New("derived credentials need ENROLL_SECRET_KEY")
-	}
-	return u, nil
+	return "", fmt.Errorf("uuids is not set for ingress %s", ing.Name)
 }

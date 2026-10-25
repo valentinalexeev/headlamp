@@ -139,6 +139,12 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 		}
 	}
 
+	// Only modules that registered contribute entries; a disabled module reports none.
+	navItems, err := CollectNav(mods)
+	if err != nil {
+		return err
+	}
+
 	// Modules start before any listener exists, so no request can reach a
 	// module that has not started. A failed Start leaves nothing open.
 	mctx, cancel := context.WithCancel(ctx)
@@ -171,7 +177,7 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 		servers = append(servers, &srv{name, ln, newHTTPServer(h, name == "public")})
 		return nil
 	}
-	if err := add("admin", hostGuard(allowed, admin), tn.ListenAdmin); err != nil {
+	if err := add("admin", hostGuard(allowed, NavMiddleware(navItems, admin)), tn.ListenAdmin); err != nil {
 		return err
 	}
 	if public != nil {

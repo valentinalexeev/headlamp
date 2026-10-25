@@ -27,7 +27,7 @@ const (
 	errAddr    = "100.64.0.4:5555"
 )
 
-const wantCSP = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+const wantCSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 func fakeTailnet() *authz.FakeTailnet {
 	return authz.NewFakeTailnet(map[string]authz.Who{
@@ -781,5 +781,53 @@ func TestEmptyPolicyIs422OverHTTP(t *testing.T) {
 	}
 	if h.api.calls() != before {
 		t.Error("the API was called")
+	}
+}
+
+func TestNavEntryWhenActive(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	nav, ok := h.mod.(core.Navigator)
+	if !ok {
+		t.Fatal("the policy module does not implement core.Navigator")
+	}
+	items := nav.Nav()
+	if len(items) != 1 || items[0] != (core.NavItem{Label: "Policy", Path: "/policy", Order: 30}) {
+		t.Fatalf("nav %+v", items)
+	}
+	if err := core.ValidateNavItem(items[0]); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNoNavEntryWhenInactive(t *testing.T) {
+	env := baseEnv(t)
+	delete(env, "POLICY_DB")
+	_, m, err := register(t, env, newFakeAPI(`{}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items := m.(core.Navigator).Nav(); len(items) != 0 {
+		t.Fatalf("inactive module advertises %+v", items)
+	}
+}
+
+// The core inserts its top bar (an inline style block) into admin pages: the page must still render it,
+// while scripts stay restricted to same-origin files.
+func TestPageWithTopBarKeepsScriptsStrict(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	bar := core.NavMiddleware([]core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Policy", Path: "/policy", Order: 30}}, h.mux)
+	req := httptest.NewRequest("GET", "/policy", nil)
+	req.RemoteAddr = adminAddr
+	rec := httptest.NewRecorder()
+	bar.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "data-nc-nav") {
+		t.Fatalf("top bar missing: %d", rec.Code)
+	}
+	csp := rec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "style-src 'self' 'unsafe-inline'") {
+		t.Errorf("inline style of the bar would be blocked: %q", csp)
+	}
+	if !strings.Contains(csp, "script-src 'self';") || strings.Contains(csp, "script-src 'self' 'unsafe") {
+		t.Errorf("script-src must stay same-origin only: %q", csp)
 	}
 }

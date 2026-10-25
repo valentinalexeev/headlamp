@@ -26,7 +26,9 @@ var pageCSS []byte
 const (
 	historyLimit = 50
 	bodySlack    = 8192 // room for the JSON wrapper around a policy
-	cspValue     = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+	// style-src allows inline styles only because the core's top bar is an inline style block inserted into admin pages;
+	// scripts stay limited to same-origin files, and this page puts no server text into HTML or styles.
+	cspValue = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 
 // console holds the HTTP handlers of the policy module.

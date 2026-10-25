@@ -178,3 +178,104 @@ func TestCollapsedDuplicateKeepsTailnetLineAndCanonicalName(t *testing.T) {
 		t.Fatalf("nodes.json must carry the canonical name: %s", nj)
 	}
 }
+
+func navEnv(t *testing.T, withEnroll bool) core.Env {
+	t.Helper()
+	dir := t.TempDir()
+	m := map[string]string{"NODES_CONFIG": filepath.Join(dir, "absent.json"), "ENROLL_ALLOWED_HOSTS": "admin.test"}
+	if withEnroll {
+		cfg := filepath.Join(dir, "ingress.json")
+		if err := os.WriteFile(cfg, []byte(`{"host": "ingress.example.test", "public_key": "P", "short_id": "ab", "sni": "s.example.test"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		m["ENROLL_DB"] = filepath.Join(dir, "e.db")
+		m["ENROLL_CONFIG"] = cfg
+		m["ENROLL_SECRET_KEY"] = strings.Repeat("k", 32)
+		m["AGENT_URL"] = "http://agent.test"
+		m["AGENT_TOKEN"] = "agent-token-value"
+	}
+	return core.MapEnv(m)
+}
+
+func getHost(t *testing.T, addr, host, path string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest("GET", "http://"+addr+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = host
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func TestTopBarWiring(t *testing.T) {
+	t.Run("with ENROLL_DB both entries and the bar on both pages", func(t *testing.T) {
+		env := navEnv(t, true)
+		mods, err := buildModules(env, http.DefaultClient)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tn, _ := serve(t, env, mods)
+		admin := tn.AdminAddr()
+
+		_, nav := getHost(t, admin, "admin.test", "/_nav.json")
+		var items []core.NavItem
+		if err := json.Unmarshal([]byte(nav), &items); err != nil {
+			t.Fatalf("%v: %s", err, nav)
+		}
+		want := []core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Enrolment", Path: "/enroll", Order: 20}}
+		if len(items) != 2 || items[0] != want[0] || items[1] != want[1] {
+			t.Fatalf("entries %+v", items)
+		}
+		for path, active := range map[string]string{"/": `href="/" aria-current="page"`, "/enroll": `href="/enroll" aria-current="page"`} {
+			code, body := getHost(t, admin, "admin.test", path)
+			if code != 200 || strings.Count(body, "<nav data-nc-nav") != 1 || !strings.Contains(body, active) {
+				t.Errorf("GET %s = %d, bar/active missing", path, code)
+			}
+		}
+		// JSON endpoints are untouched.
+		if _, body := getHost(t, admin, "admin.test", "/nodes.json"); strings.Contains(body, "data-nc-nav") {
+			t.Errorf("bar in nodes.json")
+		}
+		// The public listener never carries the bar.
+		for _, p := range []string{"/e/not-a-token", "/sub/not-a-secret", "/", "/_nav.json"} {
+			code, body := getHost(t, tn.PublicAddr(), "ingress.example.test", p)
+			if strings.Contains(body, "data-nc-nav") || strings.Contains(body, "<nav") {
+				t.Errorf("public %s (%d) carries the bar", p, code)
+			}
+			if p == "/_nav.json" && code != 404 {
+				t.Errorf("public /_nav.json = %d, want 404", code)
+			}
+		}
+		// The Host guard answers first.
+		if code, body := getHost(t, admin, "evil.test", "/_nav.json"); code != 400 || strings.Contains(body, "Nodes") {
+			t.Errorf("bad host: %d %s", code, body)
+		}
+		if code, body := getHost(t, admin, "evil.test", "/"); code != 400 || strings.Contains(body, "data-nc-nav") {
+			t.Errorf("bad host page: %d", code)
+		}
+	})
+
+	t.Run("without ENROLL_DB only Nodes and no bar", func(t *testing.T) {
+		env := navEnv(t, false)
+		mods, err := buildModules(env, http.DefaultClient)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tn, _ := serve(t, env, mods)
+		admin := tn.AdminAddr()
+		_, nav := getHost(t, admin, "admin.test", "/_nav.json")
+		var items []core.NavItem
+		if err := json.Unmarshal([]byte(nav), &items); err != nil || len(items) != 1 || items[0].Label != "Nodes" {
+			t.Fatalf("entries %v: %s", err, nav)
+		}
+		if code, body := getHost(t, admin, "admin.test", "/"); code != 200 || strings.Contains(body, "data-nc-nav") {
+			t.Fatalf("bar shown with one entry: %d", code)
+		}
+	})
+}

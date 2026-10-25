@@ -111,3 +111,11 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	return m.store.Close()
 }
+
+// Nav puts the enrolment page in the top bar, but only when the module registered (ENROLL_DB set).
+func (m *Module) Nav() []core.NavItem {
+	if m.store == nil {
+		return nil
+	}
+	return []core.NavItem{{Label: "Enrolment", Path: "/enroll", Order: 20}}
+}

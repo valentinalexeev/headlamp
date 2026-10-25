@@ -40,6 +40,14 @@ func New(env core.Env, api API) core.Module { return &Module{env: env, api: api}
 
 func (m *Module) Name() string { return "policy" }
 
+// Nav puts the console in the admin top bar; an inactive module advertises nothing.
+func (m *Module) Nav() []core.NavItem {
+	if m.svc == nil {
+		return nil
+	}
+	return []core.NavItem{{Label: "Policy", Path: "/policy", Order: 30}}
+}
+
 // intEnv reads an integer variable with a default and an inclusive range.
 func intEnv(env core.Env, key string, def, lo, hi int) (int, error) {
 	v := env.Getenv(key)

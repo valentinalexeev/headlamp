@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Policy console</title>
+<link rel="stylesheet" href="/policy/static/policy.css">
+</head>
+<body>
+<h1>Policy console</h1>
+<div id="banner" class="banner warn" hidden></div>
+<div id="stuck" class="banner warn" hidden></div>
+<div id="pending" class="banner pending" hidden>
+  <p><strong id="pending-text"></strong></p>
+  <p>Reload this page through the new rules and press Confirm. If you cannot reach it, the change reverts by itself.</p>
+  <button id="confirm" type="button">Confirm</button>
+</div>
+<p id="last-edit"></p>
+<textarea id="editor" spellcheck="false" aria-label="Policy"></textarea>
+<div class="row">
+  <button id="preview" type="button">Preview</button>
+  <button id="apply" type="button">Apply</button>
+  <button id="reload" type="button">Reload</button>
+</div>
+<p id="message"></p>
+<pre id="diff"></pre>
+<ul id="warnings"></ul>
+<h2>History</h2>
+<table>
+  <thead><tr><th>#</th><th>When</th><th>Who</th><th>Reason</th><th>State</th><th></th></tr></thead>
+  <tbody id="history"></tbody>
+</table>
+<script src="/policy/static/policy.js"></script>
+</body>
+</html>

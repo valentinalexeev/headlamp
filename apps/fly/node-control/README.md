@@ -30,6 +30,10 @@ Secrets go in Fly secrets; plain settings in `fly.toml`.
 | `ENROLL_CONFIG` | enrolment ingress description, for example `/srv/app/enroll.json` (required with `ENROLL_DB`) |
 | `ENROLL_SECRET_KEY` | secret, at least 16 bytes; derives subscription secrets (required with `ENROLL_DB`) |
 | `AGENT_URL`, `AGENT_TOKEN` | address (dialled through the tailnet) and bearer token of the ingress agent (required with `ENROLL_DB`) |
+| `POLICY_DB` | path of the SQLite change history; enables the policy console (`/policy`). On the state volume: `/var/lib/tailscale/policy.db`. Needs `HEADSCALE_LOGIN_SERVER` and `HEADSCALE_API_KEY` |
+| `POLICY_ADMIN_USERS` | comma-separated tailnet logins allowed to use the console (required with `POLICY_DB`); tagged nodes are never allowed |
+| `POLICY_REVERT_SECONDS` | seconds to confirm a change before it is reverted automatically, 30 to 900, default 120 |
+| `POLICY_MAX_BYTES` | largest policy accepted, 1024 to 4194304, default 262144 |
 | `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | Yandex service account key; folder for the lookup by name (the account needs `compute.operator` and `compute.viewer`) |
 | `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | OCI credentials and the default region and compartment |
 | `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | Selectel (OpenStack) service user, default region, optional auth URL |
@@ -216,6 +220,19 @@ func (m *Module) Nav() []core.NavItem {
 A label is 1 to 24 printable characters (no control, bidi or zero-width characters); a path is a local absolute
 path (`/x`, not `//x`, `http://x`, `javascript:x`, and without `?`, `#`, quotes or angle brackets). The bar is fixed
 at the top and uses the page's own colour variables; the longest matching path is the current one. Invalid entries and duplicate paths stop the start-up with an error naming the module.
+
+## Policy console (optional)
+
+Setting `POLICY_DB` serves `/policy` on the admin listener for the logins in `POLICY_ADMIN_USERS`: edit the headscale
+policy, preview the diff, apply, and confirm. An applied change reverts by itself after `POLICY_REVERT_SECONDS` unless
+it is confirmed, which also covers a restart of this app mid-window. Every route is refused (403) for other users and
+for tagged nodes; policy text is never logged. Headscale must run its policy in database mode.
+`ENROLL_ALLOWED_HOSTS` is required with `POLICY_DB` and must not contain a bare `*` (a `*.example.com` suffix is fine):
+the core's Host guard is what protects the console from DNS rebinding. Confirm names the pending change and succeeds
+only while headscale still serves that change's policy. If the automatic revert keeps failing, the page shows a warning;
+Confirm is then the way out, keeping the change.
+The console adds a "Policy" entry to the top bar. Its Content-Security-Policy allows inline styles (the bar is one) but scripts only from the
+page's own files.
 
 ## Build and run
 

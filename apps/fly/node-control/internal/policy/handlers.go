@@ -114,6 +114,8 @@ func fail(w http.ResponseWriter, err error, id int64, deadline time.Time) {
 		detail(w, http.StatusRequestEntityTooLarge, "the policy is too large")
 	case errors.Is(err, ErrNoChange):
 		detail(w, http.StatusUnprocessableEntity, "the policy is unchanged")
+	case errors.Is(err, ErrEmpty):
+		detail(w, http.StatusUnprocessableEntity, "the policy is empty")
 	case errors.Is(err, ErrNotFound):
 		detail(w, http.StatusNotFound, "unknown change")
 	case errors.As(err, &ae):

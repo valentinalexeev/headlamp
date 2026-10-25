@@ -18,11 +18,13 @@ const (
 	maxErrMessage = 2 << 10
 )
 
-// APIError is a 4xx answer from headscale (including 401 and 403); Message
-// is the server's own error text. It never contains the API key.
+// APIError is an answer from headscale that carries its own error text: any 4xx (including 401
+// and 403), or a 5xx whose body is a grpc-gateway error ({"code": n, "message": "..."}), which
+// shows the handler ran to completion and replied (Handled). Message never contains the API key.
 type APIError struct {
 	Status  int
 	Message string
+	Handled bool
 }
 
 func (e *APIError) Error() string { return fmt.Sprintf("headscale API %d: %s", e.Status, e.Message) }
@@ -71,11 +73,23 @@ func (c *Client) call(ctx context.Context, op, method, path string, in any, limi
 	case resp.StatusCode >= 200 && resp.StatusCode <= 299:
 		return body, nil
 	case resp.StatusCode >= 400 && resp.StatusCode <= 499:
-		return nil, &APIError{Status: resp.StatusCode, Message: errMessage(resp, body, secrets)}
+		return nil, &APIError{Status: resp.StatusCode, Message: errMessage(resp, body, secrets), Handled: true}
+	case resp.StatusCode >= 500 && isGatewayError(body):
+		return nil, &APIError{Status: resp.StatusCode, Message: errMessage(resp, body, secrets), Handled: true}
 	default:
 		// The body is deliberately left out: only the status is reported.
 		return nil, fmt.Errorf("%s: unexpected status %d", op, resp.StatusCode)
 	}
+}
+
+// isGatewayError reports whether body is a grpc-gateway error: a numeric "code" and a non-empty
+// "message". A proxy's HTML or plain text is not, so such a 5xx stays ambiguous.
+func isGatewayError(body []byte) bool {
+	var st struct {
+		Code    *float64 `json:"code"`
+		Message string   `json:"message"`
+	}
+	return json.Unmarshal(body, &st) == nil && st.Code != nil && strings.TrimSpace(st.Message) != ""
 }
 
 // errMessage extracts the grpc-gateway "message" field, falling back to the

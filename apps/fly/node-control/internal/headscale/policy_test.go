@@ -164,3 +164,51 @@ func TestNoAPIKeyInAnyErrorString(t *testing.T) {
 		t.Fatal(e1)
 	}
 }
+
+func TestHandled5xxJSONBecomesAPIError(t *testing.T) {
+	c, _ := recorder(t, 500, `{"code":2,"message":"setting policy: parsing policy: bad k1 tag","details":[]}`)
+	var ae *APIError
+	err := c.SetPolicy(context.Background(), "x")
+	if !errors.As(err, &ae) || ae.Status != 500 || !ae.Handled || !strings.Contains(ae.Message, "parsing policy") {
+		t.Fatalf("%#v", err)
+	}
+	if strings.Contains(err.Error(), "k1") {
+		t.Fatalf("key in %q", err)
+	}
+	c, _ = recorder(t, 400, `{"code":3,"message":"bad"}`)
+	if err := c.CheckPolicy(context.Background(), "x"); !errors.As(err, &ae) || !ae.Handled || ae.Status != 400 {
+		t.Fatalf("%#v", err)
+	}
+}
+
+func TestUnshapedOr5xxAnswersStayPlainErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+	}{
+		"text":        {500, "internal error"},
+		"html":        {500, "<html>oops</html>"},
+		"empty":       {500, ""},
+		"gateway":     {502, "<html><body>Bad Gateway</body></html>"},
+		"no code":     {500, `{"message":"boom"}`},
+		"no message":  {500, `{"code":2}`},
+		"blank msg":   {500, `{"code":2,"message":"  "}`},
+		"string code": {500, `{"code":"x","message":"m"}`},
+	} {
+		c, _ := recorder(t, tc.status, tc.body)
+		var ae *APIError
+		err := c.SetPolicy(context.Background(), "x")
+		if err == nil || errors.As(err, &ae) || strings.Contains(err.Error(), "k1") {
+			t.Errorf("%s: %#v", name, err)
+		}
+	}
+}
+
+func TestHandled5xxMessageIsScrubbedAndCapped(t *testing.T) {
+	c, _ := recorder(t, 500, `{"code":2,"message":"key k1 leaked `+strings.Repeat("x", 5000)+`"}`)
+	var ae *APIError
+	err := c.SetPolicy(context.Background(), "x")
+	if !errors.As(err, &ae) || strings.Contains(ae.Message, "k1") || len(ae.Message) > maxErrMessage {
+		t.Fatalf("%#v", err)
+	}
+}

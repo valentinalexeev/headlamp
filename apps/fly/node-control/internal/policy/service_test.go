@@ -30,6 +30,7 @@ type fakeAPI struct {
 	gets     int
 	sets     []string
 	checks   int
+	other    string        // a failing SetPolicy leaves this text live instead, if set
 	noVer    bool          // GetPolicy reports an empty version
 	entered  chan struct{} // signalled when SetPolicy starts, if set
 	block    chan struct{} // SetPolicy waits for it (or its ctx), if set
@@ -70,6 +71,10 @@ func (f *fakeAPI) SetPolicy(ctx context.Context, text string) error {
 		return f.applyErr
 	}
 	if f.setErr != nil {
+		if f.other != "" {
+			f.text = f.other
+			f.version++
+		}
 		if f.breakGet {
 			f.getErr = errors.New("read failed")
 		}
@@ -629,5 +634,122 @@ func TestAmbiguousErrorThroughChangeAndRevertTo(t *testing.T) {
 	cid, _, err := svc.Change(context.Background(), "alice", func(string) (string, error) { return "third", nil }, "r")
 	if err != nil || svc.Outcome(cid) != OutcomePending || api.current() != "third" {
 		t.Fatalf("change: id=%d err=%v", cid, err)
+	}
+}
+
+func handled500() error {
+	return &headscale.APIError{Status: 500, Message: "setting policy: parsing policy: bad tag", Handled: true}
+}
+
+func TestApplyHandled500NotAppliedAbortsAndReturnsAPIError(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(handled500())
+	svc, _, _ := newTestService(t, api)
+	_, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit")
+	var ae *headscale.APIError
+	if !errors.As(err, &ae) || errors.Is(err, ErrUncertain) || !strings.Contains(ae.Message, "parsing policy") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok, _ := svc.store.Pending(); ok {
+		t.Fatal("pending left behind")
+	}
+	if h, _ := svc.store.History(5); len(h) != 0 {
+		t.Fatalf("history = %v", h)
+	}
+}
+
+func TestApplyHandled500ButPolicyChangedKeepsPendingUncertain(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(handled500())
+	api.other = "someone else's"
+	svc, _, _ := newTestService(t, api)
+	id, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit")
+	if !errors.Is(err, ErrUncertain) {
+		t.Fatalf("err = %v", err)
+	}
+	if p, ok, _ := svc.store.Pending(); !ok || p.ID != id {
+		t.Fatalf("pending = %+v %v", p, ok)
+	}
+}
+
+func TestApplyHandled500ReReadFailsKeepsPendingUncertain(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(handled500())
+	api.breakGet = true
+	svc, _, _ := newTestService(t, api)
+	if _, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit"); !errors.Is(err, ErrUncertain) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok, _ := svc.store.Pending(); !ok {
+		t.Fatal("not pending")
+	}
+}
+
+func TestApplyHandled500ButActuallyAppliedIsSuccess(t *testing.T) {
+	api := newFakeAPI("old")
+	api.applyErr = handled500()
+	svc, _, _ := newTestService(t, api)
+	id := applyOK(t, svc, "new")
+	if svc.Outcome(id) != OutcomePending {
+		t.Fatalf("outcome = %q", svc.Outcome(id))
+	}
+}
+
+func TestApplyPlain500StillKeepsPendingUncertain(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(errors.New("setting the policy: unexpected status 500"))
+	svc, _, _ := newTestService(t, api)
+	id, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit")
+	if !errors.Is(err, ErrUncertain) {
+		t.Fatalf("err = %v", err)
+	}
+	if p, ok, _ := svc.store.Pending(); !ok || p.ID != id {
+		t.Fatalf("pending = %+v %v", p, ok)
+	}
+}
+
+func TestApplyTimeoutStillKeepsPendingUncertain(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(context.DeadlineExceeded)
+	svc, _, _ := newTestService(t, api)
+	if _, _, err := svc.Apply(context.Background(), "alice", "new", "v1", "edit"); !errors.Is(err, ErrUncertain) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEmptyPolicyIsRefusedBeforeAnyAPICall(t *testing.T) {
+	api := newFakeAPI("old")
+	svc, _, _ := newTestService(t, api)
+	ctx := context.Background()
+	for _, txt := range []string{"", " \n\t "} {
+		if _, _, err := svc.Apply(ctx, "alice", txt, "v1", "edit"); !errors.Is(err, ErrEmpty) {
+			t.Errorf("apply %q: %v", txt, err)
+		}
+	}
+	if _, _, err := svc.Change(ctx, "alice", func(string) (string, error) { return "  ", nil }, "r"); !errors.Is(err, ErrEmpty) {
+		t.Errorf("change: %v", err)
+	}
+	if api.setCount() != 0 {
+		t.Error("a write was sent")
+	}
+	// A history entry whose before text is empty cannot be reverted to.
+	id, err := svc.store.Begin("alice", "edit", "", "x", svc.clock().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.store.Confirm(id)
+	calls := api.calls()
+	if _, _, err := svc.RevertTo(ctx, "alice", id); !errors.Is(err, ErrEmpty) {
+		t.Errorf("revert: %v", err)
+	}
+	if api.calls() != calls {
+		t.Error("revert called the API")
+	}
+	p, err := svc.Preview(ctx, "  ")
+	if err != nil || p.Valid || p.Error != "the policy is empty" {
+		t.Errorf("preview = %+v %v", p, err)
+	}
+	if api.calls() != calls {
+		t.Error("preview called the API")
 	}
 }

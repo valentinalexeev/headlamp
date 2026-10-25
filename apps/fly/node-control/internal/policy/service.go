@@ -45,6 +45,10 @@ func NewService(api API, st *Store, revert time.Duration, maxBytes int, clock fu
 	return &Service{api: api, store: st, revert: revert, maxBytes: maxBytes, clock: clock}
 }
 
+// isBlank reports whether a policy text is empty or only whitespace. Headscale would store it,
+// leaving the tailnet with no rules, so the service refuses it.
+func isBlank(text string) bool { return strings.TrimSpace(text) == "" }
+
 // Current returns the live policy and its update stamp.
 func (s *Service) Current(ctx context.Context) (text, updatedAt string, err error) {
 	return s.api.GetPolicy(ctx)
@@ -81,7 +85,7 @@ func (s *Service) start(ctx context.Context, actor, reason, before, after string
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
 	defer cancel()
 	if err := s.api.SetPolicy(wctx, after); err != nil {
-		if err := s.settleWriteError(id, after, err); err != nil {
+		if err := s.settleWriteError(id, before, after, err); err != nil {
 			if errors.Is(err, ErrUncertain) {
 				return id, deadline, err
 			}
@@ -93,14 +97,20 @@ func (s *Service) start(ctx context.Context, actor, reason, before, after string
 	return id, deadline, nil
 }
 
-// settleWriteError decides what a failed SetPolicy means. Only a headscale rejection is definite:
-// the change is dropped. Any other failure is ambiguous (headscale may have applied it, now or
-// later), so the live policy is re-read: equal to after means success (nil); in every other case,
-// including a failed re-read, the change stays pending with its revert armed (reverting a change
-// that never landed is harmless) and ErrUncertain is returned.
-func (s *Service) settleWriteError(id int64, after string, err error) error {
+// settleWriteError decides what a failed SetPolicy means.
+//   - A headscale answer below 500 is a definite rejection: the change is dropped.
+//   - A handled 5xx (headscale ran its handler and replied with an error body) makes a re-read
+//     conclusive: live equal to before means not applied (dropped, headscale's error returned).
+//   - Anything else (no answer, timeout, a plain 5xx) is ambiguous: headscale may have applied the
+//     change, now or later.
+//
+// In every case live equal to after is success; any other outcome, including a failed re-read,
+// keeps the change pending with its revert armed (reverting a change that never landed is
+// harmless) and returns ErrUncertain.
+func (s *Service) settleWriteError(id int64, before, after string, err error) error {
 	var ae *headscale.APIError
-	if errors.As(err, &ae) {
+	isAPI := errors.As(err, &ae)
+	if isAPI && ae.Status < 500 {
 		s.abort(id)
 		slog.Warn("policy change rejected", "id", id, "bytes", len(after), "cause", errCause(err))
 		return err
@@ -108,9 +118,14 @@ func (s *Service) settleWriteError(id int64, after string, err error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), rereadTimeout)
 	defer cancel()
 	live, _, rerr := s.api.GetPolicy(ctx)
-	if rerr == nil && live == after {
+	switch {
+	case rerr == nil && live == after:
 		slog.Warn("policy write reported an error but was applied", "id", id, "cause", errCause(err))
 		return nil
+	case rerr == nil && live == before && isAPI && ae.Handled:
+		s.abort(id)
+		slog.Warn("policy change rejected", "id", id, "bytes", len(after), "cause", errCause(err))
+		return err
 	}
 	slog.Error("policy write outcome unknown; revert armed", "id", id, "cause", errCause(err))
 	return fmt.Errorf("%w: %w", ErrUncertain, err)
@@ -141,6 +156,9 @@ func reasonClass(reason string) string {
 
 // Apply replaces the policy with text, provided the live policy is still at baseUpdatedAt.
 func (s *Service) Apply(ctx context.Context, actor, text, baseUpdatedAt, reason string) (int64, time.Time, error) {
+	if isBlank(text) {
+		return 0, time.Time{}, ErrEmpty
+	}
 	if len(text) > s.maxBytes {
 		return 0, time.Time{}, ErrTooLarge
 	}
@@ -168,6 +186,9 @@ func (s *Service) Change(ctx context.Context, actor string, transform func(curre
 	next, err := transform(cur)
 	if err != nil {
 		return 0, time.Time{}, err
+	}
+	if isBlank(next) {
+		return 0, time.Time{}, ErrEmpty
 	}
 	if next == cur {
 		return 0, time.Time{}, ErrNoChange
@@ -212,6 +233,9 @@ func (s *Service) RevertTo(ctx context.Context, actor string, historyID int64) (
 	text, err := s.store.TextOf(historyID, "before")
 	if err != nil {
 		return 0, time.Time{}, err
+	}
+	if isBlank(text) {
+		return 0, time.Time{}, ErrEmpty
 	}
 	if len(text) > s.maxBytes {
 		return 0, time.Time{}, ErrTooLarge

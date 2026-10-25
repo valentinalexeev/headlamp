@@ -20,6 +20,7 @@ var (
 	ErrTooLarge       = errors.New("policy is too large")
 	ErrBusy           = errors.New("another policy change is pending")
 	ErrNothingPending = errors.New("no policy change is pending")
+	ErrEmpty          = errors.New("the policy is empty")
 	ErrNotFound       = errors.New("policy change not found")
 	ErrNotPending     = errors.New("that change is not the pending one")
 	ErrNotLive        = errors.New("the live policy is not the pending change")

@@ -754,3 +754,32 @@ func TestLogsNeverContainPolicyText(t *testing.T) {
 	}
 	_ = io.Discard
 }
+
+func TestHandled500RejectionIs422OverHTTP(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.api.fail(handled500())
+	rec := h.apply(t, "bad")
+	if rec.Code != 422 || !strings.Contains(jsonBody(t, rec)["detail"].(string), "parsing policy") {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if h.state(t)["pending"] != nil {
+		t.Error("pending left behind")
+	}
+}
+
+func TestEmptyPolicyIs422OverHTTP(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	base := h.state(t)["updated_at"].(string)
+	before := h.api.calls()
+	rec := h.post("/policy/apply", applyBody("  ", base))
+	if rec.Code != 422 || jsonBody(t, rec)["detail"] != "the policy is empty" {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	b := jsonBody(t, h.post("/policy/preview", `{"policy":""}`))
+	if b["valid"] != false || b["error"] != "the policy is empty" {
+		t.Errorf("preview %v", b)
+	}
+	if h.api.calls() != before {
+		t.Error("the API was called")
+	}
+}

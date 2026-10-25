@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -32,11 +34,15 @@ func (s *Service) Preview(ctx context.Context, after string) (Preview, error) {
 	if len(after) > s.maxBytes {
 		return Preview{}, ErrTooLarge
 	}
+	if isBlank(after) {
+		return Preview{Error: ErrEmpty.Error(), Warnings: []string{}}, nil
+	}
 	cur, _, err := s.api.GetPolicy(ctx)
 	if err != nil {
 		return Preview{}, err
 	}
 	p := Preview{Valid: true, Diff: policyDiff(cur, after), Warnings: policyWarnings(cur, after)}
+	p.Warnings = append(p.Warnings, s.userWarnings(ctx, after)...)
 	if err := s.api.CheckPolicy(ctx, after); err != nil {
 		var ae *headscale.APIError
 		if !errors.As(err, &ae) {
@@ -303,4 +309,72 @@ func removedRules(cur string, next []any) int {
 func canonical(v any) string {
 	b, _ := json.Marshal(v) // map keys are sorted
 	return string(b)
+}
+
+// UserLister is the optional part of the headscale client that lets Preview flag unknown users.
+type UserLister interface {
+	ListUsers(ctx context.Context) ([]headscale.User, error)
+}
+
+var userRef = regexp.MustCompile(`^[A-Za-z0-9._-]+@$`)
+
+// userWarnings names users that a proposed policy refers to ("name@") but headscale does not
+// have. Headscale accepts such rules, so this is the only place they show up. It adds nothing
+// when the API cannot list users or the listing fails.
+func (s *Service) userWarnings(ctx context.Context, after string) []string {
+	lister, ok := s.api.(UserLister)
+	if !ok {
+		return nil
+	}
+	var next map[string]any
+	if json.Unmarshal([]byte(after), &next) != nil || next == nil {
+		return nil
+	}
+	refs := userRefs(next)
+	if len(refs) == 0 {
+		return nil
+	}
+	users, err := lister.ListUsers(ctx)
+	if err != nil {
+		slog.Warn("policy preview cannot list users", "cause", errCause(err))
+		return nil
+	}
+	known := map[string]bool{}
+	for _, u := range users {
+		known[u.Name] = true
+	}
+	var out []string
+	for _, name := range refs {
+		if !known[name] {
+			out = append(out, fmt.Sprintf("user %q does not exist", name))
+		}
+	}
+	return out
+}
+
+// userRefs returns the sorted, distinct user names ("name@" entries, a ":ports" suffix removed)
+// found in acls src/dst, tagOwners, autoApprovers and groups.
+func userRefs(policy map[string]any) []string {
+	set := map[string]bool{}
+	add := func(s string) {
+		s, _, _ = strings.Cut(s, ":")
+		if userRef.MatchString(s) {
+			set[strings.TrimSuffix(s, "@")] = true
+		}
+	}
+	acls, _ := policy["acls"].([]any)
+	for _, r := range acls {
+		rule, _ := r.(map[string]any)
+		collectStrings(rule["src"], add)
+		collectStrings(rule["dst"], add)
+	}
+	for _, key := range []string{"tagOwners", "autoApprovers", "groups"} {
+		collectStrings(policy[key], add)
+	}
+	out := make([]string, 0, len(set))
+	for n := range set {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }

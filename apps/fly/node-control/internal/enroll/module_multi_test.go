@@ -513,7 +513,7 @@ func TestPendingIngressNotInProfileOrSyncUntilApproved(t *testing.T) {
 	if rows := ingressRows(t, m); rowSync(rows["ingress-3"])["state"] != "ok" {
 		t.Fatalf("the approval response lists the new ingress as synced: %v", rows["ingress-3"])
 	}
-	if _, l := f.do("GET", "/enroll/ingresses", ""); ingressRows(t, l)["ingress-3"]["approval"] != "approved" {
+	if _, l := f.do("GET", "/enroll/ingresses", ""); ingressRows(t, l)["ingress-3"]["approval"] != "approved" || ingressRows(t, l)["ingress-3"]["approved"] != true {
 		t.Fatalf("%v", l)
 	}
 

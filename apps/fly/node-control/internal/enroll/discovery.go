@@ -78,6 +78,7 @@ type IngressView struct {
 	Source        string        `json:"source"`   // configured | discovered
 	Approval      string        `json:"approval"` // configured, or one of the discovered states
 	Active        bool          `json:"active"`   // used for profiles and sync
+	Approved      bool          `json:"approved"` // an approval is stored for it (it can be removed)
 	Fingerprint   string        `json:"fingerprint,omitempty"`
 	PublicKeyPref string        `json:"public_key_prefix,omitempty"`
 	ShortIDPref   string        `json:"short_id_prefix,omitempty"`
@@ -484,6 +485,7 @@ func (r *Registry) buildLocked() Current {
 		v := IngressView{Name: name, Source: "discovered", Online: r.onlineLocked(name)}
 		p := r.probes[name]
 		storedFP, approved := approvals[name]
+		v.Approved = approved
 		switch {
 		case p == nil:
 			v.Approval, v.Detail = stUnreachable, "the node is not in the node list"

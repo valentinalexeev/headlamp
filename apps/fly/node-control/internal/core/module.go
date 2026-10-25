@@ -33,3 +33,16 @@ type Routes struct {
 type Stopper interface {
 	Stop(ctx context.Context) error
 }
+
+// NavItem is one entry of the admin top bar. Path is an absolute local path.
+type NavItem struct {
+	Label string `json:"label"`
+	Path  string `json:"path"`
+	Order int    `json:"order"`
+}
+
+// Navigator is an optional interface for modules that have an admin page. A module that is
+// disabled at run time returns no entries. Entries are collected once, after every Register.
+type Navigator interface {
+	Nav() []NavItem
+}

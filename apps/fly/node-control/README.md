@@ -193,6 +193,30 @@ Differences from the Python app this replaced: the agent is dialled through the 
 database is closed only after both listeners have drained on shutdown. A misconfigured enrolment (a missing variable,
 an unreadable or invalid `ENROLL_CONFIG`) stops startup with a message naming the problem, never a secret.
 
+## Navigation bar
+
+Every admin page shows a small top bar that lists the modules available in this deployment, with the current one
+highlighted. Today that is Nodes (`/`) and, when `ENROLL_DB` is set, Enrolment (`/enroll`). The bar appears only
+when at least two entries exist, so a deployment without enrolment looks exactly as before. It is never added to
+the public listener, to JSON, to non-200 responses or to any request other than GET and HEAD.
+
+The core inserts the bar into HTML responses of the admin listener, inside the Host guard. `GET /_nav.json` returns
+the same list as `[{"label":"Nodes","path":"/","order":10},...]` with `Cache-Control: no-store`.
+
+A module with an admin page adds an entry by implementing the optional `core.Navigator` interface. The core
+collects entries after every module registered, so a module that is switched off (return `nil`) or failed to
+register never appears:
+
+```go
+func (m *Module) Nav() []core.NavItem {
+	return []core.NavItem{{Label: "Reports", Path: "/reports", Order: 30}}
+}
+```
+
+A label is 1 to 24 printable characters (no control, bidi or zero-width characters); a path is a local absolute
+path (`/x`, not `//x`, `http://x`, `javascript:x`, and without `?`, `#`, quotes or angle brackets). The bar is fixed
+at the top and uses the page's own colour variables; the longest matching path is the current one. Invalid entries and duplicate paths stop the start-up with an error naming the module.
+
 ## Build and run
 
 ```

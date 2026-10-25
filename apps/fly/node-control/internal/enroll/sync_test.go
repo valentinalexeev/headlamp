@@ -279,7 +279,7 @@ func TestReconcileRecoversFromPanic(t *testing.T) {
 	defer restore()
 	var calls atomic.Int32
 	oldSync := syncFn
-	syncFn = func(ctx context.Context, s *Store, a Agent, st *SyncState) bool {
+	syncFn = func(ctx context.Context, s Backend, a Agent, st *SyncState) bool {
 		if calls.Add(1) == 1 {
 			panic(fmt.Errorf("db locked SECRETPAYLOAD"))
 		}
@@ -318,7 +318,7 @@ func TestReconcilePanicMarksError(t *testing.T) {
 	restore := setReconcileForTest(5*time.Millisecond, time.Hour)
 	defer restore()
 	oldSync := syncFn
-	syncFn = func(ctx context.Context, s *Store, a Agent, st *SyncState) bool { panic("x") }
+	syncFn = func(ctx context.Context, s Backend, a Agent, st *SyncState) bool { panic("x") }
 	defer func() { syncFn = oldSync }()
 	state := NewSyncState(nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -339,7 +339,7 @@ func TestFirstSyncBeforeFullPeriod(t *testing.T) {
 	defer restore()
 	var calls atomic.Int32
 	oldSync := syncFn
-	syncFn = func(ctx context.Context, s *Store, a Agent, st *SyncState) bool { calls.Add(1); return true }
+	syncFn = func(ctx context.Context, s Backend, a Agent, st *SyncState) bool { calls.Add(1); return true }
 	defer func() { syncFn = oldSync }()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

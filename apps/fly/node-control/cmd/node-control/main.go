@@ -90,6 +90,17 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && (os.Args[1] == "enroll-import" || os.Args[1] == "enroll-export") {
+		run := runEnrollImport
+		if os.Args[1] == "enroll-export" {
+			run = runEnrollExport
+		}
+		if err := run(os.Args[2:], core.OSEnv(), os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, os.Args[1]+" failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

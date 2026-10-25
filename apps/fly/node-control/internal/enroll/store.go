@@ -116,6 +116,28 @@ func OpenStore(path string, secretKey []byte, clock func() time.Time) (*Store, e
 	return s, nil
 }
 
+// OpenStoreReadOnly opens an existing database for reading only (SQLite mode=ro): no schema creation or migration,
+// no write of any kind to the file. It exists for Snapshot and the move to Redis, where the source must stay
+// exactly as it is so the previous release can still run against it.
+func OpenStoreReadOnly(path string, secretKey []byte, clock func() time.Time) (*Store, error) {
+	if len(secretKey) < 16 {
+		return nil, errors.New("secret key must be at least 16 bytes")
+	}
+	if clock == nil {
+		clock = time.Now
+	}
+	esc := strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(path)
+	db, err := sql.Open("sqlite", "file:"+esc+"?mode=ro&_pragma=busy_timeout(30000)")
+	if err != nil {
+		return nil, fmt.Errorf("open enrolment db: %w", err)
+	}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open enrolment db: %w", err)
+	}
+	return &Store{db: db, key: append([]byte(nil), secretKey...), clock: clock, secretHashFn: func() string { return randHex(16) }}, nil
+}
+
 func (s *Store) init() error {
 	ctx := context.Background()
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {

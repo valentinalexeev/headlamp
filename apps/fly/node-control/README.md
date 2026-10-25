@@ -247,15 +247,21 @@ Adding an ingress, step by step:
 
 1. Deploy the host with the `reality-ingress` and `ingress-agent` roles; give its agent its own token and set the
    `INGRESS_*` values so `/v1/info` answers. Its front must serve `link_host` (see "Compromised ingress").
-2. Register the node in headscale with `tag:ingress` and a name that fits `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`.
+2. Register the node in headscale with `tag:ingress` and a name that fits `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`
+   (this becomes the ingress name). Then pin the name with `headscale nodes rename <id> <name>`, using a name that the
+   machine's hostname does not produce (otherwise headscale follows a hostname change). `headscale nodes list` shows
+   the id, addresses and names.
 3. Set the token as a secret named `AGENT_TOKEN_<NAME>` and redeploy node-control (or use an `enroll.json` entry
    instead, see above, which needs no approval).
-4. Open `/enroll`. The ingress appears as `pending` with its host, a short prefix of its public key and short id and a
-   fingerprint. The agent does not report a fingerprint: it is node-control's SHA-256 over the canonical JSON of
+4. Open `/enroll`. The ingress appears as `pending` with its host, the node id, tailnet address and names, a short
+   prefix of its public key and short id and a fingerprint. Compare the node id, address and name with
+   `headscale nodes list`: an impostor holding the name can publish the real ingress's public values, so the node
+   itself must be the one you registered. The agent does not report a fingerprint: it is node-control's SHA-256 over the canonical JSON of
    `name`, `host`, `port`, `sni`, `public_key` and `short_id`. Compare the host, public key and short id that
    `GET /v1/info` on the agent reports (over a channel you trust) with what the page shows, then press Approve. The
-   API is `POST /enroll/ingresses/<name>/approve` with `{"fingerprint": "<shown fingerprint>"}`; a fingerprint that
-   no longer matches the parameters the ingress publishes at that moment is refused. `POST
+   API is `POST /enroll/ingresses/<name>/approve` with `{"fingerprint": "<shown fingerprint>", "node_id": <shown node id>}`;
+   a fingerprint that no longer matches the parameters the ingress publishes at that moment, or a node id other than
+   the node that publishes them, is refused (409). `POST
    /enroll/ingresses/<name>/unapprove` takes it out again. Both POSTs need `Content-Type: application/json`.
 5. Approval pushes the credential set at once; the row shows its sync state. Phones pick the new ingress up when they
    refresh their subscription; a profile imported by a one-time link needs the person to refresh it.
@@ -263,15 +269,23 @@ Adding an ingress, step by step:
 - A `changed` ingress (its parameters differ, or another node id publishes them) is frozen: it is out of profiles
   and no longer synced, so it keeps its old credential set until it is approved again or un-approved. A revocation
   does not reach it meanwhile.
-- A tagged node is matched by its GIVEN name (the name the headscale administrator sets), never by the hostname the
-  machine reports about itself. When several tagged nodes share a given name, the lookup of an agent fails and no
-  token is sent to any of them, unless an approval is pinned to one of them by node id (that node keeps working and
-  the others are ignored). An explicit `agent_url` in an `enroll.json` entry (or `AGENT_URL` for the first one)
-  removes the headscale lookup for that ingress altogether: the token then goes only to that address.
+- Names in headscale are NOT proof of who owns a node. The given name starts as the hostname the machine reports
+  and headscale re-derives it whenever that hostname changes, as long as the given name still follows it (equals the
+  hostname, or the hostname plus `-<digits>`). Only a name set with `headscale nodes rename <id> <name>` to something
+  the hostname does not produce stays put. So:
+  - For a CONFIGURED ingress without `agent_url`, the lookup accepts a tagged node only when its given name does not
+    follow its hostname; run `headscale nodes rename` on the ingress node first (the log says so when a lookup is
+    refused). When several nodes share the name the lookup fails and nothing is sent to any of them. An explicit
+    `agent_url` in an `enroll.json` entry (or `AGENT_URL` for the first one) removes the headscale lookup for that
+    ingress altogether: the token then goes only to that address. This is the safest setting.
+  - A DISCOVERED ingress is identified by the node id it was approved on, not by its name: the agent is found by that
+    id, and no other node is ever sent its token or credentials. If that node disappears, the row turns `invalid`
+    ("the approved node is not present") and nothing is contacted until you remove the approval; a different node that
+    now carries the name can then be reviewed and approved.
 - Before approval, the token variable `AGENT_TOKEN_<NAME>` is already sent (as the bearer of `GET /v1/info`) to a
-  tagged node whose given name matches it. Pinning the node id after approval reduces this exposure but cannot remove it:
-  anyone who can register a tagged node with that name receives that one token. Do not set the variable before you
-  expect the node.
+  tagged node whose given name matches it. Pinning the node id after approval reduces this exposure but cannot remove
+  it: anyone who can register a tagged node with that name (and, for a host with no rename, a matching hostname)
+  receives that one token. Do not set the variable before you expect the node.
 - A create, revoke, extend or approval answers after at most 3 seconds. If an agent has not answered by then, its row
   reads `pending` with state `unknown` until the push ends; the change itself is already recorded and never fails.
 

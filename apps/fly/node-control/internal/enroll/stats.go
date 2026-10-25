@@ -11,8 +11,12 @@ import (
 // Traffic is the up and down byte counts of one device.
 type Traffic struct{ Up, Down float64 }
 
+// maxTraffic bounds one reported value and every per-device sum (2^53, the largest integer a
+// float64 holds exactly): a hostile agent cannot push a total to +Inf, which encoding/json refuses.
+const maxTraffic = 9007199254740992
+
 // numeric reads a JSON number (decoded as float64, or an integer type) as a finite, non-negative
-// float.
+// float no larger than maxTraffic.
 func numeric(v any) (float64, bool) {
 	var f float64
 	switch n := v.(type) {
@@ -29,7 +33,7 @@ func numeric(v any) (float64, bool) {
 	default:
 		return 0, false
 	}
-	if math.IsNaN(f) || math.IsInf(f, 0) || f < 0 {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f < 0 || f > maxTraffic {
 		return 0, false
 	}
 	return f, true
@@ -42,12 +46,17 @@ func numeric(v any) (float64, bool) {
 // map on any failure) or when an id could not be computed.
 func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, devices []Device) (map[int64]Traffic, bool) {
 	answers := make([]map[string]any, len(targets))
+	panicked := make([]bool, len(targets))
 	var wg sync.WaitGroup
 	for i, t := range targets {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer func() { recover() }() // a broken agent client must not take the page down
+			defer func() { // a broken agent client must not take the page down
+				if recover() != nil {
+					panicked[i] = true
+				}
+			}()
 			answers[i] = t.Agent.Stats(ctx)
 		}()
 	}
@@ -55,7 +64,7 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 	out := map[int64]Traffic{}
 	partial := false
 	for i, t := range targets {
-		if len(answers[i]) == 0 && t.State.Snapshot().Pending {
+		if panicked[i] || (len(answers[i]) == 0 && t.State.Snapshot().Pending) {
 			partial = true
 		}
 		for _, d := range devices {
@@ -79,8 +88,8 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 				continue
 			}
 			tr := out[d.ID]
-			tr.Up += up
-			tr.Down += down
+			tr.Up = math.Min(tr.Up+up, maxTraffic)
+			tr.Down = math.Min(tr.Down+down, maxTraffic)
 			out[d.ID] = tr
 		}
 	}

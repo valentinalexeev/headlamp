@@ -143,9 +143,10 @@ func SyncAll(ctx context.Context, store *Store, cfg IngressConfig, targets []Syn
 		return false
 	}
 	var wg sync.WaitGroup
+	defer wg.Wait() // runs before the deferred unlock: no push outlives the lock, even on a panic
 	results := make([]bool, len(targets))
 	for i, t := range targets {
-		creds, err := cfg.CredentialsFor(t.Ingress, base)
+		creds, err := safeCredentials(cfg, t, base)
 		if err != nil {
 			syncLog(t.Name, "enrolment sync failed: credentials unavailable", "error_type", errType(err))
 			t.State.Failed("error")
@@ -175,6 +176,22 @@ func SyncAll(ctx context.Context, store *Store, cfg IngressConfig, targets []Syn
 		}
 	}
 	return true
+}
+
+// credentialsHook runs before a target's credentials are computed; tests use it to inject a panic.
+var credentialsHook func(Ingress)
+
+// safeCredentials computes a target's set; a panic becomes an error that carries only its type.
+func safeCredentials(cfg IngressConfig, t SyncTarget, base []Credential) (creds []Credential, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			creds, err = nil, fmt.Errorf("panic: %s", typeName(r))
+		}
+	}()
+	if credentialsHook != nil {
+		credentialsHook(t.Ingress)
+	}
+	return cfg.CredentialsFor(t.Ingress, base)
 }
 
 // pushTo pushes one target's set and records the outcome in its state.

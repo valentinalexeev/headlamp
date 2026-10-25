@@ -2,7 +2,9 @@ package enroll
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -180,8 +182,17 @@ func TestSyncAllNewTargetGetsFullSet(t *testing.T) {
 	ts[1].Agent = a2
 	SyncAll(context.Background(), e.store, cfg, ts)
 	base, _ := e.store.ActiveCredentials()
-	if a2.count() != 1 || len(a2.pushes[0].creds) != len(base) {
+	want, err := cfg.CredentialsFor(cfg.Ingresses[1], base)
+	if err != nil || len(want) == 0 {
+		t.Fatal(err)
+	}
+	if a2.count() != 1 || len(a2.pushes[0].creds) != len(want) {
 		t.Fatalf("new target: %+v", a2.pushes)
+	}
+	for i, c := range want {
+		if a2.pushes[0].creds[i] != c {
+			t.Fatalf("credential %d differs: %+v vs %+v", i, a2.pushes[0].creds[i], c)
+		}
 	}
 }
 
@@ -277,11 +288,25 @@ func TestSyncAllPushesAreConcurrent(t *testing.T) {
 	e := newEnv(t)
 	e.make("a", 0)
 	cfg := baseIngressCfg(2)
-	slow := func() *fakeAgent { return &fakeAgent{onPut: func() { time.Sleep(200 * time.Millisecond) }} }
-	start := time.Now()
-	SyncAll(context.Background(), e.store, cfg, targetsFor(cfg, slow(), slow()))
-	if d := time.Since(start); d >= 350*time.Millisecond {
-		t.Fatalf("pushes ran one after the other: %v", d)
+	// each push waits until BOTH pushes are in flight; sequential pushes never meet and time out
+	var arrived sync.WaitGroup
+	arrived.Add(2)
+	met := make(chan struct{})
+	go func() { arrived.Wait(); close(met) }()
+	var timedOut atomic.Bool
+	mk := func() *fakeAgent {
+		return &fakeAgent{onPut: func() {
+			arrived.Done()
+			select {
+			case <-met:
+			case <-time.After(5 * time.Second):
+				timedOut.Store(true)
+			}
+		}}
+	}
+	SyncAll(context.Background(), e.store, cfg, targetsFor(cfg, mk(), mk()))
+	if timedOut.Load() {
+		t.Fatal("pushes ran one after the other")
 	}
 }
 
@@ -518,5 +543,162 @@ func TestReconcileLoopAllUsesCurrentTargets(t *testing.T) {
 	<-done
 	if a1.count() < 2 || a2.count() == 0 {
 		t.Fatalf("%d %d", a1.count(), a2.count())
+	}
+}
+
+func TestSyncAllCredentialPanicIsolated(t *testing.T) {
+	e := newEnv(t)
+	e.make("a", 0)
+	cfg := baseIngressCfg(2)
+	credentialsHook = func(ing Ingress) {
+		if ing.Name == "ingress-1" {
+			panic("boom-" + ing.Name)
+		}
+	}
+	defer func() { credentialsHook = nil }()
+	buf := captureLogs(t)
+	a1, a2 := &fakeAgent{}, &fakeAgent{}
+	ts := targetsFor(cfg, a1, a2)
+	if SyncAll(context.Background(), e.store, cfg, ts) {
+		t.Fatal("want false")
+	}
+	if s := ts[0].State.Snapshot(); !s.Pending || s.State != "error" || a1.count() != 0 {
+		t.Fatalf("%+v", s)
+	}
+	if s := ts[1].State.Snapshot(); s.Pending || s.State != "ok" || a2.count() != 1 {
+		t.Fatalf("%+v", s)
+	}
+	if strings.Contains(buf.String(), "boom-") {
+		t.Fatal("panic value in logs")
+	}
+	if !syncMu.TryLock() {
+		t.Fatal("lock still held")
+	}
+	syncMu.Unlock()
+}
+
+type panicAgent struct{ fakeAgent }
+
+func (a *panicAgent) PutCredentials(context.Context, []Credential, bool) error { panic("x") }
+func (a *panicAgent) Stats(context.Context) map[string]any                     { panic("x") }
+
+func TestSyncAllPanickingAgentIsolated(t *testing.T) {
+	e := newEnv(t)
+	e.make("a", 0)
+	cfg := baseIngressCfg(2)
+	a2 := &fakeAgent{}
+	ts := targetsFor(cfg, &panicAgent{}, a2)
+	if SyncAll(context.Background(), e.store, cfg, ts) {
+		t.Fatal("want false")
+	}
+	if s := ts[0].State.Snapshot(); !s.Pending || s.State != "error" {
+		t.Fatalf("%+v", s)
+	}
+	if s := ts[1].State.Snapshot(); s.Pending || a2.count() != 1 {
+		t.Fatalf("%+v", s)
+	}
+}
+
+func TestMergedStatsPanickingAgentRecovered(t *testing.T) {
+	e := newEnv(t)
+	d, _ := e.make("a", 0)
+	cfg := baseIngressCfg(2)
+	id := opaqueFor(t, cfg, cfg.Ingresses[0], d)
+	good := &statsAgent{answer: map[string]any{id: map[string]any{"up": float64(1), "down": float64(2)}}}
+	ts := targetsFor(cfg, &panicAgent{}, good)
+	ds, _ := e.store.ListDevices()
+	got, partial := MergedStats(context.Background(), ts, cfg, ds)
+	if !partial || got[d.ID] != (Traffic{1, 2}) {
+		t.Fatalf("%v %+v", partial, got)
+	}
+}
+
+func TestSyncAllCancelledContextReturnsPromptly(t *testing.T) {
+	e := newEnv(t)
+	e.make("a", 0)
+	cfg := baseIngressCfg(2)
+	hang := make(chan struct{})
+	defer close(hang)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-hang:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	ts := targetsFor(cfg, NewAgent(srv.URL, "t", nil), NewAgent(srv.URL, "t", nil))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan bool)
+	go func() { done <- SyncAll(ctx, e.store, cfg, ts) }()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("want false")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("SyncAll hangs on a cancelled context")
+	}
+	for _, x := range ts {
+		if s := x.State.Snapshot(); !s.Pending || (s.State != "unreachable" && s.State != "error") {
+			t.Fatalf("%+v", s)
+		}
+	}
+}
+
+func TestMergedStatsBoundsHostileValues(t *testing.T) {
+	const max = 9007199254740992.0
+	e := newEnv(t)
+	d1, _ := e.make("a", 0)
+	d2, _ := e.make("b", 0)
+	cfg := baseIngressCfg(2)
+	id1, id2 := opaqueFor(t, cfg, cfg.Ingresses[0], d1), opaqueFor(t, cfg, cfg.Ingresses[0], d2)
+	ans := func() map[string]any {
+		return map[string]any{
+			id1: map[string]any{"up": max, "down": max},
+			id2: map[string]any{"up": 1e308, "down": max + 2}, // both ignored: the entry is dropped
+		}
+	}
+	ts := targetsFor(cfg, &statsAgent{answer: ans()}, &statsAgent{answer: ans()})
+	ds, _ := e.store.ListDevices()
+	got, _ := MergedStats(context.Background(), ts, cfg, ds)
+	if got[d1.ID] != (Traffic{max, max}) {
+		t.Fatalf("not clamped: %+v", got[d1.ID])
+	}
+	if _, ok := got[d2.ID]; ok {
+		t.Fatalf("hostile entry accepted: %+v", got[d2.ID])
+	}
+	if _, err := json.Marshal(got); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("exactly the maximum is accepted", func(t *testing.T) {
+		one, _ := MergedStats(context.Background(), ts[:1], cfg, ds)
+		if one[d1.ID] != (Traffic{max, max}) {
+			t.Fatalf("%+v", one[d1.ID])
+		}
+	})
+	t.Run("one value over the maximum drops the entry", func(t *testing.T) {
+		a := &statsAgent{answer: map[string]any{id1: map[string]any{"up": float64(5), "down": max * 2}}}
+		r, _ := MergedStats(context.Background(), targetsFor(cfg, a, &statsAgent{}), cfg, ds)
+		if len(r) != 0 {
+			t.Fatalf("%+v", r)
+		}
+	})
+}
+
+func TestMergedStatsRejectsNaNInfNegative(t *testing.T) {
+	e := newEnv(t)
+	d, _ := e.make("a", 0)
+	cfg := baseIngressCfg(1)
+	id := opaqueFor(t, cfg, cfg.Ingresses[0], d)
+	ds, _ := e.store.ListDevices()
+	for name, v := range map[string]float64{"nan": math.NaN(), "inf": math.Inf(1), "ninf": math.Inf(-1), "negative": -1} {
+		t.Run(name, func(t *testing.T) {
+			a := &statsAgent{answer: map[string]any{id: map[string]any{"up": v, "down": float64(1)}}}
+			got, _ := MergedStats(context.Background(), targetsFor(cfg, a), cfg, ds)
+			if len(got) != 0 {
+				t.Fatalf("%+v", got)
+			}
+		})
 	}
 }

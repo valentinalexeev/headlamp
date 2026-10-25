@@ -65,6 +65,7 @@ func (m *Module) Register(r *core.Routes) error {
 	if len(key) < 16 {
 		return errors.New("ENROLL_SECRET_KEY must be at least 16 bytes")
 	}
+	cfg = cfg.WithKey([]byte(key))
 	u, err := url.Parse(m.env.Getenv("AGENT_URL"))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return errors.New("AGENT_URL must be an http(s) URL with a host and no credentials")

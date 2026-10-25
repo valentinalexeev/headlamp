@@ -231,9 +231,13 @@ func RenderProfile(cfg IngressConfig, d Device) ([]byte, error) {
 	}
 	for _, m := range Modes {
 		for _, i := range cfg.Ingresses {
+			uuid, err := cfg.UUIDFor(i, m, d.UUIDs[m])
+			if err != nil {
+				return nil, err
+			}
 			outbounds = append(outbounds, obj{
 				{"type", "vless"}, {"tag", outboundTag(cfg, m, i)}, {"server", i.Host}, {"server_port", i.Port},
-				{"uuid", d.UUIDs[m]}, {"flow", "xtls-rprx-vision"},
+				{"uuid", uuid}, {"flow", "xtls-rprx-vision"},
 				{"tls", obj{
 					{"enabled", true},
 					{"server_name", i.SNI},
@@ -274,8 +278,12 @@ func RenderClashProfile(cfg IngressConfig, d Device) ([]byte, error) {
 	var proxies []any
 	for _, m := range Modes {
 		for _, i := range cfg.Ingresses {
+			uuid, err := cfg.UUIDFor(i, m, d.UUIDs[m])
+			if err != nil {
+				return nil, err
+			}
 			proxies = append(proxies, obj{
-				{"name", outboundTag(cfg, m, i)}, {"type", "vless"}, {"server", i.Host}, {"port", i.Port}, {"uuid", d.UUIDs[m]},
+				{"name", outboundTag(cfg, m, i)}, {"type", "vless"}, {"server", i.Host}, {"port", i.Port}, {"uuid", uuid},
 				{"network", "tcp"}, {"tls", true}, {"udp", true}, {"flow", "xtls-rprx-vision"},
 				{"servername", i.SNI}, {"client-fingerprint", "chrome"},
 				{"reality-opts", obj{

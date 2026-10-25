@@ -19,14 +19,15 @@ func singleOf(g IngressCfg) IngressConfig {
 func (c expectedCase) config() IngressConfig { return singleOf(c.ingress()) }
 
 // Fixed fake data of the multi-ingress cases. Nothing here is a real host, key or identifier.
+// ingress-1 keeps the stored (base) credentials, ingress-2 gets derived ones.
 var multiCfg = IngressConfig{
 	ProfileName: "tunnel",
 	LinkHost:    "links.example.com",
 	Ingresses: []Ingress{
-		{Name: "ingress-1", Host: "ingress-1.example.com", PublicKey: "KEY-ONE-fake", ShortID: "0a1b", SNI: "sni-1.example.com", Port: 443},
-		{Name: "ingress-2", Host: "ingress-2.example.com", PublicKey: "KEY-TWO-fake", ShortID: "2c3d", SNI: "sni-2.example.com", Port: 8443},
+		{Name: "ingress-1", Host: "ingress-1.example.com", PublicKey: "KEY-ONE-fake", ShortID: "0a1b", SNI: "sni-1.example.com", Port: 443, UUIDs: "base"},
+		{Name: "ingress-2", Host: "ingress-2.example.com", PublicKey: "KEY-TWO-fake", ShortID: "2c3d", SNI: "sni-2.example.com", Port: 8443, UUIDs: "derived"},
 	},
-}
+}.WithKey(testKey)
 
 func multiDevice() Device {
 	return Device{ID: 7, Name: "Secret Phone", Owner: "someone", Client: "sing-box", ExpiresAt: 2_000_000_000,
@@ -101,6 +102,15 @@ func asList(t *testing.T, v any) []any {
 	return l
 }
 
+func wantUUID(t *testing.T, ing Ingress, mode string, d Device) string {
+	t.Helper()
+	u, err := multiCfg.UUIDFor(ing, mode, d.UUIDs[mode])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
 func TestMultiIngressOutboundsPerIngressAndMode(t *testing.T) {
 	d := multiDevice()
 	sb, err := RenderProfile(multiCfg, d)
@@ -124,7 +134,7 @@ func TestMultiIngressOutboundsPerIngressAndMode(t *testing.T) {
 				tls := o["tls"].(map[string]any)
 				reality := tls["reality"].(map[string]any)
 				if o["type"] != "vless" || o["server"] != ing.Host || int(o["server_port"].(float64)) != ing.Port ||
-					o["uuid"] != d.UUIDs[mode] || tls["server_name"] != ing.SNI ||
+					o["uuid"] != wantUUID(t, ing, mode, d) || tls["server_name"] != ing.SNI ||
 					reality["public_key"] != ing.PublicKey || reality["short_id"] != ing.ShortID {
 					t.Errorf("%s-%s: wrong parameters: %v", mode, ing.Name, o)
 				}
@@ -176,7 +186,7 @@ func TestMultiIngressOutboundsPerIngressAndMode(t *testing.T) {
 				x := proxies[mode+"-"+ing.Name]
 				ro, _ := x["reality-opts"].(map[string]any)
 				if x == nil || x["server"] != ing.Host || int(x["port"].(float64)) != ing.Port ||
-					x["uuid"] != d.UUIDs[mode] || x["servername"] != ing.SNI ||
+					x["uuid"] != wantUUID(t, ing, mode, d) || x["servername"] != ing.SNI ||
 					ro["public-key"] != ing.PublicKey || ro["short-id"] != ing.ShortID {
 					t.Errorf("%s-%s: wrong parameters: %v", mode, ing.Name, x)
 				}

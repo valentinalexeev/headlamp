@@ -21,6 +21,8 @@ type Ingress struct {
 	Port      int    `json:"port"`
 	AgentURL  string `json:"agent_url"`
 	TokenEnv  string `json:"token_env"`
+	// UUIDs is "base" (the stored device UUIDs) or "derived" (computed per ingress, see UUIDFor).
+	UUIDs string `json:"uuids"`
 }
 
 // IngressConfig is the parsed ENROLL_CONFIG: one or more ingresses, the host that serves
@@ -29,6 +31,8 @@ type IngressConfig struct {
 	ProfileName string    `json:"profile_name"`
 	LinkHost    string    `json:"link_host"`
 	Ingresses   []Ingress `json:"ingresses"`
+
+	key []byte // ENROLL_SECRET_KEY, set by WithKey; never serialised
 }
 
 const (
@@ -73,7 +77,7 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 		}
 		return IngressConfig{ProfileName: old.ProfileName, LinkHost: old.Host, Ingresses: []Ingress{{
 			Name: defaultIngress, Host: old.Host, PublicKey: old.PublicKey, ShortID: old.ShortID,
-			SNI: old.SNI, Port: old.Port}}}, nil
+			SNI: old.SNI, Port: old.Port, UUIDs: uuidsBase}}}, nil
 	}
 	for _, k := range singleHostKeys {
 		if _, ok := raw[k]; ok {
@@ -113,6 +117,22 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 		}
 		names[in.Name], hosts[in.Host] = true, true
 		cfg.Ingresses = append(cfg.Ingresses, in)
+	}
+	firstBase := ""
+	for i := range cfg.Ingresses {
+		in := &cfg.Ingresses[i]
+		if in.UUIDs == "" {
+			in.UUIDs = uuidsDerived
+			if len(cfg.Ingresses) == 1 {
+				in.UUIDs = uuidsBase
+			}
+		}
+		if in.UUIDs == uuidsBase {
+			if firstBase != "" {
+				return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: ingress %s: uuids \"base\" is already used by ingress %s (at most one ingress may use the stored credentials)", in.Name, firstBase)
+			}
+			firstBase = in.Name
+		}
 	}
 	if v, ok := raw["link_host"]; ok {
 		s, ok := rawString(v)
@@ -180,6 +200,13 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 			return fail("token_env must match %s", ingressTokenPatt)
 		}
 		in.TokenEnv = s
+	}
+	if v, present := raw["uuids"]; present {
+		s, _ := rawString(v)
+		if s != uuidsBase && s != uuidsDerived {
+			return fail("uuids must be %q or %q", uuidsBase, uuidsDerived)
+		}
+		in.UUIDs = s
 	}
 	return in, nil
 }

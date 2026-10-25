@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -84,6 +85,9 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 			return IngressConfig{}, errors.New(errMixedShapes)
 		}
 	}
+	if err := rejectUnknownKeys(raw, "", newShapeTopKeys); err != nil {
+		return IngressConfig{}, err
+	}
 	cfg := IngressConfig{ProfileName: "tunnel"}
 	if v, ok := raw["profile_name"]; ok {
 		s, ok := rawString(v)
@@ -151,6 +155,9 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 	if !ingressNameRe.MatchString(name) {
 		return Ingress{}, fmt.Errorf("ENROLL_CONFIG: ingresses[%d]: name must match %s", i, ingressNamePatt)
 	}
+	if err := rejectUnknownKeys(raw, name, ingressKeys); err != nil {
+		return Ingress{}, err
+	}
 	fail := func(format string, a ...any) (Ingress, error) {
 		return Ingress{}, fmt.Errorf("ENROLL_CONFIG: ingress %s: %s", name, fmt.Sprintf(format, a...))
 	}
@@ -202,6 +209,39 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 	}
 	in.UUIDs = s
 	return in, nil
+}
+
+var (
+	newShapeTopKeys = []string{"profile_name", "link_host", "ingresses"}
+	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids"}
+	keyNameRe       = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,40}$`)
+)
+
+// rejectUnknownKeys fails on a key outside allowed, so a misspelt option is never silently
+// ignored. The key name is echoed only when it looks like a name (never an arbitrary string).
+func rejectUnknownKeys(raw map[string]json.RawMessage, ingress string, allowed []string) error {
+	ok := map[string]bool{}
+	for _, k := range allowed {
+		ok[k] = true
+	}
+	var bad []string
+	for k := range raw {
+		if !ok[k] {
+			bad = append(bad, k)
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	sort.Strings(bad)
+	k := bad[0]
+	if !keyNameRe.MatchString(k) {
+		k = "(a key with an unusual name)"
+	}
+	if ingress == "" {
+		return fmt.Errorf("ENROLL_CONFIG: unknown key %q", k)
+	}
+	return fmt.Errorf("ENROLL_CONFIG: ingress %s: unknown key %q", ingress, k)
 }
 
 // rawString decodes a non-empty JSON string; anything else (absent, null, number, "") is !ok.

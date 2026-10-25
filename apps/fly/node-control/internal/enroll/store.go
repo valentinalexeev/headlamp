@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS tokens (
     max_uses INTEGER NOT NULL,
     uses INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS ingress_approvals (
+    name TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    approved_at INTEGER NOT NULL
+);
 `
 
 // Device is an enrolled device. It carries no secret material.
@@ -435,4 +440,38 @@ func (s *Store) ActiveCredentials() ([]Credential, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// Approvals returns the approved discovered ingresses: name -> the fingerprint of the published
+// parameters that the operator approved.
+func (s *Store) Approvals() (map[string]string, error) {
+	rows, err := s.db.Query("SELECT name, fingerprint FROM ingress_approvals")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var name, fp string
+		if err := rows.Scan(&name, &fp); err != nil {
+			return nil, err
+		}
+		out[name] = fp
+	}
+	return out, rows.Err()
+}
+
+// Approve records (or replaces) the approval of a discovered ingress.
+func (s *Store) Approve(name, fingerprint string) error {
+	_, err := s.db.Exec(
+		"INSERT INTO ingress_approvals (name, fingerprint, approved_at) VALUES (?, ?, ?)"+
+			" ON CONFLICT(name) DO UPDATE SET fingerprint=excluded.fingerprint, approved_at=excluded.approved_at",
+		name, fingerprint, s.clock().Unix())
+	return err
+}
+
+// Unapprove removes an approval; removing a missing one is not an error.
+func (s *Store) Unapprove(name string) error {
+	_, err := s.db.Exec("DELETE FROM ingress_approvals WHERE name=?", name)
+	return err
 }

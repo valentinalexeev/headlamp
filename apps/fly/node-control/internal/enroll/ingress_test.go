@@ -238,3 +238,37 @@ func TestLinkView(t *testing.T) {
 		t.Errorf("Link() = %+v, want %+v", got, want)
 	}
 }
+
+func TestUnknownKeysRejectedInNewShape(t *testing.T) {
+	t.Run("unknown ingress key names the key and the ingress", func(t *testing.T) {
+		_, err := ParseIngressConfig(cfgOf("", ing("ingress-1", "ingress-1.example.com", `"agent_ulr":"http://x.example.com"`)))
+		if err == nil || !strings.Contains(err.Error(), "agent_ulr") || !strings.Contains(err.Error(), "ingress-1") {
+			t.Fatalf("%v", err)
+		}
+	})
+	t.Run("unknown top-level key", func(t *testing.T) {
+		_, err := ParseIngressConfig(cfgOf(`"link_hots":"links.example.com"`, ing("ingress-1", "ingress-1.example.com", "")))
+		if err == nil || !strings.Contains(err.Error(), "link_hots") {
+			t.Fatalf("%v", err)
+		}
+	})
+	t.Run("a key that looks like a value is not echoed", func(t *testing.T) {
+		odd := strings.Repeat("S3CRET", 10)
+		_, err := ParseIngressConfig(cfgOf("", ing("ingress-1", "ingress-1.example.com", `"`+odd+`":1`)))
+		if err == nil || strings.Contains(err.Error(), odd) {
+			t.Fatalf("%v", err)
+		}
+	})
+	t.Run("every documented key is accepted", func(t *testing.T) {
+		all := `"sni":"s.example.com","port":8443,"agent_url":"http://100.64.0.2:9000","token_env":"AGENT_TOKEN_X"`
+		if _, err := ParseIngressConfig(cfgOf(`"profile_name":"p","link_host":"links.example.com"`, ing("ingress-1", "ingress-1.example.com", all))); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("the old shape stays lenient", func(t *testing.T) {
+		raw := `{"host":"ingress.example.test","public_key":"P","short_id":"ab","sni":"s.example.test","extra":1}`
+		if _, err := ParseIngressConfig([]byte(raw)); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

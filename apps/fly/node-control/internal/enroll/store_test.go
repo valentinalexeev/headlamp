@@ -691,3 +691,84 @@ func TestFixturesAreNotModified(t *testing.T) {
 		t.Fatal("fixture changed")
 	}
 }
+
+func TestApprovalsStore(t *testing.T) {
+	t.Run("empty then approve, replace, remove", func(t *testing.T) {
+		s := newStore(t, 1_800_000_000)
+		got, err := s.Approvals()
+		if err != nil || len(got) != 0 {
+			t.Fatalf("%v %v", got, err)
+		}
+		if err := s.Approve("ingress-3", "fp1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Approve("ingress-3", "fp2"); err != nil { // re-approval replaces
+			t.Fatal(err)
+		}
+		got, _ = s.Approvals()
+		if len(got) != 1 || got["ingress-3"] != "fp2" {
+			t.Fatalf("%v", got)
+		}
+		if err := s.Unapprove("ingress-3"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Unapprove("ingress-3"); err != nil { // idempotent
+			t.Fatal(err)
+		}
+		if got, _ = s.Approvals(); len(got) != 0 {
+			t.Fatalf("%v", got)
+		}
+	})
+}
+
+func TestApprovalsPersistInTheDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "e.db")
+	s, err := OpenStore(path, testKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Approve("ingress-3", "fp1")
+	s.Close()
+	s2, err := OpenStore(path, testKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if got, _ := s2.Approvals(); got["ingress-3"] != "fp1" {
+		t.Fatalf("%v", got)
+	}
+}
+
+func TestOldDatabaseOpensWithoutApprovalsTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the schema as the Python implementation created it: no approvals table
+	for _, q := range []string{
+		`CREATE TABLE devices (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, owner TEXT NOT NULL, client TEXT NOT NULL, expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0, secret_epoch INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE device_uuids (device_id INTEGER NOT NULL REFERENCES devices(id), mode TEXT NOT NULL, uuid TEXT NOT NULL, PRIMARY KEY (device_id, mode))`,
+		`CREATE TABLE tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id INTEGER NOT NULL REFERENCES devices(id), token_hash TEXT NOT NULL UNIQUE, expires INTEGER NOT NULL, max_uses INTEGER NOT NULL, uses INTEGER NOT NULL DEFAULT 0)`,
+		`INSERT INTO devices (name, owner, client, expires_at) VALUES ('d','o','sing-box',4000000000)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	s, err := OpenStore(path, testKey, nil)
+	if err != nil {
+		t.Fatalf("an old database must open: %v", err)
+	}
+	defer s.Close()
+	if devs, err := s.ListDevices(); err != nil || len(devs) != 1 {
+		t.Fatalf("%v %v", devs, err)
+	}
+	if got, err := s.Approvals(); err != nil || len(got) != 0 {
+		t.Fatalf("%v %v", got, err)
+	}
+	if err := s.Approve("ingress-3", "fp"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -23,9 +23,13 @@
   table { width:100%; border-collapse:collapse; font-size:.9rem; }
   th, td { text-align:left; padding:.5rem; border-bottom:1px solid var(--border); white-space:nowrap; }
   td.actions { display:flex; gap:.4rem; }
+  div.actions { display:flex; gap:.4rem; }
+  td.wrap { white-space:normal; min-width:12rem; }
   .muted { color:var(--muted); } .bad { color:var(--bad); }
   #out { display:none; }
   #syncbanner { display:none; border-color:var(--bad); color:var(--bad); }
+  #ingresses { display:none; }
+  .pill { font-size:.75rem; padding:.1rem .45rem; border:1px solid var(--border); border-radius:99px; }
   #out textarea { width:100%; height:5rem; }
 </style>
 </head>
@@ -50,9 +54,16 @@
     <textarea id="outtext" readonly></textarea>
     <button class="ghost" id="copy" type="button">Copy</button>
   </div>
+  <div class="panel tablewrap" id="ingresses">
+    <div class="muted" id="ingnote"></div>
+    <table>
+      <thead><tr><th>Ingress</th><th>Host</th><th>Online</th><th>Sync</th><th>Since</th><th>Approval</th><th></th></tr></thead>
+      <tbody id="ingrows"></tbody>
+    </table>
+  </div>
   <div class="panel tablewrap">
     <table>
-      <thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Client</th><th>Expires</th><th>Status</th><th>Traffic</th><th></th></tr></thead>
+      <thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Client</th><th>Expires</th><th>Status</th><th id="trafficth">Traffic</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -76,13 +87,65 @@ const SYNC_HINT = {
   conflict: "agent refused an empty credential set",
   error: "unexpected error; see the node-control log",
 };
-function showSync(s) {
+function showSync(s, rows) {
   const b = $("#syncbanner");
   if (!s || !s.pending) { b.style.display = "none"; b.textContent = ""; return; }
-  const when = s.since ? new Date(s.since * 1000).toLocaleString() : "?";
-  b.textContent = "ingress host out of sync since " + when + ": " + s.state + " (" + (SYNC_HINT[s.state] || "") + ")."
-    + " Revocations and extensions are NOT in effect on the ingress host until this clears.";
+  const when = (t) => t ? new Date(t * 1000).toLocaleString() : "?";
+  const behind = (rows || []).filter((r) => r.sync && r.sync.pending);
+  if ((rows || []).length > 1 && behind.length > 0) {
+    // several ingresses: name every one that is behind
+    b.textContent = "ingress " + behind.map((r) => r.name).join(", ") + " out of sync since " + when(s.since) + ": "
+      + behind.map((r) => r.name + " " + r.sync.state + " (" + (SYNC_HINT[r.sync.state] || "") + ")").join("; ") + "."
+      + " Revocations and extensions are NOT in effect on " + (behind.length > 1 ? "those ingresses" : "that ingress") + " until this clears.";
+  } else {
+    b.textContent = "ingress host out of sync since " + when(s.since) + ": " + s.state + " (" + (SYNC_HINT[s.state] || "") + ")."
+      + " Revocations and extensions are NOT in effect on the ingress host until this clears.";
+  }
   b.style.display = "block";
+}
+// text a machine reports about itself: printable characters only, shortened
+const plain = (t, n) => String(t === undefined || t === null ? "" : t).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, "").slice(0, n || 63);
+const yesNo = (v) => v === null || v === undefined ? "-" : (v ? "yes" : "no");
+// The ingress table is shown only when it has something to say: several active ingresses, or a
+// discovered one that is not approved. With one ingress and nothing pending the page stays as it was.
+async function loadIngresses(j) {
+  const panel = $("#ingresses");
+  const need = (j.ingresses || []).length > 1 || (j.pending_ingresses || []).length > 0;
+  if (!need) { panel.style.display = "none"; return; }
+  let list;
+  try { list = await (await fetch("/enroll/ingresses")).json(); } catch (e) { return; }
+  const body = $("#ingrows"); body.textContent = "";
+  for (const v of list.ingresses) {
+    const tr = document.createElement("tr");
+    const sync = v.sync ? v.sync.state + (v.sync.pending ? " (pending)" : "") : "-";
+    const since = v.sync && v.sync.since ? new Date(v.sync.since * 1000).toLocaleString() : "-";
+    let appr = v.approval;
+    if (v.public_key_prefix && v.approval !== "approved") appr += " (key " + v.public_key_prefix + "\u2026, id " + (v.short_id_prefix || "") + "\u2026, fingerprint " + (v.fingerprint ? v.fingerprint.slice(0, 12) : "") + "\u2026)";
+    if (v.node_id && v.approval !== "approved") appr += " [node " + v.node_id + ", key " + plain(v.machine_key_prefix, 12) + "\u2026, " + plain(v.address, 45) + ", hostname " + (plain(v.hostname) || "?") + ", name " + (plain(v.given_name) || "?") + "]";
+    if (v.detail) appr += ": " + v.detail;
+    [v.name, v.host || "-", yesNo(v.online), sync, since, appr].forEach((t, i) => {
+      const td = document.createElement("td"); td.textContent = t; if (i === 5) td.className = "wrap"; tr.appendChild(td);
+    });
+    const td = document.createElement("td"); const box = document.createElement("div"); box.className = "actions"; td.appendChild(box);
+    const btn = (label, cls, fn) => { const b = document.createElement("button"); b.textContent = label; b.className = cls; b.onclick = fn; box.appendChild(b); };
+    const base = "/enroll/ingresses/" + encodeURIComponent(v.name);
+    if (v.source === "discovered" && v.fingerprint && (v.approval === "pending" || v.approval === "changed")) {
+      btn("Approve", "", async () => {
+        if (!confirm("Approve " + v.name + " (" + v.host + ")?\nNode " + v.node_id + ", address " + plain(v.address, 45) + ", machine key " + plain(v.machine_key_prefix, 12) + "\u2026, hostname " + plain(v.hostname) + ", name " + plain(v.given_name)
+          + "\nFingerprint " + v.fingerprint + "\nCompare the node with `headscale nodes list`. It will receive credentials and appear in every profile.")) return;
+        try { const r = await post(base + "/approve", {fingerprint: v.fingerprint, node_id: v.node_id}); showSync(r.sync, r.ingresses); load(); } catch (e) { say(e.message, true); }
+      });
+    }
+    if (v.source === "discovered" && v.approved) {
+      btn("Remove approval", "danger", async () => {
+        if (!confirm("Remove the approval of " + v.name + "? It leaves the profiles and gets no more updates (it keeps its last set).")) return;
+        try { const r = await post(base + "/unapprove"); showSync(r.sync, r.ingresses); load(); } catch (e) { say(e.message, true); }
+      });
+    }
+    tr.appendChild(td); body.appendChild(tr);
+  }
+  $("#ingnote").textContent = list.discovery && !list.discovery.enabled ? "Discovery is off: " + list.discovery.reason + "." : "";
+  panel.style.display = "block";
 }
 function fmtTraffic(t) {
   if (!t) return "-";
@@ -91,7 +154,11 @@ function fmtTraffic(t) {
 async function load() {
   const r = await fetch("/enroll/devices");
   const j = await r.json();
-  showSync(j.sync);
+  showSync(j.sync, j.ingresses);
+  const th = $("#trafficth");
+  th.textContent = j.stats_partial ? "Traffic*" : "Traffic";
+  th.title = j.stats_partial ? "Partial: an ingress did not answer, so its traffic is missing." : "";
+  loadIngresses(j);
   const devs = j.devices;
   const body = $("#rows"); body.textContent = "";
   for (const d of devs) {
@@ -108,11 +175,11 @@ async function load() {
     });
     btn("Extend", "ghost", async () => {
       const v = prompt("New expiry date (YYYY-MM-DD)"); if (!v) return;
-      try { const j = await post("/enroll/devices/" + d.id + "/extend", {expires_at: endOfDay(v)}); showSync(j.sync); load(); } catch (e) { say(e.message, true); }
+      try { const j = await post("/enroll/devices/" + d.id + "/extend", {expires_at: endOfDay(v)}); showSync(j.sync, j.ingresses); load(); } catch (e) { say(e.message, true); }
     });
     btn("Revoke", "danger", async () => {
       if (!confirm("Revoke " + d.name + "?")) return;
-      try { const j = await post("/enroll/devices/" + d.id + "/revoke"); showSync(j.sync); load(); } catch (e) { say(e.message, true); }
+      try { const j = await post("/enroll/devices/" + d.id + "/revoke"); showSync(j.sync, j.ingresses); load(); } catch (e) { say(e.message, true); }
     });
     tr.appendChild(td); body.appendChild(tr);
   }
@@ -124,7 +191,7 @@ $("#create").onsubmit = async (ev) => {
     const j = await post("/enroll/devices", {name: f.get("name"), owner: f.get("owner"), client: f.get("client"), expires_at: endOfDay(f.get("expires"))});
     show("Subscription URL for the new device", j.subscription_url);
     say(j.sync_pending ? "Created; not yet on the ingress host (" + j.sync.state + "), retried every 5 minutes." : "Created.");
-    showSync(j.sync);
+    showSync(j.sync, j.ingresses);
     ev.target.reset(); load();
   } catch (e) { say(e.message, true); }
 };

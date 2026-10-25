@@ -1,6 +1,7 @@
 package enroll
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -60,13 +61,28 @@ type publicStore interface {
 // Public is the public enrolment handler.
 type Public struct {
 	store publicStore
-	cfg   IngressCfg
+	cfg   IngressConfig
+	// profileCfg, when set, gives the ingresses of the moment for a profile (the approved set can
+	// change at run time); cfg then only supplies the link host.
+	profileCfg func(ctx context.Context) IngressConfig
 }
 
 // NewPublic returns the public handler over store.
-func NewPublic(store *Store, cfg IngressCfg) *Public { return newPublic(store, cfg) }
+func NewPublic(store *Store, cfg IngressConfig) *Public { return newPublic(store, cfg) }
 
-func newPublic(store publicStore, cfg IngressCfg) *Public { return &Public{store: store, cfg: cfg} }
+// NewPublicFor returns the public handler over store whose profiles list the ingresses the
+// registry has approved at the time of the request.
+func NewPublicFor(store *Store, reg *Registry) *Public {
+	p := newPublic(store, reg.LinkConfig())
+	p.profileCfg = func(ctx context.Context) IngressConfig {
+		// the readings the page and the reconcile loop keep fresh: a profile request never waits for
+		// the network
+		return reg.Current(ctx, false).Cfg
+	}
+	return p
+}
+
+func newPublic(store publicStore, cfg IngressConfig) *Public { return &Public{store: store, cfg: cfg} }
 
 // Register routes everything on mux to the handler, which answers an empty 404 to all but the two
 // routes.
@@ -150,11 +166,15 @@ func (p *Public) subscription(w http.ResponseWriter, r *http.Request, secret str
 	}
 	var body []byte
 	var ctype string
+	cfg := p.cfg
+	if p.profileCfg != nil {
+		cfg = p.profileCfg(r.Context())
+	}
 	if d.Client == "clash" {
-		body, err = RenderClashProfile(p.cfg, *d)
+		body, err = RenderClashProfile(cfg, *d)
 		ctype = "text/yaml; charset=utf-8"
 	} else {
-		body, err = RenderProfile(p.cfg, *d)
+		body, err = RenderProfile(cfg, *d)
 		ctype = "application/json"
 	}
 	if err != nil {

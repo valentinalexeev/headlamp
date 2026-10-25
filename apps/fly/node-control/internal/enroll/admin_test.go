@@ -21,7 +21,7 @@ const (
 	adminFuture       = adminNow + 86400*30
 )
 
-var adminCfg = IngressCfg{Host: "ingress.example.test", PublicKey: "PUB", ShortID: "ab", SNI: "sni.example.test", Port: 443, ProfileName: "tunnel"}
+var adminCfg = singleOf(IngressCfg{Host: "ingress.example.test", PublicKey: "PUB", ShortID: "ab", SNI: "sni.example.test", Port: 443, ProfileName: "tunnel"})
 
 // stubAgent is an Agent whose behaviour tests switch at will.
 type stubAgent struct {
@@ -78,11 +78,13 @@ func newStore(t *testing.T, now int64) *Store {
 	return s
 }
 
-func newAdminFx(t *testing.T) *adminFx {
+func newAdminFx(t *testing.T) *adminFx { return newAdminFxCfg(t, adminCfg) }
+
+func newAdminFxCfg(t *testing.T, cfg IngressConfig) *adminFx {
 	t.Helper()
 	store := newStore(t, adminNow)
 	agent := &stubAgent{}
-	a := NewAdmin(store, adminCfg, agent)
+	a := NewAdmin(store, cfg, agent)
 	mux := http.NewServeMux()
 	a.Register(mux)
 	return &adminFx{t: t, store: store, agent: agent, admin: a, mux: mux}

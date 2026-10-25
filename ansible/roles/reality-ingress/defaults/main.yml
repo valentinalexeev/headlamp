@@ -10,9 +10,16 @@ ingress_host: ""
 ingress_listen_port: 443
 
 # Reality (REQUIRED, vault). Private key from `xray x25519`; short id is
-# 2-16 hex chars (`openssl rand -hex 8`). The public key is not used here.
+# 2-16 hex chars (`openssl rand -hex 8`). The public key is not used by this
+# role; it is only passed on to the ingress agent (role `ingress-agent`) for
+# GET /v1/info.
 reality_private_key: ""
 reality_short_id: ""
+# Public half of reality_private_key: `xray x25519 -i <private key>` prints it
+# ("Password (PublicKey)"). Optional; empty = the agent does not publish it.
+reality_public_key: ""
+# Short label of this ingress for discovery (ingress-agent role), e.g. "ingress-1".
+ingress_name: ""
 reality_sni: "{{ ingress_host }}"
 # The self-steal target: the loopback TLS site of the Caddy front.
 reality_dest: "127.0.0.1:8443"

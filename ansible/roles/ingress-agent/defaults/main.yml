@@ -37,3 +37,17 @@ ingress_direct_geosite: []
 
 # Geodata directory (xray run -test needs it for geoip:/geosite: rules).
 xray_asset_dir: /usr/local/share/xray
+
+# Public parameters served at GET /v1/info (all optional; the endpoint answers
+# 503 until name, host, public key and short id are all set). Public values
+# only: never put the Reality private key here. These names match the
+# reality-ingress role, so one set of group variables serves both roles.
+# Short label of this ingress, e.g. "ingress-1": [a-z0-9-], at most 32 chars.
+ingress_name: ""
+ingress_host: ""
+ingress_listen_port: 443
+reality_sni: "{{ ingress_host }}"
+reality_short_id: ""
+# Public half of the vaulted reality_private_key: `xray x25519 -i <private key>`
+# prints it as "Password (PublicKey)". Empty = not exported.
+reality_public_key: ""

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -278,4 +279,64 @@ func TestTopBarWiring(t *testing.T) {
 			t.Fatalf("bar shown with one entry: %d", code)
 		}
 	})
+}
+
+// The enrolment module gets the same cached headscale source as the other modules: it shows the
+// online flag of a configured ingress and lists a tagged node it does not know as pending.
+func TestEnrolmentUsesTheHeadscaleSource(t *testing.T) {
+	var fetches atomic.Int32
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetches.Add(1)
+		io.WriteString(w, `{"nodes":[
+		  {"id":"1","name":"ingress-1","givenName":"ingress-1","online":true,"tags":["tag:ingress"],"ipAddresses":["100.64.0.5"]},
+		  {"id":"2","name":"ingress-2","givenName":"ingress-2","online":true,"tags":["tag:ingress"],"ipAddresses":["100.64.0.6"]}]}`)
+	}))
+	defer hs.Close()
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "ingress.json")
+	os.WriteFile(cfg, []byte(`{"link_host":"links.example.com","ingresses":[
+	  {"name":"ingress-1","host":"ingress-1.example.com","public_key":"P","short_id":"ab","uuids":"base"}]}`), 0o600)
+	env := core.MapEnv(map[string]string{
+		"NODES_CONFIG":           filepath.Join(dir, "absent.json"),
+		"HEADSCALE_LOGIN_SERVER": hs.URL,
+		"HEADSCALE_API_KEY":      "test-key",
+		"ENROLL_DB":              filepath.Join(dir, "e.db"),
+		"ENROLL_CONFIG":          cfg,
+		"ENROLL_SECRET_KEY":      strings.Repeat("k", 32),
+		"AGENT_URL":              "http://agent.test",
+		"AGENT_TOKEN":            "agent-token-value",
+		"ENROLL_ALLOWED_HOSTS":   "admin.test",
+	})
+	mods, err := buildModules(env, hs.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn, _ := serve(t, env, mods)
+	code, body := getHost(t, tn.AdminAddr(), "admin.test", "/enroll/ingresses")
+	if code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	var out struct {
+		Ingresses []struct {
+			Name     string `json:"name"`
+			Approval string `json:"approval"`
+			Online   *bool  `json:"online"`
+		} `json:"ingresses"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("%v: %s", err, body)
+	}
+	if len(out.Ingresses) != 2 {
+		t.Fatalf("%s", body)
+	}
+	if o := out.Ingresses[0]; o.Name != "ingress-1" || o.Approval != "configured" || o.Online == nil || !*o.Online {
+		t.Fatalf("%+v", o)
+	}
+	// ingress-2 has no token variable: it is listed, never asked and never used
+	if o := out.Ingresses[1]; o.Name != "ingress-2" || o.Approval != "no token" {
+		t.Fatalf("%+v", o)
+	}
+	if fetches.Load() == 0 {
+		t.Fatal("the headscale source was not used")
+	}
 }

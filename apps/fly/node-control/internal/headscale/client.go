@@ -24,6 +24,7 @@ const requestTimeout = 10 * time.Second
 // Node is one headscale node as seen by the API.
 type Node struct {
 	ID              uint64
+	MachineKey      string // the node's machine public key ("mkey:..."), empty when the API omits it
 	Name, GivenName string
 	Online          bool
 	LastSeen        *time.Time
@@ -38,6 +39,8 @@ type Node struct {
 func (n *Node) UnmarshalJSON(b []byte) error {
 	var raw struct {
 		ID              json.RawMessage `json:"id"`
+		MachineKey      string          `json:"machineKey"`
+		MachineKeySnake string          `json:"machine_key"`
 		Name            string          `json:"name"`
 		GivenName       string          `json:"givenName"`
 		GivenNameSnake  string          `json:"given_name"`
@@ -65,6 +68,7 @@ func (n *Node) UnmarshalJSON(b []byte) error {
 	}
 	*n = Node{
 		ID:              id,
+		MachineKey:      first(raw.MachineKey, raw.MachineKeySnake),
 		Name:            raw.Name,
 		GivenName:       first(raw.GivenName, raw.GivenNameSnake),
 		Online:          raw.Online,

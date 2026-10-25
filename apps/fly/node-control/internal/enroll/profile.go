@@ -89,8 +89,8 @@ func parseIntLiteral(v json.RawMessage) (int, error) {
 }
 
 // SubURL is the subscription URL a device imports.
-func SubURL(cfg IngressCfg, secret string) string {
-	return "https://" + cfg.Host + "/sub/" + secret
+func SubURL(cfg IngressConfig, secret string) string {
+	return "https://" + cfg.Link().Host + "/sub/" + secret
 }
 
 // DeepLinkFor builds the import link of one client ("sing-box", "karing" or "clash") for a
@@ -110,25 +110,25 @@ func DeepLinkFor(client, subURL, name string) (string, error) {
 }
 
 // SingBoxDeepLink is the sing-box import link for the device's subscription secret.
-func SingBoxDeepLink(cfg IngressCfg, secret string) string {
+func SingBoxDeepLink(cfg IngressConfig, secret string) string {
 	s, _ := DeepLinkFor("sing-box", SubURL(cfg, secret), cfg.ProfileName)
 	return s
 }
 
 // KaringDeepLink is the Karing import link for the device's subscription secret.
-func KaringDeepLink(cfg IngressCfg, secret string) string {
+func KaringDeepLink(cfg IngressConfig, secret string) string {
 	s, _ := DeepLinkFor("karing", SubURL(cfg, secret), cfg.ProfileName)
 	return s
 }
 
 // ClashDeepLink is the Clash import link for the device's subscription secret.
-func ClashDeepLink(cfg IngressCfg, secret string) string {
+func ClashDeepLink(cfg IngressConfig, secret string) string {
 	s, _ := DeepLinkFor("clash", SubURL(cfg, secret), cfg.ProfileName)
 	return s
 }
 
 // DeepLink is the default (sing-box) import link for the device's subscription secret.
-func DeepLink(cfg IngressCfg, secret string) string { return SingBoxDeepLink(cfg, secret) }
+func DeepLink(cfg IngressConfig, secret string) string { return SingBoxDeepLink(cfg, secret) }
 
 // quote matches Python urllib.parse.quote(s, safe=""): everything but the unreserved set is
 // percent-encoded byte-wise (uppercase hex), a space becomes %20.
@@ -191,25 +191,61 @@ func strs(s []string) []any {
 	return out
 }
 
-// RenderProfile renders the sing-box profile for a device: compact JSON, raw UTF-8.
-func RenderProfile(cfg IngressCfg, d Device) ([]byte, error) {
+// Health-check parameters of the per-mode fail-over groups (several ingresses only).
+const (
+	probeURL       = "https://www.gstatic.com/generate_204"
+	probeInterval  = "3m"
+	probeIntervalS = 180 // the same interval in seconds, for Clash
+	probeTolerance = 50
+)
+
+// outboundTag is the tag of one mode's outbound on one ingress. With a single ingress it is the
+// bare mode name, so the profile is the one a single-host deployment always produced.
+func outboundTag(cfg IngressConfig, mode string, i Ingress) string {
+	if cfg.Single() {
+		return mode
+	}
+	return mode + "-" + i.Name
+}
+
+// RenderProfile renders the sing-box profile for a device: compact JSON, raw UTF-8. With several
+// ingresses every mode becomes a urltest group over that mode's outbound on each ingress.
+func RenderProfile(cfg IngressConfig, d Device) ([]byte, error) {
 	if err := checkModes(d); err != nil {
 		return nil, err
 	}
 	outbounds := []any{
 		obj{{"type", "selector"}, {"tag", "select"}, {"outbounds", strs(Modes)}, {"default", "auto"}},
 	}
+	if !cfg.Single() {
+		for _, m := range Modes {
+			var members []string
+			for _, i := range cfg.Ingresses {
+				members = append(members, outboundTag(cfg, m, i))
+			}
+			outbounds = append(outbounds, obj{
+				{"type", "urltest"}, {"tag", m}, {"outbounds", strs(members)},
+				{"url", probeURL}, {"interval", probeInterval}, {"tolerance", probeTolerance},
+			})
+		}
+	}
 	for _, m := range Modes {
-		outbounds = append(outbounds, obj{
-			{"type", "vless"}, {"tag", m}, {"server", cfg.Host}, {"server_port", cfg.Port},
-			{"uuid", d.UUIDs[m]}, {"flow", "xtls-rprx-vision"},
-			{"tls", obj{
-				{"enabled", true},
-				{"server_name", cfg.SNI},
-				{"utls", obj{{"enabled", true}, {"fingerprint", "chrome"}}},
-				{"reality", obj{{"enabled", true}, {"public_key", cfg.PublicKey}, {"short_id", cfg.ShortID}}},
-			}},
-		})
+		for _, i := range cfg.Ingresses {
+			uuid, err := cfg.UUIDFor(i, m, d.UUIDs[m])
+			if err != nil {
+				return nil, err
+			}
+			outbounds = append(outbounds, obj{
+				{"type", "vless"}, {"tag", outboundTag(cfg, m, i)}, {"server", i.Host}, {"server_port", i.Port},
+				{"uuid", uuid}, {"flow", "xtls-rprx-vision"},
+				{"tls", obj{
+					{"enabled", true},
+					{"server_name", i.SNI},
+					{"utls", obj{{"enabled", true}, {"fingerprint", "chrome"}}},
+					{"reality", obj{{"enabled", true}, {"public_key", i.PublicKey}, {"short_id", i.ShortID}}},
+				}},
+			})
+		}
 	}
 	outbounds = append(outbounds, obj{{"type", "direct"}, {"tag", "plain"}})
 	p := obj{
@@ -226,6 +262,7 @@ func RenderProfile(cfg IngressCfg, d Device) ([]byte, error) {
 			}},
 			{"final", "select"},
 			{"auto_detect_interface", true},
+			// Every ingress host (the "server" of each outbound) is resolved by the local resolver.
 			{"default_domain_resolver", obj{{"server", "local"}, {"strategy", "prefer_ipv4"}}},
 		}},
 	}
@@ -233,28 +270,49 @@ func RenderProfile(cfg IngressCfg, d Device) ([]byte, error) {
 }
 
 // RenderClashProfile renders the same three modes as a Clash/mihomo profile (JSON, valid YAML).
-func RenderClashProfile(cfg IngressCfg, d Device) ([]byte, error) {
+// With several ingresses every mode becomes a url-test group over that mode's proxy on each ingress.
+func RenderClashProfile(cfg IngressConfig, d Device) ([]byte, error) {
 	if err := checkModes(d); err != nil {
 		return nil, err
 	}
 	var proxies []any
 	for _, m := range Modes {
-		proxies = append(proxies, obj{
-			{"name", m}, {"type", "vless"}, {"server", cfg.Host}, {"port", cfg.Port}, {"uuid", d.UUIDs[m]},
-			{"network", "tcp"}, {"tls", true}, {"udp", true}, {"flow", "xtls-rprx-vision"},
-			{"servername", cfg.SNI}, {"client-fingerprint", "chrome"},
-			{"reality-opts", obj{
-				{"public-key", cfg.PublicKey}, {"short-id", cfg.ShortID}, {"support-x25519mlkem768", true},
-			}},
-		})
+		for _, i := range cfg.Ingresses {
+			uuid, err := cfg.UUIDFor(i, m, d.UUIDs[m])
+			if err != nil {
+				return nil, err
+			}
+			proxies = append(proxies, obj{
+				{"name", outboundTag(cfg, m, i)}, {"type", "vless"}, {"server", i.Host}, {"port", i.Port}, {"uuid", uuid},
+				{"network", "tcp"}, {"tls", true}, {"udp", true}, {"flow", "xtls-rprx-vision"},
+				{"servername", i.SNI}, {"client-fingerprint", "chrome"},
+				{"reality-opts", obj{
+					{"public-key", i.PublicKey}, {"short-id", i.ShortID}, {"support-x25519mlkem768", true},
+				}},
+			})
+		}
+	}
+	groups := []any{obj{{"name", "select"}, {"type", "select"}, {"proxies", strs(Modes)}}}
+	if !cfg.Single() {
+		for _, m := range Modes {
+			var members []string
+			for _, i := range cfg.Ingresses {
+				members = append(members, outboundTag(cfg, m, i))
+			}
+			groups = append(groups, obj{
+				{"name", m}, {"type", "url-test"}, {"proxies", strs(members)},
+				{"url", probeURL}, {"interval", probeIntervalS}, {"tolerance", probeTolerance},
+			})
+		}
 	}
 	p := obj{
 		{"proxies", proxies},
-		{"proxy-groups", []any{obj{{"name", "select"}, {"type", "select"}, {"proxies", strs(Modes)}}}},
+		{"proxy-groups", groups},
 		{"rules", []any{"MATCH,select"}},
 		{"dns", obj{
 			{"enable", true}, {"ipv6", false},
 			{"nameserver", []any{"tls://1.1.1.1#select"}},
+			// The proxy servers (every ingress host) are resolved by the system resolver.
 			{"proxy-server-nameserver", []any{"system"}},
 		}},
 	}

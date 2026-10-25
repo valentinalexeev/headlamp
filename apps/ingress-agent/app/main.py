@@ -21,6 +21,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, StrictInt, field_validator, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .info import load_info
 from .store import Cred, diff, load, save, sweep
 from .xray import XrayRunner, email_for, parse_list, render_config
 
@@ -143,7 +144,8 @@ async def sweep_loop(applier, interval: float, sleep=asyncio.sleep) -> None:
             log.error("expiry sweep failed: %s", type(e).__name__)
 
 
-def create_app(applier: Applier, token: str, clock: Callable[[], int] = lambda: int(time.time()), sweep_interval: float = SWEEP_SECONDS) -> FastAPI:
+def create_app(applier: Applier, token: str, clock: Callable[[], int] = lambda: int(time.time()), sweep_interval: float = SWEEP_SECONDS,
+               info: dict | None = None) -> FastAPI:
     @contextlib.asynccontextmanager
     async def lifespan(_app):
         try:
@@ -191,6 +193,12 @@ def create_app(applier: Applier, token: str, clock: Callable[[], int] = lambda: 
                 out[opaque_id(c.uuid)] = {"up": s["up"], "down": s["down"]}
         return out
 
+    @app.get("/v1/info", dependencies=[Depends(auth)])
+    def get_info() -> dict:
+        if info is None:
+            raise HTTPException(status_code=503)  # this deployment does not configure it
+        return dict(info)
+
     return app
 
 
@@ -199,10 +207,11 @@ def create_app_from_env() -> FastAPI:
     token = env.get("AGENT_TOKEN")
     if not token:
         raise RuntimeError("AGENT_TOKEN is required")
+    info = load_info(env)  # raises naming the variable; never echoes a value
     state_dir = Path(env.get("AGENT_STATE_DIR", "/var/lib/ingress-agent"))
     runner = XrayRunner(env.get("XRAY_BIN", "/usr/local/bin/xray"), env.get("XRAY_UNIT", "xray"), env.get("XRAY_API", "127.0.0.1:10085"))
     applier = Applier(state_dir / "credentials.json", env.get("XRAY_BASE_CONFIG", "/etc/xray/config.base.json"),
                       env.get("XRAY_CONFIG", "/etc/xray/config.json"), runner,
                       direct_geoip=parse_list(env.get("INGRESS_DIRECT_GEOIP", "")),
                       direct_geosite=parse_list(env.get("INGRESS_DIRECT_GEOSITE", "")))
-    return create_app(applier, token)
+    return create_app(applier, token, info=info)

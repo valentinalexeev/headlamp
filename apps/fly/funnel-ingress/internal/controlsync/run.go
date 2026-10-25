@@ -39,6 +39,14 @@ func Run(ctx context.Context, src Source, rep Reporter, app *Applier, cache *Cac
 	r.run(ctx)
 }
 
+// ApplyCached applies the cached configuration, if any, and returns its version ("" when there is none or it
+// was rejected). main calls it before the public listener starts, so a restart serves from the cache at once.
+func ApplyCached(cache *Cache, app *Applier, log func(string, ...any)) string {
+	r := &runner{app: app, cache: cache, log: log}
+	r.loadCache()
+	return r.applied
+}
+
 type runner struct {
 	src      Source
 	rep      Reporter

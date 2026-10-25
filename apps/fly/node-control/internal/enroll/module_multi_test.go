@@ -437,6 +437,20 @@ func (f *multiFx) withDiscovered(t *testing.T) {
 	f.nodes.set(ingressNode("ingress-3", true))
 }
 
+// approveBody is the body the page posts for an ingress: the fingerprint and the node it shows.
+func (f *multiFx) approveBody(name string) string {
+	f.t.Helper()
+	_, m := f.do("GET", "/enroll/ingresses", "")
+	for _, r := range m["ingresses"].([]any) {
+		row := r.(map[string]any)
+		if row["name"] == name {
+			return fmt.Sprintf(`{"fingerprint":%q,"node_id":%v}`, row["fingerprint"], row["node_id"])
+		}
+	}
+	f.t.Fatalf("no row for %s", name)
+	return ""
+}
+
 func (f *multiFx) fingerprintOf(name string) string {
 	f.t.Helper()
 	_, m := f.do("GET", "/enroll/ingresses", "")
@@ -493,8 +507,7 @@ func TestPendingIngressNotInProfileOrSyncUntilApproved(t *testing.T) {
 		t.Fatal("a pending ingress received credentials")
 	}
 
-	fp := f.fingerprintOf("ingress-3")
-	code, m := f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, fp))
+	code, m := f.do("POST", "/enroll/ingresses/ingress-3/approve", f.approveBody("ingress-3"))
 	if code != 200 {
 		t.Fatalf("%d %v", code, m)
 	}
@@ -542,15 +555,17 @@ func TestApproveEndpointRules(t *testing.T) {
 		name, path, ctype, body string
 		want                    int
 	}{
-		{"mismatching fingerprint", "/enroll/ingresses/ingress-3/approve", "application/json", `{"fingerprint":"` + strings.Repeat("0", 64) + `"}`, 409},
-		{"unknown ingress", "/enroll/ingresses/ingress-9/approve", "application/json", `{"fingerprint":"` + fp + `"}`, 404},
-		{"configured ingress", "/enroll/ingresses/ingress-1/approve", "application/json", `{"fingerprint":"x"}`, 409},
+		{"mismatching fingerprint", "/enroll/ingresses/ingress-3/approve", "application/json", `{"fingerprint":"` + strings.Repeat("0", 64) + `","node_id":3}`, 409},
+		{"unknown ingress", "/enroll/ingresses/ingress-9/approve", "application/json", `{"fingerprint":"` + fp + `","node_id":3}`, 404},
+		{"configured ingress", "/enroll/ingresses/ingress-1/approve", "application/json", `{"fingerprint":"x","node_id":1}`, 409},
+		{"missing node id", "/enroll/ingresses/ingress-3/approve", "application/json", `{"fingerprint":"` + fp + `"}`, 422},
+		{"another node id", "/enroll/ingresses/ingress-3/approve", "application/json", `{"fingerprint":"` + fp + `","node_id":4}`, 409},
 		{"missing fingerprint", "/enroll/ingresses/ingress-3/approve", "application/json", `{}`, 422},
-		{"not JSON content type", "/enroll/ingresses/ingress-3/approve", "text/plain", `{"fingerprint":"` + fp + `"}`, 422},
+		{"not JSON content type", "/enroll/ingresses/ingress-3/approve", "text/plain", `{"fingerprint":"` + fp + `","node_id":3}`, 422},
 		{"unapprove needs JSON too", "/enroll/ingresses/ingress-3/unapprove", "text/plain", `{}`, 422},
 		{"unapprove unknown", "/enroll/ingresses/ingress-9/unapprove", "application/json", `{}`, 404},
 		{"unapprove configured", "/enroll/ingresses/ingress-1/unapprove", "application/json", `{}`, 409},
-		{"invalid name", "/enroll/ingresses/Ingress_3/approve", "application/json", `{"fingerprint":"` + fp + `"}`, 404},
+		{"invalid name", "/enroll/ingresses/Ingress_3/approve", "application/json", `{"fingerprint":"` + fp + `","node_id":3}`, 404},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -566,7 +581,7 @@ func TestApproveEndpointRules(t *testing.T) {
 	if got, _ := f.mod.store.Approvals(); len(got) != 0 {
 		t.Fatalf("nothing above may approve: %v", got)
 	}
-	if code, _ := f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, fp)); code != 200 {
+	if code, _ := f.do("POST", "/enroll/ingresses/ingress-3/approve", f.approveBody("ingress-3")); code != 200 {
 		t.Fatal(code)
 	}
 }
@@ -596,8 +611,7 @@ func TestApprovalsPersistAcrossRestart(t *testing.T) {
 	f := newMultiFx(t)
 	f.withDiscovered(t)
 	f.register()
-	fp := f.fingerprintOf("ingress-3")
-	if code, _ := f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, fp)); code != 200 {
+	if code, _ := f.do("POST", "/enroll/ingresses/ingress-3/approve", f.approveBody("ingress-3")); code != 200 {
 		t.Fatal(code)
 	}
 	f.mod.Stop(context.Background())
@@ -619,7 +633,7 @@ func TestChangedParametersLeaveProfileThroughTheModule(t *testing.T) {
 	f.register()
 	_, subURL := f.create()
 	sub := subURL[strings.Index(subURL, "/sub/"):]
-	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
+	f.do("POST", "/enroll/ingresses/ingress-3/approve", f.approveBody("ingress-3"))
 	f.a3.set("public_key", "CHANGED-KEY-0123456789")
 	f.clk.advance(infoTTL + time.Second)
 	f.do("GET", "/enroll/ingresses", "") // the page (or the reconcile loop) reads the parameters; a profile fetch never does
@@ -673,7 +687,7 @@ func TestHangingInfoDoesNotDelayARevoke(t *testing.T) {
 	f.withDiscovered(t)
 	f.register()
 	id, _ := f.create()
-	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
+	f.do("POST", "/enroll/ingresses/ingress-3/approve", f.approveBody("ingress-3"))
 	release := make(chan struct{})
 	f.a3.mu.Lock()
 	f.a3.handler = func(w http.ResponseWriter, r *http.Request) { <-release }
@@ -692,7 +706,7 @@ func TestRevokeReachesApprovedIngressRightAfterARestart(t *testing.T) {
 	f.withDiscovered(t)
 	f.register()
 	id, _ := f.create()
-	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
+	f.do("POST", "/enroll/ingresses/ingress-3/approve", f.approveBody("ingress-3"))
 	f.mod.Stop(context.Background())
 
 	f.register() // a fresh process: no reading of /v1/info has happened yet
@@ -708,7 +722,7 @@ func TestReconcileAndDeviceListCoverUnverifiedApprovedIngress(t *testing.T) {
 	f.withDiscovered(t)
 	f.register()
 	id, _ := f.create()
-	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
+	f.do("POST", "/enroll/ingresses/ingress-3/approve", f.approveBody("ingress-3"))
 	f.mod.Stop(context.Background())
 
 	f.a3.mu.Lock()
@@ -750,7 +764,7 @@ func TestPublicProfileNeverReadsInfo(t *testing.T) {
 	f.withDiscovered(t)
 	f.register()
 	_, subURL := f.create()
-	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
+	f.do("POST", "/enroll/ingresses/ingress-3/approve", f.approveBody("ingress-3"))
 	f.clk.advance(infoTTL + time.Second)
 	hits := f.a3.hits()
 	f.pub(subURL[strings.Index(subURL, "/sub/"):])

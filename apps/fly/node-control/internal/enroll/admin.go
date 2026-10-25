@@ -541,11 +541,12 @@ func (a *Admin) approve(w http.ResponseWriter, r *http.Request) {
 	}
 	var v validator
 	fp := v.str(obj, "fingerprint", 1, 128)
+	nodeID := v.integer(obj, "node_id", 1, math.MaxInt64)
 	if len(v.errs) > 0 {
 		invalid(w, v.errs...)
 		return
 	}
-	if err := a.reg.Approve(r.Context(), name, fp); err != nil {
+	if err := a.reg.Approve(r.Context(), name, fp, uint64(nodeID)); err != nil {
 		a.approvalFailed(w, err)
 		return
 	}

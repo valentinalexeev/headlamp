@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -144,6 +145,13 @@ func ingressNode(name string, online bool) headscale.Node {
 	return ingressNodeID(name, uint64(name[len(name)-1]-'0'), online)
 }
 
+// renamedNode is a node the administrator renamed (`headscale nodes rename`): its given name no
+// longer follows the hostname the machine reports.
+func renamedNode(name string, id uint64, ip string) headscale.Node {
+	return headscale.Node{ID: id, Name: fmt.Sprintf("box-%d", id), GivenName: name, Online: true,
+		Tags: []string{"tag:ingress"}, IPAddresses: []string{ip}}
+}
+
 func ingressNodeID(name string, id uint64, online bool) headscale.Node {
 	return headscale.Node{ID: id, Name: name, GivenName: name, Online: online, Tags: []string{"tag:ingress"}, IPAddresses: []string{"fd7a:115c::1", "127.0.0.1"}}
 }
@@ -197,6 +205,13 @@ func (f *regFx) view(name string) IngressView {
 	return IngressView{}
 }
 
+// approve approves what the ingress publishes now, on the node that publishes it.
+func (f *regFx) approve(name string) error {
+	f.t.Helper()
+	v := f.view(name)
+	return f.reg.Approve(context.Background(), name, v.Fingerprint, v.NodeID)
+}
+
 func (f *regFx) names() []string {
 	var out []string
 	for _, in := range f.reg.Current(context.Background(), true).Cfg.Ingresses {
@@ -241,7 +256,7 @@ func TestDiscoveredIngressNotUsedUntilApproved(t *testing.T) {
 	})
 	t.Run("approved is used and receives its own derived set", func(t *testing.T) {
 		fp := f.view("ingress-3").Fingerprint
-		if err := f.reg.Approve(context.Background(), "ingress-3", fp); err != nil {
+		if err := f.reg.Approve(context.Background(), "ingress-3", fp, 3); err != nil {
 			t.Fatal(err)
 		}
 		cur := f.reg.Current(context.Background(), true)
@@ -275,7 +290,7 @@ func TestChangedParametersNeedReapproval(t *testing.T) {
 	f.nodes.set(ingressNode("ingress-3", true))
 	f.store.CreateDevice("n", "o", "sing-box", adminFuture)
 	fp := f.view("ingress-3").Fingerprint
-	if err := f.reg.Approve(context.Background(), "ingress-3", fp); err != nil {
+	if err := f.reg.Approve(context.Background(), "ingress-3", fp, 3); err != nil {
 		t.Fatal(err)
 	}
 	cur := f.reg.Current(context.Background(), true)
@@ -304,12 +319,12 @@ func TestChangedParametersNeedReapproval(t *testing.T) {
 	}
 
 	// the old fingerprint cannot approve the new parameters; the new one can
-	err := f.reg.Approve(context.Background(), "ingress-3", fp)
+	err := f.reg.Approve(context.Background(), "ingress-3", fp, 3)
 	var ae *ApprovalError
 	if !errors.As(err, &ae) || ae.Status != 409 {
 		t.Fatalf("%v", err)
 	}
-	if err := f.reg.Approve(context.Background(), "ingress-3", f.view("ingress-3").Fingerprint); err != nil {
+	if err := f.approve("ingress-3"); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(f.names(), ","); got != "ingress-1,ingress-3" {
@@ -335,7 +350,7 @@ func TestApproveRequiresMatchingFingerprint(t *testing.T) {
 	}
 	ctx := context.Background()
 	t.Run("wrong fingerprint", func(t *testing.T) {
-		if s := status(f.reg.Approve(ctx, "ingress-3", strings.Repeat("0", 64))); s != 409 {
+		if s := status(f.reg.Approve(ctx, "ingress-3", strings.Repeat("0", 64), 3)); s != 409 {
 			t.Fatal(s)
 		}
 		if got, _ := f.store.Approvals(); len(got) != 0 {
@@ -344,24 +359,24 @@ func TestApproveRequiresMatchingFingerprint(t *testing.T) {
 	})
 	t.Run("parameters changed after the page was loaded: the cache is not trusted", func(t *testing.T) {
 		a.set("short_id", "changedsid-999999")
-		if s := status(f.reg.Approve(ctx, "ingress-3", fp)); s != 409 { // no clock advance
+		if s := status(f.reg.Approve(ctx, "ingress-3", fp, 3)); s != 409 { // no clock advance
 			t.Fatal(s)
 		}
 		fp = f.view("ingress-3").Fingerprint
 	})
 	t.Run("unknown name", func(t *testing.T) {
-		if s := status(f.reg.Approve(ctx, "ingress-9", fp)); s != 404 {
+		if s := status(f.reg.Approve(ctx, "ingress-9", fp, 9)); s != 404 {
 			t.Fatal(s)
 		}
 	})
 	t.Run("configured ingress", func(t *testing.T) {
-		if s := status(f.reg.Approve(ctx, "ingress-1", fp)); s != 409 {
+		if s := status(f.reg.Approve(ctx, "ingress-1", fp, 1)); s != 409 {
 			t.Fatal(s)
 		}
 	})
 	t.Run("matching fingerprint", func(t *testing.T) {
 		fresh := f.view("ingress-3").Fingerprint
-		if s := status(f.reg.Approve(ctx, "ingress-3", fresh)); s != 200 {
+		if s := status(f.reg.Approve(ctx, "ingress-3", fresh, 3)); s != 200 {
 			t.Fatal(s)
 		}
 		if got, _ := f.store.Approvals(); got["ingress-3"] != fresh {
@@ -391,7 +406,7 @@ func TestUnapproveStopsSyncAndProfiles(t *testing.T) {
 	f.nodes.set(ingressNode("ingress-3", true))
 	f.store.CreateDevice("n", "o", "sing-box", adminFuture)
 	ctx := context.Background()
-	if err := f.reg.Approve(ctx, "ingress-3", f.view("ingress-3").Fingerprint); err != nil {
+	if err := f.approve("ingress-3"); err != nil {
 		t.Fatal(err)
 	}
 	cur := f.reg.Current(ctx, true)
@@ -438,7 +453,7 @@ func TestPendingListShowsPrefixesOnly(t *testing.T) {
 		}
 	}
 	// the key material of the approved ingress is not listed in full either
-	if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint); err != nil {
+	if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint, v.NodeID); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ = json.Marshal(f.reg.Current(context.Background(), true).Views)
@@ -550,7 +565,7 @@ func TestInfoValidation(t *testing.T) {
 				t.Fatalf("detail echoes key material: %q", v.Detail)
 			}
 			var ae *ApprovalError
-			if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint); err == nil || !errors.As(err, &ae) {
+			if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint, v.NodeID); err == nil || !errors.As(err, &ae) {
 				t.Fatalf("an invalid ingress must not be approvable: %v", err)
 			}
 		})
@@ -563,7 +578,7 @@ func TestInfoValidation(t *testing.T) {
 		usePort(t, a)
 		f := newRegFx(t, nil)
 		f.nodes.set(ingressNode("ingress-3", true))
-		f.reg.Approve(context.Background(), "ingress-3", f.view("ingress-3").Fingerprint)
+		f.approve("ingress-3")
 		in := f.reg.Current(context.Background(), true).Cfg.Ingresses[1]
 		if in.UUIDs != uuidsDerived || in.AgentURL != "" || in.TokenEnv != "" {
 			t.Fatalf("%+v", in)
@@ -576,7 +591,7 @@ func TestApprovedIngressSurvivesATransientInfoFailure(t *testing.T) {
 	usePort(t, a)
 	f := newRegFx(t, nil)
 	f.nodes.set(ingressNode("ingress-3", true))
-	if err := f.reg.Approve(context.Background(), "ingress-3", f.view("ingress-3").Fingerprint); err != nil {
+	if err := f.approve("ingress-3"); err != nil {
 		t.Fatal(err)
 	}
 	a.mu.Lock()
@@ -605,7 +620,7 @@ func TestDiscoveredIngressNeedsTokenVariable(t *testing.T) {
 	if !strings.Contains(v.Detail, "no token") && v.Detail == "" {
 		t.Fatalf("%q", v.Detail)
 	}
-	if err := f.reg.Approve(context.Background(), "ingress-3", strings.Repeat("0", 64)); err == nil {
+	if err := f.reg.Approve(context.Background(), "ingress-3", strings.Repeat("0", 64), 3); err == nil {
 		t.Fatal("approved an ingress without a token")
 	}
 }
@@ -623,7 +638,7 @@ func TestDiscoveryOffWithoutLinkHost(t *testing.T) {
 		t.Fatalf("views %d hits %d", len(cur.Views), a.hits())
 	}
 	var ae *ApprovalError
-	if err := f.reg.Approve(context.Background(), "ingress-3", "x"); !errors.As(err, &ae) || ae.Status != 404 {
+	if err := f.reg.Approve(context.Background(), "ingress-3", "x", 3); !errors.As(err, &ae) || ae.Status != 404 {
 		t.Fatal(err)
 	}
 }
@@ -690,7 +705,7 @@ func TestAgentURLFromHeadscale(t *testing.T) {
 		}
 	})
 	t.Run("the node's tailnet IPv4 and port 9000 are used", func(t *testing.T) {
-		nodes.set(ingressNode("ingress-2", true))
+		nodes.set(renamedNode("ingress-2", 2, "127.0.0.1"))
 		cur := reg.Current(ctx, true)
 		if !SyncAll(ctx, store, cur.Cfg, cur.Targets) {
 			t.Fatal("want true")
@@ -756,7 +771,7 @@ func approvedIngress3(t *testing.T) (*regFx, *infoAgent) {
 	f := newRegFx(t, nil)
 	f.nodes.set(ingressNode("ingress-3", true))
 	f.store.CreateDevice("n", "o", "sing-box", adminFuture)
-	if err := f.reg.Approve(context.Background(), "ingress-3", f.view("ingress-3").Fingerprint); err != nil {
+	if err := f.approve("ingress-3"); err != nil {
 		t.Fatal(err)
 	}
 	cur := f.reg.Current(context.Background(), true)
@@ -776,7 +791,7 @@ func TestApprovalPinsTheNode(t *testing.T) {
 		f.nodes.set(ingressNodeID("ingress-3", 30, true))
 		f.clk.advance(infoTTL + time.Second)
 		cur := f.reg.Current(ctx, true)
-		if v := f.view("ingress-3"); v.Active || v.Approval != stUnreachable || v.Fingerprint != "" {
+		if v := f.view("ingress-3"); v.Active || v.Approval != stInvalid || v.Fingerprint != "" {
 			t.Fatalf("the old node's parameters must not be shown for the new node: %+v", v)
 		}
 		SyncAll(ctx, f.store, cur.Cfg, cur.Targets)
@@ -784,20 +799,30 @@ func TestApprovalPinsTheNode(t *testing.T) {
 			t.Fatal("credentials were pushed to a node that replaced the approved one")
 		}
 	})
-	t.Run("identical parameters on another node id need re-approval", func(t *testing.T) {
+	t.Run("identical parameters on another node id are not even asked for", func(t *testing.T) {
 		f, a := approvedIngress3(t)
+		hits := a.hits()
 		f.nodes.set(ingressNodeID("ingress-3", 30, true))
 		f.clk.advance(infoTTL + time.Second)
 		cur := f.reg.Current(ctx, true)
-		if v := f.view("ingress-3"); v.Approval != stChanged || v.Active {
+		if v := f.view("ingress-3"); v.Approval != stInvalid || v.Active {
 			t.Fatalf("%+v", v)
 		}
-		SyncAll(ctx, f.store, cur.Cfg, cur.Targets)
-		if a.putCount() != 1 {
-			t.Fatal("a changed node was synced")
+		if a.hits() != hits {
+			t.Fatal("the token went to a node the approval is not pinned to")
 		}
-		// the same parameters, approved again for the new node, work again
-		if err := f.reg.Approve(ctx, "ingress-3", f.view("ingress-3").Fingerprint); err != nil {
+		SyncAll(ctx, f.store, cur.Cfg, cur.SyncTargets)
+		if a.putCount() != 1 {
+			t.Fatal("a node that replaced the approved one was synced")
+		}
+		// only the operator's explicit removal of the approval lets the new node be reviewed
+		if err := f.reg.Unapprove(ctx, "ingress-3"); err != nil {
+			t.Fatal(err)
+		}
+		if v := f.view("ingress-3"); v.Approval != stPending || v.NodeID != 30 {
+			t.Fatalf("%+v", v)
+		}
+		if err := f.approve("ingress-3"); err != nil {
 			t.Fatal(err)
 		}
 		if v := f.view("ingress-3"); v.Approval != stApproved || !v.Active {
@@ -831,7 +856,7 @@ func TestApprovalPinsTheNode(t *testing.T) {
 			t.Fatal("an ambiguous name was synced")
 		}
 		var ae *ApprovalError
-		if err := f.reg.Approve(ctx, "ingress-3", strings.Repeat("0", 64)); !errors.As(err, &ae) {
+		if err := f.reg.Approve(ctx, "ingress-3", strings.Repeat("0", 64), 3); !errors.As(err, &ae) {
 			t.Fatal(err)
 		}
 	})
@@ -863,7 +888,7 @@ func TestUnapprovedNodeCannotInvalidateAnApprovedOne(t *testing.T) {
 	f.env["AGENT_TOKEN_INGRESS_5"] = discToken
 	f.env["AGENT_TOKEN_INGRESS_4"] = "tok4"
 	f.nodes.set(ingressNode("ingress-5", true))
-	if err := f.reg.Approve(ctx, "ingress-5", f.view("ingress-5").Fingerprint); err != nil {
+	if err := f.approve("ingress-5"); err != nil {
 		t.Fatal(err)
 	}
 	f.nodes.set(ingressNode("ingress-5", true), ingressNode("ingress-4", true)) // sorts first
@@ -910,7 +935,7 @@ func TestNodeIDZeroNeverPins(t *testing.T) {
 	if v.Approval != stInvalid || v.Active {
 		t.Fatalf("%+v", v)
 	}
-	if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint); err == nil {
+	if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint, v.NodeID); err == nil {
 		t.Fatal("approved a node without an id")
 	}
 	// a stored approval without a pin never matches, whatever the node id
@@ -933,7 +958,7 @@ func TestApprovalPredatingPinningNeedsReapproval(t *testing.T) {
 	if v.Approval != stChanged || v.Active || v.Detail != "approval predates node pinning, approve again" {
 		t.Fatalf("%+v", v)
 	}
-	if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint); err != nil {
+	if err := f.reg.Approve(context.Background(), "ingress-3", v.Fingerprint, v.NodeID); err != nil {
 		t.Fatal(err)
 	}
 	if v := f.view("ingress-3"); v.Approval != stApproved || !v.Active {
@@ -1037,29 +1062,233 @@ func TestImpostorWithTheSameNameCannotTakeOver(t *testing.T) {
 	})
 	t.Run("a configured ingress found through headscale", func(t *testing.T) {
 		nodes := &nodeList{}
-		cfg := IngressConfig{LinkHost: "links.example.com", Ingresses: []Ingress{
-			{Name: "ingress-2", Host: "ingress-2.example.com", PublicKey: "P2", ShortID: "b2", Port: 443, UUIDs: uuidsBase}}}.WithKey(testKey)
-		reg, err := NewRegistry(RegistryConfig{Cfg: cfg, Src: nodes, Getenv: func(k string) string {
-			return map[string]string{"AGENT_TOKEN_INGRESS_2": "t"}[k]
-		}})
-		if err != nil {
-			t.Fatal(err)
-		}
+		reg := configuredByHeadscale(t, nodes)
 		resolve := reg.resolver("ingress-2")
-		legit := ingressNodeID("ingress-2", 2, true)
-		legit.IPAddresses = []string{"100.64.0.2"}
-		clone := ingressNodeID("ingress-2", 20, true)
-		clone.IPAddresses = []string{"100.64.0.20"}
+		legit := renamedNode("ingress-2", 2, "100.64.0.2")
+		clone := renamedNode("ingress-2", 20, "100.64.0.20")
 		nodes.set(legit, clone)
 		if u, err := resolve(ctx); err == nil {
 			t.Fatalf("an ambiguous name resolved to %s", u)
 		}
-		renamed := clone
-		renamed.GivenName = "laptop" // the clone only reports the hostname
-		renamed.Name = "ingress-2"
-		nodes.set(renamed, legit)
+		clone.GivenName = "laptop" // the clone only reports the hostname
+		clone.Name = "ingress-2"
+		nodes.set(clone, legit)
 		if u, err := resolve(ctx); err != nil || !strings.Contains(u, "100.64.0.2:") {
 			t.Fatalf("%q %v", u, err)
+		}
+	})
+}
+
+func configuredByHeadscale(t *testing.T, nodes *nodeList) *Registry {
+	t.Helper()
+	cfg := IngressConfig{LinkHost: "links.example.com", Ingresses: []Ingress{
+		{Name: "ingress-2", Host: "ingress-2.example.com", PublicKey: "P2", ShortID: "b2", Port: 443, UUIDs: uuidsBase}}}.WithKey(testKey)
+	reg, err := NewRegistry(RegistryConfig{Cfg: cfg, Src: nodes, Getenv: func(k string) string {
+		return map[string]string{"AGENT_TOKEN_INGRESS_2": "t"}[k]
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reg
+}
+
+func TestAutoDerivedGivenName(t *testing.T) {
+	cases := []struct {
+		given, hostname string
+		want            bool
+	}{
+		{"ingress-2", "ingress-2", true},
+		{"ingress-2", "Ingress-2", true},
+		{"ingress-2-1", "ingress-2", true},
+		{"ingress-2-17", "ingress-2", true},
+		{"ingress-2", "ingress_2", true}, // sanitised hostname
+		{"ingress-2", "my laptop", false},
+		{"ingress-2-x", "ingress-2", false},
+		{"ingress-22", "ingress-2", false},
+		{"ingress-2", "box-2", false},
+	}
+	for _, c := range cases {
+		t.Run(c.given+"/"+c.hostname, func(t *testing.T) {
+			if got := autoDerivedGivenName(c.given, c.hostname); got != c.want {
+				t.Fatalf("got %v", got)
+			}
+		})
+	}
+}
+
+func TestConfiguredLookupNeedsAnAdministratorSetName(t *testing.T) {
+	ctx := context.Background()
+	nodes := &nodeList{}
+	resolve := configuredByHeadscale(t, nodes).resolver("ingress-2")
+	t.Run("a given name that follows the hostname is not admin-set", func(t *testing.T) {
+		// what headscale does at registration, and again when the hostname changes
+		n := ingressNodeID("ingress-2", 2, true)
+		n.IPAddresses = []string{"100.64.0.2"}
+		nodes.set(n)
+		if u, err := resolve(ctx); err == nil {
+			t.Fatalf("an auto-derived name resolved to %s", u)
+		}
+	})
+	t.Run("a hostname change to a free name by an unrenamed node gets nothing", func(t *testing.T) {
+		n := headscale.Node{ID: 66, Name: "Ingress-2", GivenName: "ingress-2", Online: true, Tags: []string{"tag:ingress"}, IPAddresses: []string{"100.64.0.66"}}
+		nodes.set(n)
+		if u, err := resolve(ctx); err == nil {
+			t.Fatalf("resolved to %s", u)
+		}
+	})
+	t.Run("an administrator-renamed node is found", func(t *testing.T) {
+		nodes.set(renamedNode("ingress-2", 2, "100.64.0.2"))
+		if u, err := resolve(ctx); err != nil || !strings.Contains(u, "100.64.0.2:") {
+			t.Fatalf("%q %v", u, err)
+		}
+	})
+	t.Run("a renamed node next to an unrenamed claimant: the claimant is ignored", func(t *testing.T) {
+		claimant := headscale.Node{ID: 66, Name: "ingress-2", GivenName: "ingress-2", Online: true, Tags: []string{"tag:ingress"}, IPAddresses: []string{"100.64.0.66"}}
+		nodes.set(claimant, renamedNode("ingress-2", 2, "100.64.0.2"))
+		if u, err := resolve(ctx); err != nil || !strings.Contains(u, "100.64.0.2:") {
+			t.Fatalf("%q %v", u, err)
+		}
+	})
+}
+
+// dialLog records every address a registry client dials and sends all of it to one fake server.
+type dialLog struct {
+	mu    sync.Mutex
+	addrs []string
+}
+
+func (d *dialLog) dialed(ip string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, a := range d.addrs {
+		if strings.HasPrefix(a, ip+":") {
+			return true
+		}
+	}
+	return false
+}
+
+func recordingClient(a *infoAgent) (*http.Client, *dialLog) {
+	log := &dialLog{}
+	c := newHTTPClient(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		log.mu.Lock()
+		log.addrs = append(log.addrs, addr)
+		log.mu.Unlock()
+		return (&net.Dialer{}).DialContext(ctx, network, a.srv.Listener.Addr().String())
+	})
+	return c, log
+}
+
+func pinnedFx(t *testing.T) (*regFx, *infoAgent, *dialLog) {
+	t.Helper()
+	a := newInfoAgent(t, "ingress-3")
+	client, log := recordingClient(a)
+	f := newRegFx(t, func(rc *RegistryConfig) { rc.HC = client })
+	x := ingressNodeID("ingress-3", 3, true)
+	x.IPAddresses = []string{"100.64.0.3"}
+	f.nodes.set(x)
+	f.store.CreateDevice("n", "o", "sing-box", adminFuture)
+	if err := f.approve("ingress-3"); err != nil {
+		t.Fatal(err)
+	}
+	return f, a, log
+}
+
+func TestApprovedNodeAbsentSendsNoTokenToAnotherNode(t *testing.T) {
+	ctx := context.Background()
+	f, a, log := pinnedFx(t)
+	hits := a.hits()
+	y := ingressNodeID("ingress-3", 30, true)
+	y.IPAddresses = []string{"100.64.0.30"}
+	f.nodes.set(y) // the approved node is gone, another one carries the name
+	f.clk.advance(infoTTL + time.Second)
+	cur := f.reg.Current(ctx, true)
+	v := f.view("ingress-3")
+	if v.Active || v.Approval != stInvalid || !strings.Contains(v.Detail, "approved node is not present") {
+		t.Fatalf("%+v", v)
+	}
+	if log.dialed("100.64.0.30") || a.hits() != hits {
+		t.Fatal("the token was sent to a node the approval is not pinned to")
+	}
+	if len(cur.SyncTargets) != 1 {
+		t.Fatalf("%d targets", len(cur.SyncTargets))
+	}
+}
+
+func TestPinnedNodeWhoseNameCollidedIsStillUsedById(t *testing.T) {
+	ctx := context.Background()
+	f, a, log := pinnedFx(t)
+	// the real node re-registered under "ingress-3-1" (headscale's collision suffix) while another
+	// node took the name "ingress-3"
+	x := ingressNodeID("ingress-3-1", 3, true)
+	x.Name = "ingress-3"
+	x.IPAddresses = []string{"100.64.0.3"}
+	y := ingressNodeID("ingress-3", 30, true)
+	y.IPAddresses = []string{"100.64.0.30"}
+	f.nodes.set(x, y)
+	f.clk.advance(infoTTL + time.Second)
+	cur := f.reg.Current(ctx, true)
+	v := f.view("ingress-3")
+	if v.Approval != stApproved || !v.Active || v.Online == nil || !*v.Online {
+		t.Fatalf("%+v", v)
+	}
+	if !SyncAll(ctx, f.store, cur.Cfg, cur.SyncTargets) || a.putCount() != 1 {
+		t.Fatalf("the pinned node was not synced: %d", a.putCount())
+	}
+	if log.dialed("100.64.0.30") {
+		t.Fatal("the node that only carries the name was contacted")
+	}
+}
+
+func TestOnlineFlagFollowsThePinnedNode(t *testing.T) {
+	f, _, _ := pinnedFx(t)
+	x := ingressNodeID("ingress-3-1", 3, true)
+	x.IPAddresses = []string{"100.64.0.3"}
+	y := ingressNodeID("ingress-3", 30, false)
+	y.IPAddresses = []string{"100.64.0.30"}
+	f.nodes.set(x, y)
+	f.clk.advance(infoTTL + time.Second)
+	if v := f.view("ingress-3"); v.Online == nil || !*v.Online {
+		t.Fatalf("%+v", v)
+	}
+}
+
+func TestApproveBindsTheNodeTheOperatorSaw(t *testing.T) {
+	ctx := context.Background()
+	a := newInfoAgent(t, "ingress-3")
+	usePort(t, a)
+	f := newRegFx(t, nil)
+	f.nodes.set(ingressNodeID("ingress-3", 3, true))
+	v := f.view("ingress-3")
+	if v.NodeID != 3 || v.Address != "127.0.0.1" || v.Hostname != "ingress-3" || v.GivenName != "ingress-3" {
+		t.Fatalf("the row must say which node it is: %+v", v)
+	}
+	var ae *ApprovalError
+	t.Run("another node id", func(t *testing.T) {
+		if err := f.reg.Approve(ctx, "ingress-3", v.Fingerprint, 4); !errors.As(err, &ae) || ae.Status != 409 {
+			t.Fatalf("%v", err)
+		}
+		if err := f.reg.Approve(ctx, "ingress-3", v.Fingerprint, 0); !errors.As(err, &ae) || ae.Status != 409 {
+			t.Fatalf("%v", err)
+		}
+		if rows, _ := f.store.ApprovalRows(); len(rows) != 0 {
+			t.Fatal("approved on a node mismatch")
+		}
+	})
+	t.Run("the node was replaced between page load and click", func(t *testing.T) {
+		f.nodes.set(ingressNodeID("ingress-3", 30, true)) // an impostor republishing the same values
+		if err := f.reg.Approve(ctx, "ingress-3", v.Fingerprint, 3); err == nil {
+			t.Fatal("approved a node the operator did not review")
+		}
+		f.nodes.set(ingressNodeID("ingress-3", 3, true))
+	})
+	t.Run("the right node id pins", func(t *testing.T) {
+		f.clk.advance(infoTTL + time.Second)
+		if err := f.reg.Approve(ctx, "ingress-3", v.Fingerprint, 3); err != nil {
+			t.Fatal(err)
+		}
+		if rows, _ := f.store.ApprovalRows(); rows["ingress-3"].NodeID != 3 {
+			t.Fatalf("%v", rows)
 		}
 	})
 }

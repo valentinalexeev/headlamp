@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -83,6 +84,10 @@ type IngressView struct {
 	Fingerprint   string        `json:"fingerprint,omitempty"`
 	PublicKeyPref string        `json:"public_key_prefix,omitempty"`
 	ShortIDPref   string        `json:"short_id_prefix,omitempty"`
+	NodeID        uint64        `json:"node_id,omitempty"`    // the node the parameters were read from
+	Address       string        `json:"address,omitempty"`    // its tailnet IPv4
+	Hostname      string        `json:"hostname,omitempty"`   // the name the machine reports
+	GivenName     string        `json:"given_name,omitempty"` // the name headscale gives it
 	Online        *bool         `json:"online"`
 	Sync          *SyncSnapshot `json:"sync"`
 	Detail        string        `json:"detail,omitempty"`
@@ -111,7 +116,8 @@ type Current struct {
 // probe is what is known about one discovered node.
 type probe struct {
 	at     time.Time
-	nodeID uint64      // the headscale node that was asked
+	nodeID uint64 // the headscale node that was asked
+	node   headscale.Node
 	info   *infoResult // the last parameters read successfully
 	state  string      // "" when the last attempt succeeded
 	detail string
@@ -139,6 +145,7 @@ type Registry struct {
 
 	nodes       []headscale.Node
 	nodesLoaded bool
+	rowsFailed  bool // the approvals were unreadable at the last refresh (logged once per change)
 	probes      map[string]*probe
 	dstate      map[string]*SyncState
 	dagent      map[string]nodeAgent
@@ -235,41 +242,97 @@ func (r *Registry) configuredToken(i int, ing Ingress) (string, error) {
 	return "", fmt.Errorf("ingress %s: token variable %s is not set", ing.Name, tokenVar(ing.Name))
 }
 
-// resolver finds the agent of a configured ingress at every call: the tailnet IPv4 of the node
-// named like the ingress that carries tag:ingress.
+// resolver finds the agent of a configured ingress at every call: the tailnet IPv4 of the tagged
+// node whose given name is the ingress name. headscale derives a given name from the hostname the
+// machine reports (at registration and again whenever the hostname changes, as long as the given
+// name still follows it), so a given name counts only once the administrator has renamed the node
+// to something the hostname does not produce. Without that, whoever controls a tagged machine could
+// take a name by changing its hostname. An explicit `agent_url` avoids the lookup altogether.
 func (r *Registry) resolver(name string) func(ctx context.Context) (string, error) {
-	return r.resolve(func(n headscale.Node) bool { return isIngressNode(n, name) })
+	return r.resolve(func(nodes []headscale.Node) (headscale.Node, error) {
+		var found []headscale.Node
+		refused := false
+		for _, n := range nodes {
+			if !isIngressNode(n, name) {
+				continue
+			}
+			if autoDerivedGivenName(n.GivenName, n.Name) {
+				refused = true
+				continue
+			}
+			found = append(found, n)
+		}
+		if len(found) == 0 && refused {
+			slog.Warn("enrolment agent lookup refused: the given name of the tagged node follows its hostname; "+
+				"run `headscale nodes rename <id> <name>` to a name the hostname does not produce, or set agent_url",
+				"ingress", name)
+		}
+		// Two nodes answering to one name is ambiguous: the agent's token and credentials must not
+		// go to a guess.
+		if len(found) != 1 {
+			return headscale.Node{}, errors.New("no unique administrator-named tagged node for this ingress")
+		}
+		return found[0], nil
+	})
 }
 
-// resolverFor finds the agent of a discovered ingress: the node with the id the approval is pinned
-// to (a node that merely carries the same name is not that ingress).
+// resolverFor finds the agent of a discovered, approved ingress: the tagged node with the pinned
+// id. The id is unique and cannot be chosen by the node, so the name is not consulted (it may have
+// collided and been suffixed since the approval).
 func (r *Registry) resolverFor(name string, id uint64) func(ctx context.Context) (string, error) {
-	return r.resolve(func(n headscale.Node) bool { return n.ID == id && isIngressNode(n, name) })
+	return r.resolve(func(nodes []headscale.Node) (headscale.Node, error) {
+		for _, n := range nodes {
+			if n.ID == id && id != 0 && hasIngressTag(n) {
+				return n, nil
+			}
+		}
+		return headscale.Node{}, errors.New("the approved node is not in the node list")
+	})
 }
 
-func (r *Registry) resolve(match func(headscale.Node) bool) func(ctx context.Context) (string, error) {
+func (r *Registry) resolve(pick func([]headscale.Node) (headscale.Node, error)) func(ctx context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
 		nodes, err := r.src.Nodes(ctx)
 		if err != nil {
 			return "", errors.New("node list unavailable")
 		}
-		var found []headscale.Node
-		for _, n := range nodes {
-			if match(n) {
-				found = append(found, n)
-			}
+		n, err := pick(nodes)
+		if err != nil {
+			return "", err
 		}
-		// Two nodes answering to one name is ambiguous: the agent's token and credentials must not
-		// go to a guess.
-		if len(found) != 1 {
-			return "", errors.New("no unique tagged node for this ingress")
-		}
-		ip := nodeIP(found[0])
+		ip := nodeIP(n)
 		if ip == "" {
 			return "", errors.New("the tagged node has no address")
 		}
 		return "http://" + net.JoinHostPort(ip, ingressAgentPort), nil
 	}
+}
+
+var (
+	hostnameJunkRe = regexp.MustCompile(`[^a-z0-9]`)
+	suffixDigitsRe = regexp.MustCompile(`^-[0-9]+$`)
+)
+
+// autoDerivedGivenName reports whether a given name is what headscale would derive from the node's
+// own hostname: that hostname lower-cased and sanitised, optionally followed by -<digits> (the
+// suffix of a collision). Both ways of sanitising runs of odd characters are tried; refusing a
+// borderline name is the safe direction.
+func autoDerivedGivenName(given, hostname string) bool {
+	if given == "" {
+		return false
+	}
+	h := strings.ToLower(hostname)
+	single := strings.Trim(hostnameJunkRe.ReplaceAllString(h, "-"), "-")
+	collapsed := strings.Trim(regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(h, "-"), "-")
+	for _, base := range []string{h, single, collapsed} {
+		if base == "" {
+			continue
+		}
+		if given == base || (strings.HasPrefix(given, base) && suffixDigitsRe.MatchString(given[len(base):])) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasIngressTag(n headscale.Node) bool {
@@ -281,9 +344,10 @@ func hasIngressTag(n headscale.Node) bool {
 	return false
 }
 
+// isIngressNode matches a tagged node by its given name. The given name alone does not prove who
+// chose it (see resolver); this match is for listing and for the online flag, never for sending
+// a token or credentials.
 func isIngressNode(n headscale.Node, name string) bool {
-	// Only the given name, which the headscale administrator sets: the node's own (client reported)
-	// name can be chosen by whoever controls the machine.
 	return hasIngressTag(n) && n.GivenName == name
 }
 
@@ -376,12 +440,53 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 		configured[t.Name] = true
 	}
 	cands := map[string][]headscale.Node{}
+	tagged := map[uint64]headscale.Node{}
 	for _, n := range r.nodes {
 		if !hasIngressTag(n) {
 			continue
 		}
+		tagged[n.ID] = n
 		if name := nodeName(n); name != "" && !configured[name] {
 			cands[name] = append(cands[name], n)
+		}
+	}
+	now := r.now()
+	var rows map[string]ApprovalRow
+	if r.store != nil {
+		var err error
+		if rows, err = r.store.ApprovalRows(); err != nil {
+			if !r.rowsFailed {
+				slog.Warn("enrolment approvals unreadable", "error_type", errType(err))
+			}
+			r.rowsFailed = true
+		} else {
+			r.rowsFailed = false
+		}
+	}
+	// An approval pinned to a node id is about THAT node: it is the only one asked, whatever its name
+	// is now, and no other node is ever sent the token for this ingress.
+	absent := map[string]string{}
+	dups := map[string]bool{}
+	for name, row := range rows {
+		if configured[name] || row.NodeID == 0 {
+			continue
+		}
+		x, ok := tagged[row.NodeID]
+		others := 0
+		for _, n := range cands[name] {
+			if n.ID != row.NodeID {
+				others++
+			}
+		}
+		if ok {
+			cands[name] = []headscale.Node{x}
+			dups[name] = others > 0
+			continue
+		}
+		delete(cands, name)
+		absent[name] = "the approved node is not present"
+		if others > 0 {
+			absent[name] += "; another node carries the name"
 		}
 	}
 	for name := range r.probes {
@@ -389,28 +494,14 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 			delete(r.probes, name) // the node is gone
 		}
 	}
-	now := r.now()
-	var rows map[string]ApprovalRow
-	if r.store != nil {
-		rows, _ = r.store.ApprovalRows()
+	for name, detail := range absent {
+		r.probes[name] = &probe{at: now, state: stInvalid, detail: detail}
 	}
-	dups := map[string]bool{}
 	for name, ns := range cands {
 		if len(ns) > 1 {
-			// An ambiguous name is never an ingress, unless the approval is pinned to one of the
-			// nodes: that node (by id) keeps its place and the others are ignored.
-			pinned := -1
-			for i, n := range ns {
-				if id := rows[name].NodeID; id != 0 && n.ID == id {
-					pinned = i
-				}
-			}
-			if pinned < 0 {
-				r.probes[name] = &probe{at: now, state: stInvalid, detail: "several nodes carry this name"}
-				continue
-			}
-			ns = []headscale.Node{ns[pinned]}
-			dups[name] = true
+			// An ambiguous name is never an ingress (a pinned approval was settled above).
+			r.probes[name] = &probe{at: now, state: stInvalid, detail: "several nodes carry this name"}
+			continue
 		}
 		n := ns[0]
 		if n.ID == 0 { // an id of 0 can never be pinned
@@ -419,12 +510,12 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 		}
 		token := r.getenv(tokenVar(name))
 		if token == "" {
-			r.probes[name] = &probe{at: now, nodeID: n.ID, state: stNoToken, detail: "no token variable for this ingress"}
+			r.probes[name] = &probe{at: now, nodeID: n.ID, node: n, state: stNoToken, detail: "no token variable for this ingress"}
 			continue
 		}
 		if p := r.probes[name]; p != nil && p.nodeID == n.ID && p.state != stNoToken &&
 			now.Sub(p.at) < infoTTL && force != name {
-			p.dup = dups[name]
+			p.dup, p.node = dups[name], n
 			continue
 		}
 		jobs = append(jobs, job{name, n, token})
@@ -442,7 +533,7 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 		go func() {
 			defer wg.Done()
 			info, state, detail := r.fetchInfo(ctx, j.node, j.name, j.token)
-			out <- result{j.name, &probe{nodeID: j.node.ID, info: info, state: state, detail: detail, dup: dups[j.name]}}
+			out <- result{j.name, &probe{nodeID: j.node.ID, node: j.node, info: info, state: state, detail: detail, dup: dups[j.name]}}
 		}()
 	}
 	wg.Wait()
@@ -597,10 +688,21 @@ func (r *Registry) buildLocked() Current {
 	views := make([]IngressView, len(names))
 	infos := make([]*infoResult, len(names))
 	for k, name := range names {
-		v := IngressView{Name: name, Source: "discovered", Online: r.onlineLocked(name)}
+		v := IngressView{Name: name, Source: "discovered"}
 		p := r.probes[name]
 		row, approved := approvals[name]
 		v.Approved = approved
+		switch {
+		case approved && row.NodeID != 0:
+			v.Online = r.onlineByIDLocked(row.NodeID) // the pinned node, not whoever carries the name
+		case p != nil && p.nodeID != 0:
+			v.Online = r.onlineByIDLocked(p.nodeID)
+		default:
+			v.Online = r.onlineLocked(name)
+		}
+		if p != nil && p.node.ID != 0 {
+			v.NodeID, v.Address, v.Hostname, v.GivenName = p.node.ID, nodeIP(p.node), p.node.Name, p.node.GivenName
+		}
 		switch {
 		case p == nil:
 			v.Approval, v.Detail = stUnreachable, "the node is not in the node list"
@@ -698,7 +800,7 @@ func (r *Registry) unverifiedLocked(name string, row ApprovalRow) bool {
 		return false
 	}
 	for _, n := range r.nodes {
-		if n.ID == row.NodeID && isIngressNode(n, name) {
+		if n.ID == row.NodeID && hasIngressTag(n) {
 			return true
 		}
 	}
@@ -719,6 +821,17 @@ func (r *Registry) discoveredTarget(name string, nodeID uint64, ing Ingress) Syn
 		r.dagent[name] = na
 	}
 	return SyncTarget{Name: name, Agent: na.agent, State: st, Ingress: ing}
+}
+
+// onlineByIDLocked is the online flag of the tagged node with this id, or nil.
+func (r *Registry) onlineByIDLocked(id uint64) *bool {
+	for _, n := range r.nodes {
+		if n.ID == id && hasIngressTag(n) {
+			v := n.Online
+			return &v
+		}
+	}
+	return nil
 }
 
 // onlineLocked is the headscale online flag of the node named like the ingress, or nil.
@@ -742,9 +855,10 @@ func (r *Registry) isConfigured(name string) bool {
 }
 
 // Approve approves a discovered ingress, but only when the parameters it publishes RIGHT NOW (read
-// again, not from the cache) have the posted fingerprint. The approval pins the node it read them
-// from.
-func (r *Registry) Approve(ctx context.Context, name, fingerprint string) error {
+// again, not from the cache) have the posted fingerprint AND come from the node the operator
+// reviewed (nodeID): an impostor holding the name can publish the same values. The approval pins
+// that node.
+func (r *Registry) Approve(ctx context.Context, name, fingerprint string, nodeID uint64) error {
 	if r.isConfigured(name) {
 		return &ApprovalError{http.StatusConflict, "already configured"}
 	}
@@ -768,6 +882,9 @@ func (r *Registry) Approve(ctx context.Context, name, fingerprint string) error 
 		if v.Name == name && v.Approval == stInvalid {
 			return &ApprovalError{http.StatusConflict, "the ingress parameters are not valid: " + v.Detail}
 		}
+	}
+	if nodeID == 0 || p.nodeID != nodeID {
+		return &ApprovalError{http.StatusConflict, "the node that publishes this ingress is not the one that was reviewed; reload and review it"}
 	}
 	if p.info.fp != fingerprint {
 		return &ApprovalError{http.StatusConflict, "the fingerprint does not match the parameters the ingress publishes now; reload and review them"}

@@ -64,28 +64,59 @@
       geodata list names (letters, digits and ! @ . _ - only, at most 64 characters each).
     quiet: true
 
-- name: Check the public parameters for /v1/info (optional, all-or-nothing)
-  ansible.builtin.assert:
-    that:
-      - ingress_name is regex('^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?\\Z')
-      - ingress_host is regex('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\\Z')
-      - ingress_host | length <= 253
-      - reality_sni is regex('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\\Z')
-      - reality_sni | length <= 253
-      - ingress_listen_port | string is regex('^[0-9]{1,5}\\Z')
-      - 1 <= (ingress_listen_port | int) <= 65535
-      - reality_public_key is regex('^[A-Za-z0-9_=-]+\\Z')
-      - reality_short_id is regex('^[0-9a-f]{2,16}\\Z')
-    fail_msg: >-
-      ingress-agent: when any of ingress_name, ingress_host, reality_public_key,
-      reality_short_id is set, all four must be valid: ingress_name [a-z0-9-] up to
-      32 characters, ingress_host / reality_sni lowercase DNS names, ingress_listen_port
-      1-65535, reality_public_key the base64url public key (`xray x25519 -i <private key>`),
-      reality_short_id 2-16 lowercase hex characters. Values are not shown.
-    quiet: true
-  when: >-
-    (ingress_name | length > 0) or (ingress_host | length > 0)
-    or (reality_public_key | length > 0) or (reality_short_id | length > 0)
+# Gate: only the two variables that are NEW with /v1/info. ingress_host and
+# reality_short_id are required by the reality-ingress role, so hosts that have
+# only those must keep passing. The gate is a superset of env.j2's export
+# condition (all four non-empty implies ingress_name is non-empty), so nothing
+# reaches the env file without these checks.
+- name: Validate the public parameters for /v1/info
+  when: (ingress_name | length > 0) or (reality_public_key | length > 0)
+  block:
+    - name: Check ingress_name for /v1/info
+      ansible.builtin.assert:
+        that:
+        - ingress_name is regex('^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?\\Z')
+        fail_msg: >-
+          ingress-agent: ingress_name must be set, [a-z0-9-], at most 32 characters, when reality_public_key is set (and the other way round). The value is not shown.
+        quiet: true
+    - name: Check ingress_host for /v1/info
+      ansible.builtin.assert:
+        that:
+        - ingress_host is regex('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\\Z')
+        - ingress_host | length <= 253
+        fail_msg: >-
+          ingress-agent: ingress_host must be a lowercase DNS name when ingress_name or reality_public_key is set. The value is not shown.
+        quiet: true
+    - name: Check reality_sni for /v1/info
+      ansible.builtin.assert:
+        that:
+        - reality_sni is regex('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\\Z')
+        - reality_sni | length <= 253
+        fail_msg: >-
+          ingress-agent: reality_sni must be a lowercase DNS name when ingress_name or reality_public_key is set. The value is not shown.
+        quiet: true
+    - name: Check ingress_listen_port for /v1/info
+      ansible.builtin.assert:
+        that:
+        - ingress_listen_port | string is regex('^[0-9]{1,5}\\Z')
+        - 1 <= (ingress_listen_port | int) <= 65535
+        fail_msg: >-
+          ingress-agent: ingress_listen_port must be 1-65535 when ingress_name or reality_public_key is set. The value is not shown.
+        quiet: true
+    - name: Check reality_public_key for /v1/info
+      ansible.builtin.assert:
+        that:
+        - reality_public_key is regex('^[A-Za-z0-9_=-]+\\Z')
+        fail_msg: >-
+          ingress-agent: reality_public_key must be the base64url public key (`xray x25519 -i <private key>`) when ingress_name is set (and the other way round). The value is not shown.
+        quiet: true
+    - name: Check reality_short_id for /v1/info
+      ansible.builtin.assert:
+        that:
+        - reality_short_id is regex('^[0-9a-f]{2,16}\\Z')
+        fail_msg: >-
+          ingress-agent: reality_short_id must be 2-16 lowercase hex characters when ingress_name or reality_public_key is set. The value is not shown.
+        quiet: true
 
 - name: Stat the agent source on the control host
   ansible.builtin.stat:

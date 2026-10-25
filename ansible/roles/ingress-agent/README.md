@@ -46,8 +46,10 @@ deployments valid):
 | `reality_public_key` | `""` | `INGRESS_PUBLIC_KEY`: the public half of the vaulted `reality_private_key`; derive it with `xray x25519 -i <private key>` and set it as a variable. The role does not run xray for this. |
 
 The six variables are exported only when `ingress_name`, `ingress_host`, `reality_public_key` and `reality_short_id`
-are all set; otherwise `/v1/info` answers `503` and everything else works as before. If any of the four is set,
-preflight validates all of them. Use a token per ingress host (`ingress_agent_token` differs on every host); the
+are all set; otherwise `/v1/info` answers `503` and everything else works as before. Preflight validates the six
+values only when `ingress_name` or `reality_public_key` is set (then all of them must be valid, so a partial
+configuration fails). Hosts that only have `ingress_host` and `reality_short_id` (required by `reality-ingress`) are
+unaffected, and `/v1/info` stays `503` there until the two new variables are set. Use a token per ingress host (`ingress_agent_token` differs on every host); the
 operator approves a discovered ingress in node-control before it is used.
 
 ## Python dependencies

@@ -6,9 +6,11 @@
 #   headscale-policy.sh check     [--file F]                validate F on the server and show its warnings
 #   headscale-policy.sh diff      [--file F]                unified diff live -> F (exit 1 when they differ)
 #   headscale-policy.sh apply     [--file F] [--yes] [--allow-dirty]
-#                                                          check, show the diff, apply, verify access, confirm
+#                                                          read the live state, check, show the diff, apply, verify that
+#                                                          node-control still answers and serves F, then confirm
 #   headscale-policy.sh pull      [--file F]                write the live policy to F
-#   headscale-policy.sh bootstrap [--file F] --yes          one-time / break-glass: load F through `fly ssh`
+#   headscale-policy.sh bootstrap [--file F] --yes          one-time / break-glass: load F through `fly ssh`, then read
+#                                                          it back and compare
 #
 # Environment:
 #   NODE_CONTROL_URL  base URL of node-control on the tailnet (required, except for bootstrap)
@@ -17,7 +19,11 @@
 #   RETRY_SLEEP       seconds between the post-apply access checks, default 2
 #
 # Exit codes: 0 ok / no diff; 1 diff present (diff); 2 usage or validation failure (also server refusals 409/413/422);
-# 3 remote failure; 4 apply was not confirmed (the server reverts it by itself at the deadline).
+# 3 remote failure (also: bootstrap could not be verified); 4 apply was not confirmed (access lost, the live policy is not
+# the applied one, or the server answered 409 to the confirmation): the server reverts it by itself at the deadline.
+#
+# apply verifies with at most 3 tries of `GET /policy/state`, each capped at 10 s, with RETRY_SLEEP between them: the worst
+# case is 3 x 10 s + 2 x RETRY_SLEEP (34 s by default) before it gives up and exits 4. Every other request is capped at 30 s.
 set -eu
 
 MAX_BOOTSTRAP_BYTES=65536
@@ -60,10 +66,10 @@ req() {
   _m=$1; _p=$2; _b=${3:-}
   : > "$tmp/resp"
   if [ -n "$_b" ]; then
-    code=$(curl --silent --show-error --max-time 30 -X "$_m" -H 'Content-Type: application/json' \
+    code=$(curl --silent --show-error --max-time "${REQ_MAX_TIME:-30}" -X "$_m" -H 'Content-Type: application/json' \
       --data-binary @"$_b" -o "$tmp/resp" -w '%{http_code}' "$url$_p") || return 1
   else
-    code=$(curl --silent --show-error --max-time 30 -X "$_m" \
+    code=$(curl --silent --show-error --max-time "${REQ_MAX_TIME:-30}" -X "$_m" \
       -o "$tmp/resp" -w '%{http_code}' "$url$_p") || return 1
   fi
 }
@@ -107,15 +113,22 @@ live_policy() {
   jq -r '.updated_at // ""' "$tmp/resp" > "$tmp/base"
 }
 
+# norm_pair A B: write $tmp/a.n and $tmp/b.n, both through `jq -S .` when both parse as JSON, else as raw copies.
+norm_pair() {
+  if jq -S . "$1" > "$tmp/a.n" 2>/dev/null && jq -S . "$2" > "$tmp/b.n" 2>/dev/null; then
+    :
+  else
+    cp "$1" "$tmp/a.n"; cp "$2" "$tmp/b.n"
+  fi
+}
+
+same_text() { norm_pair "$1" "$2"; cmp -s "$tmp/a.n" "$tmp/b.n"; }
+
 do_diff() {
   need_file
   live_policy
-  if jq -S . "$tmp/live" > "$tmp/live.n" 2>/dev/null && jq -S . "$file" > "$tmp/file.n" 2>/dev/null; then
-    :
-  else
-    cp "$tmp/live" "$tmp/live.n"; cp "$file" "$tmp/file.n"
-  fi
-  if diff -u -L live -L file "$tmp/live.n" "$tmp/file.n"; then
+  norm_pair "$tmp/live" "$file"
+  if diff -u -L live -L file "$tmp/a.n" "$tmp/b.n"; then
     return 0
   fi
   return 1
@@ -126,11 +139,14 @@ do_apply() {
   if [ "$allow_dirty" = 0 ]; then
     _dir=$(dirname "$file")
     if git -C "$_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      if [ -n "$(git -C "$_dir" status --porcelain -- "$file")" ]; then
+      if [ -n "$(git -C "$_dir" status --porcelain -- "$(basename "$file")")" ]; then
         die 2 "$file has uncommitted changes; commit it first or pass --allow-dirty"
       fi
     fi
   fi
+  # Read the base before the preview and the prompt: a change that lands while the operator reads the diff then fails
+  # the apply with 409 instead of being overwritten.
+  live_policy
   do_check
   _d=$(jq -r '.diff // ""' "$tmp/preview.json")
   if [ -n "$_d" ]; then printf '%s\n' "$_d"; else say "no difference from the live policy"; fi
@@ -144,7 +160,6 @@ do_apply() {
     fi
   fi
 
-  live_policy
   jq -n --rawfile p "$file" --arg b "$(cat "$tmp/base")" '{policy:$p, base_updated_at:$b}' > "$tmp/body"
   remote POST /policy/apply "$tmp/body"
   case $code in
@@ -157,12 +172,14 @@ do_apply() {
       fi ;;
     *) refuse ;;
   esac
+  _cid=$(jq -r '.change_id // empty' "$tmp/resp" 2>/dev/null || true)
+  case $_cid in ''|*[!0-9]*) die 3 "the answer has no change id, cannot confirm; the change reverts automatically at the deadline" ;; esac
   say "applied; verifying access under the new rules"
 
   _try=0; _reached=0
   while [ "$_try" -lt 3 ]; do
     _try=$((_try + 1))
-    if req GET /policy/state && [ "$code" = 200 ]; then _reached=1; break; fi
+    if REQ_MAX_TIME=10 req GET /policy/state && [ "$code" = 200 ]; then _reached=1; break; fi
     [ "$_try" -lt 3 ] && sleep "${RETRY_SLEEP:-2}"
   done
   if [ "$_reached" = 0 ]; then
@@ -171,7 +188,18 @@ do_apply() {
     exit 4
   fi
 
-  req POST /policy/confirm "$tmp/body" || die 3 "could not send the confirmation; the change will revert at the deadline"
+  if ! jq -e '.policy | type == "string"' "$tmp/resp" >/dev/null 2>&1 \
+     || ! jq -j '.policy' "$tmp/resp" > "$tmp/applied" || ! same_text "$tmp/applied" "$file"; then
+    say "the live policy is not the one that was applied; it reverts automatically"
+    exit 4
+  fi
+
+  jq -n --argjson id "$_cid" '{change_id:$id}' > "$tmp/cbody"
+  req POST /policy/confirm "$tmp/cbody" || die 3 "could not send the confirmation; the change will revert at the deadline"
+  if [ "$code" = 409 ]; then
+    say "the change was not confirmed; it has been or will be reverted"
+    exit 4
+  fi
   [ "$code" = 204 ] || die 3 "confirmation failed (HTTP $code); the change will revert at the deadline"
   say "confirmed"
 }
@@ -180,7 +208,9 @@ do_pull() {
   live_policy
   _dir=$(dirname "$file")
   _t=$(mktemp "$_dir/.$(basename "$file").XXXXXX") || die 3 "cannot create a temporary file in $_dir"
-  if cp "$tmp/live" "$_t" && mv "$_t" "$file"; then
+  # keep the mode of an existing file (cp -p is portable, stat is not); a new file gets 0644
+  if [ -f "$file" ]; then cp -p "$file" "$_t"; else chmod 644 "$_t"; fi
+  if cat "$tmp/live" > "$_t" && mv "$_t" "$file"; then
     say "wrote $file"
   else
     rm -f "$_t"
@@ -198,8 +228,11 @@ do_bootstrap() {
   [ "$_size" -le "$MAX_BOOTSTRAP_BYTES" ] || die 2 "$file is larger than $MAX_BOOTSTRAP_BYTES bytes"
   _b64=$(base64 < "$file" | tr -d '\n')
   flyctl ssh console -a "$app" -C "sh -c 'echo $_b64 | base64 -d > /tmp/policy-bootstrap.json && headscale policy set -f /tmp/policy-bootstrap.json; rc=\$?; rm -f /tmp/policy-bootstrap.json; exit \$rc'" \
-    || die 3 "flyctl ssh failed"
-  say "bootstrap done"
+    || die 3 "flyctl ssh failed; the policy was not loaded"
+  flyctl ssh console -a "$app" -C "headscale policy get" > "$tmp/got" \
+    || die 3 "could not read the policy back; the policy was not loaded or cannot be verified"
+  same_text "$tmp/got" "$file" || die 3 "the policy read back differs from $file; the policy was not loaded"
+  say "bootstrap done (read back and compared)"
 }
 
 case $cmd in

@@ -32,7 +32,8 @@ type infoAgent struct {
 
 	mu       sync.Mutex
 	info     map[string]any
-	status   int // 0: 200
+	status   int // 0: 200 (for /v1/info)
+	putCode  int // 0: 204 (for PUT /v1/credentials; a failing answer records nothing)
 	raw      string
 	handler  http.HandlerFunc // replaces /v1/info when set
 	infoHits int
@@ -64,6 +65,10 @@ func newInfoAgent(t *testing.T, name string) *infoAgent {
 			}
 			json.NewEncoder(w).Encode(a.info)
 		case r.Method == "PUT" && r.URL.Path == "/v1/credentials":
+			if a.putCode != 0 {
+				w.WriteHeader(a.putCode)
+				return
+			}
 			var body struct {
 				Credentials []Credential `json:"credentials"`
 			}
@@ -140,7 +145,7 @@ func ingressNode(name string, online bool) headscale.Node {
 }
 
 func ingressNodeID(name string, id uint64, online bool) headscale.Node {
-	return headscale.Node{ID: id, Name: name, Online: online, Tags: []string{"tag:ingress"}, IPAddresses: []string{"fd7a:115c::1", "127.0.0.1"}}
+	return headscale.Node{ID: id, Name: name, GivenName: name, Online: online, Tags: []string{"tag:ingress"}, IPAddresses: []string{"fd7a:115c::1", "127.0.0.1"}}
 }
 
 type clock struct{ t atomic.Int64 }
@@ -809,15 +814,19 @@ func TestApprovalPinsTheNode(t *testing.T) {
 			t.Fatalf("same node: %+v", v)
 		}
 	})
-	t.Run("two nodes with one name are invalid", func(t *testing.T) {
+	t.Run("two nodes with one name, none of them the approved one, are invalid", func(t *testing.T) {
 		f, a := approvedIngress3(t)
-		f.nodes.set(ingressNodeID("ingress-3", 3, true), ingressNodeID("ingress-3", 30, true))
+		f.nodes.set(ingressNodeID("ingress-3", 30, true), ingressNodeID("ingress-3", 31, true))
 		f.clk.advance(infoTTL + time.Second)
+		hits := a.hits()
 		cur := f.reg.Current(ctx, true)
 		if v := f.view("ingress-3"); v.Approval != stInvalid || v.Active {
 			t.Fatalf("%+v", v)
 		}
-		SyncAll(ctx, f.store, cur.Cfg, cur.Targets)
+		if a.hits() != hits {
+			t.Fatal("the token was sent to a node of an ambiguous name")
+		}
+		SyncAll(ctx, f.store, cur.Cfg, cur.SyncTargets)
 		if a.putCount() != 1 {
 			t.Fatal("an ambiguous name was synced")
 		}
@@ -973,6 +982,84 @@ func TestSyncReachesApprovedIngressBeforeTheFirstProbe(t *testing.T) {
 		SyncAll(ctx, f.store, cur.Cfg, cur.SyncTargets)
 		if a.putCount() != 0 {
 			t.Fatal("pushed on an unpinned approval")
+		}
+	})
+}
+
+func TestImpostorWithTheSameNameCannotTakeOver(t *testing.T) {
+	ctx := context.Background()
+	t.Run("the pinned node keeps being read and synced while another node carries the name", func(t *testing.T) {
+		f, a := approvedIngress3(t)
+		f.nodes.set(ingressNodeID("ingress-3", 3, true), ingressNodeID("ingress-3", 30, true))
+		f.clk.advance(infoTTL + time.Second)
+		hits := a.hits()
+		cur := f.reg.Current(ctx, true)
+		v := f.view("ingress-3")
+		if v.Approval != stApproved || !v.Active || !strings.Contains(v.Detail, "another") {
+			t.Fatalf("%+v", v)
+		}
+		if a.hits() != hits+1 { // one reading: the pinned node's; the impostor is never asked
+			t.Fatalf("readings %d -> %d", hits, a.hits())
+		}
+		if !SyncAll(ctx, f.store, cur.Cfg, cur.SyncTargets) || a.putCount() != 2 {
+			t.Fatalf("pushes %d", a.putCount())
+		}
+	})
+	t.Run("a pending node is not asked for its parameters while the name is ambiguous", func(t *testing.T) {
+		a := newInfoAgent(t, "ingress-3")
+		usePort(t, a)
+		f := newRegFx(t, nil)
+		f.nodes.set(ingressNodeID("ingress-3", 3, true), ingressNodeID("ingress-3", 30, true))
+		if v := f.view("ingress-3"); v.Approval != stInvalid {
+			t.Fatalf("%+v", v)
+		}
+		if a.hits() != 0 {
+			t.Fatal("a token was sent to an unapproved duplicate")
+		}
+	})
+	t.Run("a node that only reports the name as its hostname is ignored", func(t *testing.T) {
+		a := newInfoAgent(t, "ingress-3")
+		usePort(t, a)
+		f := newRegFx(t, nil)
+		impostor := ingressNodeID("x", 9, true)
+		impostor.Name = "ingress-3" // client-reported
+		impostor.GivenName = "laptop-9"
+		f.nodes.set(impostor)
+		cur := f.reg.Current(ctx, true)
+		for _, v := range cur.Views {
+			if v.Name == "ingress-3" {
+				t.Fatalf("the hostname alone made a node an ingress: %+v", v)
+			}
+		}
+		if a.hits() != 0 {
+			t.Fatal("a token was sent to a node that only reports the name")
+		}
+	})
+	t.Run("a configured ingress found through headscale", func(t *testing.T) {
+		nodes := &nodeList{}
+		cfg := IngressConfig{LinkHost: "links.example.com", Ingresses: []Ingress{
+			{Name: "ingress-2", Host: "ingress-2.example.com", PublicKey: "P2", ShortID: "b2", Port: 443, UUIDs: uuidsBase}}}.WithKey(testKey)
+		reg, err := NewRegistry(RegistryConfig{Cfg: cfg, Src: nodes, Getenv: func(k string) string {
+			return map[string]string{"AGENT_TOKEN_INGRESS_2": "t"}[k]
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolve := reg.resolver("ingress-2")
+		legit := ingressNodeID("ingress-2", 2, true)
+		legit.IPAddresses = []string{"100.64.0.2"}
+		clone := ingressNodeID("ingress-2", 20, true)
+		clone.IPAddresses = []string{"100.64.0.20"}
+		nodes.set(legit, clone)
+		if u, err := resolve(ctx); err == nil {
+			t.Fatalf("an ambiguous name resolved to %s", u)
+		}
+		renamed := clone
+		renamed.GivenName = "laptop" // the clone only reports the hostname
+		renamed.Name = "ingress-2"
+		nodes.set(renamed, legit)
+		if u, err := resolve(ctx); err != nil || !strings.Contains(u, "100.64.0.2:") {
+			t.Fatalf("%q %v", u, err)
 		}
 	})
 }

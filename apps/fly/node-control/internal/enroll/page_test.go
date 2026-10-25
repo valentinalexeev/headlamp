@@ -11,7 +11,7 @@ func TestPageHasTheIngressTable(t *testing.T) {
 	t.Run("container, columns and buttons", func(t *testing.T) {
 		for _, want := range []string{
 			`id="ingresses"`, `id="ingrows"`, "<th>Ingress</th>", "<th>Online</th>", "<th>Sync</th>", "<th>Since</th>", "<th>Approval</th>",
-			`"Approve"`, `"Remove approval"`, "/approve", "/unapprove", "fingerprint: v.fingerprint", "v.fingerprint.slice(0, 12)", "/enroll/ingresses",
+			`"Approve"`, `"Remove approval"`, "/approve", "/unapprove", "fingerprint: v.fingerprint", "v.fingerprint.slice(0, 12)", "fingerprint \" + v.fingerprint + \")?", "/enroll/ingresses",
 		} {
 			if !strings.Contains(page, want) {
 				t.Errorf("page lacks %q", want)

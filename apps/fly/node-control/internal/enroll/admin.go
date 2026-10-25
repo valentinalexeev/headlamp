@@ -281,7 +281,7 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	stats, partial := MergedStats(r.Context(), cur.Targets, cur.Cfg, devs)
+	stats, partial := MergedStats(r.Context(), cur.SyncTargets, cur.Cfg, devs)
 	rows := make([]deviceRow, 0, len(devs))
 	for _, d := range devs {
 		var traffic any
@@ -290,13 +290,13 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, d.Client, d.ExpiresAt, d.Revoked, traffic})
 	}
-	snaps := snapshotsOf(cur.Targets)
+	snaps := snapshotsOf(cur.SyncTargets)
 	pending := cur.Pending
 	if pending == nil {
 		pending = []string{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"devices": rows, "sync": summarize(snaps),
-		"ingresses": rowsOf(cur, cur.Targets, snaps), "pending_ingresses": pending, "stats_partial": partial})
+		"ingresses": rowsOf(cur, cur.SyncTargets, snaps), "pending_ingresses": pending, "stats_partial": partial})
 }
 
 // syncResult is what a change reports about the ingresses.

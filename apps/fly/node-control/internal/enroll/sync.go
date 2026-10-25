@@ -273,7 +273,7 @@ func ReconcileLoop(ctx context.Context, store *Store, agent Agent, state *SyncSt
 // ReconcileLoopAll is ReconcileLoop for every CURRENT target (the set can change at runtime).
 func ReconcileLoopAll(ctx context.Context, store *Store, cfg IngressConfig, targets func() []SyncTarget) {
 	reconcile(ctx, func(ctx context.Context) {
-		ts := targets()
+		var ts []SyncTarget
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("enrolment reconcile failed", "error_type", typeName(r))
@@ -282,6 +282,7 @@ func ReconcileLoopAll(ctx context.Context, store *Store, cfg IngressConfig, targ
 				}
 			}
 		}()
+		ts = targets()
 		SyncAll(ctx, store, cfg, ts)
 	})
 }

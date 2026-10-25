@@ -115,6 +115,7 @@ type probe struct {
 	info   *infoResult // the last parameters read successfully
 	state  string      // "" when the last attempt succeeded
 	detail string
+	dup    bool // another tagged node carries the same name; this is the one the approval is pinned to
 }
 
 type infoResult struct {
@@ -252,14 +253,22 @@ func (r *Registry) resolve(match func(headscale.Node) bool) func(ctx context.Con
 		if err != nil {
 			return "", errors.New("node list unavailable")
 		}
+		var found []headscale.Node
 		for _, n := range nodes {
 			if match(n) {
-				if ip := nodeIP(n); ip != "" {
-					return "http://" + net.JoinHostPort(ip, ingressAgentPort), nil
-				}
+				found = append(found, n)
 			}
 		}
-		return "", errors.New("no tagged node with an address")
+		// Two nodes answering to one name is ambiguous: the agent's token and credentials must not
+		// go to a guess.
+		if len(found) != 1 {
+			return "", errors.New("no unique tagged node for this ingress")
+		}
+		ip := nodeIP(found[0])
+		if ip == "" {
+			return "", errors.New("the tagged node has no address")
+		}
+		return "http://" + net.JoinHostPort(ip, ingressAgentPort), nil
 	}
 }
 
@@ -273,15 +282,16 @@ func hasIngressTag(n headscale.Node) bool {
 }
 
 func isIngressNode(n headscale.Node, name string) bool {
-	return hasIngressTag(n) && (n.Name == name || n.GivenName == name)
+	// Only the given name, which the headscale administrator sets: the node's own (client reported)
+	// name can be chosen by whoever controls the machine.
+	return hasIngressTag(n) && n.GivenName == name
 }
 
-// nodeName is the ingress name a tagged node stands for: its name when that is a valid ingress name.
+// nodeName is the ingress name a tagged node stands for: its given name when that is a valid
+// ingress name.
 func nodeName(n headscale.Node) string {
-	for _, c := range []string{n.Name, n.GivenName} {
-		if ingressNameRe.MatchString(c) {
-			return c
-		}
+	if ingressNameRe.MatchString(n.GivenName) {
+		return n.GivenName
 	}
 	return ""
 }
@@ -380,10 +390,27 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 		}
 	}
 	now := r.now()
+	var rows map[string]ApprovalRow
+	if r.store != nil {
+		rows, _ = r.store.ApprovalRows()
+	}
+	dups := map[string]bool{}
 	for name, ns := range cands {
-		if len(ns) > 1 { // an ambiguous name is never an ingress
-			r.probes[name] = &probe{at: now, state: stInvalid, detail: "several nodes carry this name"}
-			continue
+		if len(ns) > 1 {
+			// An ambiguous name is never an ingress, unless the approval is pinned to one of the
+			// nodes: that node (by id) keeps its place and the others are ignored.
+			pinned := -1
+			for i, n := range ns {
+				if id := rows[name].NodeID; id != 0 && n.ID == id {
+					pinned = i
+				}
+			}
+			if pinned < 0 {
+				r.probes[name] = &probe{at: now, state: stInvalid, detail: "several nodes carry this name"}
+				continue
+			}
+			ns = []headscale.Node{ns[pinned]}
+			dups[name] = true
 		}
 		n := ns[0]
 		if n.ID == 0 { // an id of 0 can never be pinned
@@ -397,6 +424,7 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 		}
 		if p := r.probes[name]; p != nil && p.nodeID == n.ID && p.state != stNoToken &&
 			now.Sub(p.at) < infoTTL && force != name {
+			p.dup = dups[name]
 			continue
 		}
 		jobs = append(jobs, job{name, n, token})
@@ -414,7 +442,7 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 		go func() {
 			defer wg.Done()
 			info, state, detail := r.fetchInfo(ctx, j.node, j.name, j.token)
-			out <- result{j.name, &probe{nodeID: j.node.ID, info: info, state: state, detail: detail}}
+			out <- result{j.name, &probe{nodeID: j.node.ID, info: info, state: state, detail: detail, dup: dups[j.name]}}
 		}()
 	}
 	wg.Wait()
@@ -601,6 +629,9 @@ func (r *Registry) buildLocked() Current {
 			if p.state != "" {
 				v.Detail = "the last check failed: " + p.detail
 			}
+		}
+		if p != nil && p.dup && v.Detail == "" {
+			v.Detail = "another tagged node carries this name; it is ignored"
 		}
 		if aerr != nil && v.Approval == stPending {
 			v.Detail = "the stored approvals could not be read"

@@ -75,9 +75,9 @@ func NewPublic(store *Store, cfg IngressConfig) *Public { return newPublic(store
 func NewPublicFor(store *Store, reg *Registry) *Public {
 	p := newPublic(store, reg.LinkConfig())
 	p.profileCfg = func(ctx context.Context) IngressConfig {
-		// reading the discovered ingresses can take a few seconds when the cached readings are
-		// stale; without discovery there is nothing to read
-		return reg.Current(ctx, reg.DiscoveryEnabled()).Cfg
+		// the readings the page and the reconcile loop keep fresh: a profile request never waits for
+		// the network
+		return reg.Current(ctx, false).Cfg
 	}
 	return p
 }

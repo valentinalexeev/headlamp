@@ -79,7 +79,7 @@ func (m *Module) Register(r *core.Routes) error {
 			}
 		} else if cfg, parseErr = ParseIngressConfig(data); parseErr == nil {
 			legacy = !hasKey(data, "ingresses")
-			linkHostSet = hasKey(data, "link_host")
+			linkHostSet = !legacy && hasKey(data, "link_host")
 		}
 	}
 	required := []string{"ENROLL_CONFIG", "ENROLL_SECRET_KEY"}
@@ -148,7 +148,7 @@ func (m *Module) Start(ctx context.Context) error {
 	go func() {
 		defer close(m.loopDone)
 		ReconcileLoopAll(ctx, m.store, m.reg.LinkConfig(), func() []SyncTarget {
-			return m.reg.Current(ctx, true).Targets
+			return m.reg.Current(ctx, true).SyncTargets
 		})
 	}()
 	return nil

@@ -288,8 +288,8 @@ func TestEnrolmentUsesTheHeadscaleSource(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fetches.Add(1)
 		io.WriteString(w, `{"nodes":[
-		  {"id":"1","name":"ingress-1","online":true,"tags":["tag:ingress"],"ipAddresses":["100.64.0.5"]},
-		  {"id":"2","name":"ingress-2","online":true,"tags":["tag:ingress"],"ipAddresses":["100.64.0.6"]}]}`)
+		  {"id":"1","name":"ingress-1","givenName":"ingress-1","online":true,"tags":["tag:ingress"],"ipAddresses":["100.64.0.5"]},
+		  {"id":"2","name":"ingress-2","givenName":"ingress-2","online":true,"tags":["tag:ingress"],"ipAddresses":["100.64.0.6"]}]}`)
 	}))
 	defer hs.Close()
 	dir := t.TempDir()

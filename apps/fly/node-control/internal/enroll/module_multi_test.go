@@ -622,6 +622,7 @@ func TestChangedParametersLeaveProfileThroughTheModule(t *testing.T) {
 	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
 	f.a3.set("public_key", "CHANGED-KEY-0123456789")
 	f.clk.advance(infoTTL + time.Second)
+	f.do("GET", "/enroll/ingresses", "") // the page (or the reconcile loop) reads the parameters; a profile fetch never does
 	if _, body := f.pub(sub); strings.Contains(body, "ingress-3.example.com") || strings.Contains(body, "CHANGED-KEY") {
 		t.Fatal("a changed ingress stays in the profile")
 	}
@@ -699,5 +700,77 @@ func TestRevokeReachesApprovedIngressRightAfterARestart(t *testing.T) {
 	code, _ := f.do("POST", fmt.Sprintf("/enroll/devices/%d/revoke", id), "{}")
 	if code != 200 || f.a3.putCount() != before+1 || len(f.a3.lastPut()) != 0 {
 		t.Fatalf("%d: the revocation did not reach the approved ingress (pushes %d -> %d)", code, before, f.a3.putCount())
+	}
+}
+
+func TestReconcileAndDeviceListCoverUnverifiedApprovedIngress(t *testing.T) {
+	f := newMultiFx(t)
+	f.withDiscovered(t)
+	f.register()
+	id, _ := f.create()
+	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
+	f.mod.Stop(context.Background())
+
+	f.a3.mu.Lock()
+	f.a3.status = 503 // /v1/info keeps failing: the ingress stays unverified
+	f.a3.putCode = 503
+	f.a3.mu.Unlock()
+	f.register()
+	_, m := f.do("POST", fmt.Sprintf("/enroll/devices/%d/revoke", id), "{}")
+	if s := rowSync(ingressRows(t, m)["ingress-3"]); s["pending"] != true {
+		t.Fatalf("the revoke response must show the unverified ingress as pending: %v", m)
+	}
+	// the device list's banner data covers it too
+	_, dl := f.do("GET", "/enroll/devices", "")
+	if rows := ingressRows(t, dl); rows["ingress-3"] == nil || rowSync(rows["ingress-3"])["pending"] != true || dl["sync"].(map[string]any)["pending"] != true {
+		t.Fatalf("the device list hides a lagging ingress: %v", dl)
+	}
+	// a reconcile tick delivers the revocation once the agent answers again
+	f.a3.mu.Lock()
+	f.a3.putCode = 0
+	n := len(f.a3.puts)
+	f.a3.mu.Unlock()
+	restore := setReconcileForTest(10*time.Millisecond, 20*time.Millisecond)
+	defer restore()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := f.mod.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the reconcile loop to reach the unverified ingress", func() bool { return f.a3.putCount() > n })
+	if len(f.a3.lastPut()) != 0 {
+		t.Fatalf("the revocation was not delivered: %v", f.a3.lastPut())
+	}
+	cancel()
+	<-f.mod.loopDone
+}
+
+func TestPublicProfileNeverReadsInfo(t *testing.T) {
+	f := newMultiFx(t)
+	f.withDiscovered(t)
+	f.register()
+	_, subURL := f.create()
+	f.do("POST", "/enroll/ingresses/ingress-3/approve", fmt.Sprintf(`{"fingerprint":%q}`, f.fingerprintOf("ingress-3")))
+	f.clk.advance(infoTTL + time.Second)
+	hits := f.a3.hits()
+	f.pub(subURL[strings.Index(subURL, "/sub/"):])
+	if f.a3.hits() != hits {
+		t.Fatal("a public profile request triggered a /v1/info reading")
+	}
+}
+
+func TestLinkHostKeyCountsOnlyInTheListShape(t *testing.T) {
+	agent := newFakeIngressAgent(t)
+	e := newModEnv(t, agent.srv.URL)
+	os.WriteFile(e.m["ENROLL_CONFIG"], []byte(`{"host":"ingress.example.test","public_key":"P","short_id":"ab","sni":"s.example.test","link_host":"links.example.com"}`), 0o600)
+	env := e.env()
+	r := routesFor(env)
+	mod := New(env, WithNodeSource(&nodeList{})).(*Module)
+	if err := mod.Register(r); err != nil {
+		t.Fatal(err)
+	}
+	defer mod.Stop(context.Background())
+	if mod.reg.DiscoveryEnabled() {
+		t.Fatal("the old single-host form must not turn discovery on")
 	}
 }

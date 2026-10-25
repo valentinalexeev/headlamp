@@ -128,7 +128,7 @@ async function loadIngresses(j) {
     const base = "/enroll/ingresses/" + encodeURIComponent(v.name);
     if (v.source === "discovered" && v.fingerprint && (v.approval === "pending" || v.approval === "changed")) {
       btn("Approve", "", async () => {
-        if (!confirm("Approve " + v.name + " (" + v.host + ", fingerprint " + v.fingerprint.slice(0, 12) + "\u2026)? It will receive credentials and appear in every profile.")) return;
+        if (!confirm("Approve " + v.name + " (" + v.host + ", fingerprint " + v.fingerprint + ")? It will receive credentials and appear in every profile.")) return;
         try { const r = await post(base + "/approve", {fingerprint: v.fingerprint}); showSync(r.sync, r.ingresses); load(); } catch (e) { say(e.message, true); }
       });
     }

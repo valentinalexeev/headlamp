@@ -23,7 +23,11 @@
 # (default 8081), CANARY_LINK_PORT (default none), CANARY_LINK_SCHEME (https or http, default https).
 set -u
 
-usage() { echo "usage: profile-canary.sh <tailnet-base-url> <link-host> <canary-sub-secret>" >&2; exit 2; }
+usage() {
+  echo "usage: profile-canary.sh <tailnet-base-url> <link-host> [<canary-sub-secret> | -]" >&2
+  echo "       the secret may also come from CANARY_SECRET (no third argument) or stdin ('-')" >&2
+  exit 2
+}
 die() { echo "profile-canary: $*" >&2; exit 2; }
 
 [ $# -eq 2 ] || [ $# -eq 3 ] || usage
@@ -35,7 +39,7 @@ else
   [ -n "$secret" ] || usage
 fi
 if [ "$secret" = "-" ]; then
-  IFS= read -r secret || die "no secret on stdin"
+  IFS= read -r secret || [ -n "$secret" ] || die "no secret on stdin"
 fi
 
 # control characters (a newline would hide a second line from the line-based checks below) and

@@ -22,13 +22,14 @@ BODY_MARKER=PROFILE-BODY-MARKER-7f3a
 
 # fake <name> <body> [status]: serves <body> at /sub/<SECRET> on a free loopback port; port in $t/<name>.port
 fake() {
-  rm -f "$t/$1.port" # never read a port left by an earlier server of the same name
+  rm -f "$t/$1.port" "$t/$1.port.hits" # never read a port left by an earlier server of the same name
   printf '%s' "$2" >"$t/$1.body"
   python3 - "$t/$1.body" "$t/$1.port" "$SECRET" "${3:-200}" <<'PY' &
 import sys, http.server
 body_path, port_path, secret, status = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        open(port_path + ".hits", "a").write("x")
         ok = self.path == "/sub/" + secret and self.headers.get("User-Agent") == "profile-canary"
         data = open(body_path, "rb").read() if ok else b"no"
         self.send_response(status if ok else 404)
@@ -131,11 +132,12 @@ check "two empty bodies print no OK" "$(grep -c '^OK' "$t/out")" -eq 0
 run "$pa" "$ph"
 check "one empty body exits 2" "$rc" -eq 2
 
-# the test hooks are ignored unless CANARY_TEST=1
-CANARY_DIRECT_PORT="$pa" CANARY_LINK_PORT="$pa" CANARY_LINK_SCHEME=http \
+# the test hooks are ignored unless CANARY_TEST=1: the fake must see no request at all
+fake m "$BODY_MARKER profile one"; pm=$(cat "$t/m.port")
+CANARY_DIRECT_PORT="$pm" CANARY_LINK_PORT="$pm" CANARY_LINK_SCHEME=http \
   sh "$script" http://127.0.0.1 127.0.0.1 "$SECRET" >"$t/out" 2>"$t/err"
-check "hooks without CANARY_TEST are ignored" "$?" -eq 2
 check "hooks without CANARY_TEST print no OK" "$(grep -c '^OK' "$t/out")" -eq 0
+check "hooks without CANARY_TEST never reach the fake" "$(cat "$t/m.port.hits" 2>/dev/null | wc -c | tr -d ' ')" -eq 0
 
 # the secret can come from the environment or stdin instead of the argument list
 fake k "$BODY_MARKER profile one"; pk=$(cat "$t/k.port")
@@ -145,6 +147,9 @@ check "secret from CANARY_SECRET" "$?" -eq 0
 printf '%s\n' "$SECRET" | CANARY_TEST=1 CANARY_DIRECT_PORT=$pa CANARY_LINK_PORT=$pk CANARY_LINK_SCHEME=http \
   sh "$script" http://127.0.0.1 127.0.0.1 - >"$t/out" 2>"$t/err"
 check "secret from stdin" "$?" -eq 0
+printf '%s' "$SECRET" | CANARY_TEST=1 CANARY_DIRECT_PORT=$pa CANARY_LINK_PORT=$pk CANARY_LINK_SCHEME=http \
+  sh "$script" http://127.0.0.1 127.0.0.1 - >"$t/out" 2>"$t/err"
+check "secret on stdin without a trailing newline" "$?" -eq 0
 printf 'x\n' | CANARY_TEST=1 CANARY_DIRECT_PORT=$pa CANARY_LINK_PORT=$pk CANARY_LINK_SCHEME=http \
   sh "$script" http://127.0.0.1 127.0.0.1 - >"$t/out" 2>"$t/err"
 check "bad secret on stdin exits 2" "$?" -eq 2

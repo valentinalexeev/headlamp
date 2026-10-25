@@ -266,6 +266,14 @@ S="$FLY.script"
 { has -e '--bypass-grpc-and-access-database-directly' "$S" && has -e '--force' "$S" && has -e '-c /tmp/hs-bootstrap-config.yaml' "$S" \
   && has 'mode: database' "$S" && has "$b64" "$S" && has 'headscale policy set' "$S" && has 'headscale policy get' "$S"; } && ok "remote script: direct database access, forced, database-mode config, the file's base64" || bad "remote script: $(cat "$S" 2>/dev/null)"
 { has 'trap' "$S" && has 'rm -f' "$S" && has '/tmp/policy-bootstrap.json' "$S" && has '/tmp/hs-bootstrap-config.yaml' "$S" && has -e '---POLICY---' "$S"; } && ok "remote script removes its temp files and prints the marker" || bad "remote script cleanup"
+for sub in set get; do
+  line=$(grep "^headscale policy $sub" "$S")
+  case $line in
+    *--force*--bypass*|*--bypass*--force*|*--force*) ok "remote $sub carries --force" ;;
+    *) bad "remote $sub lacks --force: $line" ;;
+  esac
+  case $line in *--bypass-grpc-and-access-database-directly*) ok "remote $sub bypasses grpc" ;; *) bad "remote $sub lacks the bypass flag" ;; esac
+done
 [ "$(ncalls)" = 0 ] && ok "bootstrap never contacts node-control" || bad "bootstrap used curl"
 [ "$(wc -l < "$T/flycalls" | tr -d ' ')" = 1 ] && ok "bootstrap makes a single flyctl call" || bad "bootstrap calls: $(cat "$T/flycalls")"
 
@@ -284,6 +292,43 @@ run bootstrap --yes --file "$FILE"
 reset; fxfail flyctl
 run bootstrap --yes --file "$FILE"
 { [ $rc = 3 ] && has 'was NOT loaded' "$T/err"; } && ok "bootstrap flyctl failure exits 3" || bad "bootstrap fail rc=$rc"
+
+# comparison variants: HuJSON file (comments, trailing comma) vs what headscale stores (comments blanked)
+HU="$T/hu.json"
+printf '%s\n' '{ // note' '  "acls": [ {"action":"accept","src":["alice"],"dst":["*:*"],},' '  ],' '}' > "$HU"
+reset; printf '%s' '{
+  "acls": [ {"action":"accept","src":["alice"],"dst":["*:*"]} ]
+}' > "$FIX/flyctl.get.out"
+run bootstrap --yes --file "$HU"
+{ [ $rc = 0 ] && has 'warning: the policy file contains comments or trailing commas' "$T/err"; } && ok "bootstrap: commented file, stored without comments -> 0 with a warning" || bad "bootstrap hujson rc=$rc: $(cat "$T/err")"
+
+reset; printf '%s\n' '{        ' '  "acls": [ {"action":"accept","src":["alice"],"dst":["*:*"],},' '  ],' '}' > "$FIX/flyctl.get.out"
+run bootstrap --yes --file "$HU"
+{ [ $rc = 0 ] && has 'warning: the policy file contains comments' "$T/err"; } && ok "bootstrap: read-back with blanked comment and kept trailing commas -> 0 with a warning" || bad "bootstrap stored-hujson rc=$rc: $(cat "$T/err")"
+
+reset; printf '%s\n' '{        ' '  "acls": [ ' '}' > "$FIX/flyctl.get.out"
+run bootstrap --yes --file "$HU"
+[ $rc = 3 ] && ok "bootstrap: read-back that is broken even without trailing commas -> 3" || bad "bootstrap broken rc=$rc"
+
+reset; : > "$FIX/flyctl.get.out"
+run bootstrap --yes --file "$HU"
+{ [ $rc = 3 ] && has 'NOT loaded' "$T/err"; } && ok "bootstrap: commented file, empty read-back -> 3" || bad "bootstrap empty rc=$rc"
+
+reset; printf '%s' 'not json at all' > "$FIX/flyctl.get.out"
+run bootstrap --yes --file "$HU"
+[ $rc = 3 ] && ok "bootstrap: commented file, read-back not JSON -> 3" || bad "bootstrap nonjson rc=$rc"
+
+reset; printf '%s' '{}' > "$FIX/flyctl.get.out"
+run bootstrap --yes --file "$HU"
+[ $rc = 3 ] && ok "bootstrap: commented file, empty-object read-back -> 3" || bad "bootstrap {} rc=$rc"
+
+reset; printf '%s' '[1,2]' > "$FIX/flyctl.get.out"
+run bootstrap --yes --file "$HU"
+[ $rc = 3 ] && ok "bootstrap: commented file, non-object read-back -> 3" || bad "bootstrap array rc=$rc"
+
+reset; : > "$FIX/flyctl.get.out"
+run bootstrap --yes --file "$FILE"
+[ $rc = 3 ] && ok "bootstrap: plain file, empty read-back -> 3" || bad "bootstrap plain empty rc=$rc"
 
 # the awk program really run against sample configs (taken from the remote script)
 reset; cp "$FILE" "$FIX/flyctl.get.out"; run bootstrap --yes --file "$FILE"

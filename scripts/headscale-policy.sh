@@ -231,6 +231,11 @@ skip && /^[[:space:]]*$/ { nb++; next }
 { if (skip) for (i = 0; i < nb; i++) print ""; skip = 0; nb = 0; print }
 END { if (skip) for (i = 0; i < nb; i++) print "" }'
 
+is_object() { jq -e 'type == "object" and length > 0' "$1" >/dev/null 2>&1; }
+
+# The direct-database path keeps trailing commas (it only blanks comments); drop them for the lenient check.
+strip_trailing_commas() { tr '\n' ' ' < "$1" | sed -E 's/,[[:space:]]*([]}])/\1/g'; }
+
 do_bootstrap() {
   app=${HS_APP:-}
   [ -n "$app" ] || die 2 "HS_APP is required for bootstrap"
@@ -250,13 +255,21 @@ do_bootstrap() {
     "awk '$AWK_POLICY' /etc/headscale/config.yaml > /tmp/hs-bootstrap-config.yaml" \
     'headscale policy set -f /tmp/policy-bootstrap.json --bypass-grpc-and-access-database-directly --force -c /tmp/hs-bootstrap-config.yaml || exit $?' \
     'echo ---POLICY---' \
-    'headscale policy get --bypass-grpc-and-access-database-directly -c /tmp/hs-bootstrap-config.yaml')
+    'headscale policy get --bypass-grpc-and-access-database-directly --force -c /tmp/hs-bootstrap-config.yaml')
   _sb64=$(printf '%s\n' "$_rs" | base64 | tr -d '\n')
   flyctl ssh console -a "$app" -C "sh -c 'echo $_sb64 | base64 -d > /tmp/hs-bootstrap.sh && sh /tmp/hs-bootstrap.sh; rc=\$?; rm -f /tmp/hs-bootstrap.sh; exit \$rc'" > "$tmp/out" \
     || die 3 "flyctl ssh failed; the policy was NOT loaded"
   grep -qx -e '---POLICY---' "$tmp/out" || die 3 "no policy read back; the policy was NOT loaded"
   sed -n -e '/^---POLICY---$/,$p' "$tmp/out" | sed -e 1d > "$tmp/got"
-  same_text "$tmp/got" "$file" || die 3 "the policy read back differs from $file; the policy was NOT loaded"
+  # The direct-database path stores the policy standardized (comments blanked, trailing commas dropped), so a file with
+  # comments cannot be compared byte for byte or through jq: accept a non-empty JSON object read back in that case.
+  if jq -e . "$file" >/dev/null 2>&1; then
+    same_text "$tmp/got" "$file" || die 3 "the policy read back differs from $file; the policy was NOT loaded"
+  elif is_object "$tmp/got" || { strip_trailing_commas "$tmp/got" > "$tmp/got.s" && is_object "$tmp/got.s"; }; then
+    say "warning: the policy file contains comments or trailing commas; headscale stored it without them (direct database path)"
+  else
+    die 3 "the policy read back is empty or not a JSON object; the policy was NOT loaded"
+  fi
   say "policy preloaded into headscale's database; now switch the server to policy.mode: database"
 }
 

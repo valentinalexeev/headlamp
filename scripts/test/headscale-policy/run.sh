@@ -44,17 +44,14 @@ echo "curl: (7) no fixture for $key" >&2; exit 7
 STUB
 cat > "$BIN/flyctl" <<'STUB'
 #!/bin/sh
+# Records the args and the remote script (the command carries it base64-encoded); prints the marker and a chosen policy.
 for last; do :; done
-case $last in
-  *"policy get"*)
-    echo get >> "$FLY_CALLS"
-    [ -e "$FIX/flyctl.getfail" ] && exit 1
-    [ -f "$FIX/flyctl.get.out" ] && cat "$FIX/flyctl.get.out"
-    exit 0 ;;
-esac
-echo set >> "$FLY_CALLS"
+echo call >> "$FLY_CALLS"
 for a in "$@"; do printf '%s\n' "$a"; done > "$FLY_ARGS"
+printf '%s\n' "$last" | sed -E "s/^sh -c .echo ([A-Za-z0-9+\/=]+) .*/\1/" | base64 -d > "$FLY_ARGS.script" 2>/dev/null
 [ -e "$FIX/flyctl.fail" ] && exit 1
+[ -e "$FIX/flyctl.nomarker" ] || echo '---POLICY---'
+[ -f "$FIX/flyctl.get.out" ] && cat "$FIX/flyctl.get.out"
 exit 0
 STUB
 chmod +x "$BIN/curl" "$BIN/flyctl"
@@ -74,11 +71,11 @@ fx() { # KEY STATUS BODY [N]
   printf '%s' "$2" > "$base.status"; printf '%s' "$3" > "$base.body"
 }
 fxfail() { : > "$FIX/$1${2:+.$2}.fail"; }
-reset() { rm -rf "$FIX"; mkdir -p "$FIX"; : > "$CALLS"; rm -f "$FLY" "$T/flycalls"; }
+reset() { rm -rf "$FIX"; mkdir -p "$FIX"; : > "$CALLS"; rm -f "$FLY" "$FLY.script" "$T/flycalls"; }
 run() { sh "$script" "$@" > "$T/out" 2> "$T/err"; rc=$?; }
 ncalls() { wc -l < "$CALLS" | tr -d ' '; }
 order() { tr '\n' ',' < "$CALLS"; }
-has() { grep -q -- "$1" "$2"; }
+has() { if [ "$1" = -e ]; then grep -q -e "$2" "$3"; else grep -q -- "$1" "$2"; fi; }
 
 POL='{"acls":[{"action":"accept","src":["alice"],"dst":["*:*"]}]}'
 OK_PREVIEW='{"valid":true,"error":"","diff":"--- live\n+++ new\n+x\n","warnings":[]}'
@@ -263,21 +260,50 @@ export HS_APP=hs-app
 cp "$FILE" "$FIX/flyctl.get.out"
 run bootstrap --yes --file "$FILE"
 b64=$(base64 < "$FILE" | tr -d '\n')
-{ [ $rc = 0 ] && has 'ssh' "$FLY" && has 'hs-app' "$FLY" && has "$b64" "$FLY" && has 'headscale policy set' "$FLY"; } && ok "bootstrap runs flyctl ssh with the base64 file" || bad "bootstrap rc=$rc args=$(cat "$FLY" 2>/dev/null)"
+[ $rc = 0 ] && has "switch the server to policy.mode: database" "$T/err" && ok "bootstrap with an equal read-back exits 0 with the next-step message" || bad "bootstrap rc=$rc err=$(cat "$T/err")"
+{ has 'ssh' "$FLY" && has 'hs-app' "$FLY"; } && ok "bootstrap runs flyctl ssh console for the app" || bad "bootstrap args=$(cat "$FLY" 2>/dev/null)"
+S="$FLY.script"
+{ has -e '--bypass-grpc-and-access-database-directly' "$S" && has -e '--force' "$S" && has -e '-c /tmp/hs-bootstrap-config.yaml' "$S" \
+  && has 'mode: database' "$S" && has "$b64" "$S" && has 'headscale policy set' "$S" && has 'headscale policy get' "$S"; } && ok "remote script: direct database access, forced, database-mode config, the file's base64" || bad "remote script: $(cat "$S" 2>/dev/null)"
+{ has 'trap' "$S" && has 'rm -f' "$S" && has '/tmp/policy-bootstrap.json' "$S" && has '/tmp/hs-bootstrap-config.yaml' "$S" && has -e '---POLICY---' "$S"; } && ok "remote script removes its temp files and prints the marker" || bad "remote script cleanup"
 [ "$(ncalls)" = 0 ] && ok "bootstrap never contacts node-control" || bad "bootstrap used curl"
-[ "$(tr '\n' ' ' < "$T/flycalls")" = "set get " ] && ok "bootstrap reads the policy back after setting it" || bad "bootstrap calls: $(cat "$T/flycalls")"
+[ "$(wc -l < "$T/flycalls" | tr -d ' ')" = 1 ] && ok "bootstrap makes a single flyctl call" || bad "bootstrap calls: $(cat "$T/flycalls")"
+
+reset; printf '%s' '{ "acls": [ {"src":["alice"],"dst":["*:*"],"action":"accept"} ] }' > "$FIX/flyctl.get.out"
+run bootstrap --yes --file "$FILE"
+[ $rc = 0 ] && ok "bootstrap accepts a reformatted, equal read-back" || bad "bootstrap reformat rc=$rc"
 
 reset; printf '%s' '{ "acls": [] }' > "$FIX/flyctl.get.out"
 run bootstrap --yes --file "$FILE"
-{ [ $rc = 3 ] && has 'not loaded' "$T/err"; } && ok "bootstrap: read-back differs -> exit 3" || bad "bootstrap mismatch rc=$rc"
+{ [ $rc = 3 ] && has 'was NOT loaded' "$T/err"; } && ok "bootstrap: read-back differs -> exit 3" || bad "bootstrap mismatch rc=$rc"
 
-reset; printf '%s' "$POL" > "$FIX/flyctl.get.out"; : > "$FIX/flyctl.getfail"
+reset; printf '%s' "$POL" > "$FIX/flyctl.get.out"; : > "$FIX/flyctl.nomarker"
 run bootstrap --yes --file "$FILE"
-[ $rc = 3 ] && ok "bootstrap: read-back failing -> exit 3" || bad "bootstrap get fail rc=$rc"
+{ [ $rc = 3 ] && has 'was NOT loaded' "$T/err"; } && ok "bootstrap: missing marker -> exit 3" || bad "bootstrap no marker rc=$rc"
 
 reset; fxfail flyctl
 run bootstrap --yes --file "$FILE"
-[ $rc = 3 ] && ok "bootstrap flyctl failure exits 3" || bad "bootstrap fail rc=$rc"
+{ [ $rc = 3 ] && has 'was NOT loaded' "$T/err"; } && ok "bootstrap flyctl failure exits 3" || bad "bootstrap fail rc=$rc"
+
+# the awk program really run against sample configs (taken from the remote script)
+reset; cp "$FILE" "$FIX/flyctl.get.out"; run bootstrap --yes --file "$FILE"
+awkcmd=$(sed -n '/^awk /,/config.yaml >/p' "$FLY.script" | sed 's# /etc/headscale/config.yaml > .*##')
+cfg() { eval "$awkcmd \"\$1\""; }
+printf '%s\n' 'server_url: https://hs.example.test' 'policy:' '  mode: file' '  path: "/etc/headscale/acl.json"' '' 'derp:' '  server:' '    enabled: true' > "$T/c1"
+printf '%s\n' 'server_url: https://hs.example.test' 'policy:' '  mode: database' '' 'derp:' '  server:' '    enabled: true' > "$T/c1.want"
+cfg "$T/c1" > "$T/c1.got"
+cmp -s "$T/c1.got" "$T/c1.want" && ok "awk: policy block replaced, other lines (and the blank before the next key) unchanged" || { bad "awk basic"; diff "$T/c1.want" "$T/c1.got"; }
+printf '%s\n' 'a: 1' 'policy:' '  mode: file' '  path: x' > "$T/c2"
+printf '%s\n' 'a: 1' 'policy:' '  mode: database' > "$T/c2.want"
+cfg "$T/c2" > "$T/c2.got"; cmp -s "$T/c2.got" "$T/c2.want" && ok "awk: policy as the last block" || { bad "awk last"; diff "$T/c2.want" "$T/c2.got"; }
+printf '%s\n' 'policy:' '  mode: file' '  # old path' '  path: x' '    # deep comment' 'b: 2' > "$T/c3"
+printf '%s\n' 'policy:' '  mode: database' 'b: 2' > "$T/c3.want"
+cfg "$T/c3" > "$T/c3.got"; cmp -s "$T/c3.got" "$T/c3.want" && ok "awk: commented lines inside the block are dropped with it" || { bad "awk comment"; diff "$T/c3.want" "$T/c3.got"; }
+printf '%s\n' 'policy_extra:' '  keep: me' 'policy:' '  mode: file' 'xpolicy: 1' > "$T/c4"
+printf '%s\n' 'policy_extra:' '  keep: me' 'policy:' '  mode: database' 'xpolicy: 1' > "$T/c4.want"
+cfg "$T/c4" > "$T/c4.got"; cmp -s "$T/c4.got" "$T/c4.want" && ok "awk: similarly named keys are untouched" || { bad "awk similar"; diff "$T/c4.want" "$T/c4.got"; }
+printf '%s\n' 'x: 1' > "$T/c5"; cfg "$T/c5" > "$T/c5.got"
+cmp -s "$T/c5" "$T/c5.got" && ok "awk: a config without a policy block is unchanged" || bad "awk none"
 
 reset
 head -c 70000 /dev/zero | tr '\0' 'a' > "$T/big.json"

@@ -9,8 +9,13 @@
 #                                                          read the live state, check, show the diff, apply, verify that
 #                                                          node-control still answers and serves F, then confirm
 #   headscale-policy.sh pull      [--file F]                write the live policy to F
-#   headscale-policy.sh bootstrap [--file F] --yes          one-time / break-glass: load F through `fly ssh`, then read
-#                                                          it back and compare
+#   headscale-policy.sh bootstrap [--file F] --yes          preload F into headscale's database through `fly ssh`
+#                                                          (needs HS_APP), then read it back and compare
+#
+# bootstrap is the first step of the move to `policy.mode: database`: run it BEFORE deploying the database-mode config.
+# In database mode a server with no stored policy allows everything, so the policy must already be in the database when
+# the mode is switched. It writes the row directly (a copy of the config with the policy block set to database mode, so it
+# works while the server still runs in file mode). It is also the break-glass path when node-control is down.
 #
 # Environment:
 #   NODE_CONTROL_URL  base URL of node-control on the tailnet (required, except for bootstrap)
@@ -218,6 +223,14 @@ do_pull() {
   fi
 }
 
+# Rewrites the top-level `policy:` block of a headscale config to `policy:` + `  mode: database`; every other line is kept
+# (blank lines before the next key included). Runs on the headscale machine, see do_bootstrap.
+AWK_POLICY='/^policy:/ { print; print "  mode: database"; skip = 1; nb = 0; next }
+skip && /^[[:space:]]+[^[:space:]]/ { nb = 0; next }
+skip && /^[[:space:]]*$/ { nb++; next }
+{ if (skip) for (i = 0; i < nb; i++) print ""; skip = 0; nb = 0; print }
+END { if (skip) for (i = 0; i < nb; i++) print "" }'
+
 do_bootstrap() {
   app=${HS_APP:-}
   [ -n "$app" ] || die 2 "HS_APP is required for bootstrap"
@@ -227,12 +240,24 @@ do_bootstrap() {
   _size=$(wc -c < "$file" | tr -d ' ')
   [ "$_size" -le "$MAX_BOOTSTRAP_BYTES" ] || die 2 "$file is larger than $MAX_BOOTSTRAP_BYTES bytes"
   _b64=$(base64 < "$file" | tr -d '\n')
-  flyctl ssh console -a "$app" -C "sh -c 'echo $_b64 | base64 -d > /tmp/policy-bootstrap.json && headscale policy set -f /tmp/policy-bootstrap.json; rc=\$?; rm -f /tmp/policy-bootstrap.json; exit \$rc'" \
-    || die 3 "flyctl ssh failed; the policy was not loaded"
-  flyctl ssh console -a "$app" -C "headscale policy get" > "$tmp/got" \
-    || die 3 "could not read the policy back; the policy was not loaded or cannot be verified"
-  same_text "$tmp/got" "$file" || die 3 "the policy read back differs from $file; the policy was not loaded"
-  say "bootstrap done (read back and compared)"
+  # The remote script goes over as base64 so that no quoting survives the ssh/sh layers. It writes the policy straight
+  # into headscale's database with a copy of the config whose policy block says `mode: database`; this works while the
+  # server still runs in file mode. It then prints a marker and the stored policy for the local comparison.
+  _rs=$(printf '%s\n' \
+    'set -u' \
+    'trap '"'"'rm -f /tmp/policy-bootstrap.json /tmp/hs-bootstrap-config.yaml'"'"' EXIT' \
+    "echo '$_b64' | base64 -d > /tmp/policy-bootstrap.json" \
+    "awk '$AWK_POLICY' /etc/headscale/config.yaml > /tmp/hs-bootstrap-config.yaml" \
+    'headscale policy set -f /tmp/policy-bootstrap.json --bypass-grpc-and-access-database-directly --force -c /tmp/hs-bootstrap-config.yaml || exit $?' \
+    'echo ---POLICY---' \
+    'headscale policy get --bypass-grpc-and-access-database-directly -c /tmp/hs-bootstrap-config.yaml')
+  _sb64=$(printf '%s\n' "$_rs" | base64 | tr -d '\n')
+  flyctl ssh console -a "$app" -C "sh -c 'echo $_sb64 | base64 -d > /tmp/hs-bootstrap.sh && sh /tmp/hs-bootstrap.sh; rc=\$?; rm -f /tmp/hs-bootstrap.sh; exit \$rc'" > "$tmp/out" \
+    || die 3 "flyctl ssh failed; the policy was NOT loaded"
+  grep -qx -e '---POLICY---' "$tmp/out" || die 3 "no policy read back; the policy was NOT loaded"
+  sed -n -e '/^---POLICY---$/,$p' "$tmp/out" | sed -e 1d > "$tmp/got"
+  same_text "$tmp/got" "$file" || die 3 "the policy read back differs from $file; the policy was NOT loaded"
+  say "policy preloaded into headscale's database; now switch the server to policy.mode: database"
 }
 
 case $cmd in

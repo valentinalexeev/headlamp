@@ -22,6 +22,7 @@ BODY_MARKER=PROFILE-BODY-MARKER-7f3a
 
 # fake <name> <body> [status]: serves <body> at /sub/<SECRET> on a free loopback port; port in $t/<name>.port
 fake() {
+  rm -f "$t/$1.port" # never read a port left by an earlier server of the same name
   printf '%s' "$2" >"$t/$1.body"
   python3 - "$t/$1.body" "$t/$1.port" "$SECRET" "${3:-200}" <<'PY' &
 import sys, http.server
@@ -45,7 +46,7 @@ PY
 }
 
 run() { # run <direct-port> <link-port> [secret]
-  CANARY_DIRECT_PORT=$1 CANARY_LINK_PORT=$2 CANARY_LINK_SCHEME=http \
+  CANARY_TEST=1 CANARY_DIRECT_PORT=$1 CANARY_LINK_PORT=$2 CANARY_LINK_SCHEME=http \
     sh "$script" http://127.0.0.1 127.0.0.1 "${3:-$SECRET}" >"$t/out" 2>"$t/err"
   rc=$?
   cat "$t/out" "$t/err" >"$t/all"
@@ -95,7 +96,7 @@ fake f "$BODY_MARKER profile one" 500; pf=$(cat "$t/f.port")
 run "$pe" "$pf"
 check "HTTP 500 on both exits 2" "$rc" -eq 2
 
-# a redirect is not followed
+# a redirect is not followed, and not taken for a profile: one side or both sides
 cat >"$t/redir.py" <<'PY'
 import sys, http.server
 class H(http.server.BaseHTTPRequestHandler):
@@ -106,10 +107,55 @@ s = http.server.HTTPServer(("127.0.0.1", 0), H)
 open(sys.argv[1], "w").write(str(s.server_address[1]))
 s.serve_forever()
 PY
-python3 "$t/redir.py" "$t/r.port" & pids="$pids $!"
-i=0; while [ ! -s "$t/r.port" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
-run "$pa" "$(cat "$t/r.port")"
-check "redirect is an error, not followed" "$rc" -eq 2
+for n in r1 r2; do
+  rm -f "$t/$n.port"
+  python3 "$t/redir.py" "$t/$n.port" & pids="$pids $!"
+  i=0; while [ ! -s "$t/$n.port" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+done
+pr1=$(cat "$t/r1.port"); pr2=$(cat "$t/r2.port")
+run "$pa" "$pr1"
+check "redirect on the link side exits 2" "$rc" -eq 2
+check "redirect on the link side prints no OK" "$(grep -c '^OK' "$t/out")" -eq 0
+run "$pr1" "$pa"
+check "redirect on the direct side exits 2" "$rc" -eq 2
+run "$pr1" "$pr2"
+check "redirects on both sides exit 2 (two empty bodies are not a match)" "$rc" -eq 2
+check "redirects on both sides print no OK" "$(grep -c '^OK' "$t/out")" -eq 0
+
+# an empty 200 body is not a profile, even when both sides agree
+fake g ""; pg=$(cat "$t/g.port")
+fake h ""; ph=$(cat "$t/h.port")
+run "$pg" "$ph"
+check "two empty bodies exit 2" "$rc" -eq 2
+check "two empty bodies print no OK" "$(grep -c '^OK' "$t/out")" -eq 0
+run "$pa" "$ph"
+check "one empty body exits 2" "$rc" -eq 2
+
+# the test hooks are ignored unless CANARY_TEST=1
+CANARY_DIRECT_PORT="$pa" CANARY_LINK_PORT="$pa" CANARY_LINK_SCHEME=http \
+  sh "$script" http://127.0.0.1 127.0.0.1 "$SECRET" >"$t/out" 2>"$t/err"
+check "hooks without CANARY_TEST are ignored" "$?" -eq 2
+check "hooks without CANARY_TEST print no OK" "$(grep -c '^OK' "$t/out")" -eq 0
+
+# the secret can come from the environment or stdin instead of the argument list
+fake k "$BODY_MARKER profile one"; pk=$(cat "$t/k.port")
+CANARY_TEST=1 CANARY_DIRECT_PORT=$pa CANARY_LINK_PORT=$pk CANARY_LINK_SCHEME=http CANARY_SECRET=$SECRET \
+  sh "$script" http://127.0.0.1 127.0.0.1 >"$t/out" 2>"$t/err"
+check "secret from CANARY_SECRET" "$?" -eq 0
+printf '%s\n' "$SECRET" | CANARY_TEST=1 CANARY_DIRECT_PORT=$pa CANARY_LINK_PORT=$pk CANARY_LINK_SCHEME=http \
+  sh "$script" http://127.0.0.1 127.0.0.1 - >"$t/out" 2>"$t/err"
+check "secret from stdin" "$?" -eq 0
+printf 'x\n' | CANARY_TEST=1 CANARY_DIRECT_PORT=$pa CANARY_LINK_PORT=$pk CANARY_LINK_SCHEME=http \
+  sh "$script" http://127.0.0.1 127.0.0.1 - >"$t/out" 2>"$t/err"
+check "bad secret on stdin exits 2" "$?" -eq 2
+
+# control characters (a newline hides a second line from line-based checks) are refused
+nl='
+'
+CANARY_DIRECT_PORT=1 sh "$script" "http://127.0.0.1${nl}x" 127.0.0.1 "$SECRET" >"$t/out" 2>"$t/err"; check "newline in the base url exits 2" "$?" -eq 2
+CANARY_DIRECT_PORT=1 sh "$script" http://127.0.0.1 "127.0.0.1${nl}evil.example" "$SECRET" >"$t/out" 2>"$t/err"; check "newline in the host exits 2" "$?" -eq 2
+CANARY_DIRECT_PORT=1 sh "$script" http://127.0.0.1 127.0.0.1 "$SECRET${nl}x" >"$t/out" 2>"$t/err"; check "newline in the secret exits 2" "$?" -eq 2
+CANARY_DIRECT_PORT=1 sh "$script" http://127.0.0.1 127.0.0.1 "$SECRET$(printf '\001')" >"$t/out" 2>"$t/err"; check "control character in the secret exits 2" "$?" -eq 2
 
 # argument checks: exit 2, and nothing is fetched
 for args in "" "http://127.0.0.1 127.0.0.1" "-x 127.0.0.1 $SECRET" "http://127.0.0.1 -bad.example $SECRET" \

@@ -29,7 +29,7 @@ Secrets go in Fly secrets; plain settings in `fly.toml`.
 | `ENROLL_DB` | path of the SQLite database; enables enrolment. Put it on the state volume: `/var/lib/tailscale/enroll.db` |
 | `ENROLL_CONFIG` | enrolment ingress description, for example `/srv/app/enroll.json` (required with `ENROLL_DB`; shape under "Enrolment") |
 | `ENROLL_SECRET_KEY` | secret, at least 16 bytes; derives subscription secrets (required with `ENROLL_DB`) |
-| `AGENT_URL`, `AGENT_TOKEN` | address (dialled through the tailnet) and bearer token of the first ingress's agent (required with `ENROLL_DB`) |
+| `AGENT_URL`, `AGENT_TOKEN` | address (dialled through the tailnet) and bearer token of the first ingress's agent. Required with `ENROLL_DB` only for the old single-host `enroll.json`; in the list shape they are the optional fallback of the FIRST entry (no `agent_url` / no `AGENT_TOKEN_<NAME>`) |
 | `AGENT_TOKEN_<NAME>` | one bearer token per ingress: `<NAME>` is the ingress name upper-cased with `-` as `_` (`ingress-2` reads `AGENT_TOKEN_INGRESS_2`). An entry's `token_env` names another variable instead |
 | `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | Yandex service account key; folder for the lookup by name (the account needs `compute.operator` and `compute.viewer`) |
 | `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | OCI credentials and the default region and compartment |
@@ -205,7 +205,9 @@ Existing phones keep working untouched, because their credential on the old ingr
 Consequences to plan for:
 
 - The ingress NAME is part of a derived credential. Renaming a `derived` ingress rotates its credentials: phones need a
-  new profile. Reordering entries changes nothing.
+  new profile. Reordering entries does not change any credential, but the FIRST entry owns the `AGENT_URL` /
+  `AGENT_TOKEN` fallback and the link view (key, short id and sni used for import links), so moving another entry to
+  the top changes which agent those variables reach.
 - Rotating `ENROLL_SECRET_KEY` invalidates the subscription secrets AND every derived credential. Re-publish
   and re-enrol the profiles. `base` credentials survive.
 - Removing an entry from the file stops syncing to it: that ingress keeps its last credential set, and a later
@@ -248,18 +250,26 @@ Adding an ingress, step by step:
 2. Register the node in headscale with `tag:ingress` and a name that fits `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`.
 3. Set the token as a secret named `AGENT_TOKEN_<NAME>` and redeploy node-control (or use an `enroll.json` entry
    instead, see above, which needs no approval).
-4. Open `/enroll`. The ingress appears as `pending` with a short prefix of its public key and short id. Compare the
-   fingerprint with the one the host reports (`GET /v1/info` on its agent) over a channel you trust, then press
-   Approve. The API is `POST /enroll/ingresses/<name>/approve` with `{"fingerprint": "<shown fingerprint>"}`; a
-   fingerprint that no longer matches is refused. `POST /enroll/ingresses/<name>/unapprove` takes it out again.
+4. Open `/enroll`. The ingress appears as `pending` with its host, a short prefix of its public key and short id and a
+   fingerprint. The agent does not report a fingerprint: it is node-control's SHA-256 over the canonical JSON of
+   `name`, `host`, `port`, `sni`, `public_key` and `short_id`. Compare the host, public key and short id that
+   `GET /v1/info` on the agent reports (over a channel you trust) with what the page shows, then press Approve. The
+   API is `POST /enroll/ingresses/<name>/approve` with `{"fingerprint": "<shown fingerprint>"}`; a fingerprint that
+   no longer matches the parameters the ingress publishes at that moment is refused. `POST
+   /enroll/ingresses/<name>/unapprove` takes it out again. Both POSTs need `Content-Type: application/json`.
 5. Approval pushes the credential set at once; the row shows its sync state. Phones pick the new ingress up when they
    refresh their subscription; a profile imported by a one-time link needs the person to refresh it.
 
 - A `changed` ingress (its parameters differ, or another node id publishes them) is frozen: it is out of profiles
   and no longer synced, so it keeps its old credential set until it is approved again or un-approved. A revocation
   does not reach it meanwhile.
+- A tagged node is matched by its GIVEN name (the name the headscale administrator sets), never by the hostname the
+  machine reports about itself. When several tagged nodes share a given name, the lookup of an agent fails and no
+  token is sent to any of them, unless an approval is pinned to one of them by node id (that node keeps working and
+  the others are ignored). An explicit `agent_url` in an `enroll.json` entry (or `AGENT_URL` for the first one)
+  removes the headscale lookup for that ingress altogether: the token then goes only to that address.
 - Before approval, the token variable `AGENT_TOKEN_<NAME>` is already sent (as the bearer of `GET /v1/info`) to a
-  tagged node whose name matches it. Pinning the node id after approval reduces this exposure but cannot remove it:
+  tagged node whose given name matches it. Pinning the node id after approval reduces this exposure but cannot remove it:
   anyone who can register a tagged node with that name receives that one token. Do not set the variable before you
   expect the node.
 - A create, revoke, extend or approval answers after at most 3 seconds. If an agent has not answered by then, its row
@@ -276,23 +286,33 @@ admin port or the other ingresses' agents (restrict both in the tailnet ACL: the
 
 What the design limits:
 
-- Credentials are per ingress (`derived`), so what is stolen from one ingress is valid on that ingress only. The
-  `base` ingress holds the stored credentials; keep it the one you trust most or migrate it to a derived entry in time.
+- Credentials are per ingress (`derived`), so what is stolen from an ingress's agent or xray is valid on that
+  ingress only. This holds for an ingress that never served `link_host`. An ingress whose front serves `link_host`
+  terminates TLS for profiles and subscription secrets: it sees complete profiles, with every ingress's credentials
+  (the `base` ones included), and any host tagged `tag:ingress` may fetch `:8081/sub/` with a secret it harvested. If
+  such an ingress is compromised, rotate the subscription secrets and `ENROLL_SECRET_KEY` (this also changes every
+  derived credential) and re-enrol the devices that held `base` credentials. The `base` ingress holds the stored
+  credentials; keep it the one you trust most or migrate it to a derived entry in time.
 - A discovered ingress is never used before approval, and the approval pins the fingerprint and the node id. A
   changed host is frozen out of profiles and sync until approved again.
-- Each ingress is asked with its own token and sees no other ingress's credentials.
+- Each ingress is asked with its own token and is pushed only its own credential set (see the condition above for an ingress that serves `link_host`).
 
 What it does not limit: a compromised ingress that serves `link_host` can hand phones a modified profile (clients do
 not verify a signature) and read the tokens and secrets that pass through. The canary only detects this.
 
-Detection: `scripts/profile-canary.sh <tailnet-base-url> <link-host> <canary-sub-secret>` fetches a dedicated canary
+Detection: `scripts/profile-canary.sh <tailnet-base-url> <link-host> [<canary-sub-secret> | -]` fetches a dedicated canary
 device's profile directly (`<tailnet-base-url>:8081/sub/<secret>`) and through `https://<link-host>/sub/<secret>`,
 compares SHA-256 of the two bodies and prints the two short hashes and `OK` or `MISMATCH`, never the body or the
-secret (exit 0 identical, 1 different, 2 usage or fetch error). Create a device just for it and run the script
-from cron or CI on a machine on the tailnet; the secret is the canary device's `<digits>.<token>`. It needs `curl`
+secret (exit 0 identical, 1 different, 2 usage or fetch error; each side must answer exactly 200 with a non-empty
+body, a redirect or an empty answer is an error). Create a device just for it and run the script from cron or CI on a
+machine on the tailnet; the secret is the canary device's `<digits>.<token>`. Give it as the environment variable
+`CANARY_SECRET` or as `-` (one line on stdin): an argument shows in `ps`, and `sh -x` would print it. A false
+`MISMATCH` is possible if the approved set of ingresses changes between the two fetches; run it once more before
+acting. It needs `curl`
 and `sha256sum` or `shasum`; `sh scripts/test_profile_canary.sh` tests it against local fakes. It only catches an
-ingress that serves the canary a different profile than everybody else; one that targets other phones, or that only
-watches, passes.
+ingress that serves the canary a different profile than everybody else; one that targets other phones, that only
+watches, or that recognises the canary by its fixed `User-Agent` (`profile-canary`) or its source address and serves it
+the honest profile, passes.
 
 Structural fixes (not built): serve `link_host` from a host that is not on the data path of any ingress, or pass TLS
 through the front to a certificate held by node-control's side, so no ingress terminates it.

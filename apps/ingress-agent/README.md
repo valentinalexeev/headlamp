@@ -79,6 +79,11 @@ copy the host, public key and short id by hand. It publishes only public values.
 values, and the operator approves the ingress there; nothing is used before that. Each ingress host has its own
 `AGENT_TOKEN` (a token per ingress host), so a leaked token opens one ingress only.
 
+The agent is not a trust boundary against its own host: whoever has root on an ingress controls its agent and xray,
+and sees the credentials pushed to it. node-control therefore derives a different credential per ingress and pins an
+approved ingress to its published parameters and its headscale node; see "Compromised ingress" in the node-control
+README for what that does and does not protect.
+
 ## Run
 
 Bind to the tailnet address only, and disable the access log (it would record client addresses):

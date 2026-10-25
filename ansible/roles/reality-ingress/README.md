@@ -64,6 +64,16 @@ get it with `xray x25519 -i <private key>` and set it as a variable (this role d
 empty means `/v1/info` answers `503`. Use a token per ingress host. `ingress_name` is a short label such as
 `ingress-1` (used only for discovery).
 
+With several ingresses, every ingress's Caddy front must serve node-control's `link_host` (a certificate for it, and
+the `/e/<token>` and `/sub/<secret>` proxy to `enroll_upstream`, which is node-control's `:8081`), so the shared name
+can point at any of them. Give each ingress host its own agent token (`AGENT_TOKEN_<NAME>` in node-control, one
+distinct value per host).
+
+Risk to know about: TLS for `link_host` ends on this front, so a compromised ingress that `link_host` points at can
+read one-time link tokens and subscription secrets and serve phones a modified profile. Credentials are per ingress
+(`uuids: derived` in node-control's `enroll.json`), which limits what such a host holds, but not this. node-control
+ships `scripts/profile-canary.sh` to detect altered profiles; see "Compromised ingress" in its README.
+
 ## Who owns which config file
 
 The role writes `/etc/xray/config.base.json`. The **ingress agent** (`apps/ingress-agent`) owns

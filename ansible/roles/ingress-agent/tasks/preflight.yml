@@ -64,6 +64,29 @@
       geodata list names (letters, digits and ! @ . _ - only, at most 64 characters each).
     quiet: true
 
+- name: Check the public parameters for /v1/info (optional, all-or-nothing)
+  ansible.builtin.assert:
+    that:
+      - ingress_name is regex('^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?\\Z')
+      - ingress_host is regex('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\\Z')
+      - ingress_host | length <= 253
+      - reality_sni is regex('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\\Z')
+      - reality_sni | length <= 253
+      - ingress_listen_port | string is regex('^[0-9]{1,5}\\Z')
+      - 1 <= (ingress_listen_port | int) <= 65535
+      - reality_public_key is regex('^[A-Za-z0-9_=-]+\\Z')
+      - reality_short_id is regex('^[0-9a-f]{2,16}\\Z')
+    fail_msg: >-
+      ingress-agent: when any of ingress_name, ingress_host, reality_public_key,
+      reality_short_id is set, all four must be valid: ingress_name [a-z0-9-] up to
+      32 characters, ingress_host / reality_sni lowercase DNS names, ingress_listen_port
+      1-65535, reality_public_key the base64url public key (`xray x25519 -i <private key>`),
+      reality_short_id 2-16 lowercase hex characters. Values are not shown.
+    quiet: true
+  when: >-
+    (ingress_name | length > 0) or (ingress_host | length > 0)
+    or (reality_public_key | length > 0) or (reality_short_id | length > 0)
+
 - name: Stat the agent source on the control host
   ansible.builtin.stat:
     path: "{{ ingress_agent_src }}/app/main.py"

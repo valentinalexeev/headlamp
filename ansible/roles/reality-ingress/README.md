@@ -54,6 +54,16 @@ port 53; must include every IPv4 resolver in `/etc/resolv.conf` that lies in a r
 resolver at `100.100.100.100` or a local stub; preflight checks this), `ingress_guard_file`, `nft_bin`, `ingress_agent_unit`
 (`ingress-agent`). See `defaults/main.yml`.
 
+## Several ingresses and discovery
+
+The ingress agent (role `ingress-agent`) serves the public parameters of this ingress at `GET /v1/info`
+(`ingress_name`, `ingress_host`, `ingress_listen_port`, `reality_sni`, `reality_short_id` and the new
+`reality_public_key`), so node-control can discover it and the operator approves it there. It publishes public
+values only, never the private key. `reality_public_key` is the public half of the vaulted `reality_private_key`:
+get it with `xray x25519 -i <private key>` and set it as a variable (this role does not run xray for it). Optional:
+empty means `/v1/info` answers `503`. Use a token per ingress host. `ingress_name` is a short label such as
+`ingress-1` (used only for discovery).
+
 ## Who owns which config file
 
 The role writes `/etc/xray/config.base.json`. The **ingress agent** (`apps/ingress-agent`) owns

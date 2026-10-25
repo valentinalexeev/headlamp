@@ -29,6 +29,27 @@ changes. The unit is ordered `After=xray.service` but does not require it.
 | `ingress_agent_fastapi_min` / `ingress_agent_uvicorn_min` | `0.110` / `0.30` | Floors checked against the OS packages. |
 | `xray_bin`, `xray_unit`, `xray_api`, `xray_base_config`, `xray_config`, `xray_asset_dir` | see `defaults/main.yml` | Must match `reality-ingress`. `xray_asset_dir` is passed as `XRAY_LOCATION_ASSET` so `xray run -test` finds the geodata. |
 
+## Public parameters and discovery (`GET /v1/info`)
+
+The agent publishes how clients reach this ingress, so node-control can discover it and the operator can approve it
+(no copying of host, key and short id). Public values only; the endpoint never returns a secret and the agent has no
+variable for the Reality private key. Role variables (shared names with `reality-ingress`, defaults keep existing
+deployments valid):
+
+| Variable | Default | Env var in the agent |
+|---|---|---|
+| `ingress_name` | `""` | `INGRESS_NAME` (short label, `[a-z0-9-]`, at most 32 characters) |
+| `ingress_host` | `""` | `INGRESS_HOST` |
+| `ingress_listen_port` | `443` | `INGRESS_PORT` |
+| `reality_sni` | `ingress_host` | `INGRESS_SNI` |
+| `reality_short_id` | `""` | `INGRESS_SHORT_ID` |
+| `reality_public_key` | `""` | `INGRESS_PUBLIC_KEY`: the public half of the vaulted `reality_private_key`; derive it with `xray x25519 -i <private key>` and set it as a variable. The role does not run xray for this. |
+
+The six variables are exported only when `ingress_name`, `ingress_host`, `reality_public_key` and `reality_short_id`
+are all set; otherwise `/v1/info` answers `503` and everything else works as before. If any of the four is set,
+preflight validates all of them. Use a token per ingress host (`ingress_agent_token` differs on every host); the
+operator approves a discovered ingress in node-control before it is used.
+
 ## Python dependencies
 
 Installed from the OS packages (`python3-fastapi`, `python3-uvicorn`, `python3-pydantic`),

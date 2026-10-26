@@ -14,9 +14,12 @@ package enroll
 // HINCRBY, HGETALL and PEXPIRE inside the scripts.
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -152,5 +155,70 @@ func TestLiveRedisSnapshotRoundTrip(t *testing.T) {
 	ok, err := s.HasData()
 	if err != nil || !ok {
 		t.Fatalf("HasData = %v, %v", ok, err)
+	}
+}
+
+// TestLiveImportOfADatabaseCopy imports a copy of a real enrolment database into a throwaway prefix on the real Redis,
+// compares the result with the source and removes its keys. Set ENROLL_LIVE_IMPORT_DB to the path of the copy (with its
+// -wal and -shm files next to it, if any). The database is opened read-only. A dummy secret key is used on both sides,
+// so subscription secrets are compared for equality (same ids and epochs give the same secret) without the real key.
+// Nothing about the devices is printed: counts only.
+func TestLiveImportOfADatabaseCopy(t *testing.T) {
+	path := os.Getenv("ENROLL_LIVE_IMPORT_DB")
+	if path == "" {
+		t.Skip("ENROLL_LIVE_IMPORT_DB is not set")
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := OpenStoreReadOnly(path, testKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	dst := newLiveStore(t, &fakeClock{now: time.Now()})
+
+	devices, links, approvals, err := Import(src, dst, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("imported %d devices, %d links, %d approvals", devices, links, approvals)
+
+	want, err := src.ListDevices()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := dst.ListDevices()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("the device lists differ after the import (%d vs %d devices)", len(want), len(got))
+	}
+	for _, d := range want {
+		a, err1 := src.SubscriptionSecret(d.ID)
+		b, err2 := dst.SubscriptionSecret(d.ID)
+		if err1 != nil || err2 != nil || a != b {
+			t.Fatalf("subscription secret of device %d differs (errors %v, %v)", d.ID, err1, err2)
+		}
+	}
+	wc, err1 := src.ActiveCredentials()
+	gc, err2 := dst.ActiveCredentials()
+	if err1 != nil || err2 != nil || !reflect.DeepEqual(wc, gc) {
+		t.Fatalf("active credentials differ (%d vs %d; errors %v, %v)", len(wc), len(gc), err1, err2)
+	}
+	wa, _ := src.ApprovalRows()
+	ga, _ := dst.ApprovalRows()
+	// A copy of a database from before approvals existed has no such table: the source reads as nothing, not an error.
+	if (len(wa) > 0 || len(ga) > 0) && !reflect.DeepEqual(wa, ga) {
+		t.Fatalf("approvals differ (%d vs %d)", len(wa), len(ga))
+	}
+	if _, _, _, err := Import(src, dst, false); !errors.Is(err, ErrPopulated) {
+		t.Fatalf("a second import must be refused, got %v", err)
+	}
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Fatal("the source database file changed")
 	}
 }

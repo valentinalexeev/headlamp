@@ -66,7 +66,11 @@ var backendFactories = []backendFactory{
 }
 
 func eachBackend(t *testing.T, fn func(t *testing.T, e contractEnv)) {
-	for _, f := range backendFactories {
+	factories := backendFactories
+	if f, ok := liveFactory(); ok { // ENROLL_REDIS_LIVE_URL set: also run against the real Redis
+		factories = append(append([]backendFactory(nil), factories...), f)
+	}
+	for _, f := range factories {
 		t.Run(f.name, func(t *testing.T) { fn(t, f.open(t)) })
 	}
 }

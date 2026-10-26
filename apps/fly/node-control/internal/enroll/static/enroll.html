@@ -65,7 +65,7 @@
   <div class="panel tablewrap">
     <label class="toggle"><input type="checkbox" id="showrevoked"> Show revoked devices <span id="revokedcount" class="muted"></span></label>
     <table>
-      <thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Client</th><th>Expires</th><th>Status</th><th id="trafficth">Traffic</th><th></th></tr></thead>
+      <thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Client</th><th>Expires</th><th>Status</th><th title="When a one-time link of the device was last used (and how often)">Enrolled</th><th title="When the device's traffic last grew, seen every 5 minutes. Not a connection log.">Last active</th><th id="trafficth">Traffic</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -161,6 +161,14 @@ async function loadIngresses(j) {
   $("#ingnote").textContent = list.discovery && !list.discovery.enabled ? "Discovery is off: " + list.discovery.reason + "." : "";
   panel.style.display = "block";
 }
+const stamp = (t) => new Date(t * 1000).toLocaleString();
+function ago(t) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - t));
+  if (s < 90) return "just now";
+  if (s < 5400) return Math.round(s / 60) + " min ago";
+  if (s < 129600) return Math.round(s / 3600) + " h ago";
+  return Math.round(s / 86400) + " days ago";
+}
 function fmtTraffic(t) {
   if (!t) return "-";
   return Object.entries(t).map(([k, v]) => k + " " + v).join(", ");
@@ -181,22 +189,30 @@ async function load() {
   for (const d of devs) {
     const tr = document.createElement("tr");
     const status = d.revoked ? "revoked" : (d.expires_at * 1000 < Date.now() ? "expired" : "active");
-    for (const v of [d.id, d.name, d.owner, d.client, new Date(d.expires_at * 1000).toLocaleDateString(), status, fmtTraffic(d.traffic)]) {
+    for (const v of [d.id, d.name, d.owner, d.client, new Date(d.expires_at * 1000).toLocaleDateString(), status,
+                    d.enrol_count > 0 ? stamp(d.enrolled_at) + " (" + d.enrol_count + "\u00d7)" : "never",
+                    d.last_active > 0 ? ago(d.last_active) : "-", fmtTraffic(d.traffic)]) {
       const td = document.createElement("td"); td.textContent = v; tr.appendChild(td);
     }
     const td = document.createElement("td"); td.className = "actions";
     const btn = (label, cls, fn) => { const b = document.createElement("button"); b.textContent = label; b.className = cls; b.onclick = fn; td.appendChild(b); };
-    if (d.revoked) {
-      // A revoked device can only be removed for good.
+    // Only the actions that can do something for the device's state are offered:
+    //   revoked:                    Delete (nothing else works on it)
+    //   expired:                    Extend, Revoke (a link would not work: the spend refuses an expired device)
+    //   active, never enrolled:     New link, Extend, Revoke
+    //   active, already enrolled:   Extend, Revoke (it has its profile; a link is not needed)
+    if (status === "revoked") {
       btn("Delete", "danger", async () => {
         if (!confirm("Delete " + d.name + " permanently? This cannot be undone.")) return;
         try { await del("/enroll/devices/" + d.id); say("Deleted " + d.name + "."); load(); } catch (e) { say(e.message, true); }
       });
     } else {
-      btn("New link", "", async () => {
-        try { const j = await post("/enroll/devices/" + d.id + "/links", {ttl: 86400, max_uses: 1}); show("One-time link for " + d.name + " (24 h)", j.url); }
-        catch (e) { say(e.message, true); }
-      });
+      if (status === "active" && !(d.enrol_count > 0)) {
+        btn("New link", "", async () => {
+          try { const j = await post("/enroll/devices/" + d.id + "/links", {ttl: 86400, max_uses: 1}); show("One-time link for " + d.name + " (24 h)", j.url); }
+          catch (e) { say(e.message, true); }
+        });
+      }
       btn("Extend", "ghost", async () => {
         const v = prompt("New expiry date (YYYY-MM-DD)"); if (!v) return;
         try { const j = await post("/enroll/devices/" + d.id + "/extend", {expires_at: endOfDay(v)}); showSync(j.sync, j.ingresses); load(); } catch (e) { say(e.message, true); }

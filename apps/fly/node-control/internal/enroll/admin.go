@@ -51,18 +51,21 @@ var syncWait = 3 * time.Second
 
 // Admin serves the operator API.
 type Admin struct {
-	store Backend
-	reg   *Registry
+	store    Backend
+	reg      *Registry
+	activity *ActivityTracker
 }
 
 // NewAdmin returns the operator API over store and one agent that serves every configured
 // ingress. Its sync state takes time from the store's clock.
 func NewAdmin(store Backend, cfg IngressConfig, agent Agent) *Admin {
-	return &Admin{store: store, reg: newStaticRegistry(store, cfg, agent)}
+	return &Admin{store: store, reg: newStaticRegistry(store, cfg, agent), activity: NewActivityTracker(store)}
 }
 
 // NewAdminFor returns the operator API over the ingress registry.
-func NewAdminFor(store Backend, reg *Registry) *Admin { return &Admin{store: store, reg: reg} }
+func NewAdminFor(store Backend, reg *Registry) *Admin {
+	return &Admin{store: store, reg: reg, activity: NewActivityTracker(store)}
+}
 
 // State is the sync state of the first configured ingress.
 func (a *Admin) State() *SyncState { return a.reg.First().State }
@@ -240,6 +243,11 @@ type deviceRow struct {
 	ExpiresAt int64  `json:"expires_at"`
 	Revoked   bool   `json:"revoked"`
 	Traffic   any    `json:"traffic"`
+	// When a one-time link of the device was last spent and how often, and when its traffic last grew (unix seconds;
+	// 0 = never). No client addresses.
+	EnrolledAt int64 `json:"enrolled_at"`
+	Enrolments int64 `json:"enrol_count"`
+	LastActive int64 `json:"last_active"`
 }
 
 // ingressRow is one active ingress in the responses.
@@ -283,13 +291,22 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats, partial := MergedStats(r.Context(), cur.SyncTargets, cur.Cfg, devs)
+	if !partial { // partial counters would read as a reset
+		for id, at := range a.activity.Observe(devs, stats) {
+			for i := range devs {
+				if devs[i].ID == id && at > devs[i].LastActive {
+					devs[i].LastActive = at
+				}
+			}
+		}
+	}
 	rows := make([]deviceRow, 0, len(devs))
 	for _, d := range devs {
 		var traffic any
 		if tr, ok := stats[d.ID]; ok {
 			traffic = map[string]any{"up": tr.Up, "down": tr.Down}
 		}
-		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, d.Client, d.ExpiresAt, d.Revoked, traffic})
+		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, d.Client, d.ExpiresAt, d.Revoked, traffic, d.EnrolledAt, d.Enrolments, d.LastActive})
 	}
 	snaps := snapshotsOf(cur.SyncTargets)
 	pending := cur.Pending
@@ -436,7 +453,18 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 		invalid(w, v.errs...)
 		return
 	}
-	if !a.known(w, id) {
+	d, err := a.store.GetDevice(id)
+	if errors.Is(err, ErrNotFound) {
+		detail(w, http.StatusNotFound, "unknown device")
+		return
+	}
+	if err != nil {
+		a.internal(w, err)
+		return
+	}
+	// A link is spent only for an active device: for a revoked or expired one it would be created and never work.
+	if d.Revoked || float64(d.ExpiresAt) <= nowSec(a.store) {
+		detail(w, http.StatusConflict, "the device is revoked or expired; a link would not work")
 		return
 	}
 	tok, err := a.store.NewLink(id, time.Duration(ttl)*time.Second, int(uses))

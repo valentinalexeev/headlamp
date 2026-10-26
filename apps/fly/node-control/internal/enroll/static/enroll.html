@@ -196,17 +196,23 @@ async function load() {
     }
     const td = document.createElement("td"); td.className = "actions";
     const btn = (label, cls, fn) => { const b = document.createElement("button"); b.textContent = label; b.className = cls; b.onclick = fn; td.appendChild(b); };
-    if (d.revoked) {
-      // A revoked device can only be removed for good.
+    // Only the actions that can do something for the device's state are offered:
+    //   revoked:                    Delete (nothing else works on it)
+    //   expired:                    Extend, Revoke (a link would not work: the spend refuses an expired device)
+    //   active, never enrolled:     New link, Extend, Revoke
+    //   active, already enrolled:   Extend, Revoke (it has its profile; a link is not needed)
+    if (status === "revoked") {
       btn("Delete", "danger", async () => {
         if (!confirm("Delete " + d.name + " permanently? This cannot be undone.")) return;
         try { await del("/enroll/devices/" + d.id); say("Deleted " + d.name + "."); load(); } catch (e) { say(e.message, true); }
       });
     } else {
-      btn("New link", "", async () => {
-        try { const j = await post("/enroll/devices/" + d.id + "/links", {ttl: 86400, max_uses: 1}); show("One-time link for " + d.name + " (24 h)", j.url); }
-        catch (e) { say(e.message, true); }
-      });
+      if (status === "active" && !(d.enrol_count > 0)) {
+        btn("New link", "", async () => {
+          try { const j = await post("/enroll/devices/" + d.id + "/links", {ttl: 86400, max_uses: 1}); show("One-time link for " + d.name + " (24 h)", j.url); }
+          catch (e) { say(e.message, true); }
+        });
+      }
       btn("Extend", "ghost", async () => {
         const v = prompt("New expiry date (YYYY-MM-DD)"); if (!v) return;
         try { const j = await post("/enroll/devices/" + d.id + "/extend", {expires_at: endOfDay(v)}); showSync(j.sync, j.ingresses); load(); } catch (e) { say(e.message, true); }

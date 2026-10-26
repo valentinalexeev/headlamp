@@ -453,7 +453,18 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 		invalid(w, v.errs...)
 		return
 	}
-	if !a.known(w, id) {
+	d, err := a.store.GetDevice(id)
+	if errors.Is(err, ErrNotFound) {
+		detail(w, http.StatusNotFound, "unknown device")
+		return
+	}
+	if err != nil {
+		a.internal(w, err)
+		return
+	}
+	// A link is spent only for an active device: for a revoked or expired one it would be created and never work.
+	if d.Revoked || float64(d.ExpiresAt) <= nowSec(a.store) {
+		detail(w, http.StatusConflict, "the device is revoked or expired; a link would not work")
 		return
 	}
 	tok, err := a.store.NewLink(id, time.Duration(ttl)*time.Second, int(uses))

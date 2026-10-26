@@ -276,6 +276,11 @@ resolution is therefore about 5 minutes, and a device that was active only while
 time. `GET /enroll/devices` rows carry `enrolled_at`, `enrol_count` and `last_active` (unix seconds, 0 = never). SQLite databases
 gain the three columns on open; Redis device records without them read as 0. JSON and SQLite exports and imports carry them.
 
+Which buttons a row offers depends on its state, so nothing useless is shown: a revoked device only has Delete; an expired
+one has Extend and Revoke; an active one that has never been enrolled has New link, Extend and Revoke; an active one that
+is already enrolled has Extend and Revoke (it has its profile). `POST /enroll/devices/{id}/links` answers `409` for a revoked
+or expired device, because a link for it would be created and never work.
+
 Deleting: `DELETE /enroll/devices/{id}` (JSON content type, like the other changes) removes a **revoked** device with its
 UUIDs and links for good. An active or merely expired device is refused with `409` ("revoke the device before deleting
 it"), an unknown id with `404`. The id is never issued again. Nothing is pushed to an agent (only active devices are ever

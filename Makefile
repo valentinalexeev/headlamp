@@ -21,8 +21,13 @@ test-headscale-policy:
 test-headscale-policy-e2e:
 	sh scripts/test/headscale-policy/e2e-docker.sh
 
+.PHONY: check-statestore-port
+check-statestore-port:
+	./scripts/check-statestore-port.sh
+
 lint:
 	shellcheck -S error -x scripts/*.sh scripts/test/tf-run/run_tests.sh scripts/test/check-denylist/run_tests.sh \
 	  scripts/test/exit-node-state/run_tests.sh scripts/test/headscale-policy/run.sh scripts/test/headscale-policy/e2e-docker.sh apps/fly/exit-ams/*.sh \
 	  .githooks/pre-commit .githooks/commit-msg \
 	  apps/tailguard/*.sh apps/fly/headscale/*.sh
+	-./scripts/check-statestore-port.sh

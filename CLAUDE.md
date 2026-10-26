@@ -89,6 +89,7 @@ commits on top of it or attempt a rewrite on your own.
 | `apps/fly/headscale` | headscale server image; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. The route approver (`approve-gateway-routes.sh`, `cron-approve-routes.sh`) is shipped but OFF by default (commented `route_approver` process in `fly.toml`); prefer `autoApprovers.routes` in `acl.json` |
 | `apps/fly/exit-ams` | Fly tailscale exit node; `fly.toml`, `direct-hosts.txt` are **placeholders** |
 | `apps/fly/node-control` | Go service (embedded tailscale): start/stop UI and API for the exit nodes (discovered from headscale), tailnet status, optional device enrolment; `fly.toml` is a **placeholder**, `app/nodes.json` is an optional overlay |
+| `apps/fly/funnel-ingress` | Go service (embedded tailscale): public name-based reverse proxy into the tailnet (`<service>.<ns>.<domain>`), tag-authorised self-registration API, a Kubernetes registration sidecar (`funnel-sidecar`), config pulled from node-control; `fly.toml` is a **placeholder** |
 | `apps/tailguard` | WireGuard server → tailnet exit node (Docker, operator-run) |
 | `scripts/tf-run.sh`, `.githooks/`, `scripts/test/` | state-in-git workflow, commit hook, tests |
 | `scripts/headscale-assign-host.sh` | helper to register a host under an existing pre-auth key (`HEADSCALE_APP`, `HEADSCALE_LOGIN_SERVER` env) |

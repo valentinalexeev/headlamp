@@ -1,0 +1,19 @@
+{
+  "version": "example-1",
+  "public_domain": "example.com",
+  "namespaces": {
+    "demo": {
+      "ports": [
+        { "lo": 8081, "hi": 8081 },
+        { "lo": 9000, "hi": 9010 }
+      ]
+    }
+  },
+  "routes": [
+    { "ns": "demo", "service": "docs", "target": "docs-host", "port": 8081 },
+    { "ns": "demo", "service": "secure", "target": "100.64.0.20", "port": 8443, "scheme": "https", "insecure_skip_verify": false }
+  ],
+  "blocked": [
+    { "ns": "demo", "service": "old-admin" }
+  ]
+}

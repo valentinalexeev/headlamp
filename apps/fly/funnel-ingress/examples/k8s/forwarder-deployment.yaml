@@ -1,0 +1,38 @@
+# A replicated app behind a Kubernetes Service is published by ONE single-replica forwarder, not by one
+# sidecar per replica: a second node registering the same name gets 409 by design. The forwarder joins the
+# tailnet and forwards to the cluster Service, which load-balances across the replicas.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: funnel-forwarder-web
+spec:
+  replicas: 1
+  strategy: { type: Recreate } # never two forwarders at once (the second would be refused with 409)
+  selector:
+    matchLabels: { app: funnel-forwarder-web }
+  template:
+    metadata:
+      labels: { app: funnel-forwarder-web }
+    spec:
+      containers:
+        - name: forwarder
+          image: example.com/funnel-sidecar:latest
+          env:
+            - { name: FUNNEL_NS, value: demo }
+            - { name: FUNNEL_SERVICES, value: "web=8080@web.demo.svc:80" } # name=tailnet-port@service-host:port
+            - { name: FUNNEL_API_URL, value: "http://funnel-ingress:9100" }
+            - { name: FUNNEL_CONTROL_URL, value: "https://headscale.example.com" }
+            - name: TS_AUTHKEY
+              valueFrom: { secretKeyRef: { name: funnel-sidecar, key: authkey } }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8081 }
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: funnel-state, mountPath: /tmp/funnel-sidecar }
+      volumes:
+        - { name: funnel-state, emptyDir: {} }

@@ -90,9 +90,9 @@ func (s *scrubber) scrub(in string) string {
 // ones would eat ordinary text and tell an observer next to nothing.
 const minFragment = 3
 
-// trimFragment drops leading bytes that are a proper suffix of a secret: when
-// the ring evicted the start of a secret, scrubbing cannot see it and the
-// remainder would otherwise show.
+// trimFragment drops leading bytes that are a proper suffix of a secret, until
+// none is left: when the ring evicted the start of a secret, scrubbing cannot
+// see it and the remainder would otherwise show. Run it on raw, unscrubbed text.
 func (s *scrubber) trimFragment(in string) string {
 	if s == nil || s.r == nil {
 		return in
@@ -142,10 +142,13 @@ func (r *ring) tail(s *scrubber) string {
 	r.mu.Lock()
 	raw, overflowed := string(r.buf), r.overflowed
 	r.mu.Unlock()
-	out := s.scrub(raw)
+	// Trim the raw bytes, before scrubbing: once a nested or overlapping secret
+	// has been replaced, the leftover of the evicted one no longer looks like a
+	// suffix of anything.
 	if overflowed {
-		out = s.trimFragment(out)
+		raw = s.trimFragment(raw)
 	}
+	out := s.scrub(raw)
 	if len(out) > logTailBytes {
 		out = out[len(out)-logTailBytes:]
 	}
@@ -316,9 +319,10 @@ func (s *Server) runBounded(args []string) {
 
 // readResult reads the script's result file: a regular file of at most
 // maxResultBytes holding one JSON object. The container wrote it, so a symlink
-// pointing at a host file must not be followed (O_NOFOLLOW, no check-then-open).
+// pointing at a host file must not be followed (O_NOFOLLOW, no check-then-open). O_NONBLOCK keeps a FIFO planted
+// by the script from blocking open() forever and holding the run gate.
 func readResult(path string) (map[string]any, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, errors.New("result file missing: the script produced no result.json")

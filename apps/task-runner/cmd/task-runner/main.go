@@ -56,7 +56,7 @@ func main() {
 	defer stop()
 	go func() {
 		<-ctx.Done()
-		sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		srv.Shutdown(sctx) // cancel the active run first, then stop serving
 		_ = hs.Shutdown(sctx)

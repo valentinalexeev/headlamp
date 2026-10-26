@@ -48,6 +48,10 @@ case "$mode" in
   "# mode: ok") tail -n +2 "$script" > "$res/result.json" ;;
   "# mode: big") { printf '{"a":"'; head -c 5000 /dev/zero | tr '\0' x; printf '"}'; } > "$res/result.json" ;;
   "# mode: nofile") : ;;
+  "# mode: fifo") mkfifo "$res/result.json" ;;
+  "# mode: symlink") ln -s /etc/hostname "$res/result.json" ;;
+  "# mode: cat") cat "$d/stream" >&2; exit 1 ;;
+  "# mode: catsleep") cat "$d/stream" >&2; echo $$ > "$d/pid"; exec sleep 30 ;;
   "# mode: fail") echo "boom: something broke" >&2; exit 3 ;;
   "# mode: leak")
     echo "env was $TASK_SECRETS_JSON" >&2
@@ -492,5 +496,81 @@ func TestRunnerParamsKeepBigIntegers(t *testing.T) {
 	h.waitIdle()
 	if env := h.readFake("env"); !strings.Contains(env, `TASK_PARAMS_JSON={"n":12345678901234567890}`) {
 		t.Errorf("params not passed through verbatim: %q", env)
+	}
+}
+
+func TestRunnerNonRegularResultFailsAndReleasesGate(t *testing.T) {
+	for _, mode := range []string{"fifo", "symlink"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newHarness(t)
+			id := h.start(map[string]any{"script": "# mode: " + mode})
+			v := h.wait(id, "failed")
+			if !strings.Contains(v.Error, "result") {
+				t.Errorf("error %q", v.Error)
+			}
+			h.waitIdle()
+			id2 := h.start(map[string]any{"script": "# mode: ok\n{}"})
+			h.wait(id2, "succeeded")
+		})
+	}
+}
+
+func noFragments(t *testing.T, where, out string, secrets ...string) {
+	t.Helper()
+	for _, sec := range secrets {
+		for k := 3; k < len(sec); k++ {
+			for _, frag := range []string{sec[:k], sec[len(sec)-k:]} {
+				if strings.Contains(out, frag) {
+					t.Errorf("%s leaks %q of %q", where, frag, sec)
+				}
+			}
+		}
+	}
+}
+
+// streamStartingInside builds output whose last (4096+len(longest)) bytes
+// start `off` bytes into head, then a trailing full occurrence of each secret.
+func streamStartingInside(head string, off int, longest string, secrets ...string) string {
+	tail := " " + strings.Join(secrets, " ")
+	pad := 4096 + len(longest) + off - len(head) - len(tail)
+	return head + strings.Repeat("-", pad) + tail
+}
+
+func TestRunnerNestedAndOverlappingSecretsNoFragmentInAnyTail(t *testing.T) {
+	url, pw := "postgres://user:hunter2pw@host/db", "hunter2pw"
+	a, b := "abcdefgh", "efghijkl"
+	for name, tc := range map[string]struct {
+		secrets map[string]string
+		stream  string
+		all     []string
+	}{
+		"nested":  {map[string]string{"URL": url, "PW": pw}, streamStartingInside(url, 11, url, url, pw), []string{url, pw}},
+		"overlap": {map[string]string{"A": a, "B": b}, streamStartingInside("abcdefghijkl", 1, a, a, b), []string{a, b}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			if err := os.WriteFile(filepath.Join(h.fake, "stream"), []byte(tc.stream), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// Live tail, while the run is still going.
+			id := h.start(map[string]any{"script": "# mode: catsleep", "secrets": tc.secrets})
+			var live runView
+			for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+				if _, live = h.get(id); len(live.LogTail) > 3000 {
+					break
+				}
+			}
+			if len(live.LogTail) == 0 {
+				t.Fatal("no live tail")
+			}
+			noFragments(t, "live tail", live.LogTail, tc.all...)
+			h.do("DELETE", "/v1/runs/"+id, nil, testToken)
+			h.waitIdle()
+			// Final log_tail and error tail.
+			id = h.start(map[string]any{"script": "# mode: cat", "secrets": tc.secrets})
+			v := h.wait(id, "failed")
+			noFragments(t, "log_tail", v.LogTail, tc.all...)
+			noFragments(t, "error", v.Error, tc.all...)
+		})
 	}
 }

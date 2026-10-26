@@ -103,58 +103,141 @@ type OnFailure struct {
 	Cooldown Duration `json:"cooldown,omitempty"`
 }
 
-// presence records which fields with a non-zero default were written in the
-// file, so an explicit "0s" can be rejected while an omitted field gets its
-// default. Types stay plain values; this is only a second, lenient decode.
-type presence struct {
-	Tasks map[string]struct {
-		Timeout *json.RawMessage `json:"timeout"`
-		Retry   *struct {
-			Attempts *json.RawMessage `json:"attempts"`
-		} `json:"retry"`
-		Alert *struct {
-			Cooldown *json.RawMessage `json:"cooldown"`
-		} `json:"alert"`
-		OnFailure *struct {
-			Cooldown *json.RawMessage `json:"cooldown"`
-		} `json:"on_failure"`
-	} `json:"tasks"`
+// shadow is a lenient view of one task's raw JSON. It serves two purposes:
+// naming the field of a bad duration (encoding/json drops the field name when a
+// custom unmarshaler fails) and telling an omitted field from an explicit zero,
+// so "0s" is rejected while a missing timeout gets its default.
+type shadow struct {
+	Timeout  *json.RawMessage `json:"timeout"`
+	Schedule *struct {
+		Every  *json.RawMessage `json:"every"`
+		Jitter *json.RawMessage `json:"jitter"`
+	} `json:"schedule"`
+	Retry *struct {
+		Attempts *json.RawMessage  `json:"attempts"`
+		Backoff  []json.RawMessage `json:"backoff"`
+	} `json:"retry"`
+	Alert *struct {
+		Cooldown *json.RawMessage `json:"cooldown"`
+	} `json:"alert"`
+	OnFailure *struct {
+		Cooldown *json.RawMessage `json:"cooldown"`
+	} `json:"on_failure"`
+}
+
+// durationErrors lists every duration field of the task that does not parse.
+func (s *shadow) durationErrors() []string {
+	var out []string
+	check := func(field string, raw *json.RawMessage) {
+		if raw == nil {
+			return
+		}
+		var d Duration
+		if err := d.UnmarshalJSON(*raw); err != nil {
+			out = append(out, fmt.Sprintf("%s: %v", field, err))
+		}
+	}
+	check("timeout", s.Timeout)
+	if s.Schedule != nil {
+		check("schedule.every", s.Schedule.Every)
+		check("schedule.jitter", s.Schedule.Jitter)
+	}
+	if s.Retry != nil {
+		for i := range s.Retry.Backoff {
+			check(fmt.Sprintf("retry.backoff[%d]", i), &s.Retry.Backoff[i])
+		}
+	}
+	if s.Alert != nil {
+		check("alert.cooldown", s.Alert.Cooldown)
+	}
+	if s.OnFailure != nil {
+		check("on_failure.cooldown", s.OnFailure.Cooldown)
+	}
+	return out
+}
+
+// Ids end up in Redis field names, URL paths and metric labels.
+var taskIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+// rawTasks splits the "tasks" object into per-task raw JSON, in file order,
+// and reports duplicate keys (a map would collapse them silently).
+func rawTasks(raw json.RawMessage) (ids []string, bodies map[string]json.RawMessage, errs []error) {
+	bodies = map[string]json.RawMessage{}
+	if len(raw) == 0 || string(bytes.TrimSpace(raw)) == "null" {
+		return
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		errs = append(errs, errors.New("tasks: must be an object keyed by task id"))
+		return
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("tasks: %w", err))
+			return
+		}
+		id, _ := tok.(string)
+		var body json.RawMessage
+		if err := dec.Decode(&body); err != nil {
+			errs = append(errs, fmt.Errorf("task %s: %w", id, err))
+			return
+		}
+		if _, dup := bodies[id]; dup {
+			errs = append(errs, fmt.Errorf("task %s: duplicate task id", id))
+			continue
+		}
+		bodies[id] = body
+		ids = append(ids, id)
+	}
+	return
 }
 
 // ParseConfig decodes strictly (unknown fields are errors), applies defaults
-// and validates. Every validation problem is reported, not just the first.
+// and validates. Every problem is reported, each naming its task and field.
 func ParseConfig(b []byte) (*Config, error) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
-	var cfg Config
-	if err := dec.Decode(&cfg); err != nil {
+	var top struct {
+		Tasks json.RawMessage `json:"tasks"`
+	}
+	if err := dec.Decode(&top); err != nil {
 		return nil, fmt.Errorf("tasks config: %w", err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
 		return nil, errors.New("tasks config: trailing data after JSON document")
 	}
-	var seen presence
-	if err := json.Unmarshal(b, &seen); err != nil {
-		return nil, fmt.Errorf("tasks config: %w", err)
-	}
 
-	ids := make([]string, 0, len(cfg.Tasks))
-	for id := range cfg.Tasks {
-		ids = append(ids, id)
-	}
+	ids, bodies, errs := rawTasks(top.Tasks)
 	sort.Strings(ids)
+	cfg := Config{Tasks: map[string]Task{}}
 
-	var errs []error
 	for _, id := range ids {
-		t := cfg.Tasks[id]
-		p := seen.Tasks[id]
 		bad := func(field, format string, args ...any) {
 			errs = append(errs, fmt.Errorf("task %s: %s: %s", id, field, fmt.Sprintf(format, args...)))
 		}
-
-		if strings.TrimSpace(id) == "" {
-			errs = append(errs, errors.New("task: empty task id"))
+		if !taskIDRe.MatchString(id) {
+			bad("id", "%q must match %s", id, taskIDRe)
+			continue
 		}
+
+		var p shadow
+		if json.Unmarshal(bodies[id], &p) == nil {
+			if de := p.durationErrors(); len(de) > 0 {
+				for _, e := range de {
+					errs = append(errs, fmt.Errorf("task %s: %s", id, e))
+				}
+				continue
+			}
+		}
+		var t Task
+		td := json.NewDecoder(bytes.NewReader(bodies[id]))
+		td.DisallowUnknownFields()
+		if err := td.Decode(&t); err != nil {
+			errs = append(errs, fmt.Errorf("task %s: %w", id, err))
+			continue
+		}
+
 		validateScript(t.Script, bad)
 
 		switch {

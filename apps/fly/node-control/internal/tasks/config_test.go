@@ -169,3 +169,112 @@ func TestParseConfigReportsAllProblems(t *testing.T) {
 		}
 	}
 }
+
+func twoTasks(second string) string {
+	return `{"tasks":{"a":{"script":"a.js","target":{"node":"n"},"schedule":{"every":"1h"}},"b":` + second + `}}`
+}
+
+func TestParseConfigDecodeErrorsNameTaskAndField(t *testing.T) {
+	cases := []struct {
+		name, json string
+		want       []string
+	}{
+		{"bad duration in second task", twoTasks(`{"script":"b.js","target":{"node":"n"},"schedule":{"every":"12x"}}`),
+			[]string{"task b", "schedule.every", "12x"}},
+		{"bad backoff entry", twoTasks(`{"script":"b.js","target":{"node":"n"},"schedule":{"every":"1h"},"retry":{"attempts":2,"backoff":["1m","zz"]}}`),
+			[]string{"task b", "retry.backoff[1]"}},
+		{"unknown field in task", twoTasks(`{"script":"b.js","target":{"node":"n"},"schedule":{"every":"1h"},"bogus":1}`),
+			[]string{"task b", "bogus"}},
+		{"wrong type", twoTasks(`{"script":7,"target":{"node":"n"},"schedule":{"every":"1h"}}`),
+			[]string{"task b", "script"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseConfig([]byte(tc.json))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q lacks %q", err, w)
+				}
+			}
+			if strings.Contains(err.Error(), "task a") {
+				t.Errorf("valid task a blamed: %q", err)
+			}
+		})
+	}
+}
+
+func TestParseConfigTaskIDs(t *testing.T) {
+	body := `{"script":"a.js","target":{"node":"n"},"schedule":{"every":"1h"}}`
+	for _, id := range []string{"road-balance", "a.b_c-1", "0", strings.Repeat("a", 64)} {
+		if _, err := ParseConfig([]byte(`{"tasks":{"` + id + `":` + body + `}}`)); err != nil {
+			t.Errorf("id %q rejected: %v", id, err)
+		}
+	}
+	for _, id := range []string{"Upper", "a/b", "has space", "", strings.Repeat("a", 65), "-lead", ".lead"} {
+		_, err := ParseConfig([]byte(`{"tasks":{"` + id + `":` + body + `}}`))
+		if err == nil || !strings.Contains(err.Error(), "id") {
+			t.Errorf("id %q accepted or unnamed: %v", id, err)
+		}
+	}
+}
+
+func TestParseConfigRejectsDuplicateTaskID(t *testing.T) {
+	body := `{"script":"a.js","target":{"node":"n"},"schedule":{"every":"1h"}}`
+	_, err := ParseConfig([]byte(`{"tasks":{"a":` + body + `,"a":` + body + `}}`))
+	if err == nil || !strings.Contains(err.Error(), "task a") || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestParseConfigMoreRejects(t *testing.T) {
+	notify := map[string]any{"title": "t", "message": "m"}
+	cases := []struct {
+		name string
+		mod  func(t map[string]any)
+		want string
+	}{
+		{"zero alert cooldown", func(t map[string]any) {
+			t["alert"] = map[string]any{"when": map[string]any{"field": "x", "op": "<", "value": 1}, "cooldown": "0s", "notify": notify}
+		}, "alert.cooldown"},
+		{"zero on_failure cooldown", func(t map[string]any) {
+			t["on_failure"] = map[string]any{"cooldown": "0s", "notify": notify}
+		}, "on_failure.cooldown"},
+		{"alert field required", func(t map[string]any) {
+			t["alert"] = map[string]any{"when": map[string]any{"op": "<", "value": 1}, "notify": notify}
+		}, "alert.when.field"},
+		{"negative jitter", func(t map[string]any) {
+			t["schedule"] = map[string]any{"every": "1h", "jitter": "-1m"}
+		}, "schedule.jitter"},
+		{"zero backoff entry", func(t map[string]any) {
+			t["retry"] = map[string]any{"attempts": 2, "backoff": []string{"0s"}}
+		}, "retry.backoff"},
+		{"empty tag", func(t map[string]any) {
+			t["target"] = map[string]any{"tags": []string{" "}}
+		}, "target.tags"},
+		{"empty secret", func(t map[string]any) { t["secrets"] = []string{""} }, "secrets"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseConfig([]byte(taskJSON(tc.mod)))
+			if err == nil || !strings.Contains(err.Error(), "task a") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseConfigAlertCooldownDefault(t *testing.T) {
+	cfg, err := ParseConfig([]byte(taskJSON(func(t map[string]any) {
+		t["alert"] = map[string]any{"when": map[string]any{"field": "x", "op": "<", "value": 1},
+			"notify": map[string]any{"title": "t", "message": "m"}}
+	})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Tasks["a"].Alert.Cooldown; got != Duration(24*time.Hour) {
+		t.Fatalf("cooldown = %v", got)
+	}
+}

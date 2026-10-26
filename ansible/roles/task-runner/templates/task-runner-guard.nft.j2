@@ -1,0 +1,40 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+#
+# Guard for the task runner (see the role README "Guard"). Packets sent by uid
+# {{ task_runner_uid if task_runner_uid else task_runner_user }} ({{ task_runner_user }}: the runner and, through rootless user-space
+# networking, every container it starts) may not reach loopback, RFC1918,
+# CGNAT/tailnet (100.64.0.0/10), link-local or IPv6 ULA/link-local addresses,
+# even when a hostname resolved to such an address. Exceptions, before the
+# drops: replies on connections the runner ACCEPTED on its tailnet address
+# (conntrack; a connection it initiated is never "established" unless its
+# first packet passed), and port 53 to task_runner_guard_resolvers. Everything
+# else (the public internet) is accepted. Other users are untouched.
+{% set v4 = task_runner_guard_resolvers | select('match', '^[0-9.]+$') | list %}
+{% set v6 = task_runner_guard_resolvers | reject('match', '^[0-9.]+$') | list %}
+# Atomic replace: create (no-op if present), delete, define.
+table inet task_runner_guard
+delete table inet task_runner_guard
+
+table inet task_runner_guard {
+	chain output {
+		type filter hook output priority 0; policy accept;
+		meta skuid {{ task_runner_uid if task_runner_uid else '"' ~ task_runner_user ~ '"' }} jump runner_out
+	}
+
+	chain runner_out {
+		ct state established,related accept
+{% if v4 %}
+		ip daddr { {{ v4 | unique | join(', ') }} } udp dport 53 accept
+		ip daddr { {{ v4 | unique | join(', ') }} } tcp dport 53 accept
+{% endif %}
+{% if v6 %}
+		ip6 daddr { {{ v6 | unique | join(', ') }} } udp dport 53 accept
+		ip6 daddr { {{ v6 | unique | join(', ') }} } tcp dport 53 accept
+{% endif %}
+		ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 } drop
+		# fc00::/7 also covers the tailnet range fd7a:115c:a1e0::/48 (listing
+		# both would be an overlapping-interval error in an anonymous set).
+		ip6 daddr { ::1, fc00::/7, fe80::/10 } drop
+	}
+}

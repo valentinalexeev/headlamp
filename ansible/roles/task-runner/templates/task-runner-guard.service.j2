@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Guard: keep the task runner (user {{ task_runner_user }}) and its containers off loopback, LAN and the tailnet
+After=network-pre.target
+Wants=network-pre.target
+Before=task-runner.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ nft_bin }} -f {{ task_runner_guard_file }}
+ExecReload={{ nft_bin }} -f {{ task_runner_guard_file }}
+# Stopping the guard stops the runner too (it Requires= this unit).
+ExecStop={{ nft_bin }} delete table inet task_runner_guard
+
+[Install]
+WantedBy=multi-user.target

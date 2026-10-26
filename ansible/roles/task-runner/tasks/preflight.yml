@@ -1,0 +1,318 @@
+---
+# Read-only checks before anything is written. Failure messages name the
+# variable and never print the token.
+- name: Check facts are gathered
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family is defined
+      - ansible_facts.architecture is defined
+      - ansible_facts.memory_mb is defined
+      - ansible_facts.mounts is defined
+    fail_msg: >-
+      task-runner: ansible facts are missing; do not set gather_facts: false
+      for this role.
+    quiet: true
+
+- name: Check the OS and the architecture are supported
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Debian'
+      - ansible_facts.pkg_mgr | default('') == 'apt'
+      - ansible_facts.architecture in ['x86_64', 'aarch64']
+    fail_msg: >-
+      task-runner: only Debian-family hosts with apt on x86_64 or aarch64 are
+      supported. Got os_family='{{ ansible_facts.os_family }}',
+      pkg_mgr='{{ ansible_facts.pkg_mgr | default('') }}',
+      architecture='{{ ansible_facts.architecture }}'.
+    quiet: true
+
+- name: Check required variables are set
+  ansible.builtin.assert:
+    that:
+      - task_runner_src | length > 0
+      - task_runner_token | length > 0
+      - task_runner_listen_addr | length > 0
+      - (task_runner_base_image | length > 0) or (task_runner_image_archive | length > 0)
+    fail_msg: >-
+      task-runner: task_runner_src (control-host path to apps/task-runner),
+      task_runner_token (from a vault), task_runner_listen_addr (the node's
+      tailnet address) and task_runner_base_image (or task_runner_image_archive)
+      must be set.
+    quiet: true
+  # No no_log: the failure shows the expression text and fail_msg, never the value.
+
+- name: Check the token is long enough and has no whitespace
+  ansible.builtin.assert:
+    that:
+      - task_runner_token | length >= 24
+      - task_runner_token is regex('^[^\\s"\'\\\\$`]+\\Z')
+    fail_msg: >-
+      task-runner: task_runner_token must be at least 24 characters with no
+      whitespace, quotes, backslash, $ or backtick (try `openssl rand -hex 32`).
+      The value is not shown.
+    quiet: true
+
+- name: Check the listen address is a tailnet address and the port is valid
+  ansible.builtin.assert:
+    that:
+      - >-
+        task_runner_listen_addr is regex('^100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){2}\\Z')
+        or task_runner_listen_addr is regex('^fd7a:115c:a1e0:[0-9a-f:]+\\Z')
+      - task_runner_port | string is regex('^[0-9]{1,5}\\Z')
+      - 1 <= (task_runner_port | int) <= 65535
+    fail_msg: >-
+      task-runner: task_runner_listen_addr must be the node's tailnet address
+      (IPv4 in 100.64.0.0/10, or lowercase IPv6 in fd7a:115c:a1e0::/48), never
+      0.0.0.0 or a public address; task_runner_port must be 1-65535.
+      Got task_runner_listen_addr='{{ task_runner_listen_addr }}',
+      task_runner_port='{{ task_runner_port }}'.
+    quiet: true
+
+- name: Check the user name and the paths
+  ansible.builtin.assert:
+    that:
+      - task_runner_user is regex('^[a-z_][a-z0-9_-]{0,31}\\Z')
+      - task_runner_state_dir is regex('^/var/lib/[A-Za-z0-9._-]+\\Z')
+      - task_runner_runtime_dir is regex('^/run/[A-Za-z0-9._-]+\\Z')
+      - task_runner_env_file is regex('^/etc/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\\Z')
+      - task_runner_bin is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - task_runner_guard_file is regex('^/etc/[A-Za-z0-9._/-]+\\Z')
+      - nft_bin is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - task_runner_image_repo is regex('^localhost/[a-z0-9][a-z0-9._/-]*\\Z')
+      - task_runner_subid_count | string is regex('^[0-9]+\\Z')
+      - (task_runner_subid_count | int) >= 65536
+    fail_msg: >-
+      task-runner: task_runner_user must be a plain user name;
+      task_runner_state_dir /var/lib/<dir>; task_runner_runtime_dir /run/<dir>;
+      task_runner_env_file /etc/<dir>/<file>; task_runner_guard_file under /etc;
+      task_runner_image_repo localhost/<name>; task_runner_subid_count at least
+      65536; paths absolute with no spaces or shell characters.
+    quiet: true
+
+- name: Check the resource limits
+  ansible.builtin.assert:
+    that:
+      - task_runner_memory_max is regex('^[0-9]+[KMG]\\Z')
+      - task_runner_container_memory is regex('^[0-9]+[kmg]\\Z')
+      - task_runner_pids_limit | string is regex('^[0-9]+\\Z')
+      - (task_runner_pids_limit | int) >= 64
+      - task_runner_tasks_max | string is regex('^[0-9]+\\Z')
+      - (task_runner_tasks_max | int) > (task_runner_pids_limit | int)
+      - task_runner_container_mb | int >= 256
+      - (task_runner_container_mb | int) + 256 <= (task_runner_memory_max_mb | int)
+      - task_runner_min_free_mb | string is regex('^[0-9]+\\Z')
+      - task_runner_min_free_disk_mb | string is regex('^[0-9]+\\Z')
+    fail_msg: >-
+      task-runner: task_runner_memory_max must look like 2G (K/M/G),
+      task_runner_container_memory like 1g (k/m/g), at least 256 MB and at least
+      256 MB below task_runner_memory_max (room for the runner and podman);
+      task_runner_pids_limit at least 64 and below task_runner_tasks_max.
+      Got memory_max={{ task_runner_memory_max }}, container_memory={{ task_runner_container_memory }},
+      pids_limit={{ task_runner_pids_limit }}, tasks_max={{ task_runner_tasks_max }}.
+    quiet: true
+  vars:
+    task_runner_memory_max_mb: >-
+      {{ (task_runner_memory_max[:-1] | int) * {'K': 1, 'M': 1024, 'G': 1048576}[task_runner_memory_max[-1:]] | default(0) // 1024 }}
+    task_runner_container_mb: >-
+      {{ (task_runner_container_memory[:-1] | int) * {'k': 1, 'm': 1024, 'g': 1048576}[task_runner_container_memory[-1:]] | default(0) // 1024 }}
+
+- name: Check the guard inputs
+  ansible.builtin.assert:
+    that:
+      - task_runner_guard_resolvers is sequence and task_runner_guard_resolvers is not string
+      - task_runner_guard_resolvers | length > 0
+      - >-
+        (task_runner_guard_resolvers | select('match', '^[0-9]{1,3}(\\.[0-9]{1,3}){3}\\Z') | list | length)
+        + (task_runner_guard_resolvers | select('match', '^[0-9a-f]*:[0-9a-f:]+\\Z') | list | length)
+        == task_runner_guard_resolvers | length
+      - task_runner_guard_check_interval is regex('^[0-9]+(s|min|h)\\Z')
+    fail_msg: >-
+      task-runner: task_runner_guard_resolvers must be a non-empty list of IPv4
+      or lowercase IPv6 addresses (resolvers the service user may query on port
+      53); task_runner_guard_check_interval a systemd time span like 30s.
+      Got task_runner_guard_resolvers={{ task_runner_guard_resolvers }}.
+    quiet: true
+
+- name: Check the base image is pinned by digest
+  ansible.builtin.assert:
+    that:
+      - task_runner_base_image is regex('^[^@\\s]+@sha256:[0-9a-f]{64}\\Z')
+    fail_msg: >-
+      task-runner: task_runner_base_image must be pinned by digest,
+      "<registry>/<repository>@sha256:<64 hex>" (no tag). Resolve the tag the
+      pinned playwright package matches (see apps/task-runner/README.md) to its
+      digest on any machine with registry access, e.g.
+      `skopeo inspect --format '{{ '{{' }}.Digest{{ '}}' }}' docker://<image>:<tag>` or
+      `podman pull <image>:<tag> && podman image inspect --format '{{ '{{' }}.Digest{{ '}}' }}' <image>:<tag>`
+      (for a multi-arch image use the index digest from `podman manifest inspect` or the registry UI).
+      Got '{{ task_runner_base_image }}'.
+    quiet: true
+  when: task_runner_image_archive | length == 0
+
+- name: Stat the runner source on the control host
+  ansible.builtin.stat:
+    path: "{{ task_runner_src }}/{{ item }}"
+  loop:
+    - cmd/task-runner/main.go
+    - image/Containerfile
+    - image/host.js
+  delegate_to: localhost
+  become: false
+  # A read-only stat is safe, and the answer is needed in check mode too.
+  check_mode: false
+  register: task_runner_src_files
+
+- name: Check the runner source exists
+  ansible.builtin.assert:
+    that: task_runner_src_files.results | rejectattr('stat.exists') | list | length == 0
+    fail_msg: >-
+      task-runner: {{ task_runner_src_files.results | rejectattr('stat.exists') | map(attribute='item') | join(', ') }}
+      not found under {{ task_runner_src }} on the control host; task_runner_src
+      must be the apps/task-runner directory.
+    quiet: true
+
+- name: Stat the prebuilt binary on the control host
+  ansible.builtin.stat:
+    path: "{{ task_runner_binary }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  register: task_runner_binary_stat
+  when: task_runner_binary | length > 0
+
+- name: Check the prebuilt binary exists
+  ansible.builtin.assert:
+    that: task_runner_binary_stat.stat.exists and task_runner_binary_stat.stat.isreg
+    fail_msg: "task-runner: task_runner_binary '{{ task_runner_binary }}' is not a file on the control host."
+    quiet: true
+  when: task_runner_binary | length > 0
+
+- name: Check Go is available on the control host
+  ansible.builtin.command:
+    argv: [go, version]
+  delegate_to: localhost
+  become: false
+  run_once: true
+  check_mode: false
+  changed_when: false
+  register: task_runner_go
+  failed_when: false
+  when: task_runner_binary | length == 0
+
+- name: Fail without Go on the control host
+  ansible.builtin.assert:
+    that: task_runner_go.rc == 0
+    fail_msg: >-
+      task-runner: `go` was not found on the control host. Install Go (the
+      version in apps/task-runner/go.mod) or set task_runner_binary to a
+      prebuilt linux binary for the node's architecture.
+    quiet: true
+  when: task_runner_binary | length == 0
+
+- name: Stat the image archive on the control host
+  ansible.builtin.stat:
+    path: "{{ task_runner_image_archive }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  register: task_runner_archive_stat
+  when: task_runner_image_archive | length > 0
+
+- name: Check the image archive exists
+  ansible.builtin.assert:
+    that: task_runner_archive_stat.stat.exists and task_runner_archive_stat.stat.isreg
+    fail_msg: "task-runner: task_runner_image_archive '{{ task_runner_image_archive }}' is not a file on the control host."
+    quiet: true
+  when: task_runner_image_archive | length > 0
+
+# The tag is a content hash: a change to the Containerfile, host.js or the base
+# digest (or to the archive) yields a new tag and a rebuild; unchanged inputs
+# keep the tag, so the build is skipped. "b-" = built on the node, "a-" = loaded.
+- name: Work out the architecture, the listen address and the image tag
+  ansible.builtin.set_fact:
+    task_runner_goarch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] }}"
+    task_runner_listen: >-
+      {{ ('[' ~ task_runner_listen_addr ~ ']') if ':' in task_runner_listen_addr else task_runner_listen_addr }}:{{ task_runner_port }}
+    task_runner_image: >-
+      {{ task_runner_image_repo }}:{{
+        ('a-' ~ task_runner_archive_stat.stat.checksum[:16]) if task_runner_image_archive | length > 0
+        else ('b-' ~ ((lookup('ansible.builtin.file', task_runner_src ~ '/image/Containerfile')
+                       ~ '\n--host.js--\n' ~ lookup('ansible.builtin.file', task_runner_src ~ '/image/host.js')
+                       ~ '\n--base--\n' ~ task_runner_base_image) | hash('sha256'))[:16]) }}
+
+- name: Check there is enough free memory and disk
+  ansible.builtin.assert:
+    that:
+      - (ansible_facts.memory_mb.nocache.free | int) >= (task_runner_min_free_mb | int)
+      - (task_runner_free_disk_mb | int) >= (task_runner_min_free_disk_mb | int)
+    fail_msg: >-
+      task-runner: the node has {{ ansible_facts.memory_mb.nocache.free }} MB of
+      memory free (without page cache; need task_runner_min_free_mb={{ task_runner_min_free_mb }})
+      and {{ task_runner_free_disk_mb }} MB free on the file system of
+      {{ task_runner_state_dir }} (need task_runner_min_free_disk_mb={{ task_runner_min_free_disk_mb }};
+      -1 = mount not found). See README "Smaller nodes" before lowering the thresholds.
+    quiet: true
+  vars:
+    task_runner_free_disk_mb: >-
+      {%- set ns = namespace(best=none, len=-1) -%}
+      {%- for m in ansible_facts.mounts -%}
+        {%- set mp = m.mount | default('') -%}
+        {%- if (task_runner_state_dir == mp or task_runner_state_dir.startswith(mp.rstrip('/') ~ '/'))
+              and (mp | length) > ns.len -%}
+          {%- set ns.best = m -%}
+          {%- set ns.len = mp | length -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ ((ns.best.size_available | default(0) | int) // 1048576) if ns.best is not none else -1 }}
+
+# Same convention as the ingress-agent role: the bind address is the one
+# `tailscale ip` reports on the node; the runner never binds 0.0.0.0.
+- name: Read the node's tailnet addresses
+  ansible.builtin.command:
+    argv: [tailscale, ip]
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  register: task_runner_tailscale_ip
+
+- name: Check the node has the listen address
+  ansible.builtin.assert:
+    that:
+      - task_runner_tailscale_ip.rc == 0
+      - task_runner_listen_addr in task_runner_tailscale_ip.stdout_lines | default([]) | map('trim') | list
+    fail_msg: >-
+      task-runner: task_runner_listen_addr '{{ task_runner_listen_addr }}' is not
+      one of the addresses `tailscale ip` reports on this node
+      ({{ task_runner_tailscale_ip.stdout_lines | default([]) | join(', ') }}{{ task_runner_tailscale_ip.stderr | default('') | trim }}).
+      Run the tailscale role first and use the node's own tailnet address.
+    quiet: true
+
+# Containers resolve through podman's forwarder, which queries the host's
+# resolvers as the service user, so the guard must allow every resolver in
+# /etc/resolv.conf that lies in a blocked range, or DNS in runs fails.
+- name: Read the host's resolver configuration
+  ansible.builtin.slurp:
+    src: /etc/resolv.conf
+  register: task_runner_resolv_conf
+
+- name: Check the service user can use every system resolver
+  ansible.builtin.assert:
+    that:
+      - task_runner_unusable_resolvers | length == 0
+    fail_msg: >-
+      task-runner: /etc/resolv.conf lists resolvers {{ task_runner_unusable_resolvers }} in a range the
+      nftables guard blocks for the service user (loopback, private, CGNAT/tailnet, link-local, ULA) that are
+      not in task_runner_guard_resolvers. Add them there (the user may then query them on port 53 only), or DNS
+      inside runs times out.
+    quiet: true
+  vars:
+    task_runner_resolvers: >-
+      {{ (task_runner_resolv_conf.content | b64decode).splitlines()
+         | select('match', '^[ \t]*nameserver[ \t]+[0-9A-Fa-f.:]+[ \t]*$')
+         | map('regex_replace', '^[ \t]*nameserver[ \t]+([0-9A-Fa-f.:]+)[ \t]*$', '\1')
+         | map('lower') | list }}
+    task_runner_unusable_resolvers: >-
+      {{ task_runner_resolvers
+         | select('match', '^(0[.]|10[.]|127[.]|169[.]254[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|192[.]168[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|::1$|f[cd][0-9a-f]{0,2}:|fe[89ab][0-9a-f]?:)')
+         | reject('in', task_runner_guard_resolvers) | list }}

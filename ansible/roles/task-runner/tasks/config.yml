@@ -1,0 +1,102 @@
+---
+- name: Create the environment file directory
+  ansible.builtin.file:
+    path: "{{ task_runner_env_file | dirname }}"
+    state: directory
+    owner: root
+    group: "{{ task_runner_user }}"
+    mode: "0750"
+  become: true
+
+# Holds the token: no_log and no diff, so it never shows in the output.
+- name: Write the environment file (holds the token)
+  ansible.builtin.template:
+    src: task-runner.env.j2
+    dest: "{{ task_runner_env_file }}"
+    owner: root
+    group: "{{ task_runner_user }}"
+    mode: "0640"
+  diff: false
+  become: true
+  no_log: true
+  notify: restart task-runner
+
+# The env file names the image; without it every run would fail. Happens when
+# only `--tags config` runs after the image inputs changed.
+- name: Check the run image named in the environment file exists
+  ansible.builtin.command:
+    argv: [podman, --cgroup-manager=cgroupfs, image, exists, "{{ task_runner_image }}"]
+  become: true
+  become_user: "{{ task_runner_user }}"
+  environment:
+    HOME: "{{ task_runner_state_dir }}"
+    XDG_RUNTIME_DIR: "{{ task_runner_runtime_dir }}"
+  register: task_runner_image_final
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Fail when the run image is missing
+  ansible.builtin.assert:
+    that: task_runner_image_final.rc == 0
+    fail_msg: >-
+      task-runner: image {{ task_runner_image }} is not in the service user's
+      storage; run the role with --tags image (or without tags). podman said:
+      {{ task_runner_image_final.stderr | default('') | trim }}
+    quiet: true
+  when: not ansible_check_mode
+
+# Apply a changed binary/unit/env now, in its final configuration.
+- name: Apply handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start task-runner
+  ansible.builtin.systemd:
+    name: task-runner
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode
+
+# Keep the current tag and the newest other one (for a quick rollback by
+# hand); untag the rest. Runs after the service switched to the current image.
+# An image still used by a container is left alone (rmi without --force).
+- name: List the run images
+  ansible.builtin.command:
+    argv: [podman, --cgroup-manager=cgroupfs, images, --format, json, --filter, "reference={{ task_runner_image_repo }}"]
+  become: true
+  become_user: "{{ task_runner_user }}"
+  environment:
+    HOME: "{{ task_runner_state_dir }}"
+    XDG_RUNTIME_DIR: "{{ task_runner_runtime_dir }}"
+  register: task_runner_images
+  changed_when: false
+  when: not ansible_check_mode
+  tags: [image-prune]
+
+- name: Remove old run image tags
+  ansible.builtin.command:
+    argv: [podman, --cgroup-manager=cgroupfs, rmi, "{{ item }}"]
+  become: true
+  become_user: "{{ task_runner_user }}"
+  environment:
+    HOME: "{{ task_runner_state_dir }}"
+    XDG_RUNTIME_DIR: "{{ task_runner_runtime_dir }}"
+  loop: "{{ task_runner_stale_images }}"
+  register: task_runner_rmi
+  changed_when: task_runner_rmi.rc == 0
+  failed_when: false
+  when: not ansible_check_mode
+  tags: [image-prune]
+  vars:
+    task_runner_stale_images: >-
+      {%- set ns = namespace(tags=[]) -%}
+      {%- for img in (task_runner_images.stdout | default('[]', true) | from_json) -%}
+        {%- for n in img.Names | default([]) -%}
+          {%- if n.startswith(task_runner_image_repo ~ ':') and n != task_runner_image -%}
+            {%- set ns.tags = ns.tags + [{'name': n, 'created': img.Created | default(0) | int}] -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ (ns.tags | sort(attribute='created', reverse=true) | map(attribute='name') | list)[1:] }}

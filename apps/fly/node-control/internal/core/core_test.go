@@ -421,3 +421,32 @@ func TestHostGuardWildcards(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicMuxWhenEnrolmentIsInRedis(t *testing.T) {
+	// ENROLL_REDIS=1 alone (no ENROLL_DB) must open the public listener: the enrolment module refuses to start without it.
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want bool
+	}{
+		"redis":            {map[string]string{"ENROLL_REDIS": "1"}, true},
+		"sqlite":           {map[string]string{"ENROLL_DB": "/x/e.db"}, true},
+		"redis switched 0": {map[string]string{"ENROLL_REDIS": "0"}, false},
+		"neither":          {nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := EnrolmentEnabled(MapEnv(tc.env)); got != tc.want {
+				t.Fatalf("EnrolmentEnabled = %v, want %v", got, tc.want)
+			}
+			tn := NewLocal("127.0.0.1")
+			var sawPublic bool
+			mod := &stubModule{name: "m", register: func(r *Routes) { sawPublic = r.Public != nil }}
+			stop := runBG(t, []Module{mod}, MapEnv(tc.env), tn)
+			if err := stop(); err != nil {
+				t.Fatal(err)
+			}
+			if sawPublic != tc.want {
+				t.Fatalf("module saw a public mux = %v, want %v", sawPublic, tc.want)
+			}
+		})
+	}
+}

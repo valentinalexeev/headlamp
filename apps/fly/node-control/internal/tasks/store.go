@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tailscale.com/ipn"
@@ -31,6 +33,10 @@ const (
 	fieldConfig  = "config"
 	fieldSecrets = "secrets-index"
 	maxRuns      = 200
+
+	maxReasonBytes = 512
+	maxResultBytes = 8 << 10
+	maxRunsField   = 256 << 10 // whole runs:<task> field, oldest runs trimmed first
 )
 
 type RunState string
@@ -64,21 +70,33 @@ type TaskState struct {
 }
 
 // Store is safe for concurrent use. A write that fails keeps the in-memory
-// value (the scheduler must keep working with Redis down) and is queued, so
-// the next write retries every field that is still behind.
+// value (the scheduler must keep working with Redis down) and stays pending;
+// every later write retries each pending field on its own, so one field that
+// never succeeds cannot hold back the others.
+//
+// Locking: mu guards the cache and the pending set and is never held across
+// Redis IO. wmu serialises the Redis writes; each flush takes its snapshot
+// after acquiring wmu, so the latest value of a field always wins.
 type Store struct {
 	kv  ipn.StateStore
 	log *slog.Logger
 
-	mu       sync.Mutex
-	config   *Config
-	scripts  map[string]string
-	secrets  map[string]string
-	states   map[string]TaskState
-	runs     map[string][]Run  // oldest first
-	pending  map[string][]byte // fields not yet written, latest value
-	order    []string          // pending fields, in first-failure order
-	degraded bool
+	wmu sync.Mutex // held for the duration of Redis writes only
+
+	mu      sync.Mutex
+	config  *Config
+	scripts map[string]string
+	secrets map[string]string
+	states  map[string]TaskState
+	runs    map[string][]Run // oldest first
+	pending map[string]pendingWrite
+	order   []string        // pending fields, first-queued first
+	stuck   map[string]bool // fields whose last write attempt failed
+}
+
+type pendingWrite struct {
+	val []byte
+	ver uint64
 }
 
 // OpenStore reads config, scripts, secrets, state and history once.
@@ -90,7 +108,7 @@ func OpenStore(kv ipn.StateStore, log *slog.Logger) (*Store, error) {
 		kv: kv, log: log,
 		scripts: map[string]string{}, secrets: map[string]string{},
 		states: map[string]TaskState{}, runs: map[string][]Run{},
-		pending: map[string][]byte{},
+		pending: map[string]pendingWrite{}, stuck: map[string]bool{},
 	}
 
 	if b, ok, err := s.read(fieldConfig); err != nil {
@@ -163,39 +181,75 @@ func (s *Store) read(field string) ([]byte, bool, error) {
 	return b, true, nil
 }
 
-// put records field as dirty and flushes everything dirty. The caller holds
-// s.mu and has already updated the cache. Errors from the kv wrapper never
-// carry the Redis URL or key material, and values are never logged.
-func (s *Store) put(field string, val []byte) error {
+// pendingVer orders writes of one field.
+var pendingVer atomic.Uint64
+
+// queue marks field as needing a write. The caller holds s.mu and has already
+// updated the cache.
+func (s *Store) queue(field string, val []byte) {
+	ver := pendingVer.Add(1)
 	if _, queued := s.pending[field]; !queued {
 		s.order = append(s.order, field)
 	}
-	s.pending[field] = val
-	for len(s.order) > 0 {
-		f := s.order[0]
-		if err := s.kv.WriteState(ipn.StateKey(f), s.pending[f]); err != nil {
-			if !s.degraded {
-				s.log.Warn("task store write failed, serving from memory", "field", f, "err", err)
-			}
-			s.degraded = true
-			return fmt.Errorf("write %s: %w", f, err)
-		}
-		delete(s.pending, f)
-		s.order = s.order[1:]
-	}
-	s.degraded = false
-	return nil
+	s.pending[field] = pendingWrite{val: val, ver: ver}
 }
 
-func (s *Store) putJSON(field string, v any) error {
+func (s *Store) queueJSON(field string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	return s.put(field, b)
+	s.queue(field, b)
+	return nil
 }
 
-// Config is nil until a config was pushed.
+// flush writes every pending field, each independently. It is called without
+// s.mu held. Errors never carry the Redis URL or key material, and values are
+// never logged. The returned error names the fields that could not be written.
+func (s *Store) flush() error {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+
+	type item struct {
+		field string
+		pw    pendingWrite
+	}
+	s.mu.Lock()
+	todo := make([]item, 0, len(s.order))
+	for _, f := range s.order {
+		todo = append(todo, item{f, s.pending[f]})
+	}
+	s.mu.Unlock()
+
+	var errs []error
+	for _, it := range todo {
+		err := s.kv.WriteState(ipn.StateKey(it.field), it.pw.val)
+		s.mu.Lock()
+		if err != nil {
+			if !s.stuck[it.field] {
+				s.log.Warn("task store write failed, serving from memory", "field", it.field, "err", err)
+			}
+			s.stuck[it.field] = true
+			errs = append(errs, fmt.Errorf("write %s: %w", it.field, err))
+		} else {
+			delete(s.stuck, it.field)
+			if cur, ok := s.pending[it.field]; ok && cur.ver == it.pw.ver {
+				delete(s.pending, it.field)
+				for i, f := range s.order {
+					if f == it.field {
+						s.order = append(s.order[:i], s.order[i+1:]...)
+						break
+					}
+				}
+			}
+		}
+		s.mu.Unlock()
+	}
+	return errors.Join(errs...)
+}
+
+// Config is nil until a config was pushed. The result is a shared snapshot:
+// callers must treat it as read-only.
 func (s *Store) Config() *Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -205,15 +259,11 @@ func (s *Store) Config() *Config {
 // PutConfig stores the config and its scripts. Scripts are reloaded at open
 // only when a task references them.
 func (s *Store) PutConfig(cfg *Config, scripts map[string]string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.config = cfg
-	var first error
-	keep := func(err error) {
-		if err != nil && first == nil {
-			first = err
-		}
+	if cfg == nil {
+		return errors.New("nil task config")
 	}
+	s.mu.Lock()
+	s.config = cfg
 	names := make([]string, 0, len(scripts))
 	for n := range scripts {
 		names = append(names, n)
@@ -221,10 +271,14 @@ func (s *Store) PutConfig(cfg *Config, scripts map[string]string) error {
 	sort.Strings(names)
 	for _, n := range names {
 		s.scripts[n] = scripts[n]
-		keep(s.put("script:"+n, []byte(scripts[n])))
+		s.queue("script:"+n, []byte(scripts[n]))
 	}
-	keep(s.putJSON(fieldConfig, cfg))
-	return first
+	err := s.queueJSON(fieldConfig, cfg)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.flush()
 }
 
 func (s *Store) Script(name string) (string, bool) {
@@ -236,16 +290,18 @@ func (s *Store) Script(name string) (string, bool) {
 
 func (s *Store) PutSecret(name, value string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	_, known := s.secrets[name]
 	s.secrets[name] = value
-	first := s.put("secret:"+name, []byte(value))
+	s.queue("secret:"+name, []byte(value))
+	var err error
 	if !known {
-		if err := s.putJSON(fieldSecrets, s.namesLocked()); err != nil && first == nil {
-			first = err
-		}
+		err = s.queueJSON(fieldSecrets, s.namesLocked())
 	}
-	return first
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.flush()
 }
 
 func (s *Store) namesLocked() []string {
@@ -291,39 +347,98 @@ func (s *Store) State(task string) TaskState {
 
 func (s *Store) SaveState(task string, st TaskState) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.saveStateLocked(task, st)
+	err := s.setStateLocked(task, st)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.flush()
 }
 
 // UpdateState applies fn to the current state under the store lock, so two
 // writers touching different fields cannot overwrite each other. The in-memory
-// state is updated even when the write fails.
+// state is updated even when the write fails. fn must not call store methods
+// (the lock is held).
 func (s *Store) UpdateState(task string, fn func(*TaskState)) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	st := s.states[task]
 	fn(&st)
-	return s.saveStateLocked(task, st)
-}
-
-func (s *Store) saveStateLocked(task string, st TaskState) error {
-	s.states[task] = st
-	return s.putJSON("state:"+task, st)
-}
-
-// AppendRun keeps the newest maxRuns runs of the task.
-func (s *Store) AppendRun(r Run) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rs := append(s.runs[r.Task], r)
-	if len(rs) > maxRuns {
-		rs = append([]Run(nil), rs[len(rs)-maxRuns:]...)
+	err := s.setStateLocked(task, st)
+	s.mu.Unlock()
+	if err != nil {
+		return err
 	}
-	s.runs[r.Task] = rs
-	return s.putJSON("runs:"+r.Task, rs)
+	return s.flush()
 }
 
-// Runs returns a copy, newest first.
+func (s *Store) setStateLocked(task string, st TaskState) error {
+	s.states[task] = st
+	return s.queueJSON("state:"+task, st)
+}
+
+// bound keeps one run small: the history lives in a single Redis field.
+func (r Run) bound() Run {
+	if len(r.Reason) > maxReasonBytes {
+		r.Reason = strings.ToValidUTF8(r.Reason[:maxReasonBytes], "")
+	}
+	if r.Result != nil {
+		if b, err := json.Marshal(r.Result); err != nil || len(b) > maxResultBytes {
+			r.Result = map[string]any{"truncated": true}
+		}
+	}
+	return r
+}
+
+// AppendRun records r. A run whose ID is already known replaces that entry in
+// place (so queued/running/finished updates keep their position); otherwise it
+// is appended. The newest maxRuns runs are kept, and the stored field is held
+// under maxRunsField by dropping the oldest runs. Run.Result is stored as a
+// read-only snapshot: do not mutate the map afterwards.
+func (s *Store) AppendRun(r Run) error {
+	r = r.bound()
+	s.mu.Lock()
+	rs := s.runs[r.Task]
+	replaced := false
+	if r.ID != "" {
+		for i := range rs {
+			if rs[i].ID == r.ID {
+				rs = append([]Run(nil), rs...)
+				rs[i] = r
+				replaced = true
+				break
+			}
+		}
+	}
+	if !replaced {
+		rs = append(rs[:len(rs):len(rs)], r)
+	}
+	if len(rs) > maxRuns {
+		rs = rs[len(rs)-maxRuns:]
+	}
+	enc := make([][]byte, len(rs))
+	total := 2
+	for i, x := range rs {
+		b, err := json.Marshal(x)
+		if err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		enc[i] = b
+		total += len(b) + 1
+	}
+	drop := 0
+	for total > maxRunsField && drop < len(rs)-1 {
+		total -= len(enc[drop]) + 1
+		drop++
+	}
+	rs, enc = rs[drop:], enc[drop:]
+	s.runs[r.Task] = rs
+	s.queue("runs:"+r.Task, append(append([]byte("["), bytes.Join(enc, []byte(","))...), ']'))
+	s.mu.Unlock()
+	return s.flush()
+}
+
+// Runs returns a copy of the history, newest first.
 func (s *Store) Runs(task string) []Run {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -335,9 +450,22 @@ func (s *Store) Runs(task string) []Run {
 	return out
 }
 
-// Degraded reports that the last write failed.
+// Degraded reports that a write is still failing: some field could not be
+// stored at its last attempt. It clears once every pending field went through.
 func (s *Store) Degraded() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.degraded
+	return len(s.stuck) > 0
+}
+
+// DegradedFields names the fields whose last write failed (names only).
+func (s *Store) DegradedFields() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.stuck))
+	for f := range s.stuck {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
 }

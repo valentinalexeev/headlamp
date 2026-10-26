@@ -29,6 +29,10 @@ type memKV struct {
 	mu       sync.Mutex
 	m        map[ipn.StateKey][]byte
 	failNext int // writes that still fail
+
+	failField string        // always fails this field
+	entered   chan struct{} // if set: signalled when a write starts, then it waits for release
+	release   chan struct{}
 }
 
 func newMemKV() *memKV { return &memKV{m: map[ipn.StateKey][]byte{}} }
@@ -44,8 +48,15 @@ func (k *memKV) ReadState(id ipn.StateKey) ([]byte, error) {
 }
 
 func (k *memKV) WriteState(id ipn.StateKey, b []byte) error {
+	if k.entered != nil {
+		k.entered <- struct{}{}
+		<-k.release
+	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	if string(id) == k.failField {
+		return errors.New("field refused")
+	}
 	if k.failNext > 0 {
 		k.failNext--
 		return errors.New("write refused")
@@ -228,7 +239,7 @@ func TestStoreSendsOnlyHGetHSet(t *testing.T) {
 	defer mu.Unlock()
 	for cmd := range seen {
 		switch cmd {
-		case "HGET", "HSET", "PING", "HELLO": // connection setup of the shared client, not store traffic
+		case "HGET", "HSET", "PING", "HELLO": // connection setup of the shared client (HELLO 2, PING), not store traffic
 		default:
 			t.Errorf("unexpected command %s", cmd)
 		}
@@ -254,5 +265,140 @@ func TestStoreUpdateStateLosesNoUpdate(t *testing.T) {
 	st := s.State("ping")
 	if st.Streak != 200 || st.Attempt != 200 || !st.AlertUntil.Equal(at) {
 		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestStoreStuckFieldDoesNotBlockOthers(t *testing.T) {
+	kv := newMemKV()
+	kv.failField = "secret:bad"
+	s := openStore(t, kv)
+	if err := s.PutSecret("bad", "v"); err == nil {
+		t.Fatal("want the write error")
+	}
+	if err := s.PutSecret("good", "v2"); err == nil {
+		t.Fatal("the stuck field is still reported by later writes")
+	}
+	if err := s.SaveState("ping", TaskState{Streak: 3}); err == nil {
+		t.Fatal("expected the stuck field in the error")
+	}
+	kv.mu.Lock()
+	_, good := kv.m["secret:good"]
+	_, state := kv.m["state:ping"]
+	_, idx := kv.m["secrets-index"]
+	kv.mu.Unlock()
+	if !good || !state || !idx {
+		t.Fatalf("other fields blocked: good=%v state=%v index=%v", good, state, idx)
+	}
+	if !s.Degraded() {
+		t.Fatal("not degraded")
+	}
+	if f := s.DegradedFields(); len(f) != 1 || f[0] != "secret:bad" {
+		t.Fatalf("DegradedFields = %v", f)
+	}
+	kv.mu.Lock()
+	kv.failField = ""
+	kv.mu.Unlock()
+	if err := s.SaveState("ping", TaskState{Streak: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if s.Degraded() || len(s.DegradedFields()) != 0 {
+		t.Fatal("still degraded after recovery")
+	}
+}
+
+func TestStoreRunBounds(t *testing.T) {
+	s := openStore(t, newMemKV())
+	long := strings.Repeat("é", 600)
+	s.AppendRun(Run{ID: "a", Task: "t", Reason: long})
+	got := s.Runs("t")[0].Reason
+	if len(got) > maxReasonBytes || !strings.HasPrefix(long, got) {
+		t.Fatalf("reason len = %d", len(got))
+	}
+
+	big := map[string]any{"blob": strings.Repeat("x", 9<<10)}
+	s.AppendRun(Run{ID: "b", Task: "t", Result: big})
+	if r := s.Runs("t")[0]; r.Result["truncated"] != true || len(r.Result) != 1 {
+		t.Fatalf("result = %v", r.Result)
+	}
+	s.AppendRun(Run{ID: "c", Task: "t", Result: map[string]any{"ok": 1}})
+	if r := s.Runs("t")[0]; r.Result["ok"] != 1 {
+		t.Fatalf("small result altered: %v", r.Result)
+	}
+}
+
+func TestStoreRunsFieldCappedOldestFirst(t *testing.T) {
+	kv := newMemKV()
+	s := openStore(t, kv)
+	s.PutConfig(testConfig(t), nil)
+	// ~7.5 KiB each: 60 of them exceed 256 KiB.
+	for i := 0; i < 60; i++ {
+		s.AppendRun(Run{ID: fmt.Sprint(i), Task: "ping", Result: map[string]any{"blob": strings.Repeat("y", 7<<10)}})
+	}
+	kv.mu.Lock()
+	n := len(kv.m["runs:ping"])
+	kv.mu.Unlock()
+	if n > maxRunsField {
+		t.Fatalf("runs field = %d bytes", n)
+	}
+	runs := s.Runs("ping")
+	if len(runs) >= 60 || len(runs) < 10 || runs[0].ID != "59" {
+		t.Fatalf("len=%d newest=%s", len(runs), runs[0].ID)
+	}
+	if last := runs[len(runs)-1].ID; last == "0" {
+		t.Fatal("oldest run was kept")
+	}
+	if r := openStore(t, kv).Runs("ping"); len(r) != len(runs) || r[0].ID != "59" {
+		t.Fatalf("reopened len=%d", len(r))
+	}
+}
+
+func TestStoreAppendRunUpsertsByID(t *testing.T) {
+	kv := newMemKV()
+	s := openStore(t, kv)
+	s.PutConfig(testConfig(t), nil)
+	s.AppendRun(Run{ID: "1", Task: "ping", State: RunQueued})
+	s.AppendRun(Run{ID: "2", Task: "ping", State: RunQueued})
+	s.AppendRun(Run{ID: "1", Task: "ping", State: RunSucceeded})
+	for _, st := range []*Store{s, openStore(t, kv)} {
+		runs := st.Runs("ping")
+		if len(runs) != 2 || runs[0].ID != "2" || runs[1].ID != "1" || runs[1].State != RunSucceeded {
+			t.Fatalf("runs = %+v", runs)
+		}
+	}
+}
+
+func TestStorePutConfigNil(t *testing.T) {
+	s := openStore(t, newMemKV())
+	if err := s.PutConfig(nil, nil); err == nil || s.Config() != nil {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestStoreReadersDoNotWaitForRedis(t *testing.T) {
+	kv := newMemKV()
+	kv.entered, kv.release = make(chan struct{}, 8), make(chan struct{})
+	s := openStore(t, kv)
+
+	done := make(chan error, 1)
+	go func() { done <- s.PutSecret("token", "v") }()
+	<-kv.entered // a write is now blocked inside the kv
+
+	reads := make(chan struct{})
+	go func() {
+		s.Config()
+		s.State("ping")
+		s.Runs("ping")
+		s.SecretNames()
+		s.Degraded()
+		close(reads)
+	}()
+	select {
+	case <-reads:
+	case <-time.After(2 * time.Second):
+		t.Fatal("readers blocked behind a Redis write")
+	}
+	close(kv.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

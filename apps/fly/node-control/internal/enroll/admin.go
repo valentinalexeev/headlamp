@@ -72,6 +72,7 @@ func (a *Admin) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /enroll", a.page)
 	mux.HandleFunc("GET /enroll/devices", a.listDevices)
 	mux.HandleFunc("POST /enroll/devices", a.jsonOnly(a.createDevice))
+	mux.HandleFunc("DELETE /enroll/devices/{id}", a.jsonOnly(a.deleteDevice))
 	mux.HandleFunc("POST /enroll/devices/{id}/links", a.jsonOnly(a.newLink))
 	mux.HandleFunc("POST /enroll/devices/{id}/revoke", a.jsonOnly(a.revoke))
 	mux.HandleFunc("POST /enroll/devices/{id}/extend", a.jsonOnly(a.extend))
@@ -456,6 +457,25 @@ func (a *Admin) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
+}
+
+// deleteDevice removes a revoked device for good. An active or expired-but-not-revoked device must be revoked first,
+// so one stray click cannot remove a working phone. No push is needed: only active devices are ever sent to an agent.
+func (a *Admin) deleteDevice(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	switch err := a.store.DeleteDevice(id); {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case errors.Is(err, ErrNotFound):
+		detail(w, http.StatusNotFound, "unknown device")
+	case errors.Is(err, ErrNotRevoked):
+		detail(w, http.StatusConflict, "revoke the device before deleting it")
+	default:
+		a.internal(w, err)
+	}
 }
 
 func (a *Admin) extend(w http.ResponseWriter, r *http.Request) {

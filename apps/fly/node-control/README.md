@@ -263,6 +263,13 @@ Consequences to plan for:
 ### Sync with the ingress host
 
 Every create/revoke/extend pushes the full credential set to the agent; a reconcile loop retries every 5 minutes.
+
+Deleting: `DELETE /enroll/devices/{id}` (JSON content type, like the other changes) removes a **revoked** device with its
+UUIDs and links for good. An active or merely expired device is refused with `409` ("revoke the device before deleting
+it"), an unknown id with `404`. The id is never issued again. Nothing is pushed to an agent (only active devices are ever
+sent). The `/enroll` page hides revoked devices by default ("Show revoked devices (N)", remembered in the browser) and
+offers only a Delete button on a revoked row. On Redis the delete is one guarded script (`DEL` on the device key only when
+it exists and is revoked); links of the device expire on their own TTL and can no longer be spent.
 A failed push is logged (exception class, and the HTTP status for HTTP failures; never payloads or credentials) and
 classified, per ingress: `unreachable` (no connection), `unauthorized` (401/403, `AGENT_TOKEN` mismatch), `rejected` (other
 non-2xx, typically 503: xray refused the generated config), `conflict` (409), `error` (unexpected exception in the

@@ -277,6 +277,33 @@ func (s *RedisStore) Extend(deviceID int64, expiresAt int64) error {
 	return s.update("extend", deviceID, strconv.FormatInt(expiresAt, 10))
 }
 
+// deleteScript removes a device record only if it exists and is revoked, in one step (an active device is never deleted
+// by a racing request). It returns 1 when deleted, 0 when the device is not revoked and -1 when it does not exist.
+var deleteScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+if redis.call('HGET', KEYS[1], 'revoked') ~= '1' then return 0 end
+redis.call('DEL', KEYS[1])
+return 1`)
+
+// DeleteDevice removes a revoked device. Its links cannot be listed without a scan, so they stay until their TTL
+// ends; a spend of one fails at once, because the device no longer exists. The counter is untouched, so the id is
+// never issued again.
+func (s *RedisStore) DeleteDevice(deviceID int64) error {
+	ctx, cancel := opCtx()
+	defer cancel()
+	res, err := deleteScript.Eval(ctx, s.rdb, []string{s.deviceKey(deviceID)}).Int()
+	if err != nil {
+		return s.wrap("deleting device in redis", err)
+	}
+	switch res {
+	case 1:
+		return nil
+	case 0:
+		return ErrNotRevoked
+	}
+	return ErrNotFound
+}
+
 func (s *RedisStore) listRecs(ctx context.Context) ([]devRec, error) {
 	n, err := s.seq(ctx)
 	if err != nil {

@@ -433,6 +433,37 @@ func (s *Store) Revoke(deviceID int64) error {
 	return err
 }
 
+// DeleteDevice removes a revoked device with its UUIDs and links. AUTOINCREMENT keeps the id from being reused.
+func (s *Store) DeleteDevice(deviceID int64) error {
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var revoked int64
+	err = tx.QueryRowContext(ctx, "SELECT revoked FROM devices WHERE id=?", deviceID).Scan(&revoked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if revoked == 0 {
+		return ErrNotRevoked
+	}
+	for _, q := range []string{
+		"DELETE FROM tokens WHERE device_id=?",
+		"DELETE FROM device_uuids WHERE device_id=?",
+		"DELETE FROM devices WHERE id=?",
+	} {
+		if _, err := tx.ExecContext(ctx, q, deviceID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // Extend sets a device's expiry (unix seconds).
 func (s *Store) Extend(deviceID int64, expiresAt int64) error {
 	_, err := s.db.Exec("UPDATE devices SET expires_at=? WHERE id=?", expiresAt, deviceID)

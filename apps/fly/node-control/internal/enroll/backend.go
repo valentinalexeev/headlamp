@@ -1,6 +1,12 @@
 package enroll
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrNotRevoked means a device cannot be deleted because it has not been revoked first.
+var ErrNotRevoked = errors.New("device is not revoked")
 
 // Backend is what the enrolment code needs from its persistent store. The SQLite Store is one
 // implementation; the Redis store (redis.go) is the other. Both must behave identically: the
@@ -18,6 +24,9 @@ type Backend interface {
 	CreateDevice(name, owner, client string, expiresAt int64) (Device, string, error)
 	ListDevices() ([]Device, error)
 	Revoke(deviceID int64) error
+	// DeleteDevice removes a revoked device and its UUIDs and links for good. It returns ErrNotFound for an unknown
+	// id and ErrNotRevoked, changing nothing, for a device that is not revoked. The id is never issued again.
+	DeleteDevice(deviceID int64) error
 	Extend(deviceID int64, expiresAt int64) error
 
 	// SubscriptionSecret derives the current secret of a device (ErrNotFound if it does not exist).

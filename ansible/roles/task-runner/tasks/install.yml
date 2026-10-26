@@ -14,6 +14,26 @@
     cache_valid_time: 3600
   become: true
 
+# The podman package ships ROOT-level units (API socket, restart of root
+# containers, auto-update, transient cleanup). They are unrelated to the
+# rootless service and stay off. Only these units are touched; a unit the
+# installed version does not ship is skipped.
+- name: Disable the podman package's root-level units
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - podman.socket
+    - podman-restart.service
+    - podman-auto-update.timer
+    - podman-clean-transient.service
+  register: task_runner_podman_units
+  failed_when:
+    - task_runner_podman_units is failed
+    - "'Could not find the requested service' not in (task_runner_podman_units.msg | default(''))"
+  become: true
+
 - name: Create the service group
   ansible.builtin.group:
     name: "{{ task_runner_user }}"

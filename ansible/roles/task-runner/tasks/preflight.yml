@@ -77,7 +77,7 @@
       - task_runner_env_file is regex('^/etc/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\\Z')
       - task_runner_bin is regex('^/[A-Za-z0-9._/-]+\\Z')
       - task_runner_guard_file is regex('^/etc/[A-Za-z0-9._/-]+\\Z')
-      - nft_bin is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - task_runner_nft_bin is regex('^/[A-Za-z0-9._/-]+\\Z')
       - task_runner_image_repo is regex('^localhost/[a-z0-9][a-z0-9._/-]*\\Z')
       - task_runner_subid_count | string is regex('^[0-9]+\\Z')
       - (task_runner_subid_count | int) >= 65536
@@ -241,19 +241,11 @@
                        ~ '\n--host.js--\n' ~ lookup('ansible.builtin.file', task_runner_src ~ '/image/host.js')
                        ~ '\n--base--\n' ~ task_runner_base_image) | hash('sha256'))[:16]) }}
 
-- name: Check there is enough free memory and disk
-  ansible.builtin.assert:
-    that:
-      - (ansible_facts.memory_mb.nocache.free | int) >= (task_runner_min_free_mb | int)
-      - (task_runner_free_disk_mb | int) >= (task_runner_min_free_disk_mb | int)
-    fail_msg: >-
-      task-runner: the node has {{ ansible_facts.memory_mb.nocache.free }} MB of
-      memory free (without page cache; need task_runner_min_free_mb={{ task_runner_min_free_mb }})
-      and {{ task_runner_free_disk_mb }} MB free on the file system of
-      {{ task_runner_state_dir }} (need task_runner_min_free_disk_mb={{ task_runner_min_free_disk_mb }};
-      -1 = mount not found). See README "Smaller nodes" before lowering the thresholds.
-    quiet: true
-  vars:
+# Free disk on the file system of the state dir (longest mount prefix; -1 =
+# not found). Checked in image.yml, only when the image has to be built or
+# loaded, so a rerun next to an existing image is not refused.
+- name: Work out the free disk for the state directory
+  ansible.builtin.set_fact:
     task_runner_free_disk_mb: >-
       {%- set ns = namespace(best=none, len=-1) -%}
       {%- for m in ansible_facts.mounts -%}
@@ -265,6 +257,34 @@
         {%- endif -%}
       {%- endfor -%}
       {{ ((ns.best.size_available | default(0) | int) // 1048576) if ns.best is not none else -1 }}
+
+- name: Check whether task-runner is already running
+  ansible.builtin.command:
+    argv: [systemctl, is-active, task-runner]
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  register: task_runner_active
+
+# A running service (perhaps with a Chromium run in progress) uses the memory
+# this check is about: only warn then.
+- name: Check there is enough free memory
+  ansible.builtin.assert:
+    that:
+      - (ansible_facts.memory_mb.nocache.free | int) >= (task_runner_min_free_mb | int)
+    fail_msg: &task_runner_mem_msg >-
+      task-runner: the node has {{ ansible_facts.memory_mb.nocache.free }} MB of
+      memory free (without page cache); task_runner_min_free_mb is {{ task_runner_min_free_mb }}.
+      See README "Smaller nodes" before lowering the threshold.
+    quiet: true
+  when: (task_runner_active.stdout | default('') | trim) != 'active'
+
+- name: Warn about low free memory next to the running service
+  ansible.builtin.debug:
+    msg: *task_runner_mem_msg
+  when:
+    - (task_runner_active.stdout | default('') | trim) == 'active'
+    - (ansible_facts.memory_mb.nocache.free | int) < (task_runner_min_free_mb | int)
 
 # Same convention as the ingress-agent role: the bind address is the one
 # `tailscale ip` reports on the node; the runner never binds 0.0.0.0.

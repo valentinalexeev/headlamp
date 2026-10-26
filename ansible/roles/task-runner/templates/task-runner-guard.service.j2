@@ -8,10 +8,10 @@ Before=task-runner.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart={{ nft_bin }} -f {{ task_runner_guard_file }}
-ExecReload={{ nft_bin }} -f {{ task_runner_guard_file }}
+ExecStart={{ task_runner_nft_bin }} -f {{ task_runner_guard_file }}
+ExecReload={{ task_runner_nft_bin }} -f {{ task_runner_guard_file }}
 # Stopping the guard stops the runner too (it Requires= this unit).
-ExecStop={{ nft_bin }} delete table inet task_runner_guard
+ExecStop={{ task_runner_nft_bin }} delete table inet task_runner_guard
 
 [Install]
 WantedBy=multi-user.target

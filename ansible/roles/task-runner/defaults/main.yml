@@ -73,6 +73,13 @@ task_runner_tasks_max: 2048
 task_runner_min_free_mb: 1500
 task_runner_min_free_disk_mb: 6000
 
+# systemd ProtectKernelTunables= for the unit. Off: its read-only mounts over
+# /proc/sys etc. become locked mounts in the container's user namespace and the
+# kernel refuses the fresh /proc mount, so every run would fail. To try it,
+# set true on one node after a verified run, redeploy, start a run and check
+# `journalctl -u task-runner` for a proc mount error; revert if it fails.
+task_runner_protect_kernel_tunables: false
+
 # nftables guard (tasks/guard.yml).
 task_runner_guard_file: /etc/task-runner-guard.nft
 # Resolvers the service user (and so every container, whose traffic leaves as
@@ -83,4 +90,4 @@ task_runner_guard_file: /etc/task-runner-guard.nft
 task_runner_guard_resolvers: ["100.100.100.100", "fd7a:115c:a1e0::53"]
 # How often the guard check timer verifies the table exists (systemd time span).
 task_runner_guard_check_interval: 30s
-nft_bin: /usr/sbin/nft
+task_runner_nft_bin: /usr/sbin/nft

@@ -4,8 +4,8 @@
 # the ingress guard of the reality-ingress role, in its own table.
 - name: Look for the nft binary
   ansible.builtin.stat:
-    path: "{{ nft_bin }}"
-  register: task_runner_nft_bin
+    path: "{{ task_runner_nft_bin }}"
+  register: task_runner_nft_stat
 
 - name: Install nftables (nft is missing)
   ansible.builtin.apt:
@@ -13,7 +13,7 @@
     state: present
     update_cache: true
   become: true
-  when: not task_runner_nft_bin.stat.exists
+  when: not task_runner_nft_stat.stat.exists
 
 # The rules match the numeric uid. The user is created by install.yml; in check
 # mode on a fresh host it may not exist yet, and nothing is written then.
@@ -52,7 +52,7 @@
     owner: root
     group: root
     mode: "0644"
-    validate: "{{ nft_bin }} -c -f %s"
+    validate: "{{ task_runner_nft_bin }} -c -f %s"
   become: true
   notify: reload task-runner-guard
 

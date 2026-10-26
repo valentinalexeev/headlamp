@@ -27,6 +27,25 @@
                else ('missing, loading ' ~ task_runner_image_archive if task_runner_image_archive | length > 0
                      else 'missing, building from ' ~ task_runner_base_image)) }}
 
+- name: Check there is enough free disk for the image
+  ansible.builtin.assert:
+    that: (task_runner_free_disk_mb | int) >= (task_runner_min_free_disk_mb | int)
+    fail_msg: &task_runner_disk_msg >-
+      task-runner: {{ task_runner_free_disk_mb }} MB free on the file system of
+      {{ task_runner_state_dir }} (-1 = mount not found); building or loading the
+      run image needs task_runner_min_free_disk_mb={{ task_runner_min_free_disk_mb }}.
+    quiet: true
+  when:
+    - not ansible_check_mode
+    - task_runner_image_exists.rc == 1
+
+- name: Warn about low free disk (check mode, image not inspected)
+  ansible.builtin.debug:
+    msg: *task_runner_disk_msg
+  when:
+    - ansible_check_mode
+    - (task_runner_free_disk_mb | int) < (task_runner_min_free_disk_mb | int)
+
 # Build on the node. The first build pulls the base image (about 2.5 GB, about
 # 30 minutes on a small node), hence async with a generous limit.
 - name: Build the run image on the node

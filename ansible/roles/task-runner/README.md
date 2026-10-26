@@ -31,9 +31,20 @@ task_runner_base_image: "<registry>/<repository>@sha256:<64 hex>"
 
 Allow the runner port (`task_runner_port`, default 9100) to this node from node-control only, in the tailnet ACL.
 
+**systemd-resolved hosts:** if `/etc/resolv.conf` points at the local stub (`nameserver 127.0.0.53`), add
+`127.0.0.53` to `task_runner_guard_resolvers` (keep the tailnet entries if they are used). Preflight fails safe when a
+blocked-range resolver is missing, but the play stops there until the list is right.
+
+**Deploy when the runner is idle.** A rerun that changes the binary, the unit or the env file restarts the service,
+which cancels an active run (it is reported as cancelled to node-control). Check `GET /v1/health` (`busy`) first.
+
 Tags: `task-runner` (everything), `install`, `guard`, `image`, `config`, `image-prune` (only the pruning of old image
-tags). Preflight runs under every tag. Check mode is safe: files are templated, nothing is built, loaded, started or
-reloaded; on a fresh host the steps that need the service user may fail in check mode (as in the other roles).
+tags). Preflight runs under every tag. `--tags install` alone installs the binary and unit and notifies the restart
+before `config` writes the env file: on a fresh node run the whole role (no tags) the first time.
+
+Check mode on the node is safe: files are templated, no image is built or loaded and nothing is started or reloaded.
+The Go binary IS built on the control host (into a temp dir, `check_mode: false`) so the copy can be compared; nothing
+reaches the node. On a fresh host the steps that need the service user may fail in check mode (as in the other roles).
 
 ## Variables
 
@@ -52,6 +63,7 @@ reloaded; on a fresh host the steps that need the service user may fail in check
 | `task_runner_min_free_mb` / `task_runner_min_free_disk_mb` | `1500` / `6000` | Preflight: free memory without page cache; free disk on the file system of the state dir. |
 | `task_runner_guard_resolvers` | `["100.100.100.100", "fd7a:115c:a1e0::53"]` | Resolvers the service user may query on port 53 although they are in a blocked range. |
 | `task_runner_guard_check_interval` | `30s` | How often the guard check timer looks for the table. |
+| `task_runner_protect_kernel_tunables` | `false` | systemd `ProtectKernelTunables=`; off because it very likely breaks every run (see Service hardening). |
 | `task_runner_image_async` / `task_runner_image_poll` | `3600` / `30` | Seconds allowed for a build or load, and the poll interval. |
 
 Fixed layout (variables exist, change only with reason): user `task-runner`, state dir and HOME `/var/lib/task-runner`
@@ -63,8 +75,12 @@ Fixed layout (variables exist, change only with reason): user `task-runner`, sta
 1. **Preflight** (read-only): facts, Debian family with apt, x86_64 or aarch64, required variables, token shape, listen
    address in the tailnet ranges and present on the node, limits, resolvers, base image digest, the source on the
    control host, Go (unless `task_runner_binary`), free memory and disk, every blocked-range resolver of
-   `/etc/resolv.conf` listed in `task_runner_guard_resolvers`. Works out the image tag.
+   `/etc/resolv.conf` listed in `task_runner_guard_resolvers`. Free memory fails the play only when the service is not
+   running yet (otherwise a warning); free disk is checked in the image step, only when the image has to be built or
+   loaded. Works out the image tag.
 2. **Install**: `podman`, `uidmap`, `passt`, `acl` (Ansible needs `setfacl` to run commands as the service user); the
+   package's root-level units (`podman.socket`, `podman-restart.service`, `podman-auto-update.timer`,
+   `podman-clean-transient.service`) are disabled and stopped where they exist; the
    system user `task-runner` (home = state dir, no login shell); a subordinate uid/gid range of 65536 if the user has
    none (above the highest existing range); the binary, built on the control host once per architecture in the play
    (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64|arm64 go build -trimpath -buildvcs=false`), copied to the node; the unit.
@@ -129,10 +145,21 @@ The index digest of a multi-arch image works for every architecture. A tag or a 
 `User=task-runner`, `PrivateTmp`, `ProtectHome` (HOME is the state dir), `ProtectSystem=strict` with
 `ReadWritePaths=` the state and runtime dirs, `ProtectKernelTunables`, `ProtectControlGroups=no` (cgroupfs writes
 below the unit), `Delegate=yes` (the user manages the cgroup subtree, for the container's memory and pids limits),
-`MemoryMax`, `TasksMax`, `UMask=0077`, `RuntimeDirectory=task-runner` (0700, preserved across restarts),
+`MemoryMax`, `TasksMax`, `RuntimeDirectory=task-runner` (0700, preserved across restarts),
 `KillMode=mixed` with `TimeoutStopSec=45` (the runner shuts down within 30 s, killing its container by name),
-`Restart=on-failure`. `ExecStartPre` waits up to 60 s for the tailnet address to be configured; the runner binds to it
-only. No access log. The unit `Requires=` the guard.
+`Restart=on-failure`. Two `ExecStartPre` steps: one (as root) refuses the start when the guard table has no rule for
+the CURRENT uid of the user (fail closed after the user was recreated: rerun the role with `--tags guard`), one waits
+up to 60 s for the tailnet address to be configured; the runner binds to it only. No `UMask=` (it would override the
+runner's explicit 0755/0644 modes on its run dirs). No access log. The unit `Requires=` the guard.
+
+`ProtectKernelTunables=` is off by default (`task_runner_protect_kernel_tunables`): its read-only mounts over
+`/proc/sys` and friends become locked mounts in the container's user namespace, and the kernel then refuses the fresh
+`/proc` mount every run needs. Try it only on one node after a verified run, and revert on a proc mount error.
+
+**Never add a seccomp-based option** without a verified run: under `User=` systemd silently turns on
+`NoNewPrivileges=` for `SystemCallFilter=`, `RestrictNamespaces=`, `PrivateDevices=`, `ProtectKernelModules=`,
+`ProtectKernelLogs=`, `ProtectClock=`, `RestrictSUIDSGID=`, `LockPersonality=` and `MemoryDenyWriteExecute=`, which
+recreates the `newuidmap` failure below.
 
 **`NoNewPrivileges=` is not set** (nor `RestrictSUIDSGID=`): rootless podman runs the setuid `newuidmap`/`newgidmap`
 to map the subordinate ranges, and `no_new_privs` makes that fail. The spec text mentions `NoNewPrivileges`; this
@@ -150,9 +177,15 @@ task-runner>` (numeric, looked up by the role; it refuses uid 0) to a chain that
 1. accepts `ct state established,related` (replies on connections the runner accepted on its tailnet address; a
    connection the user opened is never established unless its first packet passed);
 2. accepts UDP and TCP port 53 to `task_runner_guard_resolvers`;
-3. drops everything to `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`,
-   `192.168.0.0/16`, `::1`, `fc00::/7` (covers the tailnet's `fd7a:115c:a1e0::/48`) and `fe80::/10`;
-4. accepts the rest (the public internet).
+3. drops every address of this host (`fib daddr type local`, IPv4 and IPv6): loopback and the node's own public or
+   global addresses on any interface, so a `0.0.0.0`/`::` listener cannot be reached through them, nor through pasta's
+   `host.containers.internal` mapping (podman 5 maps 169.254.1.2 in the container to the host);
+4. drops everything to `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`,
+   `192.168.0.0/16`, `224.0.0.0/4`, `255.255.255.255`, `::1`, `fc00::/7` (covers the tailnet's `fd7a:115c:a1e0::/48`),
+   `fe80::/10` and `ff00::/8`;
+5. accepts the rest (the public internet).
+
+The resolver accepts come before the local drop, so a listed stub such as `127.0.0.53` still answers.
 
 Rootless podman's user-space networking (pasta) opens the containers' connections on the host as the service user, so
 the one uid rule covers the runner, the build and every run. A script therefore cannot reach the ingress agent, the
@@ -164,15 +197,16 @@ resolve through pasta's forwarder, which queries the host's resolvers as the ser
 The rule set is validated with `nft -c -f` before it replaces the file. A change reloads the table atomically
 (`systemctl reload task-runner-guard`, never restart, which would restart the runner). Stopping the guard deletes the
 table and stops the runner. The uid is resolved by the role: if the user is ever recreated with another uid, rerun the
-role.
+role (the runner refuses to start until then).
 
 **Limits.** `nft flush ruleset` (or a firewall tool that flushes) deletes the table while the unit stays active. As
 for the ingress guard, `task-runner-guard-check.timer` reapplies it within `task_runner_guard_check_interval` (logged
 with `journalctl -t task-runner-guard-check`); the gap is at most one interval. Unlike `xray.service`, the runner unit
 has no `IPAddressDeny=` second layer: it filters both directions for the whole cgroup, so it would also cut the API on
 the tailnet address, and with the containers in the same cgroup it would hit their internal traffic (pasta's DNS
-forwarder sits at a link-local address inside the container). The host's own public address, if it is configured on
-an interface, is not covered.
+forwarder sits at a link-local address inside the container). The host's own addresses are covered by the `fib`
+rule; besides the flush window, the only traffic the guard lets through to a blocked address is a flow that was
+already established before the rule set was (re)loaded.
 
 ## Smaller nodes
 
@@ -184,31 +218,37 @@ image and the derived image share layers; plan for about 4 GB in `/var/lib/task-
 
 ## Rollout checks on a real node
 
-Run after the first deploy (as root on the node unless noted):
+Run after the first deploy, as root on the node. Steps 7 and 8 are a **hard gate**: do not enable tasks on the node
+until the container limits are confirmed.
 
-```sh
-systemctl status task-runner task-runner-guard task-runner-guard-check.timer
-journalctl -u task-runner -n 50                        # "listening" with the tailnet address
-nft list table inet task_runner_guard                  # the chain and the uid
-systemd-cgls -u task-runner.service                    # runner (and, during a run, conmon/container) below the unit
-sudo -u task-runner env HOME=/var/lib/task-runner XDG_RUNTIME_DIR=/run/task-runner \
-  podman --cgroup-manager=cgroupfs info --format '{{.Host.CgroupManager}} {{.Host.CgroupsVersion}} {{.Store.RunRoot}}'
-# guard: these must time out / fail as the service user, succeed as root
-sudo -u task-runner curl -sS -m 5 http://127.0.0.1:22/ ; echo "rc=$?"
-sudo -u task-runner curl -sS -m 5 http://<tailnet-ip-of-another-node>:<port>/ ; echo "rc=$?"
-sudo -u task-runner curl -sS -m 5 -o /dev/null -w '%{http_code}\n' https://example.com/   # allowed
-```
-
-Then start a harmless run through node-control (or `curl` with the token from a tailnet peer allowed by the ACL) whose
-script does `await page.goto('https://example.com')` and, while it runs:
-
-- `find /sys/fs/cgroup/system.slice/task-runner.service -name memory.max -exec grep -H . {} +` (or find the
-  container's cgroup with `systemd-cgls`) shows the `task_runner_container_memory` limit, and `pids.max` the pids limit. If the run fails with a
-  cgroup error or no limit is set, the delegation is not enough: try `DelegateSubgroup=` in the unit (systemd 254+),
-  which moves the runner out of the delegated cgroup's root.
-- DNS works inside the container (the run reaches the page); a script that fetches `http://10.0.0.1/` or the
-  node's tailnet address fails.
-- After `nft flush ruleset` (on a test node), the table is back within the check interval.
+1. Hardening is as intended: `systemctl show task-runner -p NoNewPrivileges` prints `NoNewPrivileges=no`.
+2. Services: `systemctl status task-runner task-runner-guard task-runner-guard-check.timer`;
+   `journalctl -u task-runner -n 50` shows `listening` with the tailnet address.
+3. Guard: `nft list table inet task_runner_guard` shows the chain; the uid in `meta skuid` equals `id -u task-runner`.
+   `nft list ruleset | grep -c table` before and after the deploy differs only by the new table.
+4. Root-level podman units are off: `systemctl is-enabled podman.socket podman-restart.service
+   podman-auto-update.timer` prints `disabled` (or "not found") for each.
+5. Podman setup: `sudo -u task-runner env HOME=/var/lib/task-runner XDG_RUNTIME_DIR=/run/task-runner podman
+   --cgroup-manager=cgroupfs info --format '{{.Host.CgroupManager}} {{.Host.CgroupsVersion}} {{.Store.RunRoot}}'`
+   prints `cgroupfs v2` and a run root under `/run/task-runner`.
+6. AppArmor: `journalctl -k | grep -i 'apparmor.*DENIED'` is empty after a run (see Not verified, item 2).
+7. Start a harmless run through node-control (or `curl` with the token from a peer allowed by the ACL). During the run:
+   `find /sys/fs/cgroup/system.slice/task-runner.service -name memory.max -exec grep -H . {} +` and the same for
+   `pids.max` show the container's `task_runner_container_memory` and `task_runner_pids_limit`
+   (`systemd-cgls -u task-runner.service` locates the container cgroup).
+8. If step 7 shows no container limit or the run fails with a cgroup error, the delegation is not enough: try
+   `DelegateSubgroup=` in the unit (systemd >= 254), which moves the runner out of the delegated cgroup's root so
+   child cgroups can get controllers. Until then the unit's `MemoryMax`/`TasksMax` still bound the whole subtree
+   (runner plus container), but one run can use all of it.
+9. DNS and the guard from inside a container: a run whose script prints `/etc/resolv.conf` (via `fs`) and resolves
+   and opens `https://example.com` succeeds; runs that fetch `http://169.254.169.254/`, `http://<node tailnet ip>:9100/`,
+   `http://10.0.0.1/`, `http://host.containers.internal:22/` and `http://<node public ip>:22/` all fail (time out).
+   As the user on the host: `sudo -u task-runner curl -sS -m 5 http://127.0.0.1:22/` fails,
+   `sudo -u task-runner curl -sS -m 5 -o /dev/null -w '%{http_code}\n' https://example.com/` succeeds.
+10. Stop during a run: start a long run, `systemctl stop task-runner`, then `sudo -u task-runner env
+    HOME=/var/lib/task-runner XDG_RUNTIME_DIR=/run/task-runner podman --cgroup-manager=cgroupfs ps -a` is empty.
+11. Flush (test node only): `nft flush ruleset`, and the table is back within the check interval
+    (`journalctl -t task-runner-guard-check`).
 
 ## Not verified against a real host
 
@@ -216,12 +256,16 @@ Only static checks were run (syntax check, template rendering). Unverified:
 
 1. Podman works for the service without lingering (spike used lingering), with `XDG_RUNTIME_DIR=/run/task-runner`
    from `RuntimeDirectory=` and the role's own calls via `sudo` using the same run root.
-2. The sandbox is compatible with rootless podman: in particular `ProtectKernelTunables=yes` (the kernel refuses a
-   fresh `/proc` mount inside a user namespace when parts of the host `/proc` are covered; if runs fail with a proc
-   mount error, set it to `no`) and `ProtectSystem=strict`.
-3. `Delegate=yes` makes the container's `--memory`/`--pids-limit` effective under cgroupfs (see the check above).
-4. The subordinate id ranges added by the role are picked up (`podman unshare cat /proc/self/uid_map` as the user).
+2. AppArmor: Ubuntu confines pasta/passt with a profile, and the runtime dir `/run/task-runner` (no lingering, no
+   `/run/user/<uid>`) may fall outside what it allows. Check `journalctl -k | grep -i 'apparmor.*DENIED'` after a run.
+   Fallback (a role change: `task_runner_runtime_dir` only accepts `/run/<dir>` today): enable lingering for the user
+   (`loginctl enable-linger task-runner`) and point `XDG_RUNTIME_DIR` at `/run/user/<uid>` instead of the unit's
+   `RuntimeDirectory`.
+3. The sandbox is compatible with rootless podman with `ProtectSystem=strict` (and `ProtectKernelTunables` off).
+4. `Delegate=yes` makes the container's `--memory`/`--pids-limit` effective under cgroupfs (see the check above).
+5. The subordinate id ranges added by the role are picked up (`podman unshare cat /proc/self/uid_map` as the user).
    If ranges are ever changed after the storage exists, run `podman system migrate` as the user.
-5. The guard leaves the build (registry, npm) and runs working, DNS included, and blocks the private ranges.
-6. The async build/load with `become_user` (needs `acl`), the image pruning, and the archive path.
-7. `KillMode=mixed` stop behaviour during an active run (the container is gone afterwards: `podman ps -a` as the user).
+6. The guard (including the `fib` rule) leaves the build (registry, npm) and runs working, DNS included, and blocks the private ranges.
+7. The async build/load with `become_user` (needs `acl`), the image pruning, and the archive path.
+8. The fail-closed uid check in `ExecStartPre` (the `nft -n` output format for `skuid`).
+9. `KillMode=mixed` stop behaviour during an active run (the container is gone afterwards: `podman ps -a` as the user).

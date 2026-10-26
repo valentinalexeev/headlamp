@@ -85,15 +85,17 @@ commits on top of it or attempt a rewrite on your own.
 | Path | What it is |
 |---|---|
 | `terraform/modules/exit-node-vm/{yandex,oci,aws,cloudru,selectel}` | reusable VM exit-node modules (root stacks live in YOUR repo) |
-| `ansible/roles/{tailscale,route-provisioner}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; version bump / key rotation playbooks |
+| `ansible/roles/{tailscale,route-provisioner,task-runner}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; the task runner on a VM node (rootless podman, nftables guard for its user; see the role README); version bump / key rotation playbooks |
 | `apps/fly/headscale` | headscale server image; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. The route approver (`approve-gateway-routes.sh`, `cron-approve-routes.sh`) is shipped but OFF by default (commented `route_approver` process in `fly.toml`); prefer `autoApprovers.routes` in `acl.json` |
 | `apps/fly/exit-ams` | Fly tailscale exit node; `fly.toml`, `direct-hosts.txt` are **placeholders** |
-| `apps/fly/node-control` | Go service (embedded tailscale): start/stop UI and API for the exit nodes (discovered from headscale), tailnet status, optional device enrolment; `fly.toml` is a **placeholder**, `app/nodes.json` is an optional overlay |
+| `apps/fly/node-control` | Go service (embedded tailscale): start/stop UI and API for the exit nodes (discovered from headscale), tailnet status, optional device enrolment, optional policy console, optional scheduled browser-script tasks (`internal/tasks`, see its README section "Tasks module"); `fly.toml` is a **placeholder**, `app/nodes.json` is an optional overlay |
 | `apps/fly/funnel-ingress` | Go service (embedded tailscale): public name-based reverse proxy into the tailnet (`<service>.<ns>.<domain>`), tag-authorised self-registration API, a Kubernetes registration sidecar (`funnel-sidecar`), config pulled from node-control; `fly.toml` is a **placeholder** |
+| `apps/task-runner` | Go service run on a node (by the `task-runner` role): runs one caller-supplied browser script at a time in a throwaway rootless container and returns a small JSON result; called by node-control over the tailnet |
 | `apps/tailguard` | WireGuard server → tailnet exit node (Docker, operator-run) |
 | `scripts/tf-run.sh`, `.githooks/`, `scripts/test/` | state-in-git workflow, commit hook, tests |
 | `scripts/headscale-assign-host.sh` | helper to register a host under an existing pre-auth key (`HEADSCALE_APP`, `HEADSCALE_LOGIN_SERVER` env) |
 | `scripts/rotate-headscale-api-key.sh` | check (`--check`) and rotate the headscale API key used by the route approver and other apps; all site values come from env vars (`HS_APP`, `HS_URL`, `STAGE_APPS`, `DEPLOY_CMD`, optional sops `SECRET_FILE`/`SECRET_FIELD`). API keys expire: the approver logs `ERROR ... HTTP 401` when its key has, and keeps retrying |
+| `scripts/tasks.sh`, `scripts/test/tasks/` | CLI client of the node-control tasks API: check/diff/push (secrets first, from a sops file)/pull the task config and scripts (env: `NODE_CONTROL_URL`, `TASKS_FILE`, `TASKS_SCRIPTS_DIR`, `TASKS_SECRETS_FILE`); tests run against fake `curl` and `sops` (`make test-tasks-cli`) |
 | `scripts/headscale-policy.sh` | CLI client of the node-control policy console: check/diff/apply (with confirm-or-revert)/pull the headscale ACL; `bootstrap` loads the first policy through `fly ssh` (env: `NODE_CONTROL_URL`, `POLICY_FILE`, `HS_APP`) |
 | `examples/private-repo/` | the skeleton of the private site repo (Makefile, terraform, ansible, fly deploy) |
 
@@ -298,6 +300,12 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
   blocks, labels, aliases, `hidden`. Provider credentials are Fly secrets (`YANDEX_SA_KEY_JSON`, `FLY_API_TOKEN`, the
   OCI keys, `SELECTEL_*`, `HEADSCALE_API_KEY`). Tailnet identity: keep it on the `tailscale_state` volume (see its
   `fly.toml`), or in a shared Redis with `REDIS_URL` and an encryption key. Details: `apps/fly/node-control/README.md`.
+- Tasks module (optional, needs that Redis): scheduled browser-script checks that run on a node, with retries, alerts,
+  metrics and a heartbeat. Set `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `TASKS_RUNNER_TOKEN` and `TASKS_ADMIN_USERS`, deploy the
+  `task-runner` role (`ansible/roles/task-runner`) to the nodes that should run scripts, allow node-control to reach the
+  runner port in the tailnet ACL, and manage config, scripts and secrets from your private repo with `scripts/tasks.sh`
+  (example files: `examples/private-repo/fly/node-control/tasks/`). Variables, API, metrics and the trust model:
+  `apps/fly/node-control/README.md`, section "Tasks module".
 
 ### 2.9 tailguard (optional, operator-run)
 

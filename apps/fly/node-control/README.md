@@ -38,6 +38,7 @@ Secrets go in Fly secrets; plain settings in `fly.toml`.
 | `POLICY_ADMIN_USERS` | comma-separated tailnet logins allowed to use the console (required with `POLICY_DB`); tagged nodes are never allowed |
 | `POLICY_REVERT_SECONDS` | seconds to confirm a change before it is reverted automatically, 30 to 900, default 120 |
 | `POLICY_MAX_BYTES` | largest policy accepted, 1024 to 4194304, default 262144 |
+| `TASKS_*` | the scheduled-task module, on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set; variables and defaults under "Tasks module" |
 | `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | Yandex service account key; folder for the lookup by name (the account needs `compute.operator` and `compute.viewer`) |
 | `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | OCI credentials and the default region and compartment |
 | `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | Selectel (OpenStack) service user, default region, optional auth URL |
@@ -412,7 +413,7 @@ an unreadable or invalid `ENROLL_CONFIG`) stops startup with a message naming th
 ## Navigation bar
 
 Every admin page shows a small top bar that lists the modules available in this deployment, with the current one
-highlighted. Today that is Nodes (`/`) and, when `ENROLL_DB` is set, Enrolment (`/enroll`). The bar appears only
+highlighted. Today that is Nodes (`/`) and, when the module is on, Enrolment (`/enroll`, with `ENROLL_DB`), Policy (`/policy`) and Tasks (`/tasks`). The bar appears only
 when at least two entries exist, so a deployment without enrolment looks exactly as before. It is never added to
 the public listener, to JSON, to non-200 responses or to any request other than GET and HEAD.
 
@@ -445,6 +446,301 @@ only while headscale still serves that change's policy. If the automatic revert 
 Confirm is then the way out, keeping the change.
 The console adds a "Policy" entry to the top bar. Its Content-Security-Policy allows inline styles (the bar is one) but scripts only from the
 page's own files.
+
+## Tasks module (optional)
+
+Scheduled checks that drive a browser script on one of your nodes, with retries, alerts and observability. A task
+names a script, a node (or a set of tags), a schedule and what to do with the result. node-control picks an eligible
+node, hands the script and its secrets to the [`task-runner`](../../task-runner/README.md) on that node, follows the run
+to its end, and applies the retry, alert and notification rules. The script is generic: it opens pages, reads a value
+and returns a small JSON object. Nothing about what is checked lives in this repository.
+
+```
+ operator ──tasks.sh / /tasks page──▶ node-control (tasks module) ──── HGET/HSET ────▶ Redis
+ (tailnet user)                       │  config, scripts, secrets,                    hash node-control:tasks
+                                      │  state and run history, scheduler,            (values encrypted)
+                                      │  alerts, metrics, heartbeat
+                                      │  start / poll / cancel, over the tailnet
+                                      ▼
+                                   node (tailnet) ── task-runner :9100 ── rootless container: Chromium + script
+```
+
+The module lives in `internal/tasks`. The admin API and page are served on the admin listener (`:80`), gated by the
+caller's tailnet identity. Redis being down never stops node-control: the tasks routes answer `503` until the store
+opens (it is retried in the background, after 30 s, then 1, 2 and every 5 minutes), while scheduling keeps running from
+memory once it is open.
+
+### Activation and environment
+
+The module is on only when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are all set; otherwise it logs
+`tasks module inactive: not set: ...` naming the missing ones and stays off (no routes, no top-bar entry). Once on,
+a bad value stops startup with a message that names the variable and never a secret. `REDIS_URL` and
+`NODE_CONTROL_STATE_KEY` are the same ones as for the Tailscale state (see above); the tasks data is always encrypted,
+`STATE_ALLOW_PLAINTEXT` does not apply to it.
+
+| variable | default | purpose |
+|---|---|---|
+| `REDIS_URL` | | secret; the shared Redis (see the table above) |
+| `NODE_CONTROL_STATE_KEY` | | secret; encrypts every stored value (AES-256-GCM, each value bound to its Redis field name) |
+| `TASKS_RUNNER_TOKEN` | | secret; bearer token the node runners accept (their `RUNNER_TOKEN`) |
+| `TASKS_ADMIN_USERS` | | comma-separated tailnet logins allowed to use the page and API. Required once the module is on; tagged nodes are never allowed |
+| `TASKS_RUNNER_PORT` | `9100` | port of the runner on the nodes, 1 to 65535 |
+| `TASKS_NTFY_URL` | `https://ntfy.sh` | base URL of the ntfy server used for alerts and failure messages |
+| `TASKS_POLL_SECONDS` | `5` | how often a running attempt asks its runner for the status, 1 to 60 |
+| `TASKS_METRICS_ADDR` | unset | `host:port` of the metrics listener, for example `:9091` (host may be empty, port numeric). Unset: no listener |
+| `TASKS_HEARTBEAT_SECRET` | unset | NAME of a stored secret (letters, digits, `_`, at most 64) whose value is a heartbeat ping URL. Unset: no heartbeat |
+
+The admin listener's Host guard (`ENROLL_ALLOWED_HOSTS`) applies to `/tasks` as to every admin route; the module does not
+require it.
+
+### Task configuration
+
+The configuration is one JSON object, `{"tasks": {"<id>": {...}}}`. It is decoded strictly: unknown fields, trailing
+data, a duplicate task id and a bad value are all errors, and every problem is reported with its task and field. A task
+id matches `^[a-z0-9][a-z0-9._-]{0,63}$` (`config` and `secrets` are reserved: they would clash with the API paths).
+Durations are Go duration strings (`"90s"`, `"12h"`); a bare number is refused because its unit would be a guess.
+
+```json
+{
+  "tasks": {
+    "check-balance": {
+      "script": "check-balance.js",
+      "params": { "account_url": "https://example.com/account" },
+      "target": { "tags": ["tag:region-xx"], "online": true },
+      "schedule": { "every": "12h", "jitter": "30m" },
+      "timeout": "3m",
+      "retry": { "attempts": 3, "backoff": ["2m", "10m"] },
+      "secrets": ["LOGIN", "PASSWORD"],
+      "healthcheck": "CHECK_BALANCE_PING",
+      "alert": {
+        "when": { "field": "balance", "op": "<", "value": 10 },
+        "cooldown": "24h",
+        "notify": {
+          "topic": "NTFY_TOPIC",
+          "priority": "high",
+          "title": "{task}: balance is low",
+          "message": "Balance is {balance}"
+        }
+      },
+      "on_failure": {
+        "cooldown": "24h",
+        "notify": {
+          "topic": "NTFY_TOPIC",
+          "title": "{task} failed",
+          "message": "{reason}"
+        }
+      }
+    }
+  }
+}
+```
+
+A complete placeholder file is in
+[`examples/private-repo/fly/node-control/tasks/tasks.example.json`](../../../examples/private-repo/fly/node-control/tasks/tasks.example.json).
+
+| field | required | default and rules |
+|---|---|---|
+| `script` | yes | file name of a stored script: no `/`, `\` or `..`. A push also needs the name to match `^[A-Za-z0-9._-]{1,64}$` |
+| `params` | no | JSON object handed to the script as `params` |
+| `target` | yes | either `node` (a node name, matched against the headscale name and given name) or `tags` (a node must carry all of them), never both. `online: true` skips nodes headscale reports offline |
+| `schedule.every` | yes | at least `1m` |
+| `schedule.jitter` | no | `0s`. The next run is `now + every ± jitter` (uniform), never sooner than `every / 2` |
+| `timeout` | no | `3m`; above 0 and at most `30m`. Enforced by the runner |
+| `retry.attempts` | no | `1`; 1 to 10 attempts per sequence |
+| `retry.backoff` | with attempts > 1 | list of positive durations; entry *n* is the wait after failed attempt *n*, the last entry repeats |
+| `secrets` | no | names of stored secrets passed to the script as `secrets.<NAME>` |
+| `healthcheck` | no | NAME of a secret holding a healthchecks-style ping URL |
+| `alert.when` | with `alert` | `field` (a numeric result field), `op` (one of `<` `<=` `>` `>=` `==` `!=`) and `value` (number) |
+| `alert.cooldown` | no | `24h`; must be positive |
+| `alert.notify`, `on_failure.notify` | with the block | `topic` (a secret NAME: the ntfy topic is never in the config), `priority` (`min`, `low`, `high`, `max`; anything else is ntfy's default), `title`, `message` |
+| `on_failure.cooldown` | no | `24h`; must be positive |
+
+`{name}` in a title or message is replaced by the scalar result field of that name (alert) or by `task` and `reason`
+(failure); an unknown name stays as written so a typo is visible. `{task}` is also available in alert text. A
+placeholder with a colon is refused.
+
+Which node runs a task: the nodes that match `target` (and are online when `online` is set), whose runner answers its
+health check as reachable and idle. Among them the node that last ran the task successfully is preferred, then the least
+busy one, then the lowest name. None eligible makes the attempt fail with `no eligible node`.
+
+### Script contract
+
+A script is a CommonJS module exporting `run` (`module.exports = { run }` or `module.exports = fn`). It is called as
+`run({ page, params, secrets, log })`: `page` is a Playwright page of a fresh headless Chromium context (nothing is
+shared between runs), `params` and `secrets` are objects, and `log(msg)` writes a line to the run's log tail. It returns a
+small JSON object. The runner refuses a result that is not an object or is larger than 4096 bytes (the run fails and says
+why). Throw, or return a rejected promise, to fail the run. Details and the isolation of the container are in the
+task-runner README. A commented example is in
+[`examples/private-repo/fly/node-control/tasks/scripts/check-balance.example.js`](../../../examples/private-repo/fly/node-control/tasks/scripts/check-balance.example.js).
+
+Secret values are scrubbed (replaced by `***`) from the run's reason and from the result before they are stored or shown.
+A script should still never return a secret.
+
+### HTTP API
+
+Every route is on the admin listener and needs a tailnet user from `TASKS_ADMIN_USERS`: anyone else, and every tagged
+node, gets `403` with an empty body. While the store is not open each route except the page and its static files answers
+`503 {"error":"degraded"}`. Errors have the shape `{"error":"..."}`; a push that fails validation adds
+`"problems": [...]`. A request with a body (`POST`, `PUT`) needs `Content-Type: application/json`, otherwise the answer is
+`422 {"detail":"Content-Type must be application/json"}`. Answers are `Cache-Control: no-store`. Times are RFC 3339 UTC.
+
+| method and path | answer |
+|---|---|
+| `GET /tasks` | the HTML page (static files at `/tasks/static/tasks.css` and `tasks.js`), served even while degraded |
+| `GET /tasks.json` | list of task views, sorted by id (`[]` before the first config) |
+| `GET /tasks/{id}` | one task view; `404 {"error":"unknown task"}` |
+| `POST /tasks/{id}/run` | start a run now: `202 {"run_id":"..."}`; `409` already running; `404` unknown task; `503` shutting down |
+| `GET /tasks/{id}/runs` | the newest 50 runs of the task, newest first, as run views; `404` unknown task |
+| `GET /runs/{id}` | one run view, searched among the executing attempts and every task's history; `404 {"error":"unknown run"}` |
+| `DELETE /runs/{id}` | cancel an executing run: `204`; `409` when the run is recorded as running or queued but is not executing in this process; `404` unknown or finished |
+| `GET /tasks/config` | `{"config": {...}, "scripts": {"name": "text"}}`: the live config (defaults applied) and the scripts it references; `404 {"error":"no config"}` before the first push |
+| `PUT /tasks/config` | body `{"config": {...}, "scripts": {"name": "text"}}`; add `?dry_run=1` (or `true`) to validate only. Answer `200 {"tasks": {added, changed, removed}, "scripts": {added, changed, removed}, "dry_run": bool}`, plus `"pending_write": true` when Redis could not be written yet. `413` for a body over 1 MiB or a script over 256 KiB; `422` for an invalid body, a script name outside `^[A-Za-z0-9._-]{1,64}$`, an invalid config (`problems`), a reserved task id, a task naming a secret that is not stored (**push secrets first**) or a script that is neither in the body nor stored |
+| `GET /tasks/secrets` | `[{"name": "...", "set": true}]`; values are never returned |
+| `PUT /tasks/secrets` | body `{"NAME": "value", ...}`: at most 64 names (`^[A-Za-z0-9_]{1,64}$`), each value 1 to 4096 bytes, body at most 64 KiB. `200 {"stored": [names]}` (plus `pending_write`); `413`; `422` with a message that never echoes a value or a bad name |
+
+Task view: `id`, `script`, `target`, `every`, `running` (bool), `running_run` (a run view or null), `last_success`,
+`last_result` (result of the newest successful run), `streak`, `attempt` (above 0 while a retry is pending), `next_run`
+(the retry time during a retry sequence), `stale`. A task is stale when it is overdue for a success: its last success is
+older than twice `every`, or it never succeeded and either failed for real or its first run is more than a minute late
+(a cancel or a run cut short by a shutdown or restart does not count as a failure here).
+
+Run view: `id`, `task`, `node`, `attempt`, `state` (`queued`, `running`, `succeeded`, `failed`, `lost`, `cancelled`),
+`reason`, `started`, `ended`, `duration_ms` (null until the run ended), `result`, `script_sha` (SHA-256 of the script
+that ran) and `notify_outcome` (for example `alert=sent ping=sent`; `suppressed` when a cooldown held the message back).
+Where a run lives on its node is never exposed. A push replaces the config and the scripts it references as a whole;
+nothing deletes a stored script or secret (they stay, unreferenced, until removed from Redis by hand).
+
+### Storage
+
+Everything is one Redis hash, `node-control:tasks`, on the shared Redis. Each value is encrypted with
+`NODE_CONTROL_STATE_KEY` and bound to its field name, so a value copied to another field does not decrypt. Fields:
+`config`, `script:<name>`, `secret:<name>`, `secrets-index`, `state:<task>` and `runs:<task>`.
+
+The store reads every field once when it opens and serves everything from memory afterwards. It only writes (one `HSET`
+per changed field) and reads with `HGET` at open: nothing polls Redis, which matters on a Redis billed per command.
+Timestamps that drive behaviour (next run, retry time, last success, the alert and failure-message cooldowns) are stored
+as absolute times, so a restart resumes exactly where it was and an expired cooldown needs no cleanup. When a write
+fails, the value stays in memory and is retried by the next write (the API says `pending_write`); the scheduler keeps going
+with Redis down.
+
+History is bounded: the newest 200 runs per task, and the whole `runs:<task>` field is kept under 256 KiB by dropping
+the oldest runs. A stored reason is cut at 512 bytes and a result larger than 8 KiB is stored as `{"truncated": true}`.
+
+### Retry, failure and alert semantics
+
+A *sequence* is the attempts one scheduled (or manual) run makes. An attempt that fails with attempts left stores the
+attempt number and its due time and returns: nothing sleeps, the scheduler wakes at that time, and a restart resumes the
+backoff. Only the last failed attempt of a sequence counts: it increments `streak`, sends the failure message (when
+`on_failure` is set; at most once per its cooldown) and the failure ping. A success resets `streak` and schedules the next
+run. A manual run (`POST /tasks/{id}/run`) drops a pending retry and starts at attempt 1; it follows the same retry,
+alert and failure rules but does not move a future scheduled time.
+
+An attempt fails with a short reason such as `script not found: <name>`, `secret not configured: <names>`,
+`no eligible node`, `node busy`, `timeout` (the runner enforces the timeout; node-control cancels a run still reported as
+running 10 s past it), the script's own error text, or `bad result: ...`.
+
+When `alert` is set, the condition is evaluated on every successful run. A result that lacks the field or holds a
+non-number there is a failed attempt (`bad result`), not a silent pass. A true condition sends the alert unless a cooldown
+is running; a failed send releases the cooldown so the next run retries; a false condition clears the cooldown. ntfy sends
+are retried up to three times (1 s, then 2 s) for transport errors, `429` and `5xx`. With `healthcheck` set the ping URL is
+fetched after every successful sequence, and `<url>/fail` after a failed one.
+
+Crash window: the cooldown is claimed (and stored) before the message is sent. If node-control dies between the claim and
+the send, that message can be suppressed for up to one cooldown.
+
+#### Lost runs, cancel and restart
+
+- `lost` means node-control cannot tell how a run ended: the runner reported it unknown (it restarted and forgot it,
+  `runner lost the run`) or could not be reached until 30 s past the timeout (`runner unreachable`). It is a failure
+  like any other for retries and the streak.
+- At start, a startup sweep finds runs a previous process left as `queued` or `running` (it was killed mid-attempt),
+  cancels each on its node when the record says where it lives, and records it as `lost` with the reason
+  `node-control restarted`. The sweep notifies nobody and changes no state, so the persisted attempt number is retried.
+  Overdue tasks then start after a random delay of up to 10 s each, so they do not all start at once.
+- A graceful shutdown cancels the running attempts on their nodes (bounded by the platform's kill timeout) and records
+  them as `failed` with the reason `shutdown`; they are not counted and nobody is told about a deploy.
+- Cancel (`DELETE /runs/{id}`) works on an attempt executing in this process. It cancels the run on its node, records
+  `cancelled` and ends the sequence: no retry, no streak, no failure message, and the next run is scheduled normally.
+  A cancel that races an attempt that has just finished may answer `204` while the run stays recorded as it ended.
+
+### Metrics
+
+With `TASKS_METRICS_ADDR` set, a read-only listener answers `GET /metrics` (Prometheus text format 0.0.4); every other
+path is `404` and every other method `405`. It has **no authentication by design**, serves counters and gauges only, and
+labels are limited to task ids, node names, run states and notification kinds (never a result value, an account, a secret
+or a URL). Bind it on a private network only. The listener uses the machine's own network, not the tailnet, so with no
+`[[services]]` in `fly.toml` it is reachable only from Fly's private network. A listen error is logged once and the module
+keeps working. Values are kept in memory: counters restart at zero with the process.
+
+| metric | type | labels |
+|---|---|---|
+| `task_runs_total` | counter | `task`, `node`, `state` (finished attempts) |
+| `task_run_duration_seconds` | summary (`_sum`, `_count`) | `task` |
+| `task_alert_sent_total` | counter | `task`, `kind` (`alert`, `failure`, `ping`), `ok` (`true`, `false`) |
+| `task_notify_failures_total` | counter | `task` |
+| `task_failure_streak` | gauge | `task` |
+| `task_last_success_timestamp_seconds` | gauge | `task` (absent until a success) |
+| `task_next_run_timestamp_seconds` | gauge | `task` (the retry time while a retry is pending) |
+
+The gauges of a task that leaves the config are dropped; its counters stay until restart. The heartbeat ping is counted
+under `task="scheduler"`, `kind="ping"`. To have Fly scrape it, set the address and add a `[metrics]` block to `fly.toml`:
+
+```toml
+[env]
+  TASKS_METRICS_ADDR = ":9091"
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+```
+
+Useful alerts: `time() - task_last_success_timestamp_seconds > 2 * <every seconds>` (the same rule as `stale`),
+`task_failure_streak >= 2`, and `increase(task_notify_failures_total[1d]) > 0` (a message that did not go out).
+
+### Heartbeat
+
+With `TASKS_HEARTBEAT_SECRET` set, node-control GETs the ping URL stored under that secret name once at start and then
+every hour: a dead-man's switch in a healthchecks-style service alerts when node-control stops (or the whole scheduler is
+stuck). The secret is read at each ping, so it can be pushed after start; the outcome is logged when it changes (a missing secret
+at info level, a failed ping at warn level) and the next ping retries. The URL never appears in a log line, an answer or a metric label.
+
+### Log events
+
+Structured log lines (`log/slog`, key=value fields) with event names, ids and outcomes only, never a script, a param, a secret or a URL:
+`run_started` (task, run, attempt), `node_chosen` (task, run, node, attempt), `attempt_result` (task, run, node,
+attempt, state, dur_ms, reason), `retry_scheduled` (task, run, node, attempt, state, reason), `alert_evaluated` (task, hit,
+outcome), `notify_result` (task, kind, outcome) and `ping_result` (task, kind, outcome; the heartbeat logs under task
+`scheduler` and only when its outcome changes). Store events are `tasks store open`, `tasks store unavailable, ...` and
+`task store write failed, serving from memory`.
+
+### Trust model
+
+The runner executes JavaScript supplied by whoever may push a config: treat `TASKS_ADMIN_USERS` as people who can run code
+on your nodes. The code runs as a rootless podman container (read-only root file system, all capabilities dropped,
+memory and pid limits, a timeout, one run at a time) started by an unprivileged service user, and the
+`task-runner` Ansible role adds a kernel firewall rule that keeps that user (and so every container) off loopback, the LAN
+and the tailnet while leaving the public internet open. Allow the runner port from node-control only in the tailnet ACL.
+Secrets are sent with each run over the tailnet and live only in the environment of that run's container; the runner
+never writes them to disk and the nodes keep none. node-control stores them encrypted in Redis, never returns them from
+the API, never logs them, and scrubs them out of stored reasons and results.
+
+### Operations
+
+[`scripts/tasks.sh`](../../../scripts/tasks.sh) is the CLI client (it needs `curl` and `jq`, `sops` for secrets, and a
+tailnet node whose user is in `TASKS_ADMIN_USERS`; `NODE_CONTROL_URL` is the base URL). Keep the config, the scripts and
+the encrypted secrets in your private repo:
+
+```
+tasks.sh check  --file tasks.json --scripts scripts     # validate on the server (dry run)
+tasks.sh diff   --file tasks.json --scripts scripts     # what a push would add (+), change (~), remove (-)
+tasks.sh push   --file tasks.json --scripts scripts --secrets secrets.sops.json
+tasks.sh pull   --file tasks.json --scripts scripts     # write the live state back to the files (no secrets)
+```
+
+`push` checks, shows the diff, asks, sends the secrets first (a task may only name secrets that are already stored),
+then the config and scripts, and verifies the live state equals the files. Git is the long-term store of config, scripts and
+encrypted secrets; node-control never reads git, it only holds the live copy in Redis. The header of the script lists the
+flags, environment and exit codes.
 
 ## Build and run
 

@@ -12,9 +12,9 @@ token gives an empty `401`. Unknown routes give an empty `404`.
 
 | Request | Response |
 |---|---|
-| `POST /v1/runs` `{"script":"<js>","params":{},"secrets":{"NAME":"value"},"timeout_seconds":180}` | `201 {"id":"..."}`; `409` while a run is active; `422` for an empty script, `timeout_seconds` outside 1..1800 (default 180), wrong JSON types or a body over 1 MiB |
+| `POST /v1/runs` `{"script":"<js>","params":{},"secrets":{"NAME":"value"},"timeout_seconds":180}` | `201 {"id":"..."}`; `409` while a run is active (also while a cancelled run is still being reaped); `422` for an empty script, `timeout_seconds` outside 1..1800 (default 180), `params` that is not an object, `secrets` that is not an object of strings, wrong JSON types, trailing data, `params` or `secrets` over 100000 bytes encoded, or a body over 1 MiB |
 | `GET /v1/runs/{id}` | `{"state":"running\|succeeded\|failed\|cancelled","result":{...}\|null,"error":"","log_tail":"<last 4 KB>"}`; `404` for an unknown id, also after a restart |
-| `DELETE /v1/runs/{id}` | `204`; kills the container (`kill task-<id>`) |
+| `DELETE /v1/runs/{id}` | `204` (also for a run that already finished, which is left as it is); `404` for an unknown id. A running run is marked `cancelled` at once and its container is killed (`kill task-<id>`); the run slot frees when the container is reaped |
 | `GET /v1/health` | `{"version":"...","busy":false,"mem_available_mb":N}` (`-1` when `/proc/meminfo` is unreadable) |
 
 Finished runs are kept for an hour (at most the last 20).
@@ -27,22 +27,25 @@ Playwright page in a fresh browser context; `log(msg)` writes a line to stderr
 (it ends up in `log_tail`). The return value must be a JSON object of at most
 4096 bytes; otherwise the run is `failed` with the reason. A non-zero exit is
 `failed` with the last output lines and `exit status N`; exceeding the timeout
-kills the container and is `failed` with a message containing "timeout".
+kills the container and is `failed` with a message containing "timeout". A missing, unreadable or non-object result
+(including a script that returns nothing) is `failed` with the reason. The runner does not scrub `result`: it is the
+caller's to treat as sensitive (node-control scrubs secret values out of it).
 
-Every string returned (`error`, `log_tail`) has each secret value of 4 or more
-characters replaced by `***`.
+Every string the runner returns in `error` and `log_tail` has each secret value of 4 or more
+characters replaced by `***` (also in its JSON-escaped forms, and a secret cut by the log window is trimmed).
 
 ## Isolation
 
 Per run: `podman --cgroup-manager=cgroupfs run --rm --name task-<id>
 --read-only --cap-drop=ALL --security-opt no-new-privileges --pids-limit N
---memory M --timeout T --tmpfs /tmp`, the script mounted read-only at `/run/task` and a
+--memory M --timeout T --tmpfs /tmp`, where `T` is the run timeout plus a few seconds of grace (podman's own backstop;
+the runner enforces the real deadline itself and kills first), the script mounted read-only at `/run/task` and a
 writable result dir at `/run/result`, both in a 0700 temp dir under
 `RUNNER_STATE_DIR` that is removed afterwards (and any stale `run-*` dirs at
-startup). After a timeout or cancel the runner also runs `rm -f --time 0 task-<id>`
+startup, as a previous process may have left them). After a timeout or cancel the runner also runs `rm -f --time 0 task-<id>`
 (twice, best effort), since the container outlives its client. Secrets and params go in as `-e TASK_SECRETS_JSON -e
 TASK_PARAMS_JSON` with no value on the command line; the values are set only in
-the environment of that one child process. The `--cgroup-manager=cgroupfs`
+the environment of that one child process (which does not inherit `RUNNER_*`, so the bearer token never reaches it). The `--cgroup-manager=cgroupfs`
 global flag is required for a service user without a login session.
 
 ## Configuration (environment)
@@ -57,16 +60,18 @@ global flag is required for a service user without a login session.
 | `RUNNER_MEMORY` | `1g` | container memory limit |
 | `RUNNER_PIDS_LIMIT` | `512` | |
 
-Logs are JSON on stderr and carry run ids, states and durations only.
+Logs are JSON on stderr and carry run ids, states and durations only. On SIGTERM or SIGINT the runner cancels the
+active run, waits for it to be reaped (up to 30 s) and exits.
 
 ## Image
 
 `image/Containerfile` builds from the official Playwright image and installs a
 pinned `playwright`; `host.js` is the entrypoint program (`node /app/host.js`).
 `BASE` has no default on purpose: a build without
-`--build-arg BASE=mcr.microsoft.com/playwright@sha256:...` fails, so the base
-cannot change under a running node (the version tag the pinned `playwright`
-matches is v1.64.1-noble; resolve it to a digest at deploy time).
+`--build-arg BASE=<playwright base image>@sha256:...` fails, so the base
+cannot change under a running node. Pick the base image tag whose Playwright
+version matches the pinned `playwright` package (1.64.1 in `image/Containerfile`)
+and resolve it to a digest at deploy time.
 
     podman build --build-arg BASE=<image@sha256:digest> -t task-run image/
 

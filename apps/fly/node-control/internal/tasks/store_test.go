@@ -30,6 +30,9 @@ type memKV struct {
 	m        map[ipn.StateKey][]byte
 	failNext int // writes that still fail
 
+	failAll   error         // fails every write (after delay)
+	delay     time.Duration // sleep per write
+	attempts  int
 	failField string        // always fails this field
 	entered   chan struct{} // if set: signalled when a write starts, then it waits for release
 	release   chan struct{}
@@ -52,8 +55,15 @@ func (k *memKV) WriteState(id ipn.StateKey, b []byte) error {
 		k.entered <- struct{}{}
 		<-k.release
 	}
+	if k.delay > 0 {
+		time.Sleep(k.delay)
+	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	k.attempts++
+	if k.failAll != nil {
+		return k.failAll
+	}
 	if string(id) == k.failField {
 		return errors.New("field refused")
 	}
@@ -275,11 +285,15 @@ func TestStoreStuckFieldDoesNotBlockOthers(t *testing.T) {
 	if err := s.PutSecret("bad", "v"); err == nil {
 		t.Fatal("want the write error")
 	}
-	if err := s.PutSecret("good", "v2"); err == nil {
-		t.Fatal("the stuck field is still reported by later writes")
+	if err := s.PutSecret("good", "v2"); err != nil {
+		t.Fatalf("an unrelated stuck field leaked into this write's error: %v", err)
 	}
-	if err := s.SaveState("ping", TaskState{Streak: 3}); err == nil {
-		t.Fatal("expected the stuck field in the error")
+	if err := s.SaveState("ping", TaskState{Streak: 3}); err != nil {
+		t.Fatalf("unrelated stuck field leaked: %v", err)
+	}
+	if err := s.PutSecret("bad", "v3"); err == nil || !strings.Contains(err.Error(), "secret:bad") ||
+		strings.Contains(err.Error(), "good") || strings.Contains(err.Error(), "state:") {
+		t.Fatalf("own stuck field error = %v", err)
 	}
 	kv.mu.Lock()
 	_, good := kv.m["secret:good"]
@@ -400,5 +414,86 @@ func TestStoreReadersDoNotWaitForRedis(t *testing.T) {
 	close(kv.release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+func queueMany(s *Store, n int) {
+	s.mu.Lock()
+	for i := 0; i < n; i++ {
+		s.queue(fmt.Sprintf("state:q%d", i), []byte("{}"))
+	}
+	s.mu.Unlock()
+}
+
+func TestStoreFlushBudgetBoundsWriterLatency(t *testing.T) {
+	kv := newMemKV()
+	kv.delay = 40 * time.Millisecond
+	kv.failAll = errors.New("ERR rejected") // slow per-field rejections: no early abort
+	s := openStore(t, kv)
+	s.flushBudget = 120 * time.Millisecond
+	queueMany(s, 30)
+
+	start := time.Now()
+	err := s.SaveState("ping", TaskState{Streak: 1})
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("writer blocked %v for 31 pending fields", took)
+	}
+	if err == nil {
+		t.Fatal("own field was not written: want an error")
+	}
+	kv.mu.Lock()
+	tried := kv.attempts
+	kv.failAll = nil
+	kv.delay = 0
+	kv.mu.Unlock()
+	if tried >= 31 {
+		t.Fatalf("budget did not stop the flush: %d attempts", tried)
+	}
+	if err := s.SaveState("ping", TaskState{Streak: 2}); err != nil {
+		t.Fatal(err)
+	}
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	if len(kv.m) != 31 || s.Degraded() {
+		t.Fatalf("unattempted fields not written later: %d stored, degraded=%v", len(kv.m), s.Degraded())
+	}
+}
+
+func TestStoreTransportFailureAbortsFlush(t *testing.T) {
+	kv := newMemKV()
+	kv.failAll = timeoutErr{}
+	s := openStore(t, kv)
+	queueMany(s, 20)
+	if err := s.SaveState("ping", TaskState{}); err == nil {
+		t.Fatal("want an error")
+	}
+	kv.mu.Lock()
+	n := kv.attempts
+	kv.failAll = nil
+	kv.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("%d attempts after a transport failure, want 1", n)
+	}
+	if err := s.SaveState("ping", TaskState{Streak: 1}); err != nil {
+		t.Fatal(err)
+	}
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	if len(kv.m) != 21 {
+		t.Fatalf("%d stored, want 21", len(kv.m))
+	}
+}
+
+func TestStoreFlattenedTransportTextAbortsFlush(t *testing.T) {
+	// The shared client turns go-redis errors into plain text.
+	if !isTransportErr(errors.New("writing state to redis: dial tcp 10.0.0.1:6379: i/o timeout")) ||
+		isTransportErr(errors.New("writing state to redis: OOM command not allowed when used memory > 'maxmemory'")) {
+		t.Fatal("transport detection")
 	}
 }

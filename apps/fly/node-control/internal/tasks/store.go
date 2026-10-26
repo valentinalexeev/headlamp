@@ -2,10 +2,13 @@ package tasks
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -90,8 +93,10 @@ type Store struct {
 	states  map[string]TaskState
 	runs    map[string][]Run // oldest first
 	pending map[string]pendingWrite
-	order   []string        // pending fields, first-queued first
-	stuck   map[string]bool // fields whose last write attempt failed
+	order   []string         // pending fields, first-queued first
+	stuck   map[string]error // fields whose last write attempt failed
+
+	flushBudget time.Duration // tests shrink it
 }
 
 type pendingWrite struct {
@@ -108,7 +113,7 @@ func OpenStore(kv ipn.StateStore, log *slog.Logger) (*Store, error) {
 		kv: kv, log: log,
 		scripts: map[string]string{}, secrets: map[string]string{},
 		states: map[string]TaskState{}, runs: map[string][]Run{},
-		pending: map[string]pendingWrite{}, stuck: map[string]bool{},
+		pending: map[string]pendingWrite{}, stuck: map[string]error{}, flushBudget: defaultFlushBudget,
 	}
 
 	if b, ok, err := s.read(fieldConfig); err != nil {
@@ -203,12 +208,41 @@ func (s *Store) queueJSON(field string, v any) error {
 	return nil
 }
 
-// flush writes every pending field, each independently. It is called without
-// s.mu held. Errors never carry the Redis URL or key material, and values are
-// never logged. The returned error names the fields that could not be written.
-func (s *Store) flush() error {
+// defaultFlushBudget bounds one flush. Each Redis call can take up to 10 s when
+// Redis is unreachable, so without a budget a writer would wait that long per
+// pending field.
+const defaultFlushBudget = 15 * time.Second
+
+// isTransportErr tells "Redis cannot be reached or answered in time" from a
+// per-field rejection by the server. The shared client flattens go-redis errors
+// into text, so besides the error chain the text is checked too.
+func isTransportErr(err error) bool {
+	var ne net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &ne) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, m := range []string{"timeout", "deadline exceeded", "connection refused", "connection reset",
+		"broken pipe", "no such host", "dial tcp", "eof", "network is unreachable", "closed network connection"} {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// flush writes the pending fields, each independently, within the flush
+// budget; a transport failure ends the flush at once (the other fields would
+// fail the same way). Fields not attempted stay pending for the next flush. It
+// is called without s.mu held. Errors never carry the Redis URL or key
+// material, and values are never logged. The returned error covers only the
+// fields in own (the ones the caller queued); everything else a flush could
+// not write shows in Degraded/DegradedFields.
+func (s *Store) flush(own ...string) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
+	deadline := time.Now().Add(s.flushBudget)
 
 	type item struct {
 		field string
@@ -221,16 +255,24 @@ func (s *Store) flush() error {
 	}
 	s.mu.Unlock()
 
-	var errs []error
+	var abort error
 	for _, it := range todo {
+		if abort == nil && !time.Now().Before(deadline) {
+			abort = errors.New("flush budget spent")
+		}
+		if abort != nil {
+			break
+		}
 		err := s.kv.WriteState(ipn.StateKey(it.field), it.pw.val)
 		s.mu.Lock()
 		if err != nil {
-			if !s.stuck[it.field] {
+			if _, was := s.stuck[it.field]; !was {
 				s.log.Warn("task store write failed, serving from memory", "field", it.field, "err", err)
 			}
-			s.stuck[it.field] = true
-			errs = append(errs, fmt.Errorf("write %s: %w", it.field, err))
+			s.stuck[it.field] = err
+			if isTransportErr(err) {
+				abort = err
+			}
 		} else {
 			delete(s.stuck, it.field)
 			if cur, ok := s.pending[it.field]; ok && cur.ver == it.pw.ver {
@@ -244,6 +286,20 @@ func (s *Store) flush() error {
 			}
 		}
 		s.mu.Unlock()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var errs []error
+	for _, f := range own {
+		if _, queued := s.pending[f]; !queued {
+			continue
+		}
+		if err, ok := s.stuck[f]; ok {
+			errs = append(errs, fmt.Errorf("write %s: %w", f, err))
+		} else {
+			errs = append(errs, fmt.Errorf("write %s: not written yet: %v", f, abort))
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -278,7 +334,11 @@ func (s *Store) PutConfig(cfg *Config, scripts map[string]string) error {
 	if err != nil {
 		return err
 	}
-	return s.flush()
+	own := []string{fieldConfig}
+	for _, n := range names {
+		own = append(own, "script:"+n)
+	}
+	return s.flush(own...)
 }
 
 func (s *Store) Script(name string) (string, bool) {
@@ -293,15 +353,17 @@ func (s *Store) PutSecret(name, value string) error {
 	_, known := s.secrets[name]
 	s.secrets[name] = value
 	s.queue("secret:"+name, []byte(value))
+	own := []string{"secret:" + name}
 	var err error
 	if !known {
 		err = s.queueJSON(fieldSecrets, s.namesLocked())
+		own = append(own, fieldSecrets)
 	}
 	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	return s.flush()
+	return s.flush(own...)
 }
 
 func (s *Store) namesLocked() []string {
@@ -352,7 +414,7 @@ func (s *Store) SaveState(task string, st TaskState) error {
 	if err != nil {
 		return err
 	}
-	return s.flush()
+	return s.flush("state:" + task)
 }
 
 // UpdateState applies fn to the current state under the store lock, so two
@@ -368,7 +430,7 @@ func (s *Store) UpdateState(task string, fn func(*TaskState)) error {
 	if err != nil {
 		return err
 	}
-	return s.flush()
+	return s.flush("state:" + task)
 }
 
 func (s *Store) setStateLocked(task string, st TaskState) error {
@@ -435,7 +497,7 @@ func (s *Store) AppendRun(r Run) error {
 	s.runs[r.Task] = rs
 	s.queue("runs:"+r.Task, append(append([]byte("["), bytes.Join(enc, []byte(","))...), ']'))
 	s.mu.Unlock()
-	return s.flush()
+	return s.flush("runs:" + r.Task)
 }
 
 // Runs returns a copy of the history, newest first.

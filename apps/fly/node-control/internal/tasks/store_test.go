@@ -372,10 +372,11 @@ func TestStoreAppendRunUpsertsByID(t *testing.T) {
 	s.PutConfig(testConfig(t), nil)
 	s.AppendRun(Run{ID: "1", Task: "ping", State: RunQueued})
 	s.AppendRun(Run{ID: "2", Task: "ping", State: RunQueued})
-	s.AppendRun(Run{ID: "1", Task: "ping", State: RunSucceeded})
+	s.AppendRun(Run{ID: "1", Task: "ping", State: RunSucceeded, RunnerID: "r1", RunnerAddr: "100.64.0.1"})
 	for _, st := range []*Store{s, openStore(t, kv)} {
 		runs := st.Runs("ping")
-		if len(runs) != 2 || runs[0].ID != "2" || runs[1].ID != "1" || runs[1].State != RunSucceeded {
+		if len(runs) != 2 || runs[0].ID != "2" || runs[1].ID != "1" || runs[1].State != RunSucceeded ||
+			runs[1].RunnerID != "r1" || runs[1].RunnerAddr != "100.64.0.1" {
 			t.Fatalf("runs = %+v", runs)
 		}
 	}

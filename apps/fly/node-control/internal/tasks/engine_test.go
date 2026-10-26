@@ -62,6 +62,7 @@ type fakeRunner struct {
 	addrs   []string
 	calls   int
 	cancels []string
+	cAddrs  []string
 	nextID  int
 }
 
@@ -101,9 +102,10 @@ func (r *fakeRunner) Status(ctx context.Context, _, id string) (RunStatus, error
 	return RunStatus{State: "succeeded", Result: map[string]any{"ok": float64(1)}}, nil
 }
 
-func (r *fakeRunner) Cancel(_ context.Context, _, id string) error {
+func (r *fakeRunner) Cancel(_ context.Context, addr, id string) error {
 	r.mu.Lock()
 	r.cancels = append(r.cancels, id)
+	r.cAddrs = append(r.cAddrs, addr)
 	r.mu.Unlock()
 	return nil
 }
@@ -123,6 +125,8 @@ func (r *fakeRunner) cancelCount() int {
 type notifyCall struct {
 	task, reason string
 	result       map[string]any
+	ctxErr       error
+	deadline     bool
 }
 
 type fakeNotifier struct {
@@ -132,17 +136,19 @@ type fakeNotifier struct {
 	ret       NotifyResult
 }
 
-func (n *fakeNotifier) Success(_ context.Context, task string, _ Task, result map[string]any) NotifyResult {
+func (n *fakeNotifier) Success(ctx context.Context, task string, _ Task, result map[string]any) NotifyResult {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.successes = append(n.successes, notifyCall{task: task, result: result})
+	_, dl := ctx.Deadline()
+	n.successes = append(n.successes, notifyCall{task: task, result: result, ctxErr: ctx.Err(), deadline: dl})
 	return n.ret
 }
 
-func (n *fakeNotifier) Failure(_ context.Context, task string, _ Task, reason string) NotifyResult {
+func (n *fakeNotifier) Failure(ctx context.Context, task string, _ Task, reason string) NotifyResult {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.failures = append(n.failures, notifyCall{task: task, reason: reason})
+	_, dl := ctx.Deadline()
+	n.failures = append(n.failures, notifyCall{task: task, reason: reason, ctxErr: ctx.Err(), deadline: dl})
 	return n.ret
 }
 
@@ -576,6 +582,11 @@ func TestEngineTriggerWhileRunningReturnsErrAlreadyRunning(t *testing.T) {
 		r, ok := f.e.Running("job")
 		return ok && r.ID == id && r.State == RunRunning && r.Node == "n1"
 	})
+	// The stored record names the runner's run, so a successor can cancel it.
+	waitFor(t, "stored runner id", func() bool {
+		rs := f.runs("job")
+		return len(rs) == 1 && rs[0].RunnerID == "rid-a" && rs[0].RunnerAddr == "100.64.0.1" && rs[0].State == RunRunning
+	})
 	if _, err := f.e.Trigger("job"); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("second trigger: %v", err)
 	}
@@ -943,5 +954,244 @@ func TestEngineRunnerBusyIsFailedAttempt(t *testing.T) {
 	}
 	if st := f.store.State("job"); st.Streak != 1 {
 		t.Fatalf("state = %+v", st)
+	}
+}
+
+func TestEngineTriggerDuringRetryChainSetsNextRun(t *testing.T) {
+	f := newEngFixture(t, oneTask(func(tk *Task) {
+		tk.Retry = Retry{Attempts: 2, Backoff: []Duration{Duration(time.Minute)}}
+	}))
+	f.runner.status = failStatus("exit 1")
+	f.step() // scheduled attempt 1 fails; NextRun is still zero
+	if st := f.store.State("job"); st.Attempt != 1 || !st.NextRun.IsZero() {
+		t.Fatalf("state = %+v", st)
+	}
+	f.runner.mu.Lock()
+	f.runner.status = nil
+	f.runner.mu.Unlock()
+	f.clock.Set(t0.Add(10 * time.Second))
+	if _, err := f.e.Trigger("job"); err != nil {
+		t.Fatal(err)
+	}
+	f.e.wait()
+	st := f.store.State("job")
+	if st.Attempt != 0 || !st.NextRun.Equal(t0.Add(10*time.Second+time.Hour)) {
+		t.Fatalf("after manual success: %+v", st)
+	}
+	f.step()
+	if n := len(f.runs("job")); n != 2 {
+		t.Fatalf("runs = %d, want 2 (no extra scheduled sequence)", n)
+	}
+	if _, fl := f.notifier.counts(); fl != 0 {
+		t.Fatalf("failures = %d", fl)
+	}
+}
+
+func TestEngineTriggerBeforeFirstRunRunsOnce(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	if _, err := f.e.Trigger("job"); err != nil {
+		t.Fatal(err)
+	}
+	f.e.wait()
+	f.step()
+	if n := len(f.runs("job")); n != 1 {
+		t.Fatalf("runs = %d, want 1", n)
+	}
+	if st := f.store.State("job"); !st.NextRun.Equal(t0.Add(time.Hour)) {
+		t.Fatalf("NextRun = %s", st.NextRun)
+	}
+}
+
+func TestEngineStartupSweepsGhostRuns(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	pending := TaskState{NextRun: t0.Add(time.Hour), Attempt: 1, AttemptAt: t0.Add(time.Hour), Streak: 2}
+	if err := f.store.SaveState("job", pending); err != nil {
+		t.Fatal(err)
+	}
+	ghosts := []Run{
+		{ID: "g1", Task: "job", Node: "n1", Attempt: 1, State: RunRunning, Started: t0.Add(-time.Minute),
+			RunnerID: "orphan-1", RunnerAddr: "100.64.0.1"},
+		{ID: "g2", Task: "job", Attempt: 1, State: RunQueued, Started: t0.Add(-time.Minute)},
+		{ID: "done", Task: "job", Node: "n1", Attempt: 1, State: RunSucceeded, Ended: t0.Add(-2 * time.Hour),
+			RunnerID: "old", RunnerAddr: "100.64.0.1"},
+		{ID: "bad", Task: "job", Node: "n1", Attempt: 1, State: RunFailed, Reason: "exit 1", RunnerID: "old2", RunnerAddr: "100.64.0.1"},
+	}
+	for _, g := range ghosts {
+		if err := f.store.AppendRun(g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.e.Run(ctx); close(done) }()
+	waitFor(t, "ghosts finalised", func() bool {
+		for _, r := range f.runs("job") {
+			if r.State == RunRunning || r.State == RunQueued {
+				return false
+			}
+		}
+		return true
+	})
+	cancel()
+	<-done
+
+	byID := map[string]Run{}
+	for _, r := range f.runs("job") {
+		byID[r.ID] = r
+	}
+	for _, id := range []string{"g1", "g2"} {
+		r := byID[id]
+		if r.State != RunLost || r.Reason != "node-control restarted" || !r.Ended.Equal(t0) {
+			t.Fatalf("%s = %+v", id, r)
+		}
+	}
+	if byID["done"].State != RunSucceeded || byID["bad"].State != RunFailed || byID["bad"].Reason != "exit 1" {
+		t.Fatalf("finished runs touched: %+v %+v", byID["done"], byID["bad"])
+	}
+	f.runner.mu.Lock()
+	cancels, addrs := f.runner.cancels, f.runner.cAddrs
+	f.runner.mu.Unlock()
+	if len(cancels) != 1 || cancels[0] != "orphan-1" || addrs[0] != "100.64.0.1" {
+		t.Fatalf("cancels = %v at %v", cancels, addrs)
+	}
+	if st := f.store.State("job"); st != pending {
+		t.Fatalf("sweep changed state: %+v", st)
+	}
+	if s, fl := f.notifier.counts(); s != 0 || fl != 0 {
+		t.Fatalf("sweep notified: success=%d failure=%d", s, fl)
+	}
+	if len(f.runs("job")) != 4 || f.runner.startCount() != 0 {
+		t.Fatal("sweep started or added runs")
+	}
+}
+
+func TestEngineStartupSpreadPerTask(t *testing.T) {
+	f := newEngFixture(t, map[string]Task{"a": baseTask(), "b": baseTask()})
+	for _, task := range []string{"a", "b"} {
+		if err := f.store.SaveState(task, TaskState{NextRun: t0.Add(-time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	draws := []float64{0.2, 0.7} // a, b in name order
+	f.rand = func() float64 {
+		if len(draws) == 0 {
+			return 0.5
+		}
+		d := draws[0]
+		draws = draws[1:]
+		return d
+	}
+	f.e.startSpread = 10 * time.Second
+	f.e.spreadStart()
+
+	if next := f.step(); !next.Equal(t0.Add(2 * time.Second)) {
+		t.Fatalf("wake = %s, want a's delay", next)
+	}
+	if len(f.runs("a"))+len(f.runs("b")) != 0 {
+		t.Fatal("ran before its startup delay")
+	}
+	f.clock.Set(t0.Add(2 * time.Second))
+	if next := f.step(); !next.Equal(t0.Add(7 * time.Second)) {
+		t.Fatalf("wake = %s, want b's delay", next)
+	}
+	if len(f.runs("a")) != 1 || len(f.runs("b")) != 0 {
+		t.Fatalf("after 2s: a=%d b=%d", len(f.runs("a")), len(f.runs("b")))
+	}
+	f.clock.Set(t0.Add(7 * time.Second))
+	f.step()
+	if len(f.runs("b")) != 1 {
+		t.Fatal("b did not run after its delay")
+	}
+}
+
+func TestEngineOverlappingSecretsScrubbedLongestFirst(t *testing.T) {
+	f := newEngFixture(t, oneTask(func(tk *Task) { tk.Secrets = []string{"short", "long"} }))
+	for n, v := range map[string]string{"short": "abc", "long": "abcdef"} {
+		if err := f.store.PutSecret(n, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.runner.status = failStatus("saw abcdef and abc")
+	f.step()
+	if r := f.runs("job")[0]; r.Reason != "saw *** and ***" {
+		t.Fatalf("reason = %q", r.Reason)
+	}
+}
+
+func TestEngineNotifierSurvivesShutdown(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	ctx, cancel := context.WithCancel(context.Background())
+	f.runner.status = func(context.Context, string, int) (RunStatus, error) {
+		cancel() // shutdown arrives just as the run ends
+		return RunStatus{State: "failed", Error: "exit 1"}, nil
+	}
+	f.e.tick(ctx)
+	f.e.wait()
+	f.notifier.mu.Lock()
+	defer f.notifier.mu.Unlock()
+	if len(f.notifier.failures) != 1 {
+		t.Fatalf("failures = %d", len(f.notifier.failures))
+	}
+	if c := f.notifier.failures[0]; c.ctxErr != nil || !c.deadline {
+		t.Fatalf("notifier ctx err=%v deadline=%v", c.ctxErr, c.deadline)
+	}
+}
+
+func TestEngineTriggerBeforeRunStopsWithRun(t *testing.T) {
+	f := newEngFixture(t, oneTask(func(tk *Task) {
+		tk.Retry = Retry{Attempts: 2, Backoff: []Duration{Duration(time.Minute)}}
+	}))
+	if err := f.store.SaveState("job", TaskState{NextRun: t0.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	polled := make(chan struct{}, 1)
+	f.runner.status = func(context.Context, string, int) (RunStatus, error) {
+		select {
+		case polled <- struct{}{}:
+		default:
+		}
+		return RunStatus{State: "running"}, nil
+	}
+	if _, err := f.e.Trigger("job"); err != nil {
+		t.Fatal(err)
+	}
+	<-polled
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.e.Run(ctx); close(done) }()
+	cancel()
+	<-done
+	if r := f.runs("job")[0]; r.State != RunFailed || r.Reason != "shutdown" {
+		t.Fatalf("run = %+v", r)
+	}
+	if _, err := f.e.Trigger("job"); !errors.Is(err, ErrStopped) {
+		t.Fatalf("trigger after stop: %v", err)
+	}
+}
+
+func TestEngineShutdownWaitIsBounded(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	release := make(chan struct{})
+	defer close(release)
+	entered := make(chan struct{})
+	f.runner.start = func(string, StartReq) (string, error) {
+		close(entered)
+		<-release // ignores ctx, like a hung connection
+		return "x", nil
+	}
+	f.e.shutdownWait = 50 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.e.Run(ctx); close(done) }()
+	<-entered
+	began := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return within its shutdown bound")
+	}
+	if d := time.Since(began); d < 40*time.Millisecond {
+		t.Fatalf("Run returned after %s without waiting", d)
 	}
 }

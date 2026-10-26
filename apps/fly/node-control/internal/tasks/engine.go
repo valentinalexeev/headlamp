@@ -22,8 +22,8 @@ var (
 	ErrAlreadyRunning = errors.New("task is already running")
 	// ErrUnknownTask: the task is not in the current config.
 	ErrUnknownTask = errors.New("unknown task")
-
-	errStopped = errors.New("task engine stopped")
+	// ErrStopped: the engine has shut down and accepts no new work.
+	ErrStopped = errors.New("task engine stopped")
 )
 
 const (
@@ -40,9 +40,20 @@ const (
 	// The loop re-reads the schedule at least this often, so a wall-clock jump
 	// (the timer runs on the monotonic clock) cannot delay a run for long. A
 	// tick only reads memory: no Redis, no node listing.
-	maxSleep      = 5 * time.Minute
-	shutdownWait  = 30 * time.Second
-	cancelTimeout = 5 * time.Second
+	maxSleep = 5 * time.Minute
+
+	// Shutdown must fit the platform's kill timeout (25 s): wait for attempts
+	// at most this long, and give each node Cancel this much of it.
+	defaultShutdownWait = 12 * time.Second
+	defaultCancelBudget = 3 * time.Second
+
+	// The startup sweep cancels runs a previous process left behind.
+	sweepCancelEach  = 5 * time.Second
+	sweepCancelTotal = 30 * time.Second
+
+	// Notifications outlive a shutdown: the state change they report (for
+	// example Streak++) is already stored.
+	notifyTimeout = 60 * time.Second
 )
 
 // Deps are the engine's collaborators. Now and Rand default to the wall clock
@@ -69,18 +80,27 @@ type Deps struct {
 // into the store, the runner or the notifier (store writes can block for
 // seconds while Redis is down).
 type Engine struct {
-	d           Deps
-	log         *slog.Logger
-	startSpread time.Duration // random delay before the first tick; tests set 0
-	wake        chan struct{}
-	wg          sync.WaitGroup
+	d    Deps
+	log  *slog.Logger
+	wake chan struct{}
+	wg   sync.WaitGroup
 
-	mu     sync.Mutex
-	base   context.Context // parent of sequences started by Trigger
-	closed bool
-	active map[string]*Run // task -> record of the attempt executing now
-	busy   map[string]int  // node name -> attempts executing on it
-	manual map[string]bool // task -> its current sequence was started by Trigger
+	// Tests shrink these.
+	startSpread  time.Duration // per-task random delay of startup runs; tests set 0
+	shutdownWait time.Duration
+	cancelBudget time.Duration
+
+	// base is the parent of sequences started by Trigger; Run's shutdown
+	// cancels it, also for a Trigger that came before Run.
+	base       context.Context
+	cancelBase context.CancelFunc
+
+	mu        sync.Mutex
+	closed    bool
+	active    map[string]*Run      // task -> record of the attempt executing now
+	busy      map[string]int       // node name -> attempts executing on it
+	manual    map[string]bool      // task -> its current sequence was started by Trigger
+	notBefore map[string]time.Time // task -> startup delay end
 }
 
 func NewEngine(d Deps) *Engine {
@@ -97,11 +117,13 @@ func NewEngine(d Deps) *Engine {
 	if log == nil {
 		log = slog.Default()
 	}
+	base, cancel := context.WithCancel(context.Background())
 	return &Engine{
-		d: d, log: log, startSpread: defaultStartSpread,
-		wake:   make(chan struct{}, 1),
-		base:   context.Background(),
+		d: d, log: log, wake: make(chan struct{}, 1),
+		startSpread: defaultStartSpread, shutdownWait: defaultShutdownWait, cancelBudget: defaultCancelBudget,
+		base: base, cancelBase: cancel,
 		active: map[string]*Run{}, busy: map[string]int{}, manual: map[string]bool{},
+		notBefore: map[string]time.Time{},
 	}
 }
 
@@ -119,22 +141,12 @@ func Backoff(r Retry, attempt int) time.Duration {
 // executing attempts, which see ctx cancelled and record themselves as
 // interrupted. An Engine runs once: after Run returns it accepts no new work.
 func (e *Engine) Run(ctx context.Context) {
-	e.mu.Lock()
-	e.base = ctx
-	e.mu.Unlock()
 	defer e.shutdown()
+	stop := context.AfterFunc(ctx, e.cancelBase)
+	defer stop()
 
-	// Overdue tasks found at startup run within seconds, spread a little so a
-	// restart does not hit every node at the same instant.
-	if e.startSpread > 0 {
-		t := time.NewTimer(time.Duration(e.d.Rand() * float64(e.startSpread)))
-		select {
-		case <-ctx.Done():
-			t.Stop()
-			return
-		case <-t.C:
-		}
-	}
+	e.sweep(ctx)
+	e.spreadStart()
 	for {
 		next := e.tick(ctx)
 		d := maxSleep
@@ -157,15 +169,97 @@ func (e *Engine) shutdown() {
 	e.mu.Lock()
 	e.closed = true
 	e.mu.Unlock()
+	e.cancelBase()
 	done := make(chan struct{})
 	go func() { e.wg.Wait(); close(done) }()
-	t := time.NewTimer(shutdownWait)
+	t := time.NewTimer(e.shutdownWait)
 	defer t.Stop()
 	select {
 	case <-done:
 	case <-t.C:
 		e.log.Warn("task attempts still running at shutdown")
 	}
+}
+
+// sweep finalises runs a previous process left as running or queued (it was
+// killed mid-attempt): each is cancelled on its node when the record says
+// where it lives, then recorded as lost. It never notifies and never touches
+// TaskState, so the persisted Attempt/AttemptAt retry the same attempt number.
+func (e *Engine) sweep(ctx context.Context) {
+	cfg := e.d.Store.Config()
+	if cfg == nil {
+		return
+	}
+	total, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepCancelTotal)
+	defer cancel()
+	for task := range cfg.Tasks {
+		for _, r := range e.d.Store.Runs(task) {
+			if r.State != RunRunning && r.State != RunQueued {
+				continue
+			}
+			e.mu.Lock()
+			cur, mine := e.active[task]
+			mine = mine && cur.ID == r.ID // started by a Trigger before Run
+			e.mu.Unlock()
+			if mine {
+				continue
+			}
+			if r.RunnerID != "" && r.RunnerAddr != "" && total.Err() == nil {
+				cctx, cc := context.WithTimeout(total, sweepCancelEach)
+				_ = e.d.Runner.Cancel(cctx, r.RunnerAddr, r.RunnerID)
+				cc()
+			}
+			r.State, r.Reason, r.Ended = RunLost, "node-control restarted", e.d.Now()
+			if err := e.d.Store.AppendRun(r); err != nil {
+				e.log.Warn("task run record not stored", "task", task, "run", r.ID, "err", err)
+			}
+			e.log.Info("attempt_result", "task", task, "run", r.ID, "node", r.Node, "attempt", r.Attempt,
+				"state", string(r.State), "reason", r.Reason)
+		}
+	}
+}
+
+// spreadStart gives every task its own random startup delay, so tasks that
+// are overdue at a restart do not all start at once (two of them may resolve
+// to the same node).
+func (e *Engine) spreadStart() {
+	if e.startSpread <= 0 {
+		return
+	}
+	cfg := e.d.Store.Config()
+	if cfg == nil {
+		return
+	}
+	now := e.d.Now()
+	nb := map[string]time.Time{}
+	for _, task := range sortedTasks(cfg) {
+		nb[task] = now.Add(time.Duration(e.d.Rand() * float64(e.startSpread)))
+	}
+	e.mu.Lock()
+	e.notBefore = nb
+	e.mu.Unlock()
+}
+
+// due is when the task may next start: its persisted due time, held back by
+// the startup delay.
+func (e *Engine) due(task string, st TaskState) time.Time {
+	at := dueAt(st)
+	e.mu.Lock()
+	nb, ok := e.notBefore[task]
+	e.mu.Unlock()
+	if ok && nb.After(at) {
+		return nb
+	}
+	return at
+}
+
+func sortedTasks(cfg *Config) []string {
+	names := make([]string, 0, len(cfg.Tasks))
+	for n := range cfg.Tasks {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Reload makes the loop recompute its wake time, after a config push or when
@@ -205,10 +299,7 @@ func (e *Engine) Trigger(task string) (string, error) {
 	if st := e.d.Store.State(task); st.Attempt > 0 {
 		e.updateState(task, func(s *TaskState) { s.Attempt, s.AttemptAt = 0, time.Time{} })
 	}
-	e.mu.Lock()
-	ctx := e.base
-	e.mu.Unlock()
-	e.launch(ctx, task, id, 1, true)
+	e.launch(e.base, task, id, 1, true)
 	return id, nil
 }
 
@@ -227,12 +318,7 @@ func (e *Engine) tick(ctx context.Context) time.Time {
 	if cfg == nil {
 		return time.Time{}
 	}
-	names := make([]string, 0, len(cfg.Tasks))
-	for n := range cfg.Tasks {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-
+	names := sortedTasks(cfg)
 	now := e.d.Now()
 	var next time.Time
 	later := func(at time.Time) {
@@ -241,7 +327,7 @@ func (e *Engine) tick(ctx context.Context) time.Time {
 		}
 	}
 	for _, task := range names {
-		if at := dueAt(e.d.Store.State(task)); now.Before(at) {
+		if at := e.due(task, e.d.Store.State(task)); now.Before(at) {
 			later(at)
 			continue
 		}
@@ -252,7 +338,7 @@ func (e *Engine) tick(ctx context.Context) time.Time {
 		// Read again under the claim: a sequence that ended between the first
 		// read and the claim has moved the due time and must not fire twice.
 		st := e.d.Store.State(task)
-		if at := dueAt(st); now.Before(at) {
+		if at := e.due(task, st); now.Before(at) {
 			e.unclaim(task)
 			later(at)
 			continue
@@ -271,7 +357,7 @@ func (e *Engine) claim(task, id string, manual bool) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
-		return errStopped
+		return ErrStopped
 	}
 	if _, ok := e.active[task]; ok {
 		return ErrAlreadyRunning
@@ -393,6 +479,9 @@ func (e *Engine) execute(ctx context.Context, task string, t Task, run *Run, val
 	for _, v := range secrets {
 		*values = append(*values, v)
 	}
+	// Longest first, once, for every scrub of this attempt: a secret that is
+	// a substring of another must not leave the longer one's tail behind.
+	sort.Slice(*values, func(i, j int) bool { return len((*values)[i]) > len((*values)[j]) })
 	sum := sha256.Sum256([]byte(script))
 	run.ScriptSHA = hex.EncodeToString(sum[:])
 
@@ -435,6 +524,13 @@ func (e *Engine) execute(ctx context.Context, task string, t Task, run *Run, val
 			return failed("node busy")
 		}
 		return failed(err.Error())
+	}
+	// Recorded before polling so a successor process can cancel the run if
+	// this one dies (see sweep).
+	run.RunnerID, run.RunnerAddr = rid, cand.Addr
+	e.setActive(*run)
+	if err := e.d.Store.AppendRun(*run); err != nil {
+		e.log.Warn("task run record not stored", "task", task, "run", run.ID, "err", err)
 	}
 	return e.poll(ctx, t, cand.Addr, rid, started)
 }
@@ -490,7 +586,7 @@ func (e *Engine) poll(ctx context.Context, t Task, addr, rid string, started tim
 
 // cancelRun is best effort and must work while ctx is already cancelled.
 func (e *Engine) cancelRun(ctx context.Context, addr, rid string) {
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancelTimeout)
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.cancelBudget)
 	defer cancel()
 	_ = e.d.Runner.Cancel(cctx, addr, rid)
 }
@@ -562,6 +658,15 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 	e.log.Info("attempt_result", "task", task, "run", run.ID, "node", run.Node, "attempt", run.Attempt,
 		"state", string(run.State), "dur_ms", now.Sub(run.Started).Milliseconds(), "reason", run.Reason)
 
+	nctx, ncancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
+	defer ncancel()
+	// A manual sequence never moves a future NextRun, but a stale or zero one
+	// is advanced: left alone it would start a scheduled sequence right after.
+	reschedule := func(s *TaskState) {
+		if !manual || !s.NextRun.After(now) {
+			s.NextRun = e.nextRun(now, t.Schedule)
+		}
+	}
 	switch {
 	case out.shutdown:
 		// Not counted: Attempt/AttemptAt stay, so the next start retries the
@@ -569,12 +674,10 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 	case run.State == RunSucceeded:
 		e.updateState(task, func(s *TaskState) {
 			s.LastSuccess, s.Streak, s.Attempt, s.AttemptAt = now, 0, 0, time.Time{}
-			if !manual {
-				s.NextRun = e.nextRun(now, t.Schedule)
-			}
+			reschedule(s)
 		})
 		e.endSequence(task)
-		run.NotifyOutcome = notifyText(e.d.Notifier.Success(ctx, task, t, run.Result))
+		run.NotifyOutcome = notifyText(e.d.Notifier.Success(nctx, task, t, run.Result))
 	case run.Attempt < t.Retry.Attempts:
 		at := now.Add(Backoff(t.Retry, run.Attempt))
 		e.updateState(task, func(s *TaskState) { s.Attempt, s.AttemptAt = run.Attempt, at })
@@ -584,12 +687,10 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 		e.updateState(task, func(s *TaskState) {
 			s.Streak++
 			s.Attempt, s.AttemptAt = 0, time.Time{}
-			if !manual {
-				s.NextRun = e.nextRun(now, t.Schedule)
-			}
+			reschedule(s)
 		})
 		e.endSequence(task)
-		run.NotifyOutcome = notifyText(e.d.Notifier.Failure(ctx, task, t, run.Reason))
+		run.NotifyOutcome = notifyText(e.d.Notifier.Failure(nctx, task, t, run.Reason))
 	}
 	if err := e.d.Store.AppendRun(run); err != nil {
 		e.log.Warn("task run record not stored", "task", task, "run", run.ID, "err", err)
@@ -623,16 +724,14 @@ func notifyText(r NotifyResult) string {
 	return strings.Join(parts, " ")
 }
 
-// scrubResult copies the result with secret values replaced inside string
-// leaves (and keys). Numbers and structure are kept as they are, and nothing is
-// truncated: the store bounds the whole result instead.
+// scrubResult copies the result with secret values (sorted longest first by
+// execute) replaced inside string leaves and keys. Numbers and structure are
+// kept as they are, and nothing is truncated: the store bounds the whole
+// result instead.
 func scrubResult(m map[string]any, secrets []string) map[string]any {
 	if m == nil {
 		return nil
 	}
-	// Longest first, so a secret containing another is replaced whole.
-	secrets = append([]string(nil), secrets...)
-	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
 	return scrubValue(m, secrets).(map[string]any)
 }
 

@@ -62,6 +62,10 @@ type Run struct {
 	Result         map[string]any
 	ScriptSHA      string
 	NotifyOutcome  string
+	// Where the run lives on the node, so a restarted engine can cancel a
+	// run its predecessor left behind.
+	RunnerID   string `json:"runner_id,omitempty"`
+	RunnerAddr string `json:"runner_addr,omitempty"`
 }
 
 type TaskState struct {

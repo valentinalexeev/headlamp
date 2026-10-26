@@ -30,10 +30,6 @@ var (
 	reservedTaskIDs = map[string]bool{"config": true, "secrets": true}
 )
 
-// placeholderPage stands in until the tasks page exists.
-const placeholderPage = `<!doctype html><html><head><meta charset="utf-8"><title>Tasks</title></head>` +
-	`<body><h1>Tasks</h1></body></html>`
-
 // api holds the HTTP handlers. Every handler reads the store and engine once
 // through Module.current and answers 503 while they are not open.
 type api struct{ m *Module }
@@ -41,7 +37,9 @@ type api struct{ m *Module }
 func (a *api) register(mux *http.ServeMux, gate func(http.Handler) http.Handler) {
 	plain := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(h)) }
 	body := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(authz.RequireJSON(h))) }
-	plain("GET /tasks", a.page)
+	plain("GET /tasks", asset("text/html; charset=utf-8", pageHTML))
+	plain("GET /tasks/static/tasks.css", asset("text/css; charset=utf-8", pageCSS))
+	plain("GET /tasks/static/tasks.js", asset("text/javascript; charset=utf-8", pageJS))
 	plain("GET /tasks.json", a.list)
 	plain("GET /tasks/{id}", a.task)
 	body("POST /tasks/{id}/run", a.trigger)
@@ -129,17 +127,6 @@ func (a *api) view(s *Store, e *Engine, id string, t Task) taskView {
 		active = &r
 	}
 	return buildTaskView(a.m.now(), id, t, s.State(id), s.Runs(id), active)
-}
-
-// page serves the tasks page (always HTML, also while degraded).
-func (a *api) page(w http.ResponseWriter, _ *http.Request) {
-	h := w.Header()
-	h.Set("Content-Type", "text/html; charset=utf-8")
-	h.Set("Cache-Control", "no-store")
-	h.Set("X-Frame-Options", "DENY")
-	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")
-	w.Write([]byte(placeholderPage))
 }
 
 // list serves the task list (always JSON).

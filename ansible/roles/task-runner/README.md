@@ -39,7 +39,8 @@ blocked-range resolver is missing, but the play stops there until the list is ri
 which cancels an active run (it is reported as cancelled to node-control). Check `GET /v1/health` (`busy`) first.
 
 Tags: `task-runner` (everything), `install`, `guard`, `image`, `config`, `image-prune` (only the pruning of old image
-tags). Preflight runs under every tag. `--tags install` alone installs the binary and unit and notifies the restart
+tags). Preflight is tagged `always`, so it runs under every `--tags` and is not dropped by `--skip-tags` of any other
+tag (only `--skip-tags always` removes it). `--tags install` alone installs the binary and unit and notifies the restart
 before `config` writes the env file: on a fresh node run the whole role (no tags) the first time.
 
 Check mode on the node is safe: files are templated, no image is built or loaded and nothing is started or reloaded.
@@ -60,7 +61,7 @@ reaches the node. On a fresh host the steps that need the service user may fail 
 | `task_runner_memory_max` | `2G` | systemd `MemoryMax` for the whole service (runner, podman, the container). |
 | `task_runner_container_memory` | `1g` | `RUNNER_MEMORY` (podman `--memory`); at least 256 MB below `task_runner_memory_max`. |
 | `task_runner_pids_limit` / `task_runner_tasks_max` | `512` / `2048` | Per container (`RUNNER_PIDS_LIMIT`) / whole service (`TasksMax`). |
-| `task_runner_min_free_mb` / `task_runner_min_free_disk_mb` | `1500` / `6000` | Preflight: free memory without page cache; free disk on the file system of the state dir. |
+| `task_runner_min_free_mb` / `task_runner_min_free_disk_mb` | `1500` / `6000` | Free memory without page cache (preflight); free disk on the file system of the state dir (checked in the image step, only when an image has to be built or loaded). |
 | `task_runner_guard_resolvers` | `["100.100.100.100", "fd7a:115c:a1e0::53"]` | Resolvers the service user may query on port 53 although they are in a blocked range. |
 | `task_runner_guard_check_interval` | `30s` | How often the guard check timer looks for the table. |
 | `task_runner_protect_kernel_tunables` | `false` | systemd `ProtectKernelTunables=`; off because it very likely breaks every run (see Service hardening). |
@@ -80,8 +81,8 @@ Fixed layout (variables exist, change only with reason): user `task-runner`, sta
    loaded. Works out the image tag.
 2. **Install**: `podman`, `uidmap`, `passt`, `acl` (Ansible needs `setfacl` to run commands as the service user); the
    package's root-level units (`podman.socket`, `podman-restart.service`, `podman-auto-update.timer`,
-   `podman-clean-transient.service`) are disabled and stopped where they exist; the
-   system user `task-runner` (home = state dir, no login shell); a subordinate uid/gid range of 65536 if the user has
+   `podman-clean-transient.service`) are disabled where they exist (and stopped, except `podman-restart.service`, see the
+   warning below); the system user `task-runner` (home = state dir, no login shell); a subordinate uid/gid range of 65536 if the user has
    none (above the highest existing range); the binary, built on the control host once per architecture in the play
    (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64|arm64 go build -trimpath -buildvcs=false`), copied to the node; the unit.
 3. **Guard**: the nftables table and its units (below).
@@ -143,7 +144,7 @@ The index digest of a multi-arch image works for every architecture. A tag or a 
 ## Service hardening
 
 `User=task-runner`, `PrivateTmp`, `ProtectHome` (HOME is the state dir), `ProtectSystem=strict` with
-`ReadWritePaths=` the state and runtime dirs, `ProtectKernelTunables`, `ProtectControlGroups=no` (cgroupfs writes
+`ReadWritePaths=` the state and runtime dirs, `ProtectControlGroups=no` (cgroupfs writes
 below the unit), `Delegate=yes` (the user manages the cgroup subtree, for the container's memory and pids limits),
 `MemoryMax`, `TasksMax`, `RuntimeDirectory=task-runner` (0700, preserved across restarts),
 `KillMode=mixed` with `TimeoutStopSec=45` (the runner shuts down within 30 s, killing its container by name),
@@ -152,7 +153,7 @@ the CURRENT uid of the user (fail closed after the user was recreated: rerun the
 up to 60 s for the tailnet address to be configured; the runner binds to it only. No `UMask=` (it would override the
 runner's explicit 0755/0644 modes on its run dirs). No access log. The unit `Requires=` the guard.
 
-`ProtectKernelTunables=` is off by default (`task_runner_protect_kernel_tunables`): its read-only mounts over
+`ProtectKernelTunables=` is not applied by default (`task_runner_protect_kernel_tunables`): its read-only mounts over
 `/proc/sys` and friends become locked mounts in the container's user namespace, and the kernel then refuses the fresh
 `/proc` mount every run needs. Try it only on one node after a verified run, and revert on a proc mount error.
 
@@ -208,6 +209,13 @@ forwarder sits at a link-local address inside the container). The host's own add
 rule; besides the flush window, the only traffic the guard lets through to a blocked address is a flow that was
 already established before the rule set was (re)loaded.
 
+## Shared hosts
+
+The role disables the package's root-level `podman-restart.service` (`enabled: false`) but deliberately does NOT stop it:
+stopping that unit stops every root container that uses `--restart=always`, which would hit other workloads on a host
+that also runs root containers. If the unit is running when the role first runs, it stays running until the next boot
+or until you stop it yourself. The other three package units are disabled and stopped.
+
 ## Smaller nodes
 
 The spike node had 2 vCPU and about 3.9 GB RAM. Chromium needs a few hundred MB per run. On a node with less memory:
@@ -227,7 +235,7 @@ until the container limits are confirmed.
 3. Guard: `nft list table inet task_runner_guard` shows the chain; the uid in `meta skuid` equals `id -u task-runner`.
    `nft list ruleset | grep -c table` before and after the deploy differs only by the new table.
 4. Root-level podman units are off: `systemctl is-enabled podman.socket podman-restart.service
-   podman-auto-update.timer` prints `disabled` (or "not found") for each.
+   podman-auto-update.timer podman-clean-transient.service` prints `disabled` (or "not found") for each.
 5. Podman setup: `sudo -u task-runner env HOME=/var/lib/task-runner XDG_RUNTIME_DIR=/run/task-runner podman
    --cgroup-manager=cgroupfs info --format '{{.Host.CgroupManager}} {{.Host.CgroupsVersion}} {{.Store.RunRoot}}'`
    prints `cgroupfs v2` and a run root under `/run/task-runner`.

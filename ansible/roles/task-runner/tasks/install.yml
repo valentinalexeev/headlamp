@@ -17,17 +17,19 @@
 # The podman package ships ROOT-level units (API socket, restart of root
 # containers, auto-update, transient cleanup). They are unrelated to the
 # rootless service and stay off. Only these units are touched; a unit the
-# installed version does not ship is skipped.
+# installed version does not ship is skipped. podman-restart.service is only
+# disabled, never stopped: stopping it stops every root container that uses
+# restart=always, which would hit other workloads on a shared host.
 - name: Disable the podman package's root-level units
   ansible.builtin.systemd:
-    name: "{{ item }}"
+    name: "{{ item.name }}"
     enabled: false
-    state: stopped
+    state: "{{ item.state | default(omit) }}"
   loop:
-    - podman.socket
-    - podman-restart.service
-    - podman-auto-update.timer
-    - podman-clean-transient.service
+    - {name: podman.socket, state: stopped}
+    - {name: podman-restart.service}
+    - {name: podman-auto-update.timer, state: stopped}
+    - {name: podman-clean-transient.service, state: stopped}
   register: task_runner_podman_units
   failed_when:
     - task_runner_podman_units is failed

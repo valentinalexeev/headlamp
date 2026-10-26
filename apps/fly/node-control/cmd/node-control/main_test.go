@@ -68,7 +68,7 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy" {
+	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,tasks" {
 		t.Fatalf("module order %s", got)
 	}
 	tn, _ := serve(t, env, mods)
@@ -83,6 +83,22 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 	}
 	if tn.PublicListened() {
 		t.Fatal("public listener opened without ENROLL_DB")
+	}
+}
+
+func TestBuildModulesIncludesTasks(t *testing.T) {
+	env := core.MapEnv(map[string]string{"NODES_CONFIG": filepath.Join(t.TempDir(), "absent.json")})
+	mods, err := buildModules(env, http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := mods[len(mods)-1]; last.Name() != "tasks" || mods[len(mods)-2].Name() != "policy" {
+		t.Fatalf("module order %v", names(mods))
+	}
+	// Without its variables the module registers nothing and node-control serves as before.
+	tn, _ := serve(t, env, mods)
+	if code, _ := fetch(t, "http://"+tn.AdminAddr()+"/tasks"); code != 404 {
+		t.Fatalf("tasks route present without its env: %d", code)
 	}
 }
 

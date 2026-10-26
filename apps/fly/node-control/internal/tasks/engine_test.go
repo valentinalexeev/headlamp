@@ -1195,3 +1195,103 @@ func TestEngineShutdownWaitIsBounded(t *testing.T) {
 		t.Fatalf("Run returned after %s without waiting", d)
 	}
 }
+
+// blockRunning keeps every run "running" until its context ends.
+func blockRunning(polled chan<- struct{}) func(context.Context, string, int) (RunStatus, error) {
+	return func(ctx context.Context, _ string, _ int) (RunStatus, error) {
+		select {
+		case polled <- struct{}{}:
+		default:
+		}
+		return RunStatus{State: "running"}, nil
+	}
+}
+
+func TestEngineCancelByOperatorEndsSequence(t *testing.T) {
+	f := newEngFixture(t, oneTask(func(tk *Task) {
+		tk.Retry = Retry{Attempts: 3, Backoff: []Duration{Duration(time.Minute)}}
+		tk.OnFailure = &OnFailure{Notify: Notify{Topic: "TOPIC"}}
+	}))
+	// A scheduled retry sequence is in progress: attempt 2 is due now.
+	pending := TaskState{Attempt: 1, AttemptAt: t0.Add(-time.Second), NextRun: t0.Add(-time.Hour), Streak: 2}
+	if err := f.store.SaveState("job", pending); err != nil {
+		t.Fatal(err)
+	}
+	polled := make(chan struct{}, 1)
+	f.runner.status = blockRunning(polled)
+	f.e.tick(context.Background())
+	<-polled
+	r, ok := f.e.Running("job")
+	if !ok || r.State != RunRunning {
+		t.Fatalf("running = %+v, %v", r, ok)
+	}
+	if err := f.e.Cancel(r.ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	f.e.wait()
+
+	rs := f.runs("job")
+	if len(rs) != 1 || rs[0].ID != r.ID || rs[0].State != RunCancelled || rs[0].Reason != "cancelled by operator" {
+		t.Fatalf("runs = %+v", rs)
+	}
+	st := f.store.State("job")
+	if st.Attempt != 0 || !st.AttemptAt.IsZero() || st.Streak != 2 {
+		t.Fatalf("state after cancel: %+v", st)
+	}
+	if want := t0.Add(time.Hour); !st.NextRun.Equal(want) {
+		t.Fatalf("NextRun = %s, want %s", st.NextRun, want)
+	}
+	if s, fl := f.notifier.counts(); s != 0 || fl != 0 {
+		t.Fatalf("notified on cancel: success=%d failure=%d", s, fl)
+	}
+	if f.runner.cancelCount() != 1 {
+		t.Fatalf("runner cancels = %d", f.runner.cancelCount())
+	}
+	// Nothing is retried: the next due time is the schedule.
+	if next := f.step(); !next.Equal(t0.Add(time.Hour)) || f.runner.startCount() != 1 {
+		t.Fatalf("after cancel: next=%s starts=%d", next, f.runner.startCount())
+	}
+}
+
+func TestEngineCancelManualKeepsFutureNextRun(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	future := t0.Add(30 * time.Minute)
+	if err := f.store.SaveState("job", TaskState{NextRun: future}); err != nil {
+		t.Fatal(err)
+	}
+	polled := make(chan struct{}, 1)
+	f.runner.status = blockRunning(polled)
+	id, err := f.e.Trigger("job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-polled
+	if err := f.e.Cancel(id); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	f.e.wait()
+	if st := f.store.State("job"); !st.NextRun.Equal(future) || st.Attempt != 0 {
+		t.Fatalf("state = %+v", st)
+	}
+	if rs := f.runs("job"); len(rs) != 1 || rs[0].State != RunCancelled {
+		t.Fatalf("runs = %+v", rs)
+	}
+}
+
+func TestEngineCancelUnknownOrFinishedRun(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	if err := f.e.Cancel("nope"); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("unknown: %v", err)
+	}
+	id, err := f.e.Trigger("job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.e.wait()
+	if rs := f.runs("job"); len(rs) != 1 || rs[0].State != RunSucceeded {
+		t.Fatalf("runs = %+v", rs)
+	}
+	if err := f.e.Cancel(id); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("finished: %v", err)
+	}
+}

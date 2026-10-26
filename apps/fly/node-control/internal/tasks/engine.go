@@ -24,6 +24,12 @@ var (
 	ErrUnknownTask = errors.New("unknown task")
 	// ErrStopped: the engine has shut down and accepts no new work.
 	ErrStopped = errors.New("task engine stopped")
+	// ErrRunNotFound: no attempt with that run id is executing in this engine.
+	ErrRunNotFound = errors.New("run is not executing")
+
+	// errCancelledByOperator is the cause of an attempt context cancelled by
+	// Cancel, which tells it apart from a shutdown.
+	errCancelledByOperator = errors.New("cancelled by operator")
 )
 
 const (
@@ -97,10 +103,11 @@ type Engine struct {
 
 	mu        sync.Mutex
 	closed    bool
-	active    map[string]*Run      // task -> record of the attempt executing now
-	busy      map[string]int       // node name -> attempts executing on it
-	manual    map[string]bool      // task -> its current sequence was started by Trigger
-	notBefore map[string]time.Time // task -> startup delay end
+	active    map[string]*Run                    // task -> record of the attempt executing now
+	busy      map[string]int                     // node name -> attempts executing on it
+	manual    map[string]bool                    // task -> its current sequence was started by Trigger
+	stops     map[string]context.CancelCauseFunc // task -> cancels the executing attempt
+	notBefore map[string]time.Time               // task -> startup delay end
 }
 
 func NewEngine(d Deps) *Engine {
@@ -123,7 +130,7 @@ func NewEngine(d Deps) *Engine {
 		startSpread: defaultStartSpread, shutdownWait: defaultShutdownWait, cancelBudget: defaultCancelBudget,
 		base: base, cancelBase: cancel,
 		active: map[string]*Run{}, busy: map[string]int{}, manual: map[string]bool{},
-		notBefore: map[string]time.Time{},
+		stops: map[string]context.CancelCauseFunc{}, notBefore: map[string]time.Time{},
 	}
 }
 
@@ -397,16 +404,42 @@ func (e *Engine) endSequence(task string) {
 }
 
 func (e *Engine) launch(ctx context.Context, task, id string, n int, manual bool) {
+	actx, stop := context.WithCancelCause(ctx)
+	e.mu.Lock()
+	e.stops[task] = stop
+	e.mu.Unlock()
 	go func() {
 		defer e.wg.Done()
 		defer func() {
 			e.mu.Lock()
 			delete(e.active, task)
+			delete(e.stops, task)
 			e.mu.Unlock()
+			stop(nil)
 			e.Reload()
 		}()
-		e.attempt(ctx, task, id, n, manual)
+		e.attempt(actx, task, id, n, manual)
 	}()
+}
+
+// Cancel stops the executing attempt with that run id. The attempt cancels the
+// run on its node (best effort), records it as cancelled and ends its sequence:
+// no retry, no streak, no failure notification.
+func (e *Engine) Cancel(runID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for task, r := range e.active {
+		if r.ID != runID {
+			continue
+		}
+		stop, ok := e.stops[task]
+		if !ok {
+			break // claimed but not launched yet
+		}
+		stop(errCancelledByOperator)
+		return nil
+	}
+	return ErrRunNotFound
 }
 
 func (e *Engine) setActive(r Run) {
@@ -441,6 +474,7 @@ type outcome struct {
 	reason   string
 	result   map[string]any
 	shutdown bool // interrupted by shutdown: neither a success nor a failure
+	operator bool // cancelled by the operator: ends the sequence quietly
 }
 
 func failed(reason string) outcome { return outcome{state: RunFailed, reason: reason} }
@@ -462,6 +496,9 @@ func (e *Engine) attempt(ctx context.Context, task, id string, n int, manual boo
 
 	var secretValues []string
 	out := e.execute(ctx, task, t, &run, &secretValues)
+	if out.shutdown && errors.Is(context.Cause(ctx), errCancelledByOperator) {
+		out = outcome{state: RunCancelled, reason: errCancelledByOperator.Error(), operator: true}
+	}
 	e.finish(ctx, task, t, run, out, secretValues, manual)
 }
 
@@ -671,6 +708,13 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 	case out.shutdown:
 		// Not counted: Attempt/AttemptAt stay, so the next start retries the
 		// same attempt number, and nobody is told about a deploy.
+	case out.operator:
+		// The operator ended the sequence: no retry, no streak, no message.
+		e.updateState(task, func(s *TaskState) {
+			s.Attempt, s.AttemptAt = 0, time.Time{}
+			reschedule(s)
+		})
+		e.endSequence(task)
 	case run.State == RunSucceeded:
 		e.updateState(task, func(s *TaskState) {
 			s.LastSuccess, s.Streak, s.Attempt, s.AttemptAt = now, 0, 0, time.Time{}

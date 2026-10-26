@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -91,7 +92,9 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "enroll-import" || os.Args[1] == "enroll-export") {
-		run := runEnrollImport
+		run := func(args []string, env core.Env, out io.Writer) error {
+			return runEnrollImport(args, env, out, os.Stdin)
+		}
 		if os.Args[1] == "enroll-export" {
 			run = runEnrollExport
 		}

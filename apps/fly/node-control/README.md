@@ -111,9 +111,19 @@ link hashes are carried over verbatim, so issued subscription secrets and one-ti
 overwrites records with the same ids and never deletes others. An interrupted import leaves no device counter, so the
 store still reads as empty and the import can simply be run again.
 
-Backup: `node-control enroll-export [-to <file>]` writes the devices, UUIDs and approvals as JSON (one-time links are not
-included: Redis cannot list them without a scan). The output holds device names, owners and credentials; encrypt it
-before it is stored anywhere.
+Backup and restore:
+- `node-control enroll-export [-to <file>]` writes the devices, UUIDs and approvals as JSON (stdout by default; one-time
+  links are not included: Redis cannot list them without a scan).
+- `node-control enroll-import -json <file|->` restores such a file into an empty Redis (`-` reads stdin, so an encrypted
+  backup can be piped in without a plaintext file) and verifies the copy. Exactly one of `-from` and `-json` is given;
+  the JSON is checked for shape first (unknown fields, duplicate ids, unknown modes, empty UUIDs are refused, and error
+  texts never echo the file).
+- `node-control enroll-export -format sqlite -to <new file>` writes a new SQLite enrolment database that the SQLite store
+  (and so a release without Redis support) opens as it is, with the id counter kept ahead of every id ever issued. It
+  refuses an existing file and creates it mode 0600. Use it to roll back.
+
+The output of both exports holds device names, owners and credentials: treat it as a secret and encrypt it before it is
+stored anywhere.
 
 ## Node discovery
 

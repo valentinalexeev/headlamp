@@ -65,7 +65,8 @@ const staleGrace = time.Minute
 // isStale reports that a task is overdue for a success:
 //   - It has succeeded before: its last success is older than 2 x every.
 //   - It never succeeded: its first scheduled time has passed. That is the case
-//     when it already has a finished run (it ran and did not succeed), or when
+//     when it already has a real failure (a failed or lost run that was not cut
+//     short by a shutdown or restart; see realFailure), or when
 //     its NextRun is set and more than a minute in the past with no run in
 //     flight (it should have started and has not). A new task that never ran
 //     (zero NextRun, no history) is not stale.
@@ -77,6 +78,15 @@ func isStale(now time.Time, every time.Duration, st TaskState, running, ranBefor
 		return true
 	}
 	return !st.NextRun.IsZero() && !running && now.Sub(st.NextRun) > staleGrace
+}
+
+// realFailure is a run that tried and failed. Operator cancels and runs cut
+// short by a shutdown or a restart say nothing about the task itself.
+func realFailure(r Run) bool {
+	if r.State != RunFailed && r.State != RunLost {
+		return false
+	}
+	return r.Reason != "shutdown" && r.Reason != "node-control restarted"
 }
 
 // buildTaskView assembles one task from the config, its state, its history
@@ -103,7 +113,7 @@ func buildTaskView(now time.Time, id string, t Task, st TaskState, runs []Run, a
 				v.LastResult = map[string]any{}
 			}
 		}
-		if r.State != RunRunning && r.State != RunQueued {
+		if realFailure(r) {
 			ranBefore = true
 		}
 	}

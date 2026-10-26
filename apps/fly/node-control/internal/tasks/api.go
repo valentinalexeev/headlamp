@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"sort"
@@ -40,7 +41,8 @@ type api struct{ m *Module }
 func (a *api) register(mux *http.ServeMux, gate func(http.Handler) http.Handler) {
 	plain := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(h)) }
 	body := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(authz.RequireJSON(h))) }
-	plain("GET /tasks", a.list)
+	plain("GET /tasks", a.page)
+	plain("GET /tasks.json", a.list)
 	plain("GET /tasks/{id}", a.task)
 	body("POST /tasks/{id}/run", a.trigger)
 	plain("GET /tasks/{id}/runs", a.runs)
@@ -89,20 +91,34 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64, dst any, stri
 	if strict {
 		dec.DisallowUnknownFields()
 	}
-	if err := dec.Decode(dst); err != nil {
-		var mbe *http.MaxBytesError
-		if errors.As(err, &mbe) {
-			fail(w, http.StatusRequestEntityTooLarge, "request body too large")
-		} else {
-			fail(w, http.StatusUnprocessableEntity, "the body must be a JSON object with the expected fields")
+	err := dec.Decode(dst)
+	if err == nil {
+		// Exactly one JSON document: anything after it but whitespace is refused.
+		var extra json.RawMessage
+		if err = dec.Decode(&extra); err == io.EOF {
+			return true
 		}
-		return false
+		var mbe *http.MaxBytesError
+		if !errors.As(err, &mbe) {
+			fail(w, http.StatusUnprocessableEntity, "trailing data")
+			return false
+		}
 	}
-	return true
+	var mbe *http.MaxBytesError
+	if errors.As(err, &mbe) {
+		fail(w, http.StatusRequestEntityTooLarge, "request body too large")
+	} else {
+		fail(w, http.StatusUnprocessableEntity, "the body must be a JSON object with the expected fields")
+	}
+	return false
 }
 
-func wantsHTML(r *http.Request) bool {
-	return strings.Contains(r.Header.Get("Accept"), "text/html")
+// capName shortens a client-supplied name before it is echoed in an error.
+func capName(s string) string {
+	if len(s) > 64 {
+		return strings.ToValidUTF8(s[:64], "") + "..."
+	}
+	return s
 }
 
 // --- tasks and runs ----------------------------------------------------------
@@ -115,18 +131,19 @@ func (a *api) view(s *Store, e *Engine, id string, t Task) taskView {
 	return buildTaskView(a.m.now(), id, t, s.State(id), s.Runs(id), active)
 }
 
-// list serves the task list as JSON, or the page to a browser navigation.
-func (a *api) list(w http.ResponseWriter, r *http.Request) {
-	if wantsHTML(r) {
-		h := w.Header()
-		h.Set("Content-Type", "text/html; charset=utf-8")
-		h.Set("Cache-Control", "no-store")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")
-		w.Write([]byte(placeholderPage))
-		return
-	}
+// page serves the tasks page (always HTML, also while degraded).
+func (a *api) page(w http.ResponseWriter, _ *http.Request) {
+	h := w.Header()
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")
+	w.Write([]byte(placeholderPage))
+}
+
+// list serves the task list (always JSON).
+func (a *api) list(w http.ResponseWriter, _ *http.Request) {
 	s, e, ok := a.open(w)
 	if !ok {
 		return
@@ -243,7 +260,9 @@ func (a *api) run(w http.ResponseWriter, r *http.Request) {
 
 // cancel: 204 when the executing attempt was cancelled; 409 for a run that is
 // recorded as running or queued but is not executing in this process (it
-// cannot be cancelled from here); 404 for an unknown or finished run.
+// cannot be cancelled from here); 404 for an unknown or finished run. A cancel
+// that races an attempt which has just finished may still answer 204 while the
+// run ends up recorded as succeeded (or failed): the outcome already won.
 func (a *api) cancel(w http.ResponseWriter, r *http.Request) {
 	s, e, ok := a.open(w)
 	if !ok {
@@ -387,7 +406,7 @@ func (a *api) putConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	for n, text := range in.Scripts {
 		if !scriptNameRe.MatchString(n) {
-			fail(w, http.StatusUnprocessableEntity, fmt.Sprintf("script name %q must match %s", n, scriptNameRe))
+			fail(w, http.StatusUnprocessableEntity, fmt.Sprintf("script name %q must match %s", capName(n), scriptNameRe))
 			return
 		}
 		if len(text) > maxScriptBytes {

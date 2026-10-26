@@ -296,7 +296,7 @@ func TestTasksDegradedWhenRedisDown(t *testing.T) {
 	if rec := get("/other"); rec.Code != 200 {
 		t.Fatalf("other module: %d", rec.Code)
 	}
-	for _, p := range []string{"/tasks", "/tasks/job", "/tasks/job/runs", "/runs/abc", "/tasks/config", "/tasks/secrets"} {
+	for _, p := range []string{"/tasks.json", "/tasks/job", "/tasks/job/runs", "/runs/abc", "/tasks/config", "/tasks/secrets"} {
 		rec := get(p)
 		if rec.Code != 503 || decodeMap(t, rec)["error"] != "degraded" {
 			t.Fatalf("GET %s = %d %s", p, rec.Code, rec.Body)
@@ -313,7 +313,6 @@ func TestTasksDegradedWhenRedisDown(t *testing.T) {
 	// The placeholder page is served regardless.
 	req = httptest.NewRequest("GET", "/tasks", nil)
 	req.RemoteAddr = aliceAddr
-	req.Header.Set("Accept", "text/html")
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
@@ -336,7 +335,7 @@ func TestTasksRequireAllowedUser(t *testing.T) {
 	h := newModHarness(t, nil)
 	h.waitOpen()
 	routes := []struct{ method, path string }{
-		{"GET", "/tasks"}, {"GET", "/tasks/job"}, {"POST", "/tasks/job/run"}, {"GET", "/tasks/job/runs"},
+		{"GET", "/tasks"}, {"GET", "/tasks.json"}, {"GET", "/tasks/job"}, {"POST", "/tasks/job/run"}, {"GET", "/tasks/job/runs"},
 		{"GET", "/runs/x"}, {"DELETE", "/runs/x"}, {"GET", "/tasks/config"}, {"PUT", "/tasks/config"},
 		{"PUT", "/tasks/secrets"}, {"GET", "/tasks/secrets"},
 	}
@@ -355,8 +354,10 @@ func TestTasksRequireAllowedUser(t *testing.T) {
 	if rec.Code != 422 {
 		t.Fatalf("form PUT = %d", rec.Code)
 	}
-	if rec := h.alice("GET", "/tasks", ""); rec.Code != 200 {
-		t.Fatalf("alice GET /tasks = %d %s", rec.Code, rec.Body)
+	for _, p := range []string{"/tasks", "/tasks.json"} {
+		if rec := h.alice("GET", p, ""); rec.Code != 200 {
+			t.Fatalf("alice GET %s = %d %s", p, rec.Code, rec.Body)
+		}
 	}
 }
 
@@ -595,7 +596,7 @@ func TestSecretsNeverReturned(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.m.engineFor().wait()
-	for _, p := range []string{"/tasks", "/tasks/job", "/tasks/job/runs", "/tasks/config", "/tasks/secrets"} {
+	for _, p := range []string{"/tasks", "/tasks.json", "/tasks/job", "/tasks/job/runs", "/tasks/config", "/tasks/secrets"} {
 		rec := h.alice("GET", p, "")
 		if rec.Code != 200 || strings.Contains(rec.Body.String(), "SECRETVALUE") {
 			t.Fatalf("GET %s = %d leaks: %s", p, rec.Code, rec.Body)
@@ -770,7 +771,7 @@ func TestTaskListView(t *testing.T) {
 		NextRun: time.Date(2030, 1, 1, 1, 0, 0, 0, time.UTC), Streak: 3}); err != nil {
 		t.Fatal(err)
 	}
-	rec := h.alice("GET", "/tasks", "")
+	rec := h.alice("GET", "/tasks.json", "")
 	var list []map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || len(list) != 1 {
 		t.Fatalf("%s: %v", rec.Body, err)
@@ -783,5 +784,93 @@ func TestTaskListView(t *testing.T) {
 	}
 	if _, ok := v["stale"].(bool); !ok {
 		t.Fatalf("stale missing: %v", v)
+	}
+}
+
+func TestTasksPageAndListNeverMix(t *testing.T) {
+	h := newModHarness(t, nil)
+	h.waitOpen()
+	h.pushSimple()
+	for _, accept := range []string{"text/html", "*/*", "application/json, text/html", ""} {
+		get := func(path string) *httptest.ResponseRecorder {
+			req := httptest.NewRequest("GET", path, nil)
+			req.RemoteAddr = aliceAddr
+			if accept != "" {
+				req.Header.Set("Accept", accept)
+			}
+			rec := httptest.NewRecorder()
+			h.mux.ServeHTTP(rec, req)
+			return rec
+		}
+		page := get("/tasks")
+		if page.Code != 200 || !strings.HasPrefix(page.Header().Get("Content-Type"), "text/html") ||
+			strings.HasPrefix(strings.TrimSpace(page.Body.String()), "[") {
+			t.Fatalf("Accept %q: GET /tasks = %d %q %s", accept, page.Code, page.Header().Get("Content-Type"), page.Body)
+		}
+		list := get("/tasks.json")
+		var v []map[string]any
+		if list.Code != 200 || list.Header().Get("Content-Type") != "application/json" ||
+			json.Unmarshal(list.Body.Bytes(), &v) != nil || len(v) != 1 {
+			t.Fatalf("Accept %q: GET /tasks.json = %d %q %s", accept, list.Code, list.Header().Get("Content-Type"), list.Body)
+		}
+	}
+}
+
+func TestTrailingDataRejected(t *testing.T) {
+	h := newModHarness(t, nil)
+	store := h.waitOpen()
+	cfg := configBody(`"job":{"script":"check-balance.js","target":{"node":"n1"},"schedule":{"every":"1h"}}`,
+		map[string]string{"check-balance.js": scriptA})
+	for _, c := range []struct{ path, body string }{
+		{"/tasks/config", cfg + ` {"x":1}`},
+		{"/tasks/config?dry_run=1", cfg + `junk`},
+		{"/tasks/secrets", `{"A":"b"} {"C":"d"}`},
+		{"/tasks/secrets", `{"A":"b"}]`},
+	} {
+		rec := h.alice("PUT", c.path, c.body)
+		if rec.Code != 422 || decodeMap(t, rec)["error"] != "trailing data" {
+			t.Fatalf("%s %q: %d %s", c.path, c.body, rec.Code, rec.Body)
+		}
+	}
+	if store.Config() != nil || len(store.SecretNames()) != 0 {
+		t.Fatal("stored despite trailing data")
+	}
+	// Trailing whitespace is fine.
+	if rec := h.alice("PUT", "/tasks/secrets", "{\"A\":\"b\"}\n \t"); rec.Code != 200 {
+		t.Fatalf("whitespace: %d %s", rec.Code, rec.Body)
+	}
+	// A rejected script name is echoed at most 64 bytes long.
+	long := strings.Repeat("y", 300) + "/"
+	rec := h.alice("PUT", "/tasks/config", configBody(`"job":{"script":"x.js","target":{"node":"n1"},"schedule":{"every":"1h"}}`,
+		map[string]string{long: scriptA}))
+	if rec.Code != 422 || strings.Contains(rec.Body.String(), strings.Repeat("y", 65)) {
+		t.Fatalf("long name: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTaskViewStaleCountsOnlyRealFailures(t *testing.T) {
+	now := time.Now()
+	task := Task{Script: "check-balance.js", Target: Target{Node: "n1"}, Schedule: Schedule{Every: Duration(time.Hour)}}
+	future := TaskState{NextRun: now.Add(time.Hour)}
+	past := TaskState{NextRun: now.Add(-2 * time.Minute)}
+	ended := now.Add(-3 * time.Minute)
+	cases := []struct {
+		name string
+		st   TaskState
+		runs []Run
+		want bool
+	}{
+		{"only an operator-cancelled run", future, []Run{{ID: "c", State: RunCancelled, Reason: "cancelled by operator", Ended: ended}}, false},
+		{"only a shutdown run", future, []Run{{ID: "s", State: RunFailed, Reason: "shutdown", Ended: ended}}, false},
+		{"only a restart casualty", future, []Run{{ID: "l", State: RunLost, Reason: "node-control restarted", Ended: ended}}, false},
+		{"a real failure, next run ahead", future, []Run{{ID: "f", State: RunFailed, Reason: "timeout", Ended: ended}}, true},
+		{"a lost run", future, []Run{{ID: "l", State: RunLost, Reason: "runner unreachable", Ended: ended}}, true},
+		{"a real failure and a past first schedule", past, []Run{{ID: "f", State: RunFailed, Reason: "no eligible node", Ended: ended}}, true},
+		{"cancelled only but first schedule long past", past, []Run{{ID: "c", State: RunCancelled, Reason: "cancelled by operator", Ended: ended}}, true},
+	}
+	for _, c := range cases {
+		if got := buildTaskView(now, "job", task, c.st, c.runs, nil).Stale; got != c.want {
+			t.Errorf("%s: stale = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

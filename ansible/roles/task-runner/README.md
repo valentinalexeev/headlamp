@@ -65,6 +65,7 @@ reaches the node. On a fresh host the steps that need the service user may fail 
 | `task_runner_pids_limit` / `task_runner_tasks_max` | `512` / `2048` | Per container (`RUNNER_PIDS_LIMIT`) / whole service (`TasksMax`). |
 | `task_runner_min_free_mb` / `task_runner_min_free_disk_mb` | `1500` / `6000` | Free memory without page cache (preflight); free disk on the file system of the state dir (checked in the image step, only when an image has to be built or loaded). |
 | `task_runner_guard_resolvers` | `["100.100.100.100", "fd7a:115c:a1e0::53"]` | Resolvers the service user may query on port 53 although they are in a blocked range. |
+| `task_runner_guard_extra_drop` | `[]` | IPv4/IPv6 addresses or CIDRs the service user may never reach, dropped after the DNS accepts. List the node's public address here when it is not configured on an interface (1:1 NAT, see Guard). |
 | `task_runner_guard_check_interval` | `30s` | How often the guard check timer looks for the table. |
 | `task_runner_protect_kernel_tunables` | `false` | systemd `ProtectKernelTunables=`; off because it very likely breaks every run (see Service hardening). |
 | `task_runner_image_async` / `task_runner_image_poll` | `3600` / `30` | Seconds allowed for a build or load, and the poll interval. |
@@ -76,11 +77,13 @@ Fixed layout (variables exist, change only with reason): user `task-runner`, sta
 ## What it does
 
 1. **Preflight** (read-only): facts, Debian family with apt, x86_64 or aarch64, required variables, token shape, listen
-   address in the tailnet ranges and present on the node, limits, resolvers, base image digest, the source on the
+   address in the tailnet ranges and present on the node, limits, resolvers and `task_runner_guard_extra_drop`, base image digest, the source on the
    control host, Go (unless `task_runner_binary`), free memory and disk, every blocked-range resolver of
    `/etc/resolv.conf` listed in `task_runner_guard_resolvers`. Free memory fails the play only when the service is not
    running yet (otherwise a warning); free disk is checked in the image step, only when the image has to be built or
-   loaded. Works out the image tag.
+   loaded. Warns (never fails) when the inventory address (`ansible_host`) is an IP that is not on any interface of the
+   node and not in `task_runner_guard_extra_drop` (a likely 1:1-NAT public address the guard would not cover).
+   Works out the image tag.
 2. **Install**: `podman`, `uidmap`, `passt`, `acl` (Ansible needs `setfacl` to run commands as the service user); the
    package's root-level units (`podman.socket`, `podman-restart.service`, `podman-auto-update.timer`,
    `podman-clean-transient.service`) are disabled where they exist (and stopped, except `podman-restart.service`, see the
@@ -180,9 +183,11 @@ task-runner>` (numeric, looked up by the role; it refuses uid 0) to a chain that
 1. accepts `ct state established,related` (replies on connections the runner accepted on its tailnet address; a
    connection the user opened is never established unless its first packet passed);
 2. accepts UDP and TCP port 53 to `task_runner_guard_resolvers`;
-3. drops every address of this host (`fib daddr type local`, IPv4 and IPv6): loopback and the node's own public or
-   global addresses on any interface, so a `0.0.0.0`/`::` listener cannot be reached through them, nor through pasta's
-   `host.containers.internal` mapping (podman 5 maps 169.254.1.2 in the container to the host);
+3. drops every address configured on an interface of this host (`fib daddr type local`, IPv4 and IPv6): loopback and
+   the node's own addresses on any interface, so a `0.0.0.0`/`::` listener cannot be reached through them, nor through
+   pasta's `host.containers.internal` mapping (podman 5 maps 169.254.1.2 in the container to the host). A public address
+   that is NOT on an interface (a cloud's 1:1 NAT: `ip -o addr` shows only the private address) is not local to the
+   kernel and is not covered: list it in `task_runner_guard_extra_drop`, whose entries are dropped right after this rule;
 4. drops everything to `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`,
    `192.168.0.0/16`, `224.0.0.0/4`, `255.255.255.255`, `::1`, `fc00::/7` (covers the tailnet's `fd7a:115c:a1e0::/48`),
    `fe80::/10` and `ff00::/8`;
@@ -207,8 +212,10 @@ for the ingress guard, `task-runner-guard-check.timer` reapplies it within `task
 with `journalctl -t task-runner-guard-check`); the gap is at most one interval. Unlike `xray.service`, the runner unit
 has no `IPAddressDeny=` second layer: it filters both directions for the whole cgroup, so it would also cut the API on
 the tailnet address, and with the containers in the same cgroup it would hit their internal traffic (pasta's DNS
-forwarder sits at a link-local address inside the container). The host's own addresses are covered by the `fib`
-rule; besides the flush window, the only traffic the guard lets through to a blocked address is a flow that was
+forwarder sits at a link-local address inside the container). The addresses configured on the host's interfaces are
+covered by the `fib` rule; a NAT'd public address that is not on an interface is covered only when it is listed in
+`task_runner_guard_extra_drop` (otherwise a container can hairpin to the host's public listeners through it). Besides
+the flush window and that case, the only traffic the guard lets through to a blocked address is a flow that was
 already established before the rule set was (re)loaded.
 
 ## Shared hosts
@@ -235,6 +242,8 @@ until the container limits are confirmed.
 2. Services: `systemctl status task-runner task-runner-guard task-runner-guard-check.timer`;
    `journalctl -u task-runner -n 50` shows `listening` with the tailnet address.
 3. Guard: `nft list table inet task_runner_guard` shows the chain; the uid in `meta skuid` equals `id -u task-runner`.
+   `ip -o addr` shows the node's public address on an interface; if it does not (1:1 NAT), add it to
+   `task_runner_guard_extra_drop`, rerun with `--tags guard` and check the table lists it.
    `nft list ruleset | grep -c table` before and after the deploy differs only by the new table.
 4. Root-level podman units are off: `systemctl is-enabled podman.socket podman-restart.service
    podman-auto-update.timer podman-clean-transient.service` prints `disabled` (or "not found") for each.

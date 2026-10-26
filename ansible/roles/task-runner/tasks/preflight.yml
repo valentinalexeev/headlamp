@@ -126,11 +126,19 @@
         + (task_runner_guard_resolvers | select('match', '^[0-9a-f]*:[0-9a-f:]+\\Z') | list | length)
         == task_runner_guard_resolvers | length
       - task_runner_guard_check_interval is regex('^[0-9]+(s|min|h)\\Z')
+      - task_runner_guard_extra_drop is sequence and task_runner_guard_extra_drop is not string
+      - >-
+        (task_runner_guard_extra_drop | select('match', '^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/([0-9]|[12][0-9]|3[0-2]))?\\Z') | list | length)
+        + (task_runner_guard_extra_drop | select('match', '^[0-9a-f]*:[0-9a-f:]+(/([0-9]|[1-9][0-9]|1[01][0-9]|12[0-8]))?\\Z') | list | length)
+        == task_runner_guard_extra_drop | length
     fail_msg: >-
       task-runner: task_runner_guard_resolvers must be a non-empty list of IPv4
       or lowercase IPv6 addresses (resolvers the service user may query on port
-      53); task_runner_guard_check_interval a systemd time span like 30s.
-      Got task_runner_guard_resolvers={{ task_runner_guard_resolvers }}.
+      53); task_runner_guard_check_interval a systemd time span like 30s;
+      task_runner_guard_extra_drop a list (may be empty) of IPv4 or lowercase
+      IPv6 addresses or CIDRs.
+      Got task_runner_guard_resolvers={{ task_runner_guard_resolvers }},
+      task_runner_guard_extra_drop={{ task_runner_guard_extra_drop }}.
     quiet: true
 
 - name: Check the base image is pinned by digest
@@ -336,3 +344,30 @@
       {{ task_runner_resolvers
          | select('match', '^(0[.]|10[.]|127[.]|169[.]254[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|192[.]168[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.]|::1$|f[cd][0-9a-f]{0,2}:|fe[89ab][0-9a-f]?:)')
          | reject('in', task_runner_guard_resolvers) | list }}
+
+# Best effort: on a 1:1-NAT cloud the public address is not on any interface,
+# so `fib daddr type local` does not cover it. Warn (never fail) when the
+# inventory address is not one of the node's interface addresses and is not
+# listed in task_runner_guard_extra_drop. Skipped when the address is unknown
+# or not an IP literal.
+- name: Warn when the inventory address is not covered by the guard
+  ansible.builtin.debug:
+    msg: >-
+      task-runner WARNING: the inventory address {{ task_runner_public_addr }} is
+      not configured on any interface of this node (1:1 NAT?), so the guard's
+      "fib daddr type local" rule does not cover it and a container could reach
+      this host's own services through it. Add it to task_runner_guard_extra_drop
+      (check with `ip -o addr`).
+  when:
+    - task_runner_public_addr | length > 0
+    - >-
+      task_runner_public_addr is regex('^[0-9]{1,3}(\\.[0-9]{1,3}){3}\\Z')
+      or task_runner_public_addr is regex('^[0-9a-fA-F]*:[0-9a-fA-F:]+\\Z')
+    - (task_runner_public_addr | lower) not in task_runner_host_addrs
+    - task_runner_public_addr not in task_runner_guard_extra_drop
+    - (task_runner_public_addr ~ '/32') not in task_runner_guard_extra_drop
+  vars:
+    task_runner_public_addr: "{{ (ansible_host | default('')) | string | trim }}"
+    task_runner_host_addrs: >-
+      {{ ((ansible_facts.all_ipv4_addresses | default([]))
+          + (ansible_facts.all_ipv6_addresses | default([]))) | map('lower') | list }}

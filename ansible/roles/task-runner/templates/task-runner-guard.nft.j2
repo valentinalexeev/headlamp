@@ -4,8 +4,10 @@
 # Guard for the task runner (see the role README "Guard"). Packets sent by uid
 # {{ task_runner_uid if task_runner_uid else task_runner_user }} ({{ task_runner_user }}: the runner and, through rootless user-space
 # networking, every container it starts) may not reach any address of this
-# host (fib: loopback and the node's own public/global addresses, which also
-# covers pasta's host.containers.internal mapping), RFC1918, CGNAT/tailnet
+# host configured on an interface (fib: loopback and the node's own
+# addresses, which also covers pasta's host.containers.internal mapping; a
+# 1:1-NAT public address is not on an interface and must be listed in
+# task_runner_guard_extra_drop), RFC1918, CGNAT/tailnet
 # (100.64.0.0/10), link-local, multicast/broadcast or IPv6 ULA/link-local/
 # multicast, even when a hostname resolved to such an address. Exceptions,
 # before the drops: replies on connections the runner ACCEPTED on its tailnet
@@ -15,6 +17,8 @@
 # public internet) is accepted. Other users are untouched.
 {% set v4 = task_runner_guard_resolvers | select('match', '^[0-9.]+$') | list %}
 {% set v6 = task_runner_guard_resolvers | reject('match', '^[0-9.]+$') | list %}
+{% set extra4 = task_runner_guard_extra_drop | default([]) | select('match', '^[0-9./]+$') | list %}
+{% set extra6 = task_runner_guard_extra_drop | default([]) | reject('match', '^[0-9./]+$') | list %}
 # Atomic replace: create (no-op if present), delete, define.
 table inet task_runner_guard
 delete table inet task_runner_guard
@@ -35,9 +39,17 @@ table inet task_runner_guard {
 		ip6 daddr { {{ v6 | unique | join(', ') }} } udp dport 53 accept
 		ip6 daddr { {{ v6 | unique | join(', ') }} } tcp dport 53 accept
 {% endif %}
-		# Any address configured on this host (IPv4 and IPv6), whatever the
-		# interface: closes 0.0.0.0/:: listeners reached via the public address.
+		# Any address configured on an interface of this host (IPv4 and IPv6):
+		# closes 0.0.0.0/:: listeners reached through those addresses.
 		fib daddr type local drop
+		# Addresses of this host that are not on an interface (a 1:1-NAT
+		# public address), from task_runner_guard_extra_drop.
+{% if extra4 %}
+		ip daddr { {{ extra4 | unique | join(', ') }} } drop
+{% endif %}
+{% if extra6 %}
+		ip6 daddr { {{ extra6 | unique | join(', ') }} } drop
+{% endif %}
 		ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 255.255.255.255 } drop
 		# fc00::/7 also covers the tailnet range fd7a:115c:a1e0::/48 (listing
 		# both would be an overlapping-interval error in an anonymous set).

@@ -88,6 +88,12 @@ task_runner_guard_file: /etc/task-runner-guard.nft
 # (127.0.0.53) if /etc/resolv.conf points at it; preflight fails when a
 # blocked-range resolver from /etc/resolv.conf is missing here.
 task_runner_guard_resolvers: ["100.100.100.100", "fd7a:115c:a1e0::53"]
+# Extra destinations the service user may never reach: IPv4/IPv6 addresses or
+# CIDRs. The guard already drops every address configured on an interface of
+# this host (fib daddr type local); on a 1:1-NAT cloud the node's public
+# address is NOT on any interface, so list it here (`ip -o addr` shows whether
+# it is configured). Default: none.
+task_runner_guard_extra_drop: []
 # How often the guard check timer verifies the table exists (systemd time span).
 task_runner_guard_check_interval: 30s
 task_runner_nft_bin: /usr/sbin/nft

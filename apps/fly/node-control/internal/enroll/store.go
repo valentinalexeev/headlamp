@@ -40,7 +40,10 @@ CREATE TABLE IF NOT EXISTS devices (
     client TEXT NOT NULL,
     expires_at INTEGER NOT NULL,
     revoked INTEGER NOT NULL DEFAULT 0,
-    secret_epoch INTEGER NOT NULL DEFAULT 0
+    secret_epoch INTEGER NOT NULL DEFAULT 0,
+    enrolled_at INTEGER NOT NULL DEFAULT 0,
+    enrol_count INTEGER NOT NULL DEFAULT 0,
+    last_active INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS device_uuids (
     device_id INTEGER NOT NULL REFERENCES devices(id),
@@ -74,6 +77,12 @@ type Device struct {
 	ExpiresAt int64
 	Revoked   bool
 	UUIDs     map[string]string // mode -> uuid
+
+	// Activity, never client addresses: when a one-time link of the device was last spent and how often, and when its
+	// traffic last grew (unix seconds, 0 = never). Not secrets.
+	EnrolledAt int64
+	Enrolments int64
+	LastActive int64
 }
 
 // Credential is one entry of the set pushed to the ingress agent (PUT /v1/credentials body
@@ -87,6 +96,7 @@ type Credential struct {
 // Store is the enrolment store.
 type Store struct {
 	db           *sql.DB
+	noActivity   bool // a read-only copy of a database from before the activity columns: they read as 0
 	key          []byte
 	clock        func() time.Time
 	legacyHash   bool
@@ -135,7 +145,14 @@ func OpenStoreReadOnly(path string, secretKey []byte, clock func() time.Time) (*
 		db.Close()
 		return nil, fmt.Errorf("open enrolment db: %w", err)
 	}
-	return &Store{db: db, key: append([]byte(nil), secretKey...), clock: clock, secretHashFn: func() string { return randHex(16) }}, nil
+	s := &Store{db: db, key: append([]byte(nil), secretKey...), clock: clock, secretHashFn: func() string { return randHex(16) }}
+	if ok, err := s.hasColumn(context.Background(), "devices", "last_active"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open enrolment db: %w", err)
+	} else {
+		s.noActivity = !ok
+	}
+	return s, nil
 }
 
 func (s *Store) init() error {
@@ -145,6 +162,11 @@ func (s *Store) init() error {
 	}
 	for col, decl := range map[string]string{"node_id": "INTEGER NOT NULL DEFAULT 0", "machine_key": "TEXT NOT NULL DEFAULT ''"} {
 		if err := s.addColumnIfMissing(ctx, "ingress_approvals", col, decl); err != nil {
+			return err
+		}
+	}
+	for _, col := range []string{"enrolled_at", "enrol_count", "last_active"} {
+		if err := s.addColumnIfMissing(ctx, "devices", col, "INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return err
 		}
 	}
@@ -221,15 +243,24 @@ type queryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-const deviceCols = "id, name, owner, client, expires_at, revoked"
+const deviceColsNew = "id, name, owner, client, expires_at, revoked, enrolled_at, enrol_count, last_active"
 
-// scanDevices reads device rows (deviceCols) and attaches their UUIDs.
+// deviceColumns is the column list every device query uses; a read-only copy of an old database reads the activity
+// columns as 0.
+func (s *Store) deviceColumns(prefix string) string {
+	if s.noActivity {
+		return prefix + "id, " + prefix + "name, " + prefix + "owner, " + prefix + "client, " + prefix + "expires_at, " + prefix + "revoked, 0, 0, 0"
+	}
+	return prefix + strings.ReplaceAll(deviceColsNew, ", ", ", "+prefix)
+}
+
+// scanDevices reads device rows (deviceColumns) and attaches their UUIDs.
 func scanDevices(ctx context.Context, q queryer, rows *sql.Rows) ([]Device, error) {
 	var out []Device
 	for rows.Next() {
 		var d Device
 		var revoked int64
-		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked, &d.EnrolledAt, &d.Enrolments, &d.LastActive); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -267,7 +298,7 @@ func scanDevices(ctx context.Context, q queryer, rows *sql.Rows) ([]Device, erro
 // GetDevice returns one device, or ErrNotFound.
 func (s *Store) GetDevice(id int64) (Device, error) {
 	ctx := context.Background()
-	rows, err := s.db.QueryContext(ctx, "SELECT "+deviceCols+" FROM devices WHERE id=?", id)
+	rows, err := s.db.QueryContext(ctx, "SELECT "+s.deviceColumns("")+" FROM devices WHERE id=?", id)
 	if err != nil {
 		return Device{}, err
 	}
@@ -313,7 +344,7 @@ func (s *Store) CreateDevice(name, owner, client string, expiresAt int64) (Devic
 			return Device{}, "", err
 		}
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT "+deviceCols+" FROM devices WHERE id=?", id)
+	rows, err := tx.QueryContext(ctx, "SELECT "+s.deviceColumns("")+" FROM devices WHERE id=?", id)
 	if err != nil {
 		return Device{}, "", err
 	}
@@ -363,12 +394,18 @@ func (s *Store) NewLink(deviceID int64, ttl time.Duration, maxUses int) (string,
 }
 
 // ConsumeToken spends one use of a token and returns its device, or nil when the token is
-// unknown, used up, expired, or its device is revoked or expired.
+// unknown, used up, expired, or its device is revoked or expired. A spend also marks the device as
+// enrolled (when, and how many times), in the same transaction.
 func (s *Store) ConsumeToken(token string) (*Device, error) {
 	ctx := context.Background()
 	now := s.nowSec()
 	h := hashToken(token)
-	res, err := s.db.ExecContext(ctx,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
 		"UPDATE tokens SET uses = uses + 1"+
 			" WHERE token_hash=? AND uses < max_uses AND expires > ?"+
 			" AND device_id IN (SELECT id FROM devices WHERE revoked=0 AND expires_at > ?)",
@@ -379,17 +416,31 @@ func (s *Store) ConsumeToken(token string) (*Device, error) {
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT d.id, d.name, d.owner, d.client, d.expires_at, d.revoked FROM devices d"+
-			" JOIN tokens t ON t.device_id=d.id WHERE t.token_hash=?", h)
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE devices SET enrolled_at=?, enrol_count=enrol_count+1 WHERE id=(SELECT device_id FROM tokens WHERE token_hash=?)",
+		int64(now), h); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx,
+		"SELECT "+s.deviceColumns("d.")+" FROM devices d JOIN tokens t ON t.device_id=d.id WHERE t.token_hash=?", h)
 	if err != nil {
 		return nil, err
 	}
-	devs, err := scanDevices(ctx, s.db, rows)
+	devs, err := scanDevices(ctx, tx, rows)
 	if err != nil || len(devs) == 0 {
 		return nil, err
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return &devs[0], nil
+}
+
+// TouchActive records that the device's traffic grew at the given time (unix seconds). It only moves the time forward
+// and does nothing for an unknown device.
+func (s *Store) TouchActive(deviceID, at int64) error {
+	_, err := s.db.Exec("UPDATE devices SET last_active=? WHERE id=? AND last_active<?", at, deviceID, at)
+	return err
 }
 
 // VerifySecret returns the active device a subscription secret belongs to, or nil.
@@ -473,7 +524,7 @@ func (s *Store) Extend(deviceID int64, expiresAt int64) error {
 // ListDevices returns all devices ordered by id.
 func (s *Store) ListDevices() ([]Device, error) {
 	ctx := context.Background()
-	rows, err := s.db.QueryContext(ctx, "SELECT "+deviceCols+" FROM devices ORDER BY id")
+	rows, err := s.db.QueryContext(ctx, "SELECT "+s.deviceColumns("")+" FROM devices ORDER BY id")
 	if err != nil {
 		return nil, err
 	}

@@ -129,7 +129,7 @@ func TestLiveRedisExpiredLinkIsNotRevivedBySpend(t *testing.T) {
 	}
 	got, err := s.ConsumeToken(tok)
 	mustNil(t, got, err, "consume after the key is gone")
-	if err := spendScript.Eval(ctx, s.rdb, []string{key}, "1").Err(); err != nil {
+	if err := spendScript.Eval(ctx, s.rdb, []string{key, s.deviceKey(d.ID)}, "1", "1").Err(); err != nil {
 		t.Fatalf("the real server rejected the spend script: %v", err)
 	}
 	if n, err := s.rdb.Exists(ctx, key).Result(); err != nil || n != 0 {

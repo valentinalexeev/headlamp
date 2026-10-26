@@ -65,7 +65,7 @@
   <div class="panel tablewrap">
     <label class="toggle"><input type="checkbox" id="showrevoked"> Show revoked devices <span id="revokedcount" class="muted"></span></label>
     <table>
-      <thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Client</th><th>Expires</th><th>Status</th><th id="trafficth">Traffic</th><th></th></tr></thead>
+      <thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Client</th><th>Expires</th><th>Status</th><th title="When a one-time link of the device was last used (and how often)">Enrolled</th><th title="When the device's traffic last grew, seen every 5 minutes. Not a connection log.">Last active</th><th id="trafficth">Traffic</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -161,6 +161,14 @@ async function loadIngresses(j) {
   $("#ingnote").textContent = list.discovery && !list.discovery.enabled ? "Discovery is off: " + list.discovery.reason + "." : "";
   panel.style.display = "block";
 }
+const stamp = (t) => new Date(t * 1000).toLocaleString();
+function ago(t) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - t));
+  if (s < 90) return "just now";
+  if (s < 5400) return Math.round(s / 60) + " min ago";
+  if (s < 129600) return Math.round(s / 3600) + " h ago";
+  return Math.round(s / 86400) + " days ago";
+}
 function fmtTraffic(t) {
   if (!t) return "-";
   return Object.entries(t).map(([k, v]) => k + " " + v).join(", ");
@@ -181,7 +189,9 @@ async function load() {
   for (const d of devs) {
     const tr = document.createElement("tr");
     const status = d.revoked ? "revoked" : (d.expires_at * 1000 < Date.now() ? "expired" : "active");
-    for (const v of [d.id, d.name, d.owner, d.client, new Date(d.expires_at * 1000).toLocaleDateString(), status, fmtTraffic(d.traffic)]) {
+    for (const v of [d.id, d.name, d.owner, d.client, new Date(d.expires_at * 1000).toLocaleDateString(), status,
+                    d.enrol_count > 0 ? stamp(d.enrolled_at) + " (" + d.enrol_count + "\u00d7)" : "never",
+                    d.last_active > 0 ? ago(d.last_active) : "-", fmtTraffic(d.traffic)]) {
       const td = document.createElement("td"); td.textContent = v; tr.appendChild(td);
     }
     const td = document.createElement("td"); td.className = "actions";

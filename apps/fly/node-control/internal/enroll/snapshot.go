@@ -35,6 +35,10 @@ type SnapDevice struct {
 	Revoked   bool              `json:"revoked"`
 	Epoch     int64             `json:"epoch"`
 	UUIDs     map[string]string `json:"uuids"`
+	// Activity (see Device); absent in exports made before it existed.
+	EnrolledAt int64 `json:"enrolled_at,omitempty"`
+	Enrolments int64 `json:"enrol_count,omitempty"`
+	LastActive int64 `json:"last_active,omitempty"`
 }
 
 type SnapLink struct {
@@ -72,21 +76,39 @@ func (s *Store) hasColumn(ctx context.Context, table, col string) (bool, error) 
 func (s *Store) Snapshot() (Snapshot, error) {
 	ctx := context.Background()
 	var snap Snapshot
-	// A database from before secrets were derived has no secret_epoch column: its epoch is 0.
-	epochCol := "0"
-	if ok, err := s.hasColumn(ctx, "devices", "secret_epoch"); err != nil {
-		return snap, err
-	} else if ok {
-		epochCol = "secret_epoch"
+	// A database from before secrets were derived has no secret_epoch column (epoch 0); one from before the activity
+	// columns has none of those (all 0).
+	col := func(name string) (string, error) {
+		ok, err := s.hasColumn(ctx, "devices", name)
+		if err != nil || !ok {
+			return "0", err
+		}
+		return name, nil
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, owner, client, expires_at, revoked, "+epochCol+" FROM devices ORDER BY id")
+	epochCol, err := col("secret_epoch")
+	if err != nil {
+		return snap, err
+	}
+	enrolledCol, err := col("enrolled_at")
+	if err != nil {
+		return snap, err
+	}
+	countCol, err := col("enrol_count")
+	if err != nil {
+		return snap, err
+	}
+	activeCol, err := col("last_active")
+	if err != nil {
+		return snap, err
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT id, name, owner, client, expires_at, revoked, "+epochCol+", "+enrolledCol+", "+countCol+", "+activeCol+" FROM devices ORDER BY id")
 	if err != nil {
 		return snap, err
 	}
 	for rows.Next() {
 		var d SnapDevice
 		var revoked int64
-		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked, &d.Epoch); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked, &d.Epoch, &d.EnrolledAt, &d.Enrolments, &d.LastActive); err != nil {
 			rows.Close()
 			return snap, err
 		}
@@ -190,7 +212,8 @@ func (s *RedisStore) Snapshot() (Snapshot, error) {
 	}
 	for _, r := range recs {
 		snap.Devices = append(snap.Devices, SnapDevice{ID: r.ID, Name: r.Name, Owner: r.Owner, Client: r.Client,
-			ExpiresAt: r.ExpiresAt, Revoked: r.Revoked, Epoch: r.Epoch, UUIDs: r.UUIDs})
+			ExpiresAt: r.ExpiresAt, Revoked: r.Revoked, Epoch: r.Epoch, UUIDs: r.UUIDs,
+			EnrolledAt: r.EnrolledAt, Enrolments: r.Enrolments, LastActive: r.LastActive})
 	}
 	h, err := s.rdb.HGetAll(ctx, s.approvalsKey()).Result()
 	if err != nil {
@@ -243,7 +266,8 @@ func (s *RedisStore) Restore(snap Snapshot, force bool) (devices, links, approva
 		if uu == nil {
 			uu = map[string]string{}
 		}
-		if err := s.putDevice(ctx, Device{ID: d.ID, Name: d.Name, Owner: d.Owner, Client: d.Client, ExpiresAt: d.ExpiresAt, Revoked: d.Revoked, UUIDs: uu}, d.Epoch); err != nil {
+		if err := s.putDevice(ctx, Device{ID: d.ID, Name: d.Name, Owner: d.Owner, Client: d.Client, ExpiresAt: d.ExpiresAt, Revoked: d.Revoked, UUIDs: uu,
+			EnrolledAt: d.EnrolledAt, Enrolments: d.Enrolments, LastActive: d.LastActive}, d.Epoch); err != nil {
 			return 0, 0, 0, err
 		}
 		devices++

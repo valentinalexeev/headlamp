@@ -47,6 +47,10 @@ type Backend interface {
 	// by device id then mode. The result is never nil.
 	ActiveCredentials() ([]Credential, error)
 
+	// TouchActive records that the device's traffic grew at the given time (unix seconds). It only moves the time
+	// forward and does nothing for an unknown device (it never creates a record).
+	TouchActive(deviceID, at int64) error
+
 	ApprovalRows() (map[string]ApprovalRow, error)
 	Approvals() (map[string]string, error)
 	Approve(name, fingerprint string) error

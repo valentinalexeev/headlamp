@@ -189,3 +189,19 @@ func TestPageHidesRevokedDevicesAndOffersDelete(t *testing.T) {
 		t.Error("the choice must be remembered inside a try/catch")
 	}
 }
+
+func TestPageShowsEnrolledAndLastActive(t *testing.T) {
+	page := string(enrollHTML)
+	for _, want := range []string{
+		"<th", ">Enrolled</th>", ">Last active</th>", "d.enrol_count > 0", "d.enrolled_at", "d.last_active > 0", "function ago(t)",
+		"Not a connection log",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+	// The values are written with textContent (no markup injection from stored data).
+	if strings.Contains(page, "innerHTML") {
+		t.Error("the page must not use innerHTML")
+	}
+}

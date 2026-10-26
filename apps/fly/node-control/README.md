@@ -95,10 +95,11 @@ store refuses to start without it unless `STATE_ALLOW_PLAINTEXT=1`), `ENROLL_SEC
 secrets are derived from it, device id and epoch), optional `ENROLL_REDIS_KEY`.
 
 Layout under the prefix `P` (all DB 0): `P:meta` (hash; `seq` is the last device id, never reused), `P:d:<id>` (one hash
-per device, no TTL: sealed name/owner/client/UUIDs plus plain `expires_at`, `revoked`, `epoch`, so revoke, extend and
+per device, no TTL: sealed name/owner/client/UUIDs plus plain `expires_at`, `revoked`, `epoch` and the activity numbers below, so revoke, extend and
 rotate are single atomic commands), `P:t:<hash>` (one hash per one-time link, **with a TTL**), `P:approvals` (sealed).
-A link's key expires through its TTL, and every spend also checks the stored expiry. Spending is one Lua script that
-writes nothing unless the key exists, has a use left and has not expired (a bare `HINCRBY` on an expired key would
+A link's key expires through its TTL, and every spend also checks the stored expiry. Spending is one Lua script (link
+key and device key) that writes nothing unless both exist, the device is not revoked or expired, and the link has a use left
+and has not expired (a bare `HINCRBY` on an expired key would
 recreate it without a TTL). Commands sent: `EVAL` (never `EVALSHA`), `HGET`, `HGETALL`, `HINCRBY`, `HSET`, `HDEL`,
 `HEXISTS`; the scripts also use `EXISTS`, `HSET`, `HINCRBY` and `PEXPIRE`. Nothing scans, selects a database or
 flushes. A Redis error is an error, never an empty set: the sync to the agents does not push when the store cannot be
@@ -263,6 +264,17 @@ Consequences to plan for:
 ### Sync with the ingress host
 
 Every create/revoke/extend pushes the full credential set to the agent; a reconcile loop retries every 5 minutes.
+
+Activity (no connection log, no client addresses): each device row shows **Enrolled** (when a one-time link of the device was
+last spent, and how often) and **Last active** (when its traffic last grew). Spending a link marks the device in the same
+step as the spend (one SQLite transaction; one script on Redis). Last active is derived from the traffic totals the agents
+already report: node-control looks every 5 minutes (and at each page load) and records the time when a device's total grew
+since the previous look. The counters reset when xray restarts (the agent restarts it whenever the credential set changes),
+so a total that fell but is above zero also counts as activity since the reset. The first look at a device only seeds the
+baseline, and a look at which an ingress did not answer is skipped (its missing counters would read as a reset). The
+resolution is therefore about 5 minutes, and a device that was active only while node-control was down shows nothing for that
+time. `GET /enroll/devices` rows carry `enrolled_at`, `enrol_count` and `last_active` (unix seconds, 0 = never). SQLite databases
+gain the three columns on open; Redis device records without them read as 0. JSON and SQLite exports and imports carry them.
 
 Deleting: `DELETE /enroll/devices/{id}` (JSON content type, like the other changes) removes a **revoked** device with its
 UUIDs and links for good. An active or merely expired device is refused with `409` ("revoke the device before deleting

@@ -30,6 +30,9 @@
 set -eu
 
 NAME_RE='\\A[A-Za-z0-9._-]{1,64}\\z'
+# The server's problem for a secret that is not stored yet. Keep in step with TestUnknownSecretProblemWordingMatchesCLI
+# in apps/fly/node-control/internal/tasks/api_test.go, which pins the wording.
+MISSING_SECRET_RE='^task .*: secret ([A-Za-z0-9_]+) is not stored'
 
 say() { printf '%s\n' "$*" >&2; }
 die() { code=$1; shift; say "tasks: $*"; exit "$code"; }
@@ -49,16 +52,18 @@ case $cmd in check|diff|push|pull) ;; *) usage ;; esac
 file=${TASKS_FILE:-tasks.json}
 sdir=${TASKS_SCRIPTS_DIR:-scripts}
 sfile=${TASKS_SECRETS_FILE:-}
-yes=0
+yes=0; ex_yes=0; ex_sec=0
 while [ $# -gt 0 ]; do
   case $1 in
     --file) [ $# -ge 2 ] || die 2 "--file needs a value"; file=$2; shift 2 ;;
     --scripts) [ $# -ge 2 ] || die 2 "--scripts needs a value"; sdir=$2; shift 2 ;;
-    --secrets) [ $# -ge 2 ] || die 2 "--secrets needs a value"; sfile=$2; shift 2 ;;
-    --yes) yes=1; shift ;;
+    --secrets) [ $# -ge 2 ] || die 2 "--secrets needs a value"; sfile=$2; ex_sec=1; shift 2 ;;
+    --yes) yes=1; ex_yes=1; shift ;;
     *) die 2 "unknown option: $1" ;;
   esac
 done
+[ "$ex_sec" = 0 ] || [ "$cmd" = push ] || { say "tasks: --secrets only applies to push"; usage; }
+case $cmd in check|diff) [ "$ex_yes" = 0 ] || { say "tasks: --yes has no effect on $cmd"; usage; } ;; esac
 [ "$cmd" = push ] || sfile=
 
 url=${NODE_CONTROL_URL:-}
@@ -71,10 +76,10 @@ req() {
   _m=$1; _p=$2; _b=${3:-}
   : > "$tmp/resp"
   if [ -n "$_b" ]; then
-    code=$(curl --silent --show-error --max-time "${REQ_MAX_TIME:-30}" -X "$_m" -H 'Content-Type: application/json' \
+    code=$(curl -q --silent --show-error --max-time "${REQ_MAX_TIME:-30}" -X "$_m" -H 'Content-Type: application/json' \
       --data-binary @"$_b" -o "$tmp/resp" -w '%{http_code}' "$url$_p") || return 1
   else
-    code=$(curl --silent --show-error --max-time "${REQ_MAX_TIME:-30}" -X "$_m" \
+    code=$(curl -q --silent --show-error --max-time "${REQ_MAX_TIME:-30}" -X "$_m" \
       -o "$tmp/resp" -w '%{http_code}' "$url$_p") || return 1
   fi
 }
@@ -123,9 +128,9 @@ plan() {
   case $code in
     200) ;;
     422)
-      if [ "${1:-}" = soft ] && jq -e '(.problems // []) | length > 0 and all(.[]; type == "string" and test("is not stored"))' \
-           "$tmp/resp" >/dev/null 2>&1; then
-        show_problems; return 10
+      if [ "${1:-}" = soft ] && jq -e --arg re "$MISSING_SECRET_RE" \
+           '(.problems // []) | length > 0 and all(.[]; type == "string" and test($re))' "$tmp/resp" >/dev/null 2>&1; then
+        return 10
       fi
       refuse ;;
     *) refuse ;;
@@ -170,20 +175,55 @@ do_diff() {
 SECRETS_OK='type == "object" and length > 0 and length <= 64 and (keys | all(test("\\A[A-Za-z0-9_]{1,64}\\z")))
   and all(.[]; type == "string" and length > 0)'
 
+# The decrypting `sops` runs inside a group that records its exit status in $tmp/sops.rc (this POSIX sh has no pipefail),
+# so a sops failure is told apart from a bad shape or a failing consumer.
+sops_rc() { cat "$tmp/sops.rc" 2>/dev/null || echo 1; }
+
+# check_secrets: decrypt once, check the shape, keep only the NAMES in $tmp/secret.names.
 check_secrets() {
   [ -f "$sfile" ] || die 2 "secrets file not found: $sfile"
   command -v sops >/dev/null 2>&1 || die 2 "sops is required for --secrets"
-  sops -d --output-type json "$sfile" | jq -e "$SECRETS_OK" >/dev/null 2>&1 \
+  rm -f "$tmp/sops.rc"
+  : > "$tmp/secret.names"
+  { _rc=0; sops -d --output-type json "$sfile" || _rc=$?; echo "$_rc" > "$tmp/sops.rc"; } \
+    | jq -r "if $SECRETS_OK then keys[] else empty end" > "$tmp/secret.names" 2>/dev/null || true
+  [ "$(sops_rc)" = 0 ] || die 2 "sops could not decrypt $sfile"
+  [ -s "$tmp/secret.names" ] \
     || die 2 "$sfile did not decrypt to a flat JSON object of non-empty string values with valid names (A-Z a-z 0-9 _)"
 }
 
+# send_secrets: the answer is only ever read for its names and an error text; failures never mention the request body.
 send_secrets() {
-  code=$(sops -d --output-type json "$sfile" | curl --silent --show-error --max-time "${REQ_MAX_TIME:-30}" -X PUT \
-    -H 'Content-Type: application/json' --data-binary @- -o "$tmp/resp" -w '%{http_code}' "$url/tasks/secrets") \
-    || die 3 "could not send the secrets to node-control"
-  [ "$code" = 200 ] || refuse
+  rm -f "$tmp/sops.rc"
+  _c=0
+  code=$({ _rc=0; sops -d --output-type json "$sfile" || _rc=$?; echo "$_rc" > "$tmp/sops.rc"; } \
+    | curl -q --silent --show-error --max-time "${REQ_MAX_TIME:-30}" -X PUT -H 'Content-Type: application/json' \
+      --data-binary @- -o "$tmp/resp" -w '%{http_code}' "$url/tasks/secrets") || _c=1
+  [ "$(sops_rc)" = 0 ] || die 2 "sops failed while the secrets were being sent; do not trust the stored secrets, run again"
+  [ "$_c" = 0 ] || die 3 "could not send the secrets to node-control; secrets were not stored"
+  if [ "$code" != 200 ]; then
+    _d=$(detail)
+    case $code in
+      413|422) die 2 "secrets were not stored (HTTP $code)${_d:+: $_d}" ;;
+      403) die 3 "secrets were not stored: node-control refused this identity (HTTP 403)" ;;
+      *) die 3 "secrets were not stored (HTTP $code)${_d:+: $_d}" ;;
+    esac
+  fi
   jq -e '.stored | type == "array"' "$tmp/resp" >/dev/null 2>&1 || die 3 "node-control returned an unexpected answer to the secrets"
   say "secrets stored: $(jq -r '.stored | join(", ")' "$tmp/resp")"
+  if [ "$(jq -r '.pending_write // false' "$tmp/resp" 2>/dev/null)" = true ]; then
+    say "warning: the server has not yet written the secrets to its store; it keeps retrying"
+  fi
+}
+
+need_tty() { [ "$yes" = 1 ] || [ -t 0 ] || die 2 "refusing to push without --yes"; }
+
+# confirm PROMPT: ask on the terminal unless --yes.
+confirm() {
+  [ "$yes" = 1 ] && return 0
+  printf '%s [y/N] ' "$1" >&2
+  read -r _a || _a=
+  case $_a in y|Y|yes) ;; *) die 2 "not applied" ;; esac
 }
 
 do_push() {
@@ -192,21 +232,27 @@ do_push() {
   _soft=; [ -z "$sfile" ] || _soft=soft
   _pend=0
   plan $_soft || _pend=1
-  if [ "$_pend" = 0 ]; then
+  if [ "$_pend" = 1 ]; then
+    # first push of secrets: the dry run can only name them. Every problem is a missing secret (plan checked), and every
+    # missing name must be in the sops file; otherwise nothing is sent.
+    jq -r --arg re "$MISSING_SECRET_RE" '[.problems[] | match($re).captures[0].string] | unique | .[]' "$tmp/resp" > "$tmp/pending"
+    _missing=
+    while IFS= read -r _n; do
+      grep -Fxq -e "$_n" "$tmp/secret.names" || _missing="$_missing $_n"
+    done < "$tmp/pending"
+    if [ -n "$_missing" ]; then
+      show_problems
+      die 2 "the config needs secrets that are not in $sfile:$_missing; nothing was sent"
+    fi
+    need_tty
+    say "secrets not yet stored on node-control: $(tr '\n' ' ' < "$tmp/pending")"
+    confirm "Send secrets and apply?"
+  else
     show_diff
     say_ok
     if [ "$(changes)" = 0 ] && [ -z "$sfile" ]; then say "nothing to do"; return 0; fi
-  else
-    say "some secrets are not stored yet; they will be sent first"
-  fi
-  if [ "$yes" = 0 ]; then
-    if [ -t 0 ]; then
-      printf 'Apply? [y/N] ' >&2
-      read -r _a || _a=
-      case $_a in y|Y|yes) ;; *) die 2 "not applied" ;; esac
-    else
-      die 2 "refusing to push without --yes"
-    fi
+    need_tty
+    confirm "Apply?"
   fi
 
   [ -z "$sfile" ] || send_secrets
@@ -215,6 +261,7 @@ do_push() {
     plan
     show_diff
     say_ok
+    [ "$(changes)" = 0 ] || confirm "Apply?"
   fi
   if [ "$(changes)" = 0 ]; then
     say "the config and scripts are already live"

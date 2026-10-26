@@ -11,7 +11,7 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT INT TERM
-BIN="$T/bin"; FIX="$T/fix"; CALLS="$T/calls"; ARGV="$T/argv"; LEAK="$T/leak"; SCRATCH="$T/tmp"
+BIN="$T/bin"; FIX="$T/fix"; CALLS="$T/calls"; ARGV="$T/argv"; LEAK="$T/leak"; FIRSTARG="$T/firstarg"; SCRATCH="$T/tmp"
 SOPSFIX="$T/sopsfix"   # the canned decrypted output lives here, outside every place that is scanned
 mkdir -p "$BIN" "$SOPSFIX"
 
@@ -23,6 +23,7 @@ CANARY='canary-s3cr3t-value'
 cat > "$BIN/curl" <<'STUB'
 #!/bin/sh
 printf '%s\n' "$@" >> "$ARGV"
+printf '%s\n' "$1" >> "$FIRSTARG"
 method=GET; out=; body=; url=
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -90,12 +91,14 @@ cat > "$BIN/sops" <<'STUB'
 #!/bin/sh
 printf 'sops %s\n' "$*" >> "$ARGV"
 echo sops >> "$CALLS"
+n=0; [ -f "$FIX/sops.count" ] && n=$(cat "$FIX/sops.count"); n=$((n + 1)); echo "$n" > "$FIX/sops.count"
+[ -e "$FIX/sops.fail.$n" ] && { echo "sops: failed to decrypt" >&2; exit 1; }
 if grep -rq -e "$CANARY" "$TMPDIR" 2>/dev/null; then echo "sops" >> "$LEAK"; fi
 cat "$SOPSOUT"
 STUB
 chmod +x "$BIN/curl" "$BIN/sops"
 
-export FIX CALLS ARGV LEAK CANARY TMPDIR="$SCRATCH" SOPSOUT="$SOPSFIX/out.json" PATH="$BIN:$PATH"
+export FIX CALLS ARGV FIRSTARG LEAK CANARY TMPDIR="$SCRATCH" SOPSOUT="$SOPSFIX/out.json" PATH="$BIN:$PATH"
 export NODE_CONTROL_URL="http://nc.example.test/"
 unset TASKS_FILE TASKS_SCRIPTS_DIR TASKS_SECRETS_FILE
 mkdir -p "$SCRATCH"
@@ -105,7 +108,7 @@ ok()  { echo "ok   - $1"; pass=$((pass + 1)); }
 bad() { echo "FAIL - $1"; fails=$((fails + 1)); }
 has() { grep -q -e "$1" "$2"; }
 run() { sh "$script" "$@" > "$T/out" 2> "$T/err" < /dev/null; rc=$?; }
-reset() { rm -rf "$FIX"; mkdir -p "$FIX"; : > "$CALLS"; : > "$ARGV"; : > "$LEAK"; }
+reset() { rm -rf "$FIX"; mkdir -p "$FIX"; : > "$CALLS"; : > "$ARGV"; : > "$LEAK"; : > "$FIRSTARG"; }
 order() { tr '\n' ',' < "$CALLS"; }
 nputs() { grep -c '^PUT /tasks/config' "$CALLS" || true; }
 
@@ -274,6 +277,94 @@ b' ''; do
 done
 reset; run pull --file "$H/tasks.json" --scripts "$H/scripts"
 { [ $rc = 3 ] && has 'no tasks config' "$T/err"; } && ok "pull on a server without a config exits 3" || bad "pull 404 rc=$rc"
+
+# --- first push of secrets (pending path), review fixes
+# runtty INPUT ARGS...: run the script on a pseudo terminal that types INPUT; needs python3.
+runtty() {
+  _in=$1; shift
+  OUT="$T/out" ERR="$T/err" IN="$_in" python3 - "$script" "$@" <<'PY'
+import os, pty, sys, time, signal
+signal.alarm(30)
+script, args = sys.argv[1], sys.argv[2:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp('sh', ['sh', '-c', 'exec sh "$0" "$@" >"$OUT" 2>"$ERR"', script] + args)
+for line in os.environ['IN'].encode().decode('unicode_escape').splitlines(True):
+    time.sleep(0.5)
+    os.write(fd, line.encode())
+try:
+    while os.read(fd, 1024):
+        pass
+except OSError:
+    pass
+_, st = os.waitpid(pid, 0)
+sys.exit(os.waitstatus_to_exitcode(st))
+PY
+  rc=$?
+}
+if command -v python3 >/dev/null 2>&1; then
+  mk_ready; runtty 'y\ny\n' push $A --secrets "$SEC"
+  { [ $rc = 0 ] && grep -q 'Send secrets and apply?' "$T/err" && grep -q 'Apply?' "$T/err" && has '^+ task balance$' "$T/out"; } && ok "pending push asks twice and shows the diff before the second question" || bad "pending tty rc=$rc: $(cat "$T/err")"
+  case $(order) in "sops,PUT /tasks/config?dry_run=1,sops,PUT /tasks/secrets,PUT /tasks/config?dry_run=1,PUT /tasks/config,"*) ok "pending push: secrets sent between the two prompts, config after the second" ;; *) bad "pending order: $(order)" ;; esac
+  has 'secrets not yet stored on node-control: API_TOKEN' "$T/err" && ok "the pending secret names are shown" || bad "pending names"
+  mk_ready; runtty 'n\n' push $A --secrets "$SEC"
+  { [ $rc = 2 ] && ! has 'PUT /tasks/secrets' "$CALLS" && ! has 'PUT /tasks/config$' "$CALLS"; } && ok "declining the first question sends nothing" || bad "decline first rc=$rc calls=$(order)"
+  mk_ready; runtty 'y\nn\n' push $A --secrets "$SEC"
+  { [ $rc = 2 ] && has 'PUT /tasks/secrets' "$CALLS" && ! has 'PUT /tasks/config$' "$CALLS"; } && ok "declining the second question keeps the secrets but sends no config" || bad "decline second rc=$rc calls=$(order)"
+else
+  echo "skip - python3 is not available: pty prompt tests"
+fi
+printf '{"API_TOKEN":"%s","PING_URL":"x"}' "$CANARY" > "$SOPSFIX/out.json"
+
+mk_ready
+run push $A --secrets "$SEC"
+{ [ $rc = 2 ] && ! has 'PUT /tasks/secrets' "$CALLS" && ! has 'PUT /tasks/config$' "$CALLS"; } && ok "non-interactive pending push without --yes exits 2 before sending secrets" || bad "pending non-tty rc=$rc calls=$(order)"
+has 'without --yes' "$T/err" && ok "...with the --yes message" || bad "pending non-tty message"
+
+# another problem than a missing secret: nothing sent
+mk_ready; jq '.tasks.balance.bogus = true' "$CFG" > "$W/bogus.json"
+printf 422 > "$FIX/force.PUT_tasks_config.status"; printf '%s' '{"error":"invalid task config","problems":["task balance: bogus: unknown field","task balance: secret API_TOKEN is not stored (push secrets first)"]}' > "$FIX/force.PUT_tasks_config.body"
+run push --file "$W/bogus.json" --scripts "$SD" --secrets "$SEC" --yes
+{ [ $rc = 2 ] && has 'unknown field' "$T/err" && ! has 'PUT /tasks/secrets' "$CALLS"; } && ok "a non-secret problem beside a missing secret: exit 2, nothing sent" || bad "mixed problems rc=$rc calls=$(order)"
+
+# missing secret name that the sops file does not hold
+printf '%s' '{"OTHER":"v"}' > "$SOPSFIX/out.json"
+mk_ready
+run push $A --secrets "$SEC" --yes
+{ [ $rc = 2 ] && has 'API_TOKEN' "$T/err" && has 'not in' "$T/err" && ! has 'PUT /tasks/secrets' "$CALLS"; } && ok "a missing secret that is not in the sops file: exit 2, nothing sent" || bad "name not in sops rc=$rc: $(cat "$T/err")"
+printf '{"API_TOKEN":"%s","PING_URL":"x"}' "$CANARY" > "$SOPSFIX/out.json"
+
+# curl never reads a user rc file: -q first on every call
+mk_ready; : > "$FIRSTARG"; run push $A --secrets "$SEC" --yes
+[ -s "$FIRSTARG" ] && [ "$(sort -u "$FIRSTARG")" = "-q" ] && ok "every curl call starts with -q (no ~/.curlrc)" || bad "first args: $(sort -u "$FIRSTARG")"
+[ "$(grep -c . "$FIRSTARG")" = "$(grep -c '^PUT\|^GET' "$CALLS")" ] && ok "...for all $(grep -c . "$FIRSTARG") calls" || bad "curl call count mismatch"
+
+# secrets answers
+mk_ready; printf 422 > "$FIX/force.PUT_tasks_secrets.status"; printf '%s' '{"error":"a secret name is invalid"}' > "$FIX/force.PUT_tasks_secrets.body"
+run push $A --secrets "$SEC" --yes
+{ [ $rc = 2 ] && has 'secrets were not stored (HTTP 422): a secret name is invalid' "$T/err" && ! has 'refused the config' "$T/err" && ! has 'PUT /tasks/config$' "$CALLS"; } && ok "secrets 422: dedicated message, exit 2, no config sent" || bad "secrets 422 rc=$rc: $(cat "$T/err")"
+mk_ready; printf 500 > "$FIX/force.PUT_tasks_secrets.status"; printf '{}' > "$FIX/force.PUT_tasks_secrets.body"
+run push $A --secrets "$SEC" --yes
+{ [ $rc = 3 ] && has 'secrets were not stored' "$T/err"; } && ok "secrets 500: exit 3" || bad "secrets 500 rc=$rc"
+mk_ready; printf 200 > "$FIX/force.PUT_tasks_secrets.status"; printf '%s' '{"stored":["API_TOKEN"],"pending_write":true}' > "$FIX/force.PUT_tasks_secrets.body"
+run push $A --secrets "$SEC" --yes
+has 'has not yet written the secrets' "$T/err" && ok "pending_write on the secrets answer is surfaced" || bad "secrets pending_write"
+mk_ready; : > "$FIX/sops.fail.2"
+run push $A --secrets "$SEC" --yes
+{ [ $rc = 2 ] && has 'sops failed while' "$T/err" && ! has 'PUT /tasks/config$' "$CALLS"; } && ok "sops failing while sending: exit 2, no config sent" || bad "sops fail rc=$rc: $(cat "$T/err")"
+mk_ready; : > "$FIX/sops.fail.1"
+run push $A --secrets "$SEC" --yes
+{ [ $rc = 2 ] && has 'could not decrypt' "$T/err" && { [ ! -s "$CALLS" ] || [ "$(order)" = "sops," ]; }; } && ok "sops failing at validation: exit 2, nothing sent" || bad "sops fail1 rc=$rc"
+secret_leak "no leak on any failure path"
+
+# flags with no effect
+for f in "check --secrets $SEC" "diff --secrets $SEC" "pull --secrets $SEC" "check --yes" "diff --yes"; do
+  reset; run $f $A
+  { [ $rc = 2 ] && [ ! -s "$CALLS" ]; } && ok "'$f' exits 2" || bad "'$f' rc=$rc"
+done
+reset; echo '{"config":{"tasks":{}},"scripts":{},"secrets":["API_TOKEN"]}' > "$FIX/state.json"
+TASKS_SECRETS_FILE="$SEC" run check $A
+[ $rc = 0 ] && ok "TASKS_SECRETS_FILE stays silently ignored by check" || bad "env secrets on check rc=$rc"
 
 # --- remote failures
 reset; printf 403 > "$FIX/force.PUT_tasks_config.status"; echo '{"error":"forbidden"}' > "$FIX/force.PUT_tasks_config.body"

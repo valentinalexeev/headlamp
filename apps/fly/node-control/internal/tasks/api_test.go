@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -503,6 +504,33 @@ func TestConfigRejectsUnknownSecretName(t *testing.T) {
 	h.putSecrets("FAIL_TOPIC")
 	if rec := h.alice("PUT", "/tasks/config", body); rec.Code != 200 {
 		t.Fatalf("with all secrets: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// scripts/tasks.sh recognises a not-yet-pushed secret by this exact expression (MISSING_SECRET_RE there). Keep the two
+// in step: if the wording of the problem changes, this test fails and the script must change with it.
+var missingSecretRe = regexp.MustCompile(`^task .*: secret ([A-Za-z0-9_]+) is not stored`)
+
+func TestUnknownSecretProblemWordingMatchesCLI(t *testing.T) {
+	h := newModHarness(t, nil)
+	h.waitOpen()
+	body := configBody(`"job":`+fullTask, map[string]string{"check-balance.js": scriptA})
+	rec := h.alice("PUT", "/tasks/config?dry_run=1", body)
+	if rec.Code != 422 {
+		t.Fatalf("code %d %s", rec.Code, rec.Body)
+	}
+	got := map[string]bool{}
+	for _, p := range strList(decodeMap(t, rec)["problems"]) {
+		m := missingSecretRe.FindStringSubmatch(p)
+		if m == nil {
+			t.Fatalf("problem %q does not match the CLI's missing-secret expression", p)
+		}
+		got[m[1]] = true
+	}
+	for _, n := range []string{"API_TOKEN", "HC_URL", "NTFY_TOPIC", "FAIL_TOPIC"} {
+		if !got[n] {
+			t.Errorf("secret %s not reported in the expected wording", n)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -190,5 +191,51 @@ func TestReadOnlyOpenNeverWritesTheSource(t *testing.T) {
 				t.Fatal("a -wal file appeared next to the source")
 			}
 		})
+	}
+}
+
+// A copy that fails verification must not stay behind looking populated: the next start would skip ENROLL_IMPORT_FROM and
+// serve (and push to the agents) data that never verified.
+func TestFailedVerificationResetsTheCounterSoTheNextStartRetries(t *testing.T) {
+	s, e := redisEnv(t)
+	// Two entries with the same id: the restore writes both to one key, so the read-back cannot equal the source.
+	bad := Snapshot{Seq: 1, Devices: []SnapDevice{
+		{ID: 1, Name: "a", Owner: "o", Client: "c", ExpiresAt: 4_000_000_000, UUIDs: map[string]string{"auto": "u1"}},
+		{ID: 1, Name: "b", Owner: "o", Client: "c", ExpiresAt: 4_000_000_000, UUIDs: map[string]string{"auto": "u2"}},
+	}}
+	if _, _, _, err := ImportSnapshot(bad, s, false); err == nil || !strings.Contains(err.Error(), "verifying the import") {
+		t.Fatalf("a mismatching copy was accepted: %v", err)
+	}
+	if has, err := s.HasData(); err != nil || has {
+		t.Fatalf("after a failed verification the store reads as populated (%v, %v): the next start would skip the import", has, err)
+	}
+	if e.mr.HGet(s.metaKey(), "seq") != "" {
+		t.Fatal("the counter is still there")
+	}
+	// The next attempt, with good data, works.
+	good := Snapshot{Seq: 1, Devices: []SnapDevice{{ID: 1, Name: "a", Owner: "o", Client: "c", ExpiresAt: 4_000_000_000, UUIDs: map[string]string{"auto": "u1"}}}}
+	if _, _, _, err := ImportSnapshot(good, s, false); err != nil {
+		t.Fatalf("retry after a failed verification: %v", err)
+	}
+	if has, _ := s.HasData(); !has {
+		t.Fatal("the retry did not populate the store")
+	}
+}
+
+func TestFailedVerificationWithForceKeepsAnExistingStorePopulated(t *testing.T) {
+	s, _ := redisEnv(t)
+	good := Snapshot{Seq: 1, Devices: []SnapDevice{{ID: 1, Name: "a", Owner: "o", Client: "c", ExpiresAt: 4_000_000_000, UUIDs: map[string]string{"auto": "u1"}}}}
+	if _, _, _, err := ImportSnapshot(good, s, false); err != nil {
+		t.Fatal(err)
+	}
+	bad := Snapshot{Seq: 2, Devices: []SnapDevice{
+		{ID: 2, Name: "x", Owner: "o", Client: "c", ExpiresAt: 4_000_000_000, UUIDs: map[string]string{"auto": "u3"}},
+		{ID: 2, Name: "y", Owner: "o", Client: "c", ExpiresAt: 4_000_000_000, UUIDs: map[string]string{"auto": "u4"}},
+	}}
+	if _, _, _, err := ImportSnapshot(bad, s, true); err == nil {
+		t.Fatal("a mismatching forced copy was accepted")
+	}
+	if has, _ := s.HasData(); !has {
+		t.Fatal("a forced import that failed must not make a populated store look empty")
 	}
 }

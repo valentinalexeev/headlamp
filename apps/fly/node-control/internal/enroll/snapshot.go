@@ -308,20 +308,46 @@ func Import(src *Store, dst *RedisStore, force bool) (devices, links, approvals 
 	return ImportSnapshot(snap, dst, force)
 }
 
-// ImportSnapshot restores snap into dst and verifies the result by reading it back.
+// ImportSnapshot restores snap into dst and verifies the result by reading it back. If the store had no data before
+// and the verification (or the read-back) fails, the device counter is removed again, so the store reads as empty and
+// the next start imports again: a copy that did not verify must never be served (the counter is what makes a store
+// count as populated, and a populated store skips ENROLL_IMPORT_FROM). With force on a store that already had data,
+// nothing is reset.
 func ImportSnapshot(snap Snapshot, dst *RedisStore, force bool) (devices, links, approvals int, err error) {
+	had, err := dst.HasData()
+	if err != nil {
+		return 0, 0, 0, err
+	}
 	devices, links, approvals, err = dst.Restore(snap, force)
 	if err != nil {
 		return 0, 0, 0, err
 	}
+	fail := func(err error) (int, int, int, error) {
+		if !had {
+			if rerr := dst.clearCounter(); rerr != nil {
+				err = fmt.Errorf("%w (and the device counter could not be reset: %v; delete %s by hand before restarting)", err, rerr, dst.metaKey())
+			}
+		}
+		return 0, 0, 0, fmt.Errorf("verifying the import: %w", err)
+	}
 	got, err := dst.Snapshot()
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("verifying the import: %w", err)
+		return fail(err)
 	}
 	if err := sameState(snap, got); err != nil {
-		return 0, 0, 0, fmt.Errorf("verifying the import: %w", err)
+		return fail(err)
 	}
 	return devices, links, approvals, nil
+}
+
+// clearCounter removes the device counter, which is what marks the store as populated.
+func (s *RedisStore) clearCounter() error {
+	ctx, cancel := opCtx()
+	defer cancel()
+	if err := s.rdb.HDel(ctx, s.metaKey(), "seq").Err(); err != nil {
+		return s.wrap("resetting the device counter in redis", err)
+	}
+	return nil
 }
 
 // ParseSnapshot reads an exported snapshot (the JSON `enroll-export` writes) and checks its shape. Unknown fields,

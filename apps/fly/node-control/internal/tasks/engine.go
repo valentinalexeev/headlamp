@@ -77,6 +77,7 @@ type Deps struct {
 	Rand      func() float64 // [0,1)
 	PollEvery time.Duration  // Status poll interval; default 5 s
 	Log       *slog.Logger
+	Metrics   *Metrics // nil: no metrics
 }
 
 // Engine schedules task attempts and drives them on the nodes.
@@ -157,6 +158,7 @@ func (e *Engine) Run(ctx context.Context) {
 	defer stop()
 
 	e.sweep(ctx)
+	e.syncMetrics()
 	e.spreadStart()
 	for {
 		next := e.tick(ctx)
@@ -202,8 +204,9 @@ func sortedTasks(cfg *Config) []string {
 }
 
 // Reload makes the loop recompute its wake time, after a config push or when
-// an attempt ends.
+// an attempt ends. It also brings the metric gauges in line with the config.
 func (e *Engine) Reload() {
+	e.syncMetrics()
 	select {
 	case e.wake <- struct{}{}:
 	default:
@@ -240,6 +243,27 @@ func (e *Engine) Trigger(task string) (string, error) {
 	}
 	e.launch(e.base, task, id, 1, true)
 	return id, nil
+}
+
+// syncMetrics snapshots every configured task and forgets the gauges of tasks
+// no longer configured. It reads the store's memory only.
+func (e *Engine) syncMetrics() {
+	if e.d.Metrics == nil {
+		return
+	}
+	cfg := e.d.Store.Config()
+	var tasks map[string]Task
+	if cfg != nil {
+		tasks = cfg.Tasks
+	}
+	for _, task := range e.d.Metrics.gaugeTasks() {
+		if _, ok := tasks[task]; !ok {
+			e.d.Metrics.Forget(task)
+		}
+	}
+	for task := range tasks {
+		e.d.Metrics.Snapshot(task, e.d.Store.State(task))
+	}
 }
 
 func dueAt(st TaskState) time.Time {
@@ -406,6 +430,7 @@ func (e *Engine) updateState(task string, fn func(*TaskState)) {
 	if err := e.d.Store.UpdateState(task, fn); err != nil {
 		e.log.Warn("task state not stored", "task", task, "err", err)
 	}
+	e.d.Metrics.Snapshot(task, e.d.Store.State(task))
 }
 
 func newRunID() string {

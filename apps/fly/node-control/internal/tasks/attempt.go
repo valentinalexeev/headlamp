@@ -239,6 +239,7 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 	e.setActive(run)
 	e.log.Info("attempt_result", "task", task, "run", run.ID, "node", run.Node, "attempt", run.Attempt,
 		"state", string(run.State), "dur_ms", now.Sub(run.Started).Milliseconds(), "reason", run.Reason)
+	e.d.Metrics.Observe(task, run.Node, run.State, now.Sub(run.Started))
 
 	nctx, ncancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
 	defer ncancel()

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -54,16 +55,22 @@ type Module struct {
 	tn       core.Tailnet
 	log      *slog.Logger
 
+	metricsAddr     string // TASKS_METRICS_ADDR; "" means no metrics listener
+	heartbeatSecret string // TASKS_HEARTBEAT_SECRET; "" means no heartbeat
+	metrics         *Metrics
+
 	// Collaborators, replaced by tests.
-	pollEvery   time.Duration
-	openKV      func(url, key string) (ipn.StateStore, func(), error)
-	newRunner   func() Runner
-	newNotifier func(*Store) Notifier
-	onOpenFail  func()
-	now         func() time.Time
+	pollEvery    time.Duration
+	openKV       func(url, key string) (ipn.StateStore, func(), error)
+	newRunner    func() Runner
+	newNotifier  func(*Store) Notifier
+	onOpenFail   func()
+	now          func() time.Time
+	serveMetrics func(ctx context.Context, addr string, m *Metrics) error
 
 	cancel   context.CancelFunc
 	loopDone chan struct{}
+	bg       sync.WaitGroup // metrics listener and heartbeat
 
 	// mu guards the fields below only; it is never held across a store or
 	// engine call.
@@ -77,7 +84,7 @@ type Module struct {
 // New returns the tasks module configured from env. src is the shared, cached
 // headscale node source used to pick nodes.
 func New(env core.Env, src headscale.NodeSource) core.Module {
-	return &Module{env: env, src: src, openKV: openRedisKV, now: time.Now}
+	return &Module{env: env, src: src, openKV: openRedisKV, now: time.Now, serveMetrics: ServeMetrics}
 }
 
 func (m *Module) Name() string { return "tasks" }
@@ -149,17 +156,45 @@ func (m *Module) Register(r *core.Routes) error {
 	if r.Tailnet == nil {
 		return errors.New(enabled + " but the core has no tailnet node to identify users")
 	}
+	metricsAddr, err := metricsAddrEnv(m.env)
+	if err != nil {
+		return err
+	}
+	hb := strings.TrimSpace(m.env.Getenv("TASKS_HEARTBEAT_SECRET"))
+	if hb != "" && !secretNameRe.MatchString(hb) {
+		return errors.New("TASKS_HEARTBEAT_SECRET must be a secret name (letters, digits, underscore)")
+	}
 	m.on = true
 	m.redisURL = m.env.Getenv("REDIS_URL")
 	m.token = m.env.Getenv("TASKS_RUNNER_TOKEN")
 	m.port = port
 	m.ntfyURL = m.env.Default("TASKS_NTFY_URL", defaultNtfyURL)
 	m.tn = r.Tailnet
+	m.metricsAddr, m.heartbeatSecret = metricsAddr, hb
+	m.metrics = NewMetrics()
 	if m.pollEvery == 0 {
 		m.pollEvery = time.Duration(poll) * time.Second
 	}
 	(&api{m: m}).register(r.Admin, authz.UserGate(r.Tailnet, allowed, r.Log))
 	return nil
+}
+
+// metricsAddrEnv reads TASKS_METRICS_ADDR: unset is "", anything else must be
+// host:port with a numeric port (the host may be empty for all interfaces).
+func metricsAddrEnv(env core.Env) (string, error) {
+	v := strings.TrimSpace(env.Getenv("TASKS_METRICS_ADDR"))
+	if v == "" {
+		return "", nil
+	}
+	bad := errors.New("TASKS_METRICS_ADDR must be host:port, for example :9091")
+	_, port, err := net.SplitHostPort(v)
+	if err != nil {
+		return "", bad
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 0 || n > 65535 {
+		return "", bad
+	}
+	return v, nil
 }
 
 // openRedisKV opens the encrypted Redis hash. Errors carry neither the URL
@@ -184,6 +219,16 @@ func (m *Module) Start(ctx context.Context) error {
 	}
 	ctx, m.cancel = context.WithCancel(ctx)
 	m.loopDone = make(chan struct{})
+	if m.metricsAddr != "" {
+		m.bg.Add(1)
+		go func() {
+			defer m.bg.Done()
+			// A listen error is logged once; the module keeps working.
+			if err := m.serveMetrics(ctx, m.metricsAddr, m.metrics); err != nil && ctx.Err() == nil {
+				m.log.Warn("tasks metrics listener failed", "addr", m.metricsAddr, "err", err.Error())
+			}
+		}()
+	}
 	go func() {
 		defer close(m.loopDone)
 		m.openLoop(ctx)
@@ -236,6 +281,11 @@ func (m *Module) open(ctx context.Context) error {
 	} else {
 		notifier = NewNotifier(store, &http.Client{Timeout: notifyHTTPTimeout}, m.ntfyURL, m.log, m.now)
 	}
+	if o, ok := notifier.(interface {
+		SetObserver(func(task, kind string, ok bool))
+	}); ok {
+		o.SetObserver(m.metrics.NotifySent)
+	}
 	var runner Runner
 	if m.newRunner != nil {
 		runner = m.newRunner()
@@ -243,7 +293,7 @@ func (m *Module) open(ctx context.Context) error {
 		runner = NewRunnerClient(m.tn, m.port, m.token, nil)
 	}
 	eng := NewEngine(Deps{Store: store, Nodes: m.src, Runner: runner, Notifier: notifier,
-		PollEvery: m.pollEvery, Log: m.log})
+		PollEvery: m.pollEvery, Log: m.log, Metrics: m.metrics})
 	done := make(chan struct{})
 	m.mu.Lock()
 	m.store, m.engine, m.closeKV, m.engineDone = store, eng, closeKV, done
@@ -252,6 +302,14 @@ func (m *Module) open(ctx context.Context) error {
 		defer close(done)
 		eng.Run(ctx)
 	}()
+	if p, ok := notifier.(heartbeatPinger); ok && m.heartbeatSecret != "" {
+		hb := newHeartbeat(p, m.heartbeatSecret, m.log)
+		m.bg.Add(1)
+		go func() {
+			defer m.bg.Done()
+			hb.run(ctx)
+		}()
+	}
 	m.log.Info("tasks store open")
 	return nil
 }
@@ -275,8 +333,10 @@ func (m *Module) Stop(ctx context.Context) error {
 		return nil
 	}
 	m.cancel()
+	loopEnded := false
 	select {
 	case <-m.loopDone:
+		loopEnded = true
 	case <-ctx.Done():
 	}
 	m.mu.Lock()
@@ -286,6 +346,15 @@ func (m *Module) Stop(ctx context.Context) error {
 	if done != nil {
 		select {
 		case <-done:
+		case <-ctx.Done():
+		}
+	}
+	// The open loop adds the heartbeat to bg; wait only once it has ended.
+	if loopEnded {
+		bgDone := make(chan struct{})
+		go func() { m.bg.Wait(); close(bgDone) }()
+		select {
+		case <-bgDone:
 		case <-ctx.Done():
 		}
 	}

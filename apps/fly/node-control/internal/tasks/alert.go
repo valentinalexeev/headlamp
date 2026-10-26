@@ -196,37 +196,42 @@ func (n *HTTPNotifier) Success(ctx context.Context, task string, t Task, result 
 	if t.Alert == nil {
 		return res
 	}
+	hit, outcome := n.alert(ctx, task, t, result, now)
+	res.Alert = outcome
+	n.log.Info("alert_evaluated", "task", task, "hit", hit, "outcome", outcome)
+	return res
+}
+
+// alert evaluates the condition and sends the alert when it holds and the
+// cooldown allows; it returns whether it held and the outcome text.
+func (n *HTTPNotifier) alert(ctx context.Context, task string, t Task, result map[string]any, now time.Time) (bool, string) {
 	hit, err := t.Alert.When.Eval(result)
 	if err != nil {
 		// The engine rejects such a result through CheckResult already.
-		n.log.Warn("alert condition not evaluable", "task", task)
-		res.Alert = "failed: bad result"
-		return res
+		return false, "failed: bad result"
 	}
 	if !hit {
 		// Skip the write (and its Redis flush) when there is nothing to clear.
 		if !n.store.State(task).AlertUntil.IsZero() {
 			n.setState(task, func(s *TaskState) { s.AlertUntil = time.Time{} })
 		}
-		res.Alert = "none"
-		return res
+		return false, "none"
 	}
 	until := now.Add(time.Duration(t.Alert.Cooldown))
 	claimed, prev := n.claim(task, now, until, alertField)
 	if !claimed {
-		res.Alert = "suppressed"
-		return res
+		return true, "suppressed"
 	}
 	vars := make(map[string]any, len(result)+1)
 	for k, v := range result {
 		vars[k] = v
 	}
 	vars["task"] = task
-	res.Alert = n.send(ctx, task, "alert", t.Alert.Notify, vars)
-	if res.Alert != "sent" {
+	outcome := n.send(ctx, task, "alert", t.Alert.Notify, vars)
+	if outcome != "sent" {
 		n.release(task, alertField, until, prev) // the next run retries
 	}
-	return res
+	return true, outcome
 }
 
 func (n *HTTPNotifier) Failure(ctx context.Context, task string, t Task, reason string) NotifyResult {
@@ -324,34 +329,51 @@ func capBytes(s string, max int) string {
 	return s[:cut]
 }
 
-// ping GETs the healthcheck URL (suffix "/fail" for a failure ping).
+// ping GETs the healthcheck URL (suffix "/fail" for a failure ping), logs
+// the outcome and reports it to the observer.
 func (n *HTTPNotifier) ping(ctx context.Context, task, secretName, suffix string) string {
+	outcome := n.pingOnce(ctx, secretName, suffix)
+	if outcome == "sent" {
+		n.log.Info("ping_result", "task", task, "kind", "ping", "outcome", outcome)
+	} else {
+		n.log.Warn("ping_result", "task", task, "kind", "ping", "outcome", outcome)
+	}
+	n.observe(task, "ping", outcome == "sent")
+	return outcome
+}
+
+// heartbeatTask is the task label of the scheduler heartbeat ping.
+const heartbeatTask = "scheduler"
+
+// PingSecret pings the URL stored under the secret name, for the scheduler
+// heartbeat. The secret is read on every call. The outcome goes to the
+// observer (task "scheduler", kind "ping") but is not logged here: the caller
+// logs it when it changes. The URL is never logged or returned.
+func (n *HTTPNotifier) PingSecret(ctx context.Context, secretName string) string {
+	outcome := n.pingOnce(ctx, secretName, "")
+	n.observe(heartbeatTask, "ping", outcome == "sent")
+	return outcome
+}
+
+// pingOnce performs one ping and returns its outcome text, which carries no
+// URL. It neither logs nor observes.
+func (n *HTTPNotifier) pingOnce(ctx context.Context, secretName, suffix string) string {
 	sec, err := n.store.Secrets([]string{secretName})
 	if err != nil {
-		n.log.Warn("ping not sent", "task", task, "kind", "ping", "outcome", failedNoSecret)
-		n.observe(task, "ping", false)
 		return failedNoSecret
 	}
 	base := sec[secretName]
 	target, ok := pingURL(base, suffix)
 	if !ok {
-		const out = "failed: bad ping url"
-		n.log.Warn("ping not sent", "task", task, "kind", "ping", "outcome", out)
-		n.observe(task, "ping", false)
-		return out
+		return "failed: bad ping url"
 	}
 	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	var outcome string
-	if err == nil {
-		outcome = n.do(req, []string{base, target})
-	} else {
-		outcome = "failed: " + reasonText(err, []string{base, target})
+	if err != nil {
+		return "failed: " + reasonText(err, []string{base, target})
 	}
-	n.log.Info("ping", "task", task, "kind", "ping", "outcome", outcome)
-	n.observe(task, "ping", outcome == "sent")
-	return outcome
+	return n.do(req, []string{base, target})
 }
 
 // pingURL appends suffix to the URL's path (not after its query) and drops any
@@ -374,7 +396,7 @@ func pingURL(raw, suffix string) (string, bool) {
 func (n *HTTPNotifier) send(ctx context.Context, task, kind string, nt Notify, vars map[string]any) string {
 	sec, err := n.store.Secrets([]string{nt.Topic})
 	if err != nil {
-		n.log.Warn("notification not sent", "task", task, "kind", kind, "outcome", failedNoSecret)
+		n.log.Warn("notify_result", "task", task, "kind", kind, "outcome", failedNoSecret)
 		n.observe(task, kind, false)
 		return failedNoSecret
 	}
@@ -386,6 +408,7 @@ func (n *HTTPNotifier) send(ctx context.Context, task, kind string, nt Notify, v
 		"priority": priorityNumber(nt.Priority),
 	})
 	if err != nil {
+		n.log.Warn("notify_result", "task", task, "kind", kind, "outcome", "failed: encode")
 		n.observe(task, kind, false)
 		return "failed: encode"
 	}
@@ -410,7 +433,11 @@ func (n *HTTPNotifier) send(ctx context.Context, task, kind string, nt Notify, v
 			break
 		}
 	}
-	n.log.Info("notification", "task", task, "kind", kind, "outcome", outcome)
+	if outcome == "sent" {
+		n.log.Info("notify_result", "task", task, "kind", kind, "outcome", outcome)
+	} else {
+		n.log.Warn("notify_result", "task", task, "kind", kind, "outcome", outcome)
+	}
 	n.observe(task, kind, outcome == "sent")
 	return outcome
 }

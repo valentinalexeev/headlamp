@@ -24,7 +24,7 @@ Finished runs are kept for an hour (at most the last 20).
 The script is a CommonJS module exporting `run` (`module.exports = {run}` or
 `module.exports = fn`). `run({page, params, secrets, log})` gets a fresh
 Playwright page in a fresh browser context; `log(msg)` writes a line to stderr
-(it ends up in `log_tail`). The return value must be a JSON object of at most
+(it ends up in `log_tail`, readable only from this API). The return value must be a JSON object of at most
 4096 bytes; otherwise the run is `failed` with the reason. A non-zero exit is
 `failed` with the last output lines and `exit status N`; exceeding the timeout
 kills the container and is `failed` with a message containing "timeout". A missing, unreadable or non-object result
@@ -45,7 +45,9 @@ writable result dir at `/run/result`, both in a 0700 temp dir under
 startup, as a previous process may have left them). After a timeout or cancel the runner also runs `rm -f --time 0 task-<id>`
 (twice, best effort), since the container outlives its client. Secrets and params go in as `-e TASK_SECRETS_JSON -e
 TASK_PARAMS_JSON` with no value on the command line; the values are set only in
-the environment of that one child process (which does not inherit `RUNNER_*`, so the bearer token never reaches it). The `--cgroup-manager=cgroupfs`
+the environment of that one child process (which does not inherit `RUNNER_*`, so the bearer token never reaches it). The runner writes no secret to its own
+files, but the values are in its memory (and swap, if enabled), and while a container exists podman keeps its
+configuration, environment included, in the service user's storage. The `--cgroup-manager=cgroupfs`
 global flag is required for a service user without a login session.
 
 ## Configuration (environment)

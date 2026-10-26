@@ -552,7 +552,7 @@ A complete placeholder file is in
 | `healthcheck` | no | NAME of a secret holding a healthchecks-style ping URL |
 | `alert.when` | with `alert` | `field` (a numeric result field), `op` (one of `<` `<=` `>` `>=` `==` `!=`) and `value` (number) |
 | `alert.cooldown` | no | `24h`; must be positive |
-| `alert.notify`, `on_failure.notify` | with the block | `topic` (a secret NAME: the ntfy topic is never in the config), `priority` (`min`, `low`, `high`, `max`; anything else is ntfy's default), `title`, `message` |
+| `alert.notify`, `on_failure.notify` | with the block | `topic` (a secret NAME: the ntfy topic is never in the config; `ntfy.sh` is a public service where the topic name is the only access control, so store a long random topic as the secret), `priority` (`min`, `low`, `high`, `max`; anything else is ntfy's default), `title`, `message` |
 | `on_failure.cooldown` | no | `24h`; must be positive |
 
 `{name}` in a title or message is replaced by the scalar result field of that name (alert) or by `task` and `reason`
@@ -561,13 +561,14 @@ placeholder with a colon is refused.
 
 Which node runs a task: the nodes that match `target` (and are online when `online` is set), whose runner answers its
 health check as reachable and idle. Among them the node that last ran the task successfully is preferred, then the least
-busy one, then the lowest name. None eligible makes the attempt fail with `no eligible node`.
+busy one, then the lowest name. A candidate node must also have a tailnet IPv4 address. None eligible makes the attempt fail with `no eligible node`.
 
 ### Script contract
 
 A script is a CommonJS module exporting `run` (`module.exports = { run }` or `module.exports = fn`). It is called as
 `run({ page, params, secrets, log })`: `page` is a Playwright page of a fresh headless Chromium context (nothing is
-shared between runs), `params` and `secrets` are objects, and `log(msg)` writes a line to the run's log tail. It returns a
+shared between runs), `params` and `secrets` are objects, and `log(msg)` writes a line to the run's log tail. That tail is visible only
+from the runner's own `GET /v1/runs/{id}` (`log_tail`); node-control neither stores nor shows it. It returns a
 small JSON object. The runner refuses a result that is not an object or is larger than 4096 bytes (the run fails and says
 why). Throw, or return a rejected promise, to fail the run. Details and the isolation of the container are in the
 task-runner README. A commented example is in
@@ -581,8 +582,9 @@ A script should still never return a secret.
 Every route is on the admin listener and needs a tailnet user from `TASKS_ADMIN_USERS`: anyone else, and every tagged
 node, gets `403` with an empty body. While the store is not open each route except the page and its static files answers
 `503 {"error":"degraded"}`. Errors have the shape `{"error":"..."}`; a push that fails validation adds
-`"problems": [...]`. A request with a body (`POST`, `PUT`) needs `Content-Type: application/json`, otherwise the answer is
-`422 {"detail":"Content-Type must be application/json"}`. Answers are `Cache-Control: no-store`. Times are RFC 3339 UTC.
+`"problems": [...]`. Every `POST` and `PUT` needs `Content-Type: application/json`, even `POST /tasks/{id}/run`, which has no body;
+otherwise the answer is `422 {"detail":"Content-Type must be application/json"}`. For example:
+`curl -X POST -H 'Content-Type: application/json' -d '{}' "$NODE_CONTROL_URL/tasks/check-balance/run"`. Answers are `Cache-Control: no-store`. Times are RFC 3339 UTC.
 
 | method and path | answer |
 |---|---|
@@ -635,6 +637,9 @@ backoff. Only the last failed attempt of a sequence counts: it increments `strea
 run. A manual run (`POST /tasks/{id}/run`) drops a pending retry and starts at attempt 1; it follows the same retry,
 alert and failure rules but does not move a future scheduled time.
 
+Example with `"attempts": 3` and `"backoff": ["2m", "10m"]`: attempt 1 fails, wait 2 minutes, attempt 2 fails, wait 10
+minutes, attempt 3 fails: one failure message, `streak` + 1, and the next scheduled run at the normal interval.
+
 An attempt fails with a short reason such as `script not found: <name>`, `secret not configured: <names>`,
 `no eligible node`, `node busy`, `timeout` (the runner enforces the timeout; node-control cancels a run still reported as
 running 10 s past it), the script's own error text, or `bad result: ...`.
@@ -669,7 +674,8 @@ With `TASKS_METRICS_ADDR` set, a read-only listener answers `GET /metrics` (Prom
 path is `404` and every other method `405`. It has **no authentication by design**, serves counters and gauges only, and
 labels are limited to task ids, node names, run states and notification kinds (never a result value, an account, a secret
 or a URL). Bind it on a private network only. The listener uses the machine's own network, not the tailnet, so with no
-`[[services]]` in `fly.toml` it is reachable only from Fly's private network. A listen error is logged once and the module
+`[[services]]` in `fly.toml` it is reachable only from Fly's private network, which means any app in the same Fly
+organisation network can read it. The content (ids, counts, states) is of low sensitivity but not secret. A listen error is logged once and the module
 keeps working. Values are kept in memory: counters restart at zero with the process.
 
 | metric | type | labels |
@@ -720,8 +726,12 @@ on your nodes. The code runs as a rootless podman container (read-only root file
 memory and pid limits, a timeout, one run at a time) started by an unprivileged service user, and the
 `task-runner` Ansible role adds a kernel firewall rule that keeps that user (and so every container) off loopback, the LAN
 and the tailnet while leaving the public internet open. Allow the runner port from node-control only in the tailnet ACL.
-Secrets are sent with each run over the tailnet and live only in the environment of that run's container; the runner
-never writes them to disk and the nodes keep none. node-control stores them encrypted in Redis, never returns them from
+The public internet is open to the container, so a pushed script can send anything it can read, including the secrets it
+was given, to any host. That is why only operators may push scripts and why `TASKS_ADMIN_USERS` matters.
+Secrets are sent with each run over the tailnet and passed to the container through its environment. The runner never
+writes them to its own files and removes the run's script directory afterwards; but while a container exists podman holds
+its configuration, environment variables included, in the service user's storage, and the values are in the runner's
+memory (and swap, if enabled). Treat the node's service user and disk as holding secrets transiently. node-control stores them encrypted in Redis, never returns them from
 the API, never logs them, and scrubs them out of stored reasons and results.
 
 ### Operations

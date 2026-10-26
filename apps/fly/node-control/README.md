@@ -655,12 +655,15 @@ running 10 s past it), the script's own error text, or `bad result: ...`.
 
 When `alert` is set, the condition is evaluated on every successful run. A result that lacks the field or holds a
 non-number there is a failed attempt (`bad result`), not a silent pass. A true condition sends the alert unless a cooldown
-is running; a failed send releases the cooldown so the next run retries; a false condition clears the cooldown. ntfy sends
+is running or the same message is being sent right now; only a successful send stores the cooldown, so after a failed
+send the next run retries; a false condition clears the cooldown. ntfy sends
 are retried up to three times (1 s, then 2 s) for transport errors, `429` and `5xx`. With `healthcheck` set the ping URL is
 fetched after every successful sequence, and `<url>/fail` after a failed one.
 
-Crash window: the cooldown is claimed (and stored) before the message is sent. If node-control dies between the claim and
-the send, that message can be suppressed for up to one cooldown.
+Crash behaviour: the cooldown is stored only after ntfy accepted the message; while a send is under way, a second send of
+the same message is held back in memory only. If node-control dies (or a deploy cuts a send off) between the send and
+storing the cooldown, the next run sends the message again: a crash can duplicate an alert or a failure message, never
+suppress one.
 
 #### Lost runs, cancel and restart
 
@@ -671,8 +674,11 @@ the send, that message can be suppressed for up to one cooldown.
   cancels each on its node when the record says where it lives, and records it as `lost` with the reason
   `node-control restarted`. The sweep notifies nobody and changes no state, so the persisted attempt number is retried.
   Overdue tasks then start after a random delay of up to 10 s each, so they do not all start at once.
-- A graceful shutdown cancels the running attempts on their nodes (bounded by the platform's kill timeout) and records
-  them as `failed` with the reason `shutdown`; they are not counted and nobody is told about a deploy.
+- A graceful shutdown cancels the running attempts on their nodes and records them as `failed` with the reason
+  `shutdown`; they are not counted (not in metrics either) and nobody is told about a deploy. node-control gives all its
+  modules one shared 5 s stop budget, so the tasks module waits at most 3 s for its attempts (each node cancel gets 1 s
+  of that) and then closes Redis; a run whose cancel did not get through is found by the startup sweep of the next start.
+  A notification still being sent when the process exits is abandoned; at worst it is sent again on a later run.
 - Cancel (`DELETE /runs/{id}`) works on an attempt executing in this process. It cancels the run on its node, records
   `cancelled` and ends the sequence: no retry, no streak, no failure message, and the next run is scheduled normally.
   A cancel that races an attempt that has just finished may answer `204` while the run stays recorded as it ended.

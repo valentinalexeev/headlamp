@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"example.com/node-control/internal/scrub"
 )
 
 func TestConditionOperators(t *testing.T) {
@@ -88,12 +90,12 @@ func TestCheckResult(t *testing.T) {
 
 func TestRenderPlaceholders(t *testing.T) {
 	vars := map[string]any{
-		"int": 842.0, "frac": 1369.57, "s": "héllo", "b": true,
+		"int": 842.0, "frac": 27.35, "s": "héllo", "b": true,
 		"nested": map[string]any{"a": 1.0}, "list": []any{1.0}, "n": nil,
 	}
 	cases := map[string]string{
 		"{int}":               "842",
-		"{frac}":              "1369.57",
+		"{frac}":              "27.35",
 		"{s} {b}":             "héllo true",
 		"{unknown}":           "{unknown}",
 		"{nested} {list} {n}": "{nested} {list} {n}",
@@ -120,6 +122,7 @@ type ntfyReq struct {
 
 type fixture struct {
 	t     *testing.T
+	kv    *memKV
 	store *Store
 	n     *HTTPNotifier
 	now   time.Time
@@ -172,7 +175,8 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(f.ntfySrv.Close)
 	t.Cleanup(f.pingSrv.Close)
 
-	f.store = openStore(t, newMemKV())
+	f.kv = newMemKV()
+	f.store = openStore(t, f.kv)
 	must := func(err error) {
 		if err != nil {
 			t.Fatal(err)
@@ -524,7 +528,7 @@ func TestConcurrentFailureSendsOnce(t *testing.T) {
 	}
 }
 
-func TestFailedSendRollsClaimBackToPrevious(t *testing.T) {
+func TestFailedSendKeepsPreviousCooldown(t *testing.T) {
 	f := newFixture(t)
 	old := f.now.Add(-time.Hour) // an expired cooldown from an earlier alert
 	f.store.UpdateState("tk", func(s *TaskState) { s.AlertUntil = old })
@@ -539,18 +543,134 @@ func TestFailedSendRollsClaimBackToPrevious(t *testing.T) {
 	}
 }
 
-func TestReleaseDoesNotClobberNewerClaim(t *testing.T) {
+func TestInFlightSendHoldsSlotUntilSettled(t *testing.T) {
 	f := newFixture(t)
-	mine := f.now.Add(time.Hour)
-	newer := f.now.Add(5 * time.Hour)
-	f.store.UpdateState("tk", func(s *TaskState) { s.AlertUntil = newer })
-	f.n.release("tk", alertField, mine, time.Time{})
-	if got := f.store.State("tk").AlertUntil; !got.Equal(newer) {
-		t.Fatalf("clobbered: %v", got)
+	if !f.n.reserve("tk", "alert", f.now, alertField) {
+		t.Fatal("first reservation refused")
 	}
-	f.n.release("tk", alertField, newer, time.Time{})
+	if f.n.reserve("tk", "alert", f.now, alertField) {
+		t.Fatal("second reservation while one is in flight")
+	}
+	if !f.n.reserve("tk", "failure", f.now, failField) {
+		t.Fatal("the failure slot is separate from the alert slot")
+	}
 	if !f.store.State("tk").AlertUntil.IsZero() {
-		t.Fatal("own claim not released")
+		t.Fatal("a reservation stored a cooldown")
+	}
+	f.n.settle("tk", "alert", alertField, f.now.Add(time.Hour), false)
+	if !f.store.State("tk").AlertUntil.IsZero() {
+		t.Fatal("a failed send stored a cooldown")
+	}
+	if !f.n.reserve("tk", "alert", f.now, alertField) {
+		t.Fatal("slot not freed after a failed send")
+	}
+	f.n.settle("tk", "alert", alertField, f.now.Add(time.Hour), true)
+	if got := f.store.State("tk").AlertUntil; !got.Equal(f.now.Add(time.Hour)) {
+		t.Fatalf("AlertUntil = %v after a successful send", got)
+	}
+	if f.n.reserve("tk", "alert", f.now, alertField) {
+		t.Fatal("reserved during the stored cooldown")
+	}
+}
+
+// blockNtfy makes the ntfy server hold every request until release is closed
+// or the client gives up; started is signalled when a request arrives.
+func blockNtfy(t *testing.T, f *fixture) (started chan struct{}, release chan struct{}) {
+	started, release = make(chan struct{}, 8), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	f.n = NewNotifier(f.store, srv.Client(), srv.URL, quiet, func() time.Time { return f.now })
+	f.n.sleep = func(context.Context, time.Duration) {}
+	return started, release
+}
+
+func TestInterruptedSendDoesNotSetCooldown(t *testing.T) {
+	for _, kind := range []string{"alert", "failure"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newFixture(t)
+			started, _ := blockNtfy(t, f)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan NotifyResult, 1)
+			go func() {
+				if kind == "alert" {
+					done <- f.n.Success(ctx, "tk", alertTask(), map[string]any{"balance": 500.0})
+				} else {
+					done <- f.n.Failure(ctx, "tk", alertTask(), "boom")
+				}
+			}()
+			<-started
+			cancel()
+			r := <-done
+			if r.Alert == "sent" || !strings.HasPrefix(r.Alert, "failed: ") {
+				t.Fatalf("outcome %+v", r)
+			}
+			st := f.store.State("tk")
+			if !st.AlertUntil.IsZero() || !st.FailNotifyUntil.IsZero() {
+				t.Fatalf("an interrupted send stored a cooldown: %+v", st)
+			}
+		})
+	}
+}
+
+func TestRestartAfterInterruptedSendAlertsAgain(t *testing.T) {
+	f := newFixture(t)
+	started, _ := blockNtfy(t, f)
+	go f.n.Success(context.Background(), "tk", alertTask(), map[string]any{"balance": 500.0})
+	<-started // the send is under way; the process "dies" here
+
+	// A new process opens the same store and has its own notifier.
+	s2 := openStore(t, f.kv)
+	var hits int
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+	}))
+	t.Cleanup(srv.Close)
+	n2 := NewNotifier(s2, srv.Client(), srv.URL, quiet, func() time.Time { return f.now })
+	if r := n2.Success(context.Background(), "tk", alertTask(), map[string]any{"balance": 500.0}); r.Alert != "sent" {
+		t.Fatalf("after a restart: %+v (the cut-off send must not suppress the alert)", r)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 1 {
+		t.Fatalf("ntfy hits %d", hits)
+	}
+}
+
+func TestKnownScrubsLongestFirst(t *testing.T) {
+	f := newFixture(t)
+	// A healthcheck URL on the ntfy host itself contains the ntfy base.
+	hc := f.ntfySrv.URL + "/hc/secret-tail-777"
+	if err := f.store.PutSecret("hc-on-ntfy", hc); err != nil {
+		t.Fatal(err)
+	}
+	tk := alertTask()
+	tk.Healthcheck = "hc-on-ntfy"
+	known := f.n.known(tk)
+	for i := 1; i < len(known); i++ {
+		if len(known[i]) > len(known[i-1]) {
+			t.Fatalf("not longest first: %q", known)
+		}
+	}
+	got := scrub.Scrub("curl "+hc+" failed", known)
+	if strings.Contains(got, "secret-tail-777") {
+		t.Fatalf("tail leaked: %q", got)
 	}
 }
 

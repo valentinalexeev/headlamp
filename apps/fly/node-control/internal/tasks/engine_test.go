@@ -1307,3 +1307,15 @@ func TestEngineCancelUnknownOrFinishedRun(t *testing.T) {
 		t.Fatalf("finished: %v", err)
 	}
 }
+
+// The core's shared Stop context is 5 s and the tasks module stops last: the
+// engine's shutdown wait (which contains each attempt's node Cancel) must fit.
+func TestShutdownDefaultsFitCoreStopContext(t *testing.T) {
+	if defaultShutdownWait+defaultCancelBudget > 4*time.Second || defaultCancelBudget >= defaultShutdownWait {
+		t.Fatalf("shutdown wait %s, cancel budget %s do not fit a 5 s stop", defaultShutdownWait, defaultCancelBudget)
+	}
+	e := NewEngine(Deps{})
+	if e.shutdownWait != defaultShutdownWait || e.cancelBudget != defaultCancelBudget {
+		t.Fatalf("engine uses %s / %s", e.shutdownWait, e.cancelBudget)
+	}
+}

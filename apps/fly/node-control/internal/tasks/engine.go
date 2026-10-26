@@ -52,17 +52,23 @@ const (
 	// tick only reads memory: no Redis, no node listing.
 	maxSleep = 5 * time.Minute
 
-	// Shutdown must fit the platform's kill timeout (25 s): wait for attempts
-	// at most this long, and give each node Cancel this much of it.
-	defaultShutdownWait = 12 * time.Second
-	defaultCancelBudget = 3 * time.Second
+	// The core gives all modules one shared 5 s Stop context and the tasks
+	// module stops last, so shutdown must fit well inside it: wait for
+	// attempts at most this long, and give each node Cancel this much of it
+	// (each attempt cancels its own run, in parallel, inside the wait).
+	defaultShutdownWait = 3 * time.Second
+	defaultCancelBudget = 1 * time.Second
 
 	// The startup sweep cancels runs a previous process left behind.
 	sweepCancelEach  = 5 * time.Second
 	sweepCancelTotal = 30 * time.Second
 
-	// Notifications outlive a shutdown: the state change they report (for
-	// example Streak++) is already stored.
+	// A notification may take this long on the normal path; it is detached
+	// from the attempt's context because the state change it reports (for
+	// example Streak++) is already stored. Shutdown does not wait for it: a
+	// send still in flight when the process exits is abandoned, which at worst
+	// repeats the message on a later run (a cooldown is stored only after a
+	// send succeeded).
 	notifyTimeout = 60 * time.Second
 )
 

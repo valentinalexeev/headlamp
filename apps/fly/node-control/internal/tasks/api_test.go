@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"tailscale.com/ipn"
 
 	"example.com/node-control/internal/authz"
 	"example.com/node-control/internal/core"
@@ -968,4 +969,78 @@ func TestConfigRejectsTaskOverRunnerEnvCap(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("fits: %d %s", rec.Code, rec.Body)
 	}
+}
+
+func TestStopClosesRedisOnlyAfterEngineStopped(t *testing.T) {
+	mr := miniredis.RunT(t)
+	env := modEnv("redis://" + mr.Addr())
+	m := New(core.MapEnv(env), testNodes()).(*Module)
+	runner := &fakeRunner{}
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	runner.start = func(string, StartReq) (string, error) {
+		entered <- struct{}{}
+		<-release // ignores ctx, like a slow connection
+		return "rid", nil
+	}
+	m.newRunner = func() Runner { return runner }
+	m.newNotifier = func(*Store) Notifier { return &fakeNotifier{} }
+	m.pollEvery = 2 * time.Millisecond
+	type closeState struct{ engineDone bool }
+	closed := make(chan closeState, 1)
+	m.openKV = func(url, key string) (ipn.StateStore, func(), error) {
+		kv, closeKV, err := openRedisKV(url, key)
+		if err != nil {
+			return nil, nil, err
+		}
+		return kv, func() {
+			m.mu.Lock()
+			done := m.engineDone
+			m.mu.Unlock()
+			st := closeState{}
+			select {
+			case <-done:
+				st.engineDone = true
+			default:
+			}
+			closed <- st
+			closeKV()
+		}, nil
+	}
+	if err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "store open", func() bool { s, _ := m.current(); return s != nil })
+	s, e := m.current()
+	if err := s.PutConfig(&Config{Tasks: oneTask(nil)}, map[string]string{"job.sh": jobScript}); err != nil {
+		t.Fatal(err)
+	}
+	e.Reload()
+	<-entered // an attempt is executing
+
+	stopped := make(chan struct{})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		m.Stop(ctx)
+		close(stopped)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("Redis closed while the engine was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case st := <-closed:
+		if !st.engineDone {
+			t.Fatal("Redis closed before the engine stopped")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Redis never closed")
+	}
+	<-stopped
 }

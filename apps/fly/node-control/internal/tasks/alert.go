@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -142,6 +143,13 @@ type HTTPNotifier struct {
 
 	mu       sync.Mutex
 	observer func(task, kind string, ok bool)
+
+	// inflight holds the cooldown slots a send is using right now (key: task
+	// and kind). It is memory only: the cooldown itself is stored after the
+	// send succeeded, so a process that dies mid-send leaves no cooldown and
+	// the next run alerts again (a duplicate, never a missed alert).
+	resMu    sync.Mutex
+	inflight map[string]bool
 }
 
 var _ Notifier = (*HTTPNotifier)(nil)
@@ -156,7 +164,7 @@ func NewNotifier(store *Store, hc *http.Client, ntfyBase string, log *slog.Logge
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &HTTPNotifier{
 		store: store, hc: &c, ntfyBase: strings.TrimRight(ntfyBase, "/"),
-		log: log, now: now, sleep: waitCtx,
+		log: log, now: now, sleep: waitCtx, inflight: map[string]bool{},
 	}
 }
 
@@ -217,9 +225,7 @@ func (n *HTTPNotifier) alert(ctx context.Context, task string, t Task, result ma
 		}
 		return false, "none"
 	}
-	until := now.Add(time.Duration(t.Alert.Cooldown))
-	claimed, prev := n.claim(task, now, until, alertField)
-	if !claimed {
+	if !n.reserve(task, "alert", now, alertField) {
 		return true, "suppressed"
 	}
 	vars := make(map[string]any, len(result)+1)
@@ -228,9 +234,7 @@ func (n *HTTPNotifier) alert(ctx context.Context, task string, t Task, result ma
 	}
 	vars["task"] = task
 	outcome := n.send(ctx, task, "alert", t.Alert.Notify, vars)
-	if outcome != "sent" {
-		n.release(task, alertField, until, prev) // the next run retries
-	}
+	n.settle(task, "alert", alertField, now.Add(time.Duration(t.Alert.Cooldown)), outcome == "sent")
 	return true, outcome
 }
 
@@ -243,48 +247,50 @@ func (n *HTTPNotifier) Failure(ctx context.Context, task string, t Task, reason 
 	if t.OnFailure == nil {
 		return res
 	}
-	until := now.Add(time.Duration(t.OnFailure.Cooldown))
-	claimed, prev := n.claim(task, now, until, failField)
-	if !claimed {
+	if !n.reserve(task, "failure", now, failField) {
 		res.Alert = "suppressed"
 		return res
 	}
 	reason = capBytes(scrub.Scrub(reason, n.known(t)), maxNotifyReason)
 	vars := map[string]any{"task": task, "reason": reason}
 	res.Alert = n.send(ctx, task, "failure", t.OnFailure.Notify, vars)
-	if res.Alert != "sent" {
-		n.release(task, failField, until, prev)
-	}
+	n.settle(task, "failure", failField, now.Add(time.Duration(t.OnFailure.Cooldown)), res.Alert == "sent")
 	return res
 }
 
 func alertField(s *TaskState) *time.Time { return &s.AlertUntil }
 func failField(s *TaskState) *time.Time  { return &s.FailNotifyUntil }
 
-// claim reserves the cooldown slot inside UpdateState, so concurrent calls for
-// one task cannot all see an expired cooldown and all send. It returns the
-// previous expiry for release. The send itself happens outside the store lock.
-func (n *HTTPNotifier) claim(task string, now, until time.Time, field func(*TaskState) *time.Time) (bool, time.Time) {
-	var claimed bool
-	var prev time.Time
-	n.setState(task, func(s *TaskState) {
-		f := field(s)
-		if now.Before(*f) {
-			return
-		}
-		prev, *f, claimed = *f, until, true
-	})
-	return claimed, prev
+// reserve takes the cooldown slot of task and kind for one send: it fails
+// while the stored cooldown runs or another send for the same slot is in
+// flight, so concurrent calls cannot all send. Nothing is stored here, and the
+// send itself happens with no lock held.
+func (n *HTTPNotifier) reserve(task, kind string, now time.Time, field func(*TaskState) *time.Time) bool {
+	key := task + "\x00" + kind
+	n.resMu.Lock()
+	defer n.resMu.Unlock()
+	if n.inflight[key] {
+		return false
+	}
+	st := n.store.State(task)
+	if now.Before(*field(&st)) {
+		return false
+	}
+	n.inflight[key] = true
+	return true
 }
 
-// release undoes a claim after a failed send, but only while the field still
-// holds the value this call set: a newer claim must not be clobbered.
-func (n *HTTPNotifier) release(task string, field func(*TaskState) *time.Time, set, prev time.Time) {
-	n.setState(task, func(s *TaskState) {
-		if f := field(s); f.Equal(set) {
-			*f = prev
-		}
-	})
+// settle ends a reservation. Only a successful send stores the cooldown, and
+// it is stored before the slot is freed, so a caller that reserves next sees
+// either the reservation or the cooldown. A failed or interrupted send stores
+// nothing: the next run retries.
+func (n *HTTPNotifier) settle(task, kind string, field func(*TaskState) *time.Time, until time.Time, sent bool) {
+	if sent {
+		n.setState(task, func(s *TaskState) { *field(s) = until })
+	}
+	n.resMu.Lock()
+	delete(n.inflight, task+"\x00"+kind)
+	n.resMu.Unlock()
 }
 
 // known lists the secret values this notifier resolves for the task, for
@@ -309,6 +315,9 @@ func (n *HTTPNotifier) known(t Task) []string {
 			}
 		}
 	}
+	// Longest first: a value that contains a shorter one (a ping URL on the
+	// ntfy host, say) must be replaced whole, not leave its tail behind.
+	sort.SliceStable(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
 	return out
 }
 

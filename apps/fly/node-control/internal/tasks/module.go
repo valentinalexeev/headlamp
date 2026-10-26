@@ -339,8 +339,13 @@ func (m *Module) engineFor() *Engine {
 	return e
 }
 
-// Stop ends the open loop and the engine (bounded by ctx), then closes Redis.
-// It is safe without Start and when the module is inactive.
+// Stop ends the open loop and the engine, then closes Redis. The core hands
+// every module one shared, short Stop context (5 s) and this module stops
+// last, so each wait is bounded by ctx: the engine's own shutdown wait is
+// shorter than that, which lets Redis close only once the engine has stopped
+// writing. Only an expired ctx closes Redis under a running engine (its later
+// writes then fail and are logged). It is safe without Start and when the
+// module is inactive.
 func (m *Module) Stop(ctx context.Context) error {
 	if m.cancel == nil {
 		return nil

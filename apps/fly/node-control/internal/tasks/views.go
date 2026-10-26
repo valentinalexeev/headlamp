@@ -86,7 +86,7 @@ func realFailure(r Run) bool {
 	if r.State != RunFailed && r.State != RunLost {
 		return false
 	}
-	return r.Reason != "shutdown" && r.Reason != "node-control restarted"
+	return r.Reason != reasonShutdown && r.Reason != reasonRestarted
 }
 
 // buildTaskView assembles one task from the config, its state, its history

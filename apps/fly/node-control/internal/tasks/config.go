@@ -16,6 +16,7 @@ import (
 
 const (
 	defaultTimeout  = 3 * time.Minute
+	minTimeout      = time.Second // the runner takes whole seconds, at least 1
 	maxTimeout      = 30 * time.Minute
 	minEvery        = time.Minute
 	defaultCooldown = 24 * time.Hour
@@ -60,7 +61,10 @@ type Task struct {
 	OnFailure   *OnFailure     `json:"on_failure,omitempty"`
 }
 
-// Target is either a named node or a tag selector, never both.
+// Target is either a named node or a tag selector, never both. Node is the
+// node's headscale given name (unique and set by the admin), never the host
+// name the node reports. Either way only nodes that carry the runner tag
+// (TASKS_RUNNER_TAG) are candidates; see WithTag and Select.
 type Target struct {
 	Node   string   `json:"node,omitempty"`
 	Tags   []string `json:"tags,omitempty"`
@@ -261,8 +265,8 @@ func ParseConfig(b []byte) (*Config, error) {
 
 		if p.Timeout == nil {
 			t.Timeout = Duration(defaultTimeout)
-		} else if t.Timeout <= 0 || time.Duration(t.Timeout) > maxTimeout {
-			bad("timeout", "%s is outside (0, %s]", time.Duration(t.Timeout), maxTimeout)
+		} else if time.Duration(t.Timeout) < minTimeout || time.Duration(t.Timeout) > maxTimeout {
+			bad("timeout", "%s is outside [%s, %s]", time.Duration(t.Timeout), minTimeout, maxTimeout)
 		}
 
 		if p.Retry == nil || p.Retry.Attempts == nil {

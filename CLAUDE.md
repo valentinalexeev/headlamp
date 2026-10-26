@@ -301,9 +301,11 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
   OCI keys, `SELECTEL_*`, `HEADSCALE_API_KEY`). Tailnet identity: keep it on the `tailscale_state` volume (see its
   `fly.toml`), or in a shared Redis with `REDIS_URL` and an encryption key. Details: `apps/fly/node-control/README.md`.
 - Tasks module (optional, needs that Redis): scheduled browser-script checks that run on a node, with retries, alerts,
-  metrics and a heartbeat. Set `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `TASKS_RUNNER_TOKEN` and `TASKS_ADMIN_USERS`, deploy the
-  `task-runner` role (`ansible/roles/task-runner`) to the nodes that should run scripts, allow node-control to reach the
-  runner port in the tailnet ACL, and manage config, scripts and secrets from your private repo with `scripts/tasks.sh`
+  metrics and a heartbeat. Set `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `TASKS_RUNNER_TOKEN`, `TASKS_ADMIN_USERS` and
+  `ENROLL_ALLOWED_HOSTS` (required by the module), deploy the `task-runner` role (`ansible/roles/task-runner`) to the nodes
+  that should run scripts, give those nodes the runner tag (`TASKS_RUNNER_TAG`, default `tag:task-runner`; untagged nodes
+  are never used, and a `node` target means the headscale given name), allow node-control to reach the runner port of
+  that tag in the tailnet ACL, and manage config, scripts and secrets from your private repo with `scripts/tasks.sh`
   (example files: `examples/private-repo/fly/node-control/tasks/`). Variables, API, metrics and the trust model:
   `apps/fly/node-control/README.md`, section "Tasks module".
 

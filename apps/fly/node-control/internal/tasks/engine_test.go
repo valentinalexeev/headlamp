@@ -39,6 +39,12 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.mu.Unlock()
 }
 
+// runnerNode is an online node with the default runner tag whose given name
+// equals its reported name.
+func runnerNode(name, ip string) headscale.Node {
+	return headscale.Node{Name: name, GivenName: name, Online: true, Tags: []string{DefaultRunnerTag}, IPAddresses: []string{ip}}
+}
+
 type fakeNodes struct {
 	nodes []headscale.Node
 	err   error
@@ -53,7 +59,9 @@ func (f *fakeNodes) Nodes(context.Context) ([]headscale.Node, error) {
 // fakeRunner succeeds by default; tests override start/status.
 type fakeRunner struct {
 	mu      sync.Mutex
-	healthy map[string]bool // addr -> healthy; missing means healthy
+	healthy map[string]bool  // addr -> healthy; missing means healthy
+	hErr    map[string]error // addr -> Health error
+	probed  []string         // addrs asked for health, in order
 	start   func(addr string, req StartReq) (string, error)
 	status  func(ctx context.Context, id string, call int) (RunStatus, error)
 
@@ -70,6 +78,10 @@ func (r *fakeRunner) Health(_ context.Context, addr string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.health++
+	r.probed = append(r.probed, addr)
+	if err, ok := r.hErr[addr]; ok {
+		return false, err
+	}
 	if h, ok := r.healthy[addr]; ok {
 		return h, nil
 	}
@@ -196,8 +208,8 @@ func newEngFixture(t *testing.T, tasks map[string]Task) *engFixture {
 		kv: kv, store: s,
 		clock: &fakeClock{t: t0},
 		nodes: &fakeNodes{nodes: []headscale.Node{
-			{Name: "n1", Online: true, IPAddresses: []string{"100.64.0.1"}},
-			{Name: "n2", Online: true, IPAddresses: []string{"100.64.0.2"}},
+			runnerNode("n1", "100.64.0.1"),
+			runnerNode("n2", "100.64.0.2"),
 		}},
 		runner:   &fakeRunner{},
 		notifier: &fakeNotifier{},

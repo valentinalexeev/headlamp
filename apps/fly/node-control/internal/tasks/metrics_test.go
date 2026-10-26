@@ -297,3 +297,32 @@ func TestNotifierObserverFeedsMetrics(t *testing.T) {
 		t.Fatalf("metrics leak a URL or topic:\n%s", out)
 	}
 }
+
+func TestMetricsServerBoundsClients(t *testing.T) {
+	srv := newMetricsServer(NewMetrics())
+	if srv.IdleTimeout != 60*time.Second || srv.WriteTimeout != 10*time.Second ||
+		srv.MaxHeaderBytes != 8192 || srv.ReadHeaderTimeout != 5*time.Second {
+		t.Fatalf("server limits: idle %s write %s header bytes %d read header %s",
+			srv.IdleTimeout, srv.WriteTimeout, srv.MaxHeaderBytes, srv.ReadHeaderTimeout)
+	}
+}
+
+func TestEngineDoesNotObserveShutdownAttempts(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	m := NewMetrics()
+	f.e.d.Metrics = m
+	polled := make(chan struct{}, 1)
+	f.runner.status = blockRunning(polled)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { f.e.Run(ctx); close(done) }()
+	<-polled
+	cancel()
+	<-done
+	if r := f.runs("job")[0]; r.State != RunFailed || r.Reason != "shutdown" {
+		t.Fatalf("run = %+v", r)
+	}
+	if out := metricsText(m); strings.Contains(out, "task_runs_total{") || strings.Contains(out, "task_run_duration_seconds_count{") {
+		t.Fatalf("a shutdown-interrupted attempt was counted:\n%s", out)
+	}
+}

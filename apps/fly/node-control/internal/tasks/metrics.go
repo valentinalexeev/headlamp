@@ -221,6 +221,9 @@ func formatFloat(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) 
 
 const (
 	metricsReadHeaderTimeout = 5 * time.Second
+	metricsWriteTimeout      = 10 * time.Second
+	metricsIdleTimeout       = 60 * time.Second
+	metricsMaxHeaderBytes    = 8192
 	metricsShutdownTimeout   = 5 * time.Second
 	metricsContentType       = "text/plain; version=0.0.4; charset=utf-8"
 )
@@ -237,12 +240,20 @@ func ServeMetrics(ctx context.Context, addr string, m *Metrics) error {
 	return serveMetrics(ctx, ln, m)
 }
 
-func serveMetrics(ctx context.Context, ln net.Listener, m *Metrics) error {
-	srv := &http.Server{
+// newMetricsServer bounds what an unauthenticated client can hold open.
+func newMetricsServer(m *Metrics) *http.Server {
+	return &http.Server{
 		Handler:           metricsHandler(m),
 		ReadHeaderTimeout: metricsReadHeaderTimeout,
+		WriteTimeout:      metricsWriteTimeout,
+		IdleTimeout:       metricsIdleTimeout,
+		MaxHeaderBytes:    metricsMaxHeaderBytes,
 		ErrorLog:          log.New(io.Discard, "", 0),
 	}
+}
+
+func serveMetrics(ctx context.Context, ln net.Listener, m *Metrics) error {
+	srv := newMetricsServer(m)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

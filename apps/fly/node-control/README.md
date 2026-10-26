@@ -484,20 +484,27 @@ a bad value stops startup with a message that names the variable and never a sec
 | `NODE_CONTROL_STATE_KEY` | | secret; encrypts every stored value (AES-256-GCM, each value bound to its Redis field name) |
 | `TASKS_RUNNER_TOKEN` | | secret; bearer token the node runners accept (their `RUNNER_TOKEN`) |
 | `TASKS_ADMIN_USERS` | | comma-separated tailnet logins allowed to use the page and API. Required once the module is on; tagged nodes are never allowed |
+| `TASKS_RUNNER_TAG` | `tag:task-runner` | headscale tag a node must carry to run any task (matches `^tag:[a-z0-9][a-z0-9-]{0,62}$`). Nodes without it are never probed and never receive the runner token or a task's secrets |
 | `TASKS_RUNNER_PORT` | `9100` | port of the runner on the nodes, 1 to 65535 |
 | `TASKS_NTFY_URL` | `https://ntfy.sh` | base URL of the ntfy server used for alerts and failure messages |
 | `TASKS_POLL_SECONDS` | `5` | how often a running attempt asks its runner for the status, 1 to 60 |
 | `TASKS_METRICS_ADDR` | unset | `host:port` of the metrics listener, for example `:9091` (host may be empty, port numeric). Unset: no listener |
 | `TASKS_HEARTBEAT_SECRET` | unset | NAME of a stored secret (letters, digits, `_`, at most 64) whose value is a heartbeat ping URL. Unset: no heartbeat |
 
-The admin listener's Host guard (`ENROLL_ALLOWED_HOSTS`) applies to `/tasks` as to every admin route; the module does not
-require it.
+The module requires the admin listener's Host guard, like the policy console: once it is on, `ENROLL_ALLOWED_HOSTS`
+must list the host names the admin listener answers to, and an unset, empty or `*` value stops startup. The guard
+protects the page and API from DNS rebinding.
+
+Rollout: give every runner node the runner tag in headscale (tags are set by the admin; a node cannot give itself one) and
+write the tailnet ACL rule that opens the runner port with that tag as the destination. A node without the tag is
+ignored even when a task names it.
 
 ### Task configuration
 
 The configuration is one JSON object, `{"tasks": {"<id>": {...}}}`. It is decoded strictly: unknown fields, trailing
 data, a duplicate task id and a bad value are all errors, and every problem is reported with its task and field. A task
-id matches `^[a-z0-9][a-z0-9._-]{0,63}$` (`config` and `secrets` are reserved: they would clash with the API paths).
+id matches `^[a-z0-9][a-z0-9._-]{0,63}$` (`config` and `secrets` are reserved: they would clash with the API paths;
+`scheduler` is reserved too: it is the heartbeat's label in metrics and logs).
 Durations are Go duration strings (`"90s"`, `"12h"`); a bare number is refused because its unit would be a guess.
 
 ```json
@@ -542,13 +549,13 @@ A complete placeholder file is in
 |---|---|---|
 | `script` | yes | file name of a stored script: no `/`, `\` or `..`. A push also needs the name to match `^[A-Za-z0-9._-]{1,64}$` |
 | `params` | no | JSON object handed to the script as `params` |
-| `target` | yes | either `node` (a node name, matched against the headscale name and given name) or `tags` (a node must carry all of them), never both. `online: true` skips nodes headscale reports offline |
+| `target` | yes | either `node` (the node's headscale **given name**, exactly; the host name a node reports is never matched, since any node can claim any host name) or `tags` (a node must carry all of them), never both. Two nodes with the same given name make the target ambiguous: the attempt fails with `ambiguous target` and nothing is contacted. Either way only nodes with the runner tag (`TASKS_RUNNER_TAG`) are candidates. `online: true` skips nodes headscale reports offline |
 | `schedule.every` | yes | at least `1m` |
 | `schedule.jitter` | no | `0s`. The next run is `now + every ± jitter` (uniform), never sooner than `every / 2` |
-| `timeout` | no | `3m`; above 0 and at most `30m`. Enforced by the runner |
+| `timeout` | no | `3m`; from `1s` to `30m` (the runner counts whole seconds). Enforced by the runner |
 | `retry.attempts` | no | `1`; 1 to 10 attempts per sequence |
 | `retry.backoff` | with attempts > 1 | list of positive durations; entry *n* is the wait after failed attempt *n*, the last entry repeats |
-| `secrets` | no | names of stored secrets passed to the script as `secrets.<NAME>` |
+| `secrets` | no | names of stored secrets passed to the script as `secrets.<NAME>`. The runner hands secrets and params to the container in environment variables, so a push is refused when the JSON of a task's secret values plus its params JSON exceeds 100000 bytes |
 | `healthcheck` | no | NAME of a secret holding a healthchecks-style ping URL |
 | `alert.when` | with `alert` | `field` (a numeric result field), `op` (one of `<` `<=` `>` `>=` `==` `!=`) and `value` (number) |
 | `alert.cooldown` | no | `24h`; must be positive |
@@ -559,9 +566,11 @@ A complete placeholder file is in
 (failure); an unknown name stays as written so a typo is visible. `{task}` is also available in alert text. A
 placeholder with a colon is refused.
 
-Which node runs a task: the nodes that match `target` (and are online when `online` is set), whose runner answers its
-health check as reachable and idle. Among them the node that last ran the task successfully is preferred, then the least
+Which node runs a task: the nodes with the runner tag that match `target` (and are online when `online` is set), whose
+runner answers its health check as reachable and idle. Among them the node that last ran the task successfully is preferred, then the least
 busy one, then the lowest name. A candidate node must also have a tailnet IPv4 address. None eligible makes the attempt fail with `no eligible node`.
+A runner that refuses the token (`401`) counts as unhealthy; node-control logs `runner rejected the token` with the
+node's name once per process start.
 
 ### Script contract
 
@@ -596,7 +605,7 @@ otherwise the answer is `422 {"detail":"Content-Type must be application/json"}`
 | `GET /runs/{id}` | one run view, searched among the executing attempts and every task's history; `404 {"error":"unknown run"}` |
 | `DELETE /runs/{id}` | cancel an executing run: `204`; `409` when the run is recorded as running or queued but is not executing in this process; `404` unknown or finished |
 | `GET /tasks/config` | `{"config": {...}, "scripts": {"name": "text"}}`: the live config (defaults applied) and the scripts it references; `404 {"error":"no config"}` before the first push |
-| `PUT /tasks/config` | body `{"config": {...}, "scripts": {"name": "text"}}`; add `?dry_run=1` (or `true`) to validate only. Answer `200 {"tasks": {added, changed, removed}, "scripts": {added, changed, removed}, "dry_run": bool}`, plus `"pending_write": true` when Redis could not be written yet. `413` for a body over 1 MiB or a script over 256 KiB; `422` for an invalid body, a script name outside `^[A-Za-z0-9._-]{1,64}$`, an invalid config (`problems`), a reserved task id, a task naming a secret that is not stored (**push secrets first**) or a script that is neither in the body nor stored |
+| `PUT /tasks/config` | body `{"config": {...}, "scripts": {"name": "text"}}`; add `?dry_run=1` (or `true`) to validate only. Answer `200 {"tasks": {added, changed, removed}, "scripts": {added, changed, removed}, "dry_run": bool}`, plus `"pending_write": true` when Redis could not be written yet. `413` for a body over 1 MiB or a script over 256 KiB; `422` for an invalid body, a script name outside `^[A-Za-z0-9._-]{1,64}$`, an invalid config (`problems`), a reserved task id, a task naming a secret that is not stored (**push secrets first**), a task whose secrets and params exceed the runner's 100000-byte limit, or a script that is neither in the body nor stored |
 | `GET /tasks/secrets` | `[{"name": "...", "set": true}]`; values are never returned |
 | `PUT /tasks/secrets` | body `{"NAME": "value", ...}`: at most 64 names (`^[A-Za-z0-9_]{1,64}$`), each value 1 to 4096 bytes, body at most 64 KiB. `200 {"stored": [names]}` (plus `pending_write`); `413`; `422` with a message that never echoes a value or a bad name |
 
@@ -641,7 +650,7 @@ Example with `"attempts": 3` and `"backoff": ["2m", "10m"]`: attempt 1 fails, wa
 minutes, attempt 3 fails: one failure message, `streak` + 1, and the next scheduled run at the normal interval.
 
 An attempt fails with a short reason such as `script not found: <name>`, `secret not configured: <names>`,
-`no eligible node`, `node busy`, `timeout` (the runner enforces the timeout; node-control cancels a run still reported as
+`no eligible node`, `ambiguous target`, `node busy`, `timeout` (the runner enforces the timeout; node-control cancels a run still reported as
 running 10 s past it), the script's own error text, or `bad result: ...`.
 
 When `alert` is set, the condition is evaluated on every successful run. A result that lacks the field or holds a
@@ -680,7 +689,7 @@ keeps working. Values are kept in memory: counters restart at zero with the proc
 
 | metric | type | labels |
 |---|---|---|
-| `task_runs_total` | counter | `task`, `node`, `state` (finished attempts) |
+| `task_runs_total` | counter | `task`, `node`, `state` (finished attempts; an attempt cut short by a shutdown is not counted) |
 | `task_run_duration_seconds` | summary (`_sum`, `_count`) | `task` |
 | `task_alert_sent_total` | counter | `task`, `kind` (`alert`, `failure`, `ping`), `ok` (`true`, `false`) |
 | `task_notify_failures_total` | counter | `task` |
@@ -716,7 +725,8 @@ Structured log lines (`log/slog`, key=value fields) with event names, ids and ou
 `run_started` (task, run, attempt), `node_chosen` (task, run, node, attempt), `attempt_result` (task, run, node,
 attempt, state, dur_ms, reason), `retry_scheduled` (task, run, node, attempt, state, reason), `alert_evaluated` (task, hit,
 outcome), `notify_result` (task, kind, outcome) and `ping_result` (task, kind, outcome; the heartbeat logs under task
-`scheduler` and only when its outcome changes). Store events are `tasks store open`, `tasks store unavailable, ...` and
+`scheduler` and only when its outcome changes). Warnings logged once per process start: `ambiguous task target` (task,
+node) and `runner rejected the token` (node). Store events are `tasks store open`, `tasks store unavailable, ...` and
 `task store write failed, serving from memory`.
 
 ### Trust model

@@ -46,6 +46,7 @@ func modEnv(redisURL string) map[string]string {
 		"NODE_CONTROL_STATE_KEY": modStateKey,
 		"TASKS_RUNNER_TOKEN":     runnerToken,
 		"TASKS_ADMIN_USERS":      "alice",
+		"ENROLL_ALLOWED_HOSTS":   "node-control.example.com",
 	}
 }
 
@@ -60,16 +61,26 @@ type modHarness struct {
 }
 
 func testNodes() headscale.NodeSource {
-	return &fakeNodes{nodes: []headscale.Node{{Name: "n1", Online: true, IPAddresses: []string{"100.64.0.10"}}}}
+	return &fakeNodes{nodes: []headscale.Node{runnerNode("n1", "100.64.0.10")}}
 }
 
 // newModHarness registers and starts the module against miniredis with a fake
 // runner and notifier, and waits until the store is open.
 func newModHarness(t *testing.T, env map[string]string) *modHarness {
 	t.Helper()
+	return newModHarnessEnv(t, env, nil)
+}
+
+// newModHarnessEnv is newModHarness with mod applied to the environment
+// (the default one when env is nil) before Register.
+func newModHarnessEnv(t *testing.T, env map[string]string, mod func(map[string]string)) *modHarness {
+	t.Helper()
 	mr := miniredis.RunT(t)
 	if env == nil {
 		env = modEnv("redis://" + mr.Addr())
+	}
+	if mod != nil {
+		mod(env)
 	}
 	h := &modHarness{t: t, mux: http.NewServeMux(), runner: &fakeRunner{}, notifier: &fakeNotifier{}, mr: mr,
 		logs: &bytes.Buffer{}}
@@ -451,6 +462,12 @@ func TestConfigPutRejectsInvalidAndNamesProblems(t *testing.T) {
 		map[string]string{"x.js": scriptA}))
 	if rec.Code != 422 || !strings.Contains(rec.Body.String(), "reserved") {
 		t.Fatalf("reserved id: %d %s", rec.Code, rec.Body)
+	}
+	// "scheduler" is the heartbeat's task label in metrics and logs.
+	rec = h.alice("PUT", "/tasks/config", configBody(`"scheduler":{"script":"x.js","target":{"node":"n1"},"schedule":{"every":"1h"}}`,
+		map[string]string{"x.js": scriptA}))
+	if rec.Code != 422 || !strings.Contains(rec.Body.String(), "task scheduler: id: reserved") {
+		t.Fatalf("reserved id scheduler: %d %s", rec.Code, rec.Body)
 	}
 	if rec := h.alice("PUT", "/tasks/config", `not json`); rec.Code != 422 {
 		t.Fatalf("garbage: %d", rec.Code)
@@ -900,5 +917,55 @@ func TestTaskViewStaleCountsOnlyRealFailures(t *testing.T) {
 		if got := buildTaskView(now, "job", task, c.st, c.runs, nil).Stale; got != c.want {
 			t.Errorf("%s: stale = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestConfigRejectsTaskOverRunnerEnvCap(t *testing.T) {
+	h := newModHarness(t, nil)
+	store := h.waitOpen()
+	big := map[string]string{}
+	for i := 0; i < 26; i++ { // 26 x 4000 bytes: over the runner's 100000-byte cap together
+		big["BIG_"+string(rune('A'+i))] = strings.Repeat("s", 4000)
+	}
+	half := map[string]string{} // a secrets body is at most 64 KiB: two requests
+	for n, v := range big {
+		half[n] = v
+		if len(half) == 13 {
+			b, _ := json.Marshal(half)
+			if rec := h.alice("PUT", "/tasks/secrets", string(b)); rec.Code != 200 {
+				t.Fatalf("put secrets: %d %s", rec.Code, rec.Body)
+			}
+			half = map[string]string{}
+		}
+	}
+	names := make([]string, 0, len(big))
+	for n := range big {
+		names = append(names, `"`+n+`"`)
+	}
+	task := func(id string, secrets []string, params string) string {
+		return `"` + id + `":{"script":"x.js","target":{"node":"n1"},"schedule":{"every":"1h"},"secrets":[` +
+			strings.Join(secrets, ",") + `],"params":` + params + `}`
+	}
+	rec := h.alice("PUT", "/tasks/config", configBody(task("too-big", names, `{}`), map[string]string{"x.js": scriptA}))
+	if rec.Code != 422 {
+		t.Fatalf("code %d %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "task too-big") || !strings.Contains(body, "100000") || strings.Contains(body, "sss") {
+		t.Fatalf("answer must name the task and the cap, never a value: %s", body)
+	}
+	if store.Config() != nil {
+		t.Fatal("stored despite the cap")
+	}
+	// Params count too: few secrets plus large params also exceed it.
+	params := `{"p":"` + strings.Repeat("x", 97000) + `"}`
+	rec = h.alice("PUT", "/tasks/config", configBody(task("params-big", names[:1], params), map[string]string{"x.js": scriptA}))
+	if rec.Code != 422 || !strings.Contains(rec.Body.String(), "task params-big") {
+		t.Fatalf("params: %d %s", rec.Code, rec.Body)
+	}
+	// Under the cap is accepted.
+	rec = h.alice("PUT", "/tasks/config", configBody(task("fits", names[:20], `{"a":1}`), map[string]string{"x.js": scriptA}))
+	if rec.Code != 200 {
+		t.Fatalf("fits: %d %s", rec.Code, rec.Body)
 	}
 }

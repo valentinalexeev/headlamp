@@ -114,6 +114,7 @@ func TestParseConfigRejects(t *testing.T) {
 			t["schedule"] = map[string]any{"every": "30s"}
 		}), []string{"task a", "schedule.every"}},
 		{"timeout zero", taskJSON(func(t map[string]any) { t["timeout"] = "0s" }), []string{"task a", "timeout"}},
+		{"timeout below a second", taskJSON(func(t map[string]any) { t["timeout"] = "500ms" }), []string{"task a", "timeout"}},
 		{"timeout negative", taskJSON(func(t map[string]any) { t["timeout"] = "-1m" }), []string{"task a", "timeout"}},
 		{"timeout too long", taskJSON(func(t map[string]any) { t["timeout"] = "31m" }), []string{"task a", "timeout"}},
 		{"unknown op", taskJSON(func(t map[string]any) {

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +51,7 @@ type Module struct {
 	redisURL string
 	stateKey string
 	token    string
+	tag      string // TASKS_RUNNER_TAG
 	port     int
 	ntfyURL  string
 	tn       core.Tailnet
@@ -153,6 +155,16 @@ func (m *Module) Register(r *core.Routes) error {
 	if err != nil {
 		return err
 	}
+	// The pages and API act on the operator's behalf: like the policy
+	// console, they need the core's Host guard against DNS rebinding.
+	if hosts := m.env.List("ENROLL_ALLOWED_HOSTS"); len(hosts) == 0 || slices.Contains(hosts, "*") {
+		return errors.New(enabled + " but ENROLL_ALLOWED_HOSTS is empty or contains \"*\"; " +
+			"list the host names the admin listener answers to (the core's Host guard protects the tasks page and API from DNS rebinding)")
+	}
+	tag := strings.TrimSpace(m.env.Default("TASKS_RUNNER_TAG", DefaultRunnerTag))
+	if !runnerTagRe.MatchString(tag) {
+		return fmt.Errorf("TASKS_RUNNER_TAG must look like tag:task-runner (match %s)", runnerTagRe)
+	}
 	if r.Tailnet == nil {
 		return errors.New(enabled + " but the core has no tailnet node to identify users")
 	}
@@ -167,6 +179,7 @@ func (m *Module) Register(r *core.Routes) error {
 	m.on = true
 	m.redisURL = m.env.Getenv("REDIS_URL")
 	m.token = m.env.Getenv("TASKS_RUNNER_TOKEN")
+	m.tag = tag
 	m.port = port
 	m.ntfyURL = m.env.Default("TASKS_NTFY_URL", defaultNtfyURL)
 	m.tn = r.Tailnet
@@ -293,7 +306,7 @@ func (m *Module) open(ctx context.Context) error {
 		runner = NewRunnerClient(m.tn, m.port, m.token, nil)
 	}
 	eng := NewEngine(Deps{Store: store, Nodes: m.src, Runner: runner, Notifier: notifier,
-		PollEvery: m.pollEvery, Log: m.log, Metrics: m.metrics})
+		PollEvery: m.pollEvery, Log: m.log, Metrics: m.metrics, RunnerTag: m.tag})
 	done := make(chan struct{})
 	m.mu.Lock()
 	m.store, m.engine, m.closeKV, m.engineDone = store, eng, closeKV, done

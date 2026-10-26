@@ -74,10 +74,20 @@ func (e *Engine) execute(ctx context.Context, task string, t Task, run *Run, val
 		}
 		return failed("cannot list nodes")
 	}
+	// Only nodes with the runner tag are ever considered: the probe and the
+	// run itself carry the runner token.
+	nodes = WithTag(nodes, e.d.RunnerTag)
 	cand, err := Select(t.Target, nodes, e.healthProbe(ctx), e.busySnapshot(), lastOK(e.d.Store.Runs(task)))
 	if err != nil {
 		if ctx.Err() != nil {
 			return outcome{shutdown: true}
+		}
+		if errors.Is(err, ErrAmbiguousTarget) {
+			if e.warnOnce("ambiguous:" + task) {
+				e.log.Warn("ambiguous task target: more than one node has this given name; the task does not run",
+					"task", task, "node", t.Target.Node)
+			}
+			return failed("ambiguous target")
 		}
 		return failed("no eligible node")
 	}
@@ -182,6 +192,9 @@ func (e *Engine) healthProbe(ctx context.Context) func(headscale.Node) bool {
 			return v
 		}
 		ok, err := e.d.Runner.Health(ctx, addr)
+		if errors.Is(err, ErrRunnerUnauthorized) && e.warnOnce("unauthorized:"+n.GivenName) {
+			e.log.Warn("runner rejected the token", "node", n.GivenName)
+		}
 		memo[addr] = err == nil && ok
 		return memo[addr]
 	}
@@ -239,7 +252,10 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 	e.setActive(run)
 	e.log.Info("attempt_result", "task", task, "run", run.ID, "node", run.Node, "attempt", run.Attempt,
 		"state", string(run.State), "dur_ms", now.Sub(run.Started).Milliseconds(), "reason", run.Reason)
-	e.d.Metrics.Observe(task, run.Node, run.State, now.Sub(run.Started))
+	if !out.shutdown {
+		// Metrics count real attempts only: a deploy is not a failure.
+		e.d.Metrics.Observe(task, run.Node, run.State, now.Sub(run.Started))
+	}
 
 	nctx, ncancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
 	defer ncancel()

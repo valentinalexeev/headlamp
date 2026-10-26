@@ -29,7 +29,9 @@ task_runner_listen_addr: "<tailnet-ip>"                       # `tailscale ip -4
 task_runner_base_image: "<registry>/<repository>@sha256:<64 hex>"
 ```
 
-Allow the runner port (`task_runner_port`, default 9100) to this node from node-control only, in the tailnet ACL.
+Give the node the runner tag in headscale (node-control's `TASKS_RUNNER_TAG`, default `tag:task-runner`): node-control
+never contacts an untagged node. Allow the runner port (`task_runner_port`, default 9100) to that tag from node-control
+only, in the tailnet ACL.
 
 **systemd-resolved hosts:** if `/etc/resolv.conf` points at the local stub (`nameserver 127.0.0.53`), add
 `127.0.0.53` to `task_runner_guard_resolvers` (keep the tailnet entries if they are used). Preflight fails safe when a

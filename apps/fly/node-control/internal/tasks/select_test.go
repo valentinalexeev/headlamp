@@ -2,13 +2,14 @@ package tasks
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"example.com/node-control/internal/headscale"
 )
 
 func node(name string, online bool, tags []string, ips ...string) headscale.Node {
-	return headscale.Node{Name: name, Online: online, Tags: tags, IPAddresses: ips}
+	return headscale.Node{Name: name, GivenName: name, Online: online, Tags: tags, IPAddresses: ips}
 }
 
 func always(headscale.Node) bool { return true }
@@ -27,7 +28,7 @@ func TestSelectByName(t *testing.T) {
 	}
 }
 
-func TestSelectByNameMatchesGivenName(t *testing.T) {
+func TestSelectByNameMatchesGivenNameOnly(t *testing.T) {
 	n := node("host-1234", true, nil, "100.64.0.1")
 	n.GivenName = "runner"
 	c, err := Select(Target{Node: "runner"}, []headscale.Node{n}, always, nil, "")
@@ -36,6 +37,61 @@ func TestSelectByNameMatchesGivenName(t *testing.T) {
 	}
 	if _, err := Select(Target{Node: "Runner"}, []headscale.Node{n}, always, nil, ""); !errors.Is(err, ErrNoEligibleNode) {
 		t.Fatalf("match must be case-sensitive, got %v", err)
+	}
+	// The reported host name is chosen by the node itself: never a match.
+	if _, err := Select(Target{Node: "host-1234"}, []headscale.Node{n}, always, nil, ""); !errors.Is(err, ErrNoEligibleNode) {
+		t.Fatalf("reported name must not match, got %v", err)
+	}
+}
+
+func TestSelectImpostorWithSameReportedNameNeverSelectedOrProbed(t *testing.T) {
+	real := node("runner-1", true, nil, "100.64.0.1")
+	impostor := node("runner-1", true, nil, "100.64.0.66") // same reported name
+	impostor.GivenName = "laptop"
+	var asked []string
+	healthy := func(n headscale.Node) bool { asked = append(asked, n.GivenName); return true }
+	for _, order := range [][]headscale.Node{{real, impostor}, {impostor, real}} {
+		asked = nil
+		c, err := Select(Target{Node: "runner-1"}, order, healthy, nil, "")
+		if err != nil || c.Addr != "100.64.0.1" {
+			t.Fatalf("got %+v, %v", c, err)
+		}
+		if len(asked) != 1 || asked[0] != "runner-1" {
+			t.Fatalf("probed %v, want only the real node", asked)
+		}
+	}
+}
+
+func TestSelectAmbiguousGivenName(t *testing.T) {
+	a := node("a", true, nil, "100.64.0.1")
+	b := node("b", false, nil, "100.64.0.2")
+	a.GivenName, b.GivenName = "dup", "dup"
+	probed := 0
+	healthy := func(headscale.Node) bool { probed++; return true }
+	_, err := Select(Target{Node: "dup"}, []headscale.Node{a, b}, healthy, nil, "")
+	if !errors.Is(err, ErrAmbiguousTarget) || !errors.Is(err, ErrNoEligibleNode) {
+		t.Fatalf("got %v, want ambiguous (wrapping no eligible node)", err)
+	}
+	if !strings.Contains(err.Error(), "ambiguous target") {
+		t.Fatalf("message %q", err)
+	}
+	if probed != 0 {
+		t.Fatalf("an ambiguous target probed %d nodes", probed)
+	}
+}
+
+func TestWithTag(t *testing.T) {
+	nodes := []headscale.Node{
+		node("tagged", true, []string{"tag:x", DefaultRunnerTag}, "100.64.0.1"),
+		node("plain", true, nil, "100.64.0.2"),
+		node("other", true, []string{"tag:x"}, "100.64.0.3"),
+	}
+	got := WithTag(nodes, DefaultRunnerTag)
+	if len(got) != 1 || got[0].Name != "tagged" {
+		t.Fatalf("got %+v", got)
+	}
+	if got := WithTag(nodes, ""); len(got) != 0 {
+		t.Fatalf("empty tag must keep nothing, got %+v", got)
 	}
 }
 

@@ -21,13 +21,22 @@ const (
 	maxSecretValue = 4096
 	maxSecretCount = 64
 	maxRunsListed  = 50
+
+	// runnerMaxEnvJSON mirrors maxEnvJSON in the task-runner
+	// (apps/task-runner/internal/runner/server.go; a separate Go module, so
+	// the value is duplicated): the runner refuses a run whose secrets or
+	// params JSON is larger, because each travels in one environment
+	// variable. A push is refused when the two together would exceed it,
+	// which is stricter than the runner's per-variable check.
+	runnerMaxEnvJSON = 100_000
 )
 
 var (
 	scriptNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	secretNameRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
-	// Task ids that would be shadowed by the fixed /tasks/... routes.
-	reservedTaskIDs = map[string]bool{"config": true, "secrets": true}
+	// Task ids that would be shadowed by the fixed /tasks/... routes, and
+	// "scheduler", the task label of the heartbeat in metrics and logs.
+	reservedTaskIDs = map[string]bool{"config": true, "secrets": true, heartbeatTask: true}
 )
 
 // api holds the HTTP handlers. Every handler reads the store and engine once
@@ -303,6 +312,21 @@ func secretRefs(t Task) []string {
 	return out
 }
 
+// envSize is what the runner receives in its two environment variables for
+// the task: the JSON of its secrets (stored values) plus its params JSON.
+func envSize(s *Store, t Task) int {
+	n := 0
+	if vals, err := s.Secrets(t.Secrets); err == nil && len(vals) > 0 {
+		b, _ := json.Marshal(vals)
+		n += len(b)
+	}
+	if len(t.Params) > 0 {
+		b, _ := json.Marshal(t.Params)
+		n += len(b)
+	}
+	return n
+}
+
 func (a *api) getConfig(w http.ResponseWriter, _ *http.Request) {
 	s, _, ok := a.open(w)
 	if !ok {
@@ -418,10 +442,16 @@ func (a *api) putConfig(w http.ResponseWriter, r *http.Request) {
 		if reservedTaskIDs[id] {
 			problems = append(problems, fmt.Sprintf("task %s: id: reserved, choose another name", id))
 		}
+		missing := false
 		for _, n := range secretRefs(t) {
 			if !known[n] {
+				missing = true
 				problems = append(problems, fmt.Sprintf("task %s: secret %s is not stored (push secrets first)", id, n))
 			}
+		}
+		if !missing && envSize(s, t) > runnerMaxEnvJSON {
+			problems = append(problems, fmt.Sprintf("task %s: its secrets and params together exceed the runner's %d-byte limit",
+				id, runnerMaxEnvJSON))
 		}
 	}
 	newScripts := map[string]string{}

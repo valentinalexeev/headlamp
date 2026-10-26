@@ -78,6 +78,10 @@ type Deps struct {
 	PollEvery time.Duration  // Status poll interval; default 5 s
 	Log       *slog.Logger
 	Metrics   *Metrics // nil: no metrics
+	// RunnerTag is the headscale tag every candidate node must carry, for
+	// node and tag targets alike; "" means DefaultRunnerTag. Nodes without it
+	// are never probed and never receive the runner token.
+	RunnerTag string
 }
 
 // Engine schedules task attempts and drives them on the nodes.
@@ -113,6 +117,7 @@ type Engine struct {
 	manual    map[string]bool                    // task -> its current sequence was started by Trigger
 	stops     map[string]context.CancelCauseFunc // task -> cancels the executing attempt
 	notBefore map[string]time.Time               // task -> startup delay end
+	warned    map[string]bool                    // warnings already logged by this engine
 }
 
 func NewEngine(d Deps) *Engine {
@@ -125,6 +130,9 @@ func NewEngine(d Deps) *Engine {
 	if d.PollEvery <= 0 {
 		d.PollEvery = defaultPollEvery
 	}
+	if d.RunnerTag == "" {
+		d.RunnerTag = DefaultRunnerTag
+	}
 	log := d.Log
 	if log == nil {
 		log = slog.Default()
@@ -136,6 +144,7 @@ func NewEngine(d Deps) *Engine {
 		base: base, cancelBase: cancel,
 		active: map[string]*Run{}, busy: map[string]int{}, manual: map[string]bool{},
 		stops: map[string]context.CancelCauseFunc{}, notBefore: map[string]time.Time{},
+		warned: map[string]bool{},
 	}
 }
 
@@ -431,6 +440,18 @@ func (e *Engine) updateState(task string, fn func(*TaskState)) {
 		e.log.Warn("task state not stored", "task", task, "err", err)
 	}
 	e.d.Metrics.Snapshot(task, e.d.Store.State(task))
+}
+
+// warnOnce reports whether key has not been warned about yet by this engine,
+// and marks it.
+func (e *Engine) warnOnce(key string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.warned[key] {
+		return false
+	}
+	e.warned[key] = true
+	return true
 }
 
 func newRunID() string {

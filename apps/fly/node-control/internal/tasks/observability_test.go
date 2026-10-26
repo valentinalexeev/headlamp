@@ -97,7 +97,7 @@ func runObsScenario(t *testing.T) *obsScenario {
 	}
 	e := NewEngine(Deps{
 		Store: s, Runner: runner, Notifier: n, Metrics: sc.m, Now: clock.Now, Log: log,
-		Nodes:     &fakeNodes{nodes: []headscale.Node{{Name: "n1", Online: true, IPAddresses: []string{"100.64.0.1"}}}},
+		Nodes:     &fakeNodes{nodes: []headscale.Node{runnerNode("n1", "100.64.0.1")}},
 		Rand:      func() float64 { return 0.5 },
 		PollEvery: 2 * time.Millisecond,
 	})

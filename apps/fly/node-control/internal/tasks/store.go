@@ -109,6 +109,13 @@ type pendingWrite struct {
 }
 
 // OpenStore reads config, scripts, secrets, state and history once.
+//
+// A stored value that cannot be used (it does not decrypt, for example after
+// NODE_CONTROL_STATE_KEY was rotated, or it does not decode or parse, for
+// example after a stricter config parser) is logged by field name and treated
+// as absent: a bad config reads as no config, an unreadable secret is not
+// listed, a bad state or history starts empty. The operator repairs it with a
+// push. Only an error reaching Redis fails the open.
 func OpenStore(kv ipn.StateStore, log *slog.Logger) (*Store, error) {
 	if log == nil {
 		log = slog.Default()
@@ -120,24 +127,28 @@ func OpenStore(kv ipn.StateStore, log *slog.Logger) (*Store, error) {
 		pending: map[string]pendingWrite{}, stuck: map[string]error{}, flushBudget: defaultFlushBudget,
 	}
 
-	if b, ok, err := s.read(fieldConfig); err != nil {
+	if b, ok, err := s.readValue(fieldConfig); err != nil {
 		return nil, err
 	} else if ok {
-		if s.config, err = ParseConfig(b); err != nil {
-			return nil, fmt.Errorf("stored task config: %w", err)
+		cfg, perr := ParseConfig(b)
+		if perr != nil {
+			s.unusable(fieldConfig, "does not parse")
+		} else {
+			s.config = cfg
 		}
 	}
 
 	var names []string
-	if b, ok, err := s.read(fieldSecrets); err != nil {
+	if b, ok, err := s.readValue(fieldSecrets); err != nil {
 		return nil, err
 	} else if ok {
 		if err := json.Unmarshal(b, &names); err != nil {
-			return nil, fmt.Errorf("stored %s: %w", fieldSecrets, err)
+			s.unusable(fieldSecrets, "does not decode")
+			names = nil
 		}
 	}
 	for _, n := range names {
-		b, ok, err := s.read("secret:" + n)
+		b, ok, err := s.readValue("secret:" + n)
 		if err != nil {
 			return nil, err
 		}
@@ -149,33 +160,42 @@ func OpenStore(kv ipn.StateStore, log *slog.Logger) (*Store, error) {
 	if s.config != nil {
 		for id, t := range s.config.Tasks {
 			if _, done := s.scripts[t.Script]; !done {
-				if b, ok, err := s.read("script:" + t.Script); err != nil {
+				if b, ok, err := s.readValue("script:" + t.Script); err != nil {
 					return nil, err
 				} else if ok {
 					s.scripts[t.Script] = string(b)
 				}
 			}
-			if b, ok, err := s.read("state:" + id); err != nil {
+			if b, ok, err := s.readValue("state:" + id); err != nil {
 				return nil, err
 			} else if ok {
 				var st TaskState
 				if err := json.Unmarshal(b, &st); err != nil {
-					return nil, fmt.Errorf("stored state of task %s: %w", id, err)
+					s.unusable("state:"+id, "does not decode")
+				} else {
+					s.states[id] = st
 				}
-				s.states[id] = st
 			}
-			if b, ok, err := s.read("runs:" + id); err != nil {
+			if b, ok, err := s.readValue("runs:" + id); err != nil {
 				return nil, err
 			} else if ok {
 				var rs []Run
 				if err := json.Unmarshal(b, &rs); err != nil {
-					return nil, fmt.Errorf("stored history of task %s: %w", id, err)
+					s.unusable("runs:"+id, "does not decode")
+				} else {
+					s.runs[id] = rs
 				}
-				s.runs[id] = rs
 			}
 		}
 	}
 	return s, nil
+}
+
+// unusable logs a stored field that is treated as absent. Only the field name
+// is logged: never the value, the ciphertext or the decoder's message (which
+// can quote the value).
+func (s *Store) unusable(field, why string) {
+	s.log.Warn("task store field unusable, treated as absent until the next push", "field", field, "why", why)
 }
 
 // read treats a missing field as absent, not as an error.
@@ -188,6 +208,25 @@ func (s *Store) read(field string) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("read %s: %w", field, err)
 	}
 	return b, true, nil
+}
+
+// readValue is read for OpenStore: a value the encryption layer rejects is
+// absent (and logged), anything else stays an error.
+func (s *Store) readValue(field string) ([]byte, bool, error) {
+	b, ok, err := s.read(field)
+	if err != nil && isValueErr(err) {
+		s.unusable(field, "does not decrypt")
+		return nil, false, nil
+	}
+	return b, ok, err
+}
+
+// isValueErr tells a stored value the encryption layer cannot open (wrong
+// key, not encrypted, truncated: its errors all say "stored state") from a
+// failure to talk to Redis. Anything unrecognised is not a value error, so
+// the open fails and is retried rather than starting from an empty store.
+func isValueErr(err error) bool {
+	return !isTransportErr(err) && strings.Contains(err.Error(), "stored state")
 }
 
 // pendingVer orders writes of one field.

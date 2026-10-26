@@ -634,6 +634,12 @@ as absolute times, so a restart resumes exactly where it was and an expired cool
 fails, the value stays in memory and is retried by the next write (the API says `pending_write`); the scheduler keeps going
 with Redis down.
 
+A stored value the module cannot use (it does not decrypt, for example after `NODE_CONTROL_STATE_KEY` was changed, or the
+config no longer passes validation, or a state or history field does not decode) does not keep the module closed: the
+field is logged by name (`task store field unusable, ...`, never its value) and treated as absent. A bad config reads as
+no config, an unreadable secret is not listed, a bad state or history starts empty; `tasks.sh push` (with its secrets)
+repairs it. Only a failure to reach Redis keeps the routes at `503`.
+
 History is bounded: the newest 200 runs per task, and the whole `runs:<task>` field is kept under 256 KiB by dropping
 the oldest runs. A stored reason is cut at 512 bytes and a result larger than 8 KiB is stored as `{"truncated": true}`.
 
@@ -732,8 +738,8 @@ Structured log lines (`log/slog`, key=value fields) with event names, ids and ou
 attempt, state, dur_ms, reason), `retry_scheduled` (task, run, node, attempt, state, reason), `alert_evaluated` (task, hit,
 outcome), `notify_result` (task, kind, outcome) and `ping_result` (task, kind, outcome; the heartbeat logs under task
 `scheduler` and only when its outcome changes). Warnings logged once per process start: `ambiguous task target` (task,
-node) and `runner rejected the token` (node). Store events are `tasks store open`, `tasks store unavailable, ...` and
-`task store write failed, serving from memory`.
+node) and `runner rejected the token` (node). Store events are `tasks store open`, `tasks store unavailable, ...`,
+`task store field unusable, ...` (field) and `task store write failed, serving from memory`.
 
 ### Trust model
 

@@ -1,0 +1,43 @@
+# A sidecar container for an existing pod: it publishes the app container's port 3000 as
+# https://admin.<namespace>.<public domain>/ through funnel-ingress.
+#
+# The pre-auth key must be EPHEMERAL, reusable, and tagged tag:funnel + tag:ns-<namespace> (mint one per
+# namespace in node-control: a leaked key can then publish only inside that namespace).
+#   kubectl create secret generic funnel-sidecar --from-literal=authkey=<key>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+spec:
+  replicas: 1 # one sidecar, one tailnet node, one owner per name (see forwarder-deployment.yaml for scaled apps)
+  selector:
+    matchLabels: { app: demo }
+  template:
+    metadata:
+      labels: { app: demo }
+    spec:
+      containers:
+        - name: app
+          image: example.com/demo:latest
+          ports: [{ containerPort: 3000 }]
+        - name: funnel-sidecar
+          image: example.com/funnel-sidecar:latest # built from Dockerfile.sidecar
+          env:
+            - { name: FUNNEL_NS, value: demo }
+            - { name: FUNNEL_SERVICES, value: "admin=8080@127.0.0.1:3000" } # tailnet port 8080 -> the app on 3000
+            - { name: FUNNEL_API_URL, value: "http://funnel-ingress:9100" } # MagicDNS name of the ingress node
+            - { name: FUNNEL_CONTROL_URL, value: "https://headscale.example.com" }
+            - name: TS_AUTHKEY
+              valueFrom: { secretKeyRef: { name: funnel-sidecar, key: authkey } }
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8081 } # ready only after every service is registered
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: funnel-state, mountPath: /tmp/funnel-sidecar }
+      volumes:
+        - { name: funnel-state, emptyDir: {} }

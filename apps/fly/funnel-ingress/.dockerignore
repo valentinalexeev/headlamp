@@ -1,0 +1,6 @@
+*_test.go
+README.md
+examples
+config.example.json
+register-service.sh
+fly.toml

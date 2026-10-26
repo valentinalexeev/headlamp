@@ -138,7 +138,7 @@ type HTTPNotifier struct {
 	ntfyBase string
 	log      *slog.Logger
 	now      func() time.Time
-	sleep    func(time.Duration) // replaced by tests
+	sleep    func(context.Context, time.Duration) // replaced by tests
 
 	mu       sync.Mutex
 	observer func(task, kind string, ok bool)
@@ -147,9 +147,26 @@ type HTTPNotifier struct {
 var _ Notifier = (*HTTPNotifier)(nil)
 
 func NewNotifier(store *Store, hc *http.Client, ntfyBase string, log *slog.Logger, now func() time.Time) *HTTPNotifier {
+	// Copy the client: a redirect must never re-POST the topic or take a ping
+	// somewhere else, and the caller's client stays untouched.
+	var c http.Client
+	if hc != nil {
+		c = *hc
+	}
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &HTTPNotifier{
-		store: store, hc: hc, ntfyBase: strings.TrimRight(ntfyBase, "/"),
-		log: log, now: now, sleep: time.Sleep,
+		store: store, hc: &c, ntfyBase: strings.TrimRight(ntfyBase, "/"),
+		log: log, now: now, sleep: waitCtx,
+	}
+}
+
+// waitCtx sleeps for d or until ctx is done.
+func waitCtx(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
 	}
 }
 
@@ -187,11 +204,16 @@ func (n *HTTPNotifier) Success(ctx context.Context, task string, t Task, result 
 		return res
 	}
 	if !hit {
-		n.setState(task, func(s *TaskState) { s.AlertUntil = time.Time{} })
+		// Skip the write (and its Redis flush) when there is nothing to clear.
+		if !n.store.State(task).AlertUntil.IsZero() {
+			n.setState(task, func(s *TaskState) { s.AlertUntil = time.Time{} })
+		}
 		res.Alert = "none"
 		return res
 	}
-	if now.Before(n.store.State(task).AlertUntil) {
+	until := now.Add(time.Duration(t.Alert.Cooldown))
+	claimed, prev := n.claim(task, now, until, alertField)
+	if !claimed {
 		res.Alert = "suppressed"
 		return res
 	}
@@ -201,9 +223,8 @@ func (n *HTTPNotifier) Success(ctx context.Context, task string, t Task, result 
 	}
 	vars["task"] = task
 	res.Alert = n.send(ctx, task, "alert", t.Alert.Notify, vars)
-	if res.Alert == "sent" {
-		until := now.Add(time.Duration(t.Alert.Cooldown))
-		n.setState(task, func(s *TaskState) { s.AlertUntil = until })
+	if res.Alert != "sent" {
+		n.release(task, alertField, until, prev) // the next run retries
 	}
 	return res
 }
@@ -217,17 +238,73 @@ func (n *HTTPNotifier) Failure(ctx context.Context, task string, t Task, reason 
 	if t.OnFailure == nil {
 		return res
 	}
-	if now.Before(n.store.State(task).FailNotifyUntil) {
+	until := now.Add(time.Duration(t.OnFailure.Cooldown))
+	claimed, prev := n.claim(task, now, until, failField)
+	if !claimed {
 		res.Alert = "suppressed"
 		return res
 	}
-	vars := map[string]any{"task": task, "reason": capBytes(reason, maxNotifyReason)}
+	reason = capBytes(scrub.Scrub(reason, n.known(t)), maxNotifyReason)
+	vars := map[string]any{"task": task, "reason": reason}
 	res.Alert = n.send(ctx, task, "failure", t.OnFailure.Notify, vars)
-	if res.Alert == "sent" {
-		until := now.Add(time.Duration(t.OnFailure.Cooldown))
-		n.setState(task, func(s *TaskState) { s.FailNotifyUntil = until })
+	if res.Alert != "sent" {
+		n.release(task, failField, until, prev)
 	}
 	return res
+}
+
+func alertField(s *TaskState) *time.Time { return &s.AlertUntil }
+func failField(s *TaskState) *time.Time  { return &s.FailNotifyUntil }
+
+// claim reserves the cooldown slot inside UpdateState, so concurrent calls for
+// one task cannot all see an expired cooldown and all send. It returns the
+// previous expiry for release. The send itself happens outside the store lock.
+func (n *HTTPNotifier) claim(task string, now, until time.Time, field func(*TaskState) *time.Time) (bool, time.Time) {
+	var claimed bool
+	var prev time.Time
+	n.setState(task, func(s *TaskState) {
+		f := field(s)
+		if now.Before(*f) {
+			return
+		}
+		prev, *f, claimed = *f, until, true
+	})
+	return claimed, prev
+}
+
+// release undoes a claim after a failed send, but only while the field still
+// holds the value this call set: a newer claim must not be clobbered.
+func (n *HTTPNotifier) release(task string, field func(*TaskState) *time.Time, set, prev time.Time) {
+	n.setState(task, func(s *TaskState) {
+		if f := field(s); f.Equal(set) {
+			*f = prev
+		}
+	})
+}
+
+// known lists the secret values this notifier resolves for the task, for
+// scrubbing text that came from outside (a failure reason).
+func (n *HTTPNotifier) known(t Task) []string {
+	names := []string{t.Healthcheck}
+	if t.Alert != nil {
+		names = append(names, t.Alert.Notify.Topic)
+	}
+	if t.OnFailure != nil {
+		names = append(names, t.OnFailure.Notify.Topic)
+	}
+	out := []string{n.ntfyBase}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if m, err := n.store.Secrets([]string{name}); err == nil {
+			out = append(out, m[name])
+			if tr := strings.TrimRight(m[name], "/"); tr != m[name] {
+				out = append(out, tr) // a ping URL as a tool would print it
+			}
+		}
+	}
+	return out
 }
 
 func (n *HTTPNotifier) setState(task string, fn func(*TaskState)) {
@@ -256,7 +333,13 @@ func (n *HTTPNotifier) ping(ctx context.Context, task, secretName, suffix string
 		return failedNoSecret
 	}
 	base := sec[secretName]
-	target := strings.TrimRight(base, "/") + suffix
+	target, ok := pingURL(base, suffix)
+	if !ok {
+		const out = "failed: bad ping url"
+		n.log.Warn("ping not sent", "task", task, "kind", "ping", "outcome", out)
+		n.observe(task, "ping", false)
+		return out
+	}
 	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
@@ -269,6 +352,21 @@ func (n *HTTPNotifier) ping(ctx context.Context, task, secretName, suffix string
 	n.log.Info("ping", "task", task, "kind", "ping", "outcome", outcome)
 	n.observe(task, "ping", outcome == "sent")
 	return outcome
+}
+
+// pingURL appends suffix to the URL's path (not after its query) and drops any
+// fragment. ok is false when the URL does not parse; callers must not echo it.
+func pingURL(raw, suffix string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", false
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + suffix
+	if u.RawPath != "" {
+		u.RawPath = strings.TrimRight(u.RawPath, "/") + suffix
+	}
+	u.Fragment, u.RawFragment = "", ""
+	return u.String(), true
 }
 
 // send publishes one ntfy message through the JSON API: the topic travels in
@@ -307,7 +405,10 @@ func (n *HTTPNotifier) send(ctx context.Context, task, kind string, nt Notify, v
 		if outcome == "sent" || !retryable(outcome) || attempt >= sendAttempts || ctx.Err() != nil {
 			break
 		}
-		n.sleep(time.Duration(1<<(attempt-1)) * time.Second) // 1 s, then 2 s
+		n.sleep(ctx, time.Duration(1<<(attempt-1))*time.Second) // 1 s, then 2 s
+		if ctx.Err() != nil {
+			break
+		}
 	}
 	n.log.Info("notification", "task", task, "kind", kind, "outcome", outcome)
 	n.observe(task, kind, outcome == "sent")

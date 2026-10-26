@@ -132,6 +132,7 @@ type fixture struct {
 	pingCode int
 	sleeps   []time.Duration
 	events   []string
+	location string // Location header sent with ntfy responses
 	ntfySrv  *httptest.Server
 	pingSrv  *httptest.Server
 }
@@ -153,13 +154,17 @@ func newFixture(t *testing.T) *fixture {
 		if i < len(f.ntfyCode) {
 			code = f.ntfyCode[i]
 		}
+		loc := f.location
 		f.mu.Unlock()
+		if loc != "" {
+			w.Header().Set("Location", loc)
+		}
 		w.WriteHeader(code)
 		w.Write([]byte("body mentions " + testTopic))
 	}))
 	f.pingSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.pings = append(f.pings, r.Method+" "+r.URL.Path)
+		f.pings = append(f.pings, r.Method+" "+r.URL.RequestURI())
 		code := f.pingCode
 		f.mu.Unlock()
 		w.WriteHeader(code)
@@ -179,7 +184,7 @@ func newFixture(t *testing.T) *fixture {
 
 	log := slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	f.n = NewNotifier(f.store, f.ntfySrv.Client(), f.ntfySrv.URL+"/", log, func() time.Time { return f.now })
-	f.n.sleep = func(d time.Duration) { f.sleeps = append(f.sleeps, d) }
+	f.n.sleep = func(_ context.Context, d time.Duration) { f.sleeps = append(f.sleeps, d) }
 	f.n.SetObserver(func(task, kind string, ok bool) {
 		f.events = append(f.events, task+"/"+kind+"/"+map[bool]string{true: "ok", false: "fail"}[ok])
 	})
@@ -471,4 +476,190 @@ func TestZeroObserverIsNoop(t *testing.T) {
 	f := newFixture(t)
 	f.n.SetObserver(nil)
 	f.success(500) // must not panic
+}
+
+func TestConcurrentAlertSendsOnce(t *testing.T) {
+	f := newFixture(t)
+	f.n.SetObserver(nil)
+	const N = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	got := map[string]int{}
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := f.success(500)
+			mu.Lock()
+			got[r.Alert]++
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	if got["sent"] != 1 || got["suppressed"] != N-1 || f.ntfyCount() != 1 {
+		t.Fatalf("results %v, ntfy calls %d", got, f.ntfyCount())
+	}
+}
+
+func TestConcurrentFailureSendsOnce(t *testing.T) {
+	f := newFixture(t)
+	f.n.SetObserver(nil)
+	const N = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	got := map[string]int{}
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := f.n.Failure(context.Background(), "tk", alertTask(), "boom")
+			mu.Lock()
+			got[r.Alert]++
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	if got["sent"] != 1 || got["suppressed"] != N-1 || f.ntfyCount() != 1 {
+		t.Fatalf("results %v, ntfy calls %d", got, f.ntfyCount())
+	}
+}
+
+func TestFailedSendRollsClaimBackToPrevious(t *testing.T) {
+	f := newFixture(t)
+	old := f.now.Add(-time.Hour) // an expired cooldown from an earlier alert
+	f.store.UpdateState("tk", func(s *TaskState) { s.AlertUntil = old })
+	f.ntfyCode = []int{500}
+	f.success(500)
+	if got := f.store.State("tk").AlertUntil; !got.Equal(old) {
+		t.Fatalf("AlertUntil = %v, want the previous %v", got, old)
+	}
+	f.ntfyCode = []int{200}
+	if r := f.success(500); r.Alert != "sent" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestReleaseDoesNotClobberNewerClaim(t *testing.T) {
+	f := newFixture(t)
+	mine := f.now.Add(time.Hour)
+	newer := f.now.Add(5 * time.Hour)
+	f.store.UpdateState("tk", func(s *TaskState) { s.AlertUntil = newer })
+	f.n.release("tk", alertField, mine, time.Time{})
+	if got := f.store.State("tk").AlertUntil; !got.Equal(newer) {
+		t.Fatalf("clobbered: %v", got)
+	}
+	f.n.release("tk", alertField, newer, time.Time{})
+	if !f.store.State("tk").AlertUntil.IsZero() {
+		t.Fatal("own claim not released")
+	}
+}
+
+func TestNoHitDoesNotWriteWhenAlreadyClear(t *testing.T) {
+	f := newFixture(t)
+	before := f.store.State("tk")
+	f.success(5000)
+	if f.store.State("tk") != before {
+		t.Fatal("state changed")
+	}
+}
+
+func TestFailurePingKeepsQueryString(t *testing.T) {
+	cases := []struct{ in, ok, fail string }{
+		{"https://hc.example/ping/uuid", "https://hc.example/ping/uuid", "https://hc.example/ping/uuid/fail"},
+		{"https://hc.example/ping/uuid/", "https://hc.example/ping/uuid", "https://hc.example/ping/uuid/fail"},
+		{"https://hc.example/ping/uuid?x=1", "https://hc.example/ping/uuid?x=1", "https://hc.example/ping/uuid/fail?x=1"},
+		{"https://hc.example/ping/uuid/?x=1&y=2#frag", "https://hc.example/ping/uuid?x=1&y=2", "https://hc.example/ping/uuid/fail?x=1&y=2"},
+	}
+	for _, c := range cases {
+		if got, ok := pingURL(c.in, ""); !ok || got != c.ok {
+			t.Errorf("%q ok-ping: %q %v", c.in, got, ok)
+		}
+		if got, ok := pingURL(c.in, "/fail"); !ok || got != c.fail {
+			t.Errorf("%q fail-ping: %q %v", c.in, got, ok)
+		}
+	}
+}
+
+func TestPingBadURLNotEchoed(t *testing.T) {
+	f := newFixture(t)
+	f.store.PutSecret("badhc", "ht!tp://%zz-secret-host")
+	r := f.n.Success(context.Background(), "tk", Task{Healthcheck: "badhc"}, nil)
+	if r.Ping != "failed: bad ping url" {
+		t.Fatalf("%+v", r)
+	}
+	if strings.Contains(f.logs.String(), "secret-host") {
+		t.Fatal("log echoes URL")
+	}
+}
+
+func TestPingQueryReachesServer(t *testing.T) {
+	f := newFixture(t)
+	f.store.PutSecret("qhc", f.pingSrv.URL+"/ping/u?x=1")
+	f.n.Failure(context.Background(), "tk", Task{Healthcheck: "qhc"}, "boom")
+	if len(f.pings) != 1 || f.pings[0] != "GET /ping/u/fail?x=1" {
+		t.Fatalf("%v", f.pings)
+	}
+}
+
+func TestPingTransportErrorDoesNotLeak(t *testing.T) {
+	f := newFixture(t)
+	f.pingSrv.Close()
+	r := f.n.Success(context.Background(), "tk", Task{Healthcheck: "hc"}, nil)
+	if !strings.HasPrefix(r.Ping, "failed: ") {
+		t.Fatalf("%+v", r)
+	}
+	for _, bad := range []string{f.pingSrv.URL, "uuid-1234", "/ping/", "http"} {
+		if strings.Contains(r.Ping, bad) {
+			t.Errorf("ping outcome %q contains %q", r.Ping, bad)
+		}
+	}
+}
+
+func TestRetryWaitHonoursContext(t *testing.T) {
+	f := newFixture(t)
+	f.n.sleep = waitCtx // the real wait
+	f.ntfyCode = []int{500}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
+	start := time.Now()
+	r := f.n.Success(ctx, "tk", alertTask(), map[string]any{"balance": 1.0})
+	if d := time.Since(start); d > 700*time.Millisecond {
+		t.Fatalf("took %v", d)
+	}
+	if !strings.HasPrefix(r.Alert, "failed: ") || f.ntfyCount() != 1 {
+		t.Fatalf("%+v calls=%d", r, f.ntfyCount())
+	}
+}
+
+func TestRedirectIsNotFollowed(t *testing.T) {
+	f := newFixture(t)
+	f.ntfyCode = []int{307}
+	f.location = f.pingSrv.URL + "/elsewhere"
+	r := f.success(500)
+	if !strings.HasPrefix(r.Alert, "failed: ") || f.ntfyCount() != 1 {
+		t.Fatalf("%+v calls=%d", r, f.ntfyCount())
+	}
+	for _, p := range f.pings {
+		if strings.Contains(p, "elsewhere") {
+			t.Fatalf("redirect followed: %v", f.pings)
+		}
+	}
+	// The caller's client is left alone.
+	if f.ntfySrv.Client().CheckRedirect != nil {
+		t.Fatal("caller's client modified")
+	}
+}
+
+func TestFailureReasonScrubbed(t *testing.T) {
+	f := newFixture(t)
+	reason := "curl " + f.pingSrv.URL + "/ping/uuid-1234 topic " + testTopic + " failed"
+	f.n.Failure(context.Background(), "tk", alertTask(), reason)
+	var m map[string]any
+	json.Unmarshal(f.ntfy[0].body, &m)
+	msg := m["message"].(string)
+	for _, bad := range []string{testTopic, "uuid-1234", f.pingSrv.URL} {
+		if strings.Contains(msg, bad) {
+			t.Errorf("message contains %q: %s", bad, msg)
+		}
+	}
 }

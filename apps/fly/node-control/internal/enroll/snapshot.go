@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"sort"
 	"strconv"
@@ -280,6 +281,11 @@ func Import(src *Store, dst *RedisStore, force bool) (devices, links, approvals 
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("reading the source database: %w", err)
 	}
+	return ImportSnapshot(snap, dst, force)
+}
+
+// ImportSnapshot restores snap into dst and verifies the result by reading it back.
+func ImportSnapshot(snap Snapshot, dst *RedisStore, force bool) (devices, links, approvals int, err error) {
 	devices, links, approvals, err = dst.Restore(snap, force)
 	if err != nil {
 		return 0, 0, 0, err
@@ -292,6 +298,53 @@ func Import(src *Store, dst *RedisStore, force bool) (devices, links, approvals 
 		return 0, 0, 0, fmt.Errorf("verifying the import: %w", err)
 	}
 	return devices, links, approvals, nil
+}
+
+// ParseSnapshot reads an exported snapshot (the JSON `enroll-export` writes) and checks its shape. Unknown fields,
+// duplicate or non-positive ids, unknown modes and empty UUIDs are refused; error texts never echo values from the file.
+func ParseSnapshot(r io.Reader) (Snapshot, error) {
+	var snap Snapshot
+	dec := json.NewDecoder(io.LimitReader(r, 64<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&snap); err != nil {
+		return Snapshot{}, errors.New("not a valid enrolment export (JSON shape does not match)")
+	}
+	if dec.More() {
+		return Snapshot{}, errors.New("not a valid enrolment export (trailing data)")
+	}
+	known := map[string]bool{}
+	for _, m := range Modes {
+		known[m] = true
+	}
+	seen := map[int64]bool{}
+	for i, d := range snap.Devices {
+		if d.ID <= 0 || seen[d.ID] {
+			return Snapshot{}, fmt.Errorf("device entry %d has an invalid or duplicate id", i+1)
+		}
+		seen[d.ID] = true
+		if len(d.UUIDs) == 0 {
+			return Snapshot{}, fmt.Errorf("device entry %d has no UUIDs", i+1)
+		}
+		for m, u := range d.UUIDs {
+			if !known[m] || u == "" {
+				return Snapshot{}, fmt.Errorf("device entry %d has an unknown mode or an empty UUID", i+1)
+			}
+		}
+	}
+	for i, l := range snap.Links {
+		if !seen[l.DeviceID] || l.Hash == "" || l.MaxUses <= 0 {
+			return Snapshot{}, fmt.Errorf("link entry %d is invalid or names a missing device", i+1)
+		}
+	}
+	for i, a := range snap.Approvals {
+		if a.Name == "" {
+			return Snapshot{}, fmt.Errorf("approval entry %d has no name", i+1)
+		}
+	}
+	if snap.Seq < 0 {
+		return Snapshot{}, errors.New("negative device counter")
+	}
+	return snap, nil
 }
 
 func sameState(want, got Snapshot) error {

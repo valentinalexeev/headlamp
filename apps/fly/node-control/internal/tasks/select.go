@@ -54,10 +54,11 @@ type Candidate struct {
 // probe, the per-node load and the last node that succeeded, so the choice is
 // deterministic and testable.
 //
-// A node target matches the headscale given name only: it is unique and set
-// by the admin, while the reported host name is whatever the node claims. Two
-// nodes with the same given name make the target ambiguous: no node is probed
-// and the error wraps ErrAmbiguousTarget.
+// A node target matches the headscale given name only: headscale keeps it
+// unique and the admin can pin it (headscale nodes rename), while the reported
+// host name is whatever the node claims. Two nodes with the same given name
+// make the target ambiguous: no node is probed and the error wraps
+// ErrAmbiguousTarget. Trust itself comes from the runner tag (WithTag).
 //
 // Order among eligible nodes: lastOK (keeps a task on the node whose state it
 // already warmed), then the least busy, then name and given name, independent

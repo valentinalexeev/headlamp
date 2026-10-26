@@ -45,6 +45,8 @@ reply() { # STATUS [BODY-FILE]
   printf '%s' "$1"; exit 0
 }
 key=$(printf '%s' "${method}_${path#/}" | sed 's/?.*//' | tr / _)
+# force.KEY.transport: the request is read, then curl fails as on a timeout (the server may have processed it)
+if [ -e "$FIX/force.$key.transport" ]; then cat > /dev/null; echo "curl: (28) operation timed out" >&2; exit 28; fi
 if [ -e "$FIX/force.$key.status" ]; then reply "$(cat "$FIX/force.$key.status")" "$FIX/force.$key.body"; fi
 r="$FIX/reply.json"
 case "$method ${path%%\?*}" in
@@ -346,6 +348,10 @@ run push $A --secrets "$SEC" --yes
 mk_ready; printf 500 > "$FIX/force.PUT_tasks_secrets.status"; printf '{}' > "$FIX/force.PUT_tasks_secrets.body"
 run push $A --secrets "$SEC" --yes
 { [ $rc = 3 ] && has 'secrets were not stored' "$T/err"; } && ok "secrets 500: exit 3" || bad "secrets 500 rc=$rc"
+mk_ready; : > "$FIX/force.PUT_tasks_secrets.transport"
+run push $A --secrets "$SEC" --yes
+{ [ $rc = 3 ] && has 'could not confirm that the secrets were stored; rerun push' "$T/err" && ! has 'were not stored' "$T/err" \
+  && ! has 'PUT /tasks/config$' "$CALLS"; } && ok "secrets transport failure: no claim either way, exit 3, no config sent" || bad "secrets transport rc=$rc: $(cat "$T/err")"
 mk_ready; printf 200 > "$FIX/force.PUT_tasks_secrets.status"; printf '%s' '{"stored":["API_TOKEN"],"pending_write":true}' > "$FIX/force.PUT_tasks_secrets.body"
 run push $A --secrets "$SEC" --yes
 has 'has not yet written the secrets' "$T/err" && ok "pending_write on the secrets answer is surfaced" || bad "secrets pending_write"

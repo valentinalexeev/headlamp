@@ -497,7 +497,9 @@ protects the page and API from DNS rebinding.
 
 Rollout: give every runner node the runner tag in headscale (tags are set by the admin; a node cannot give itself one) and
 write the tailnet ACL rule that opens the runner port with that tag as the destination. A node without the tag is
-ignored even when a task names it.
+ignored even when a task names it. The tag is the trust boundary: a given name follows the node's reported hostname
+until it is set with `headscale nodes rename` (see "Names in headscale" above), so rename the runner nodes if `node`
+targets should not depend on what a runner reports.
 
 ### Task configuration
 
@@ -619,7 +621,14 @@ Run view: `id`, `task`, `node`, `attempt`, `state` (`queued`, `running`, `succee
 `reason`, `started`, `ended`, `duration_ms` (null until the run ended), `result`, `script_sha` (SHA-256 of the script
 that ran) and `notify_outcome` (for example `alert=sent ping=sent`; `suppressed` when a cooldown held the message back).
 Where a run lives on its node is never exposed. A push replaces the config and the scripts it references as a whole;
-nothing deletes a stored script or secret (they stay, unreferenced, until removed from Redis by hand).
+nothing deletes a stored script or secret (they stay, unreferenced, until removed from Redis by hand). Consequences:
+
+- A raw API caller (not `tasks.sh`, which always sends every referenced script) that PUTs a config naming a script
+  without its text in `scripts` silently reuses the stored text of that name, even an old orphan.
+- Removing a task id keeps its state and history in Redis; `GET /tasks.json`, `GET /tasks/{id}`,
+  `GET /tasks/{id}/runs` and `GET /runs/{id}` only look at configured tasks, so they no longer show them. Re-adding the
+  same id resumes that state: its streak, a pending retry, its next run and the alert and failure-message cooldowns.
+  Use a new id for a fresh start.
 
 ### Storage
 
@@ -651,6 +660,10 @@ backoff. Only the last failed attempt of a sequence counts: it increments `strea
 `on_failure` is set; at most once per its cooldown) and the failure ping. A success resets `streak` and schedules the next
 run. A manual run (`POST /tasks/{id}/run`) drops a pending retry and starts at attempt 1; it follows the same retry,
 alert and failure rules but does not move a future scheduled time.
+
+Tasks that share one node: use `retry.attempts` of at least 2 (with a short backoff). Two tasks due at the same moment can
+both see the node's runner as idle before one of them starts, and the other's attempt then fails with `node busy`; that
+is a failed attempt by design, so without a retry it would count as a failed sequence.
 
 Example with `"attempts": 3` and `"backoff": ["2m", "10m"]`: attempt 1 fails, wait 2 minutes, attempt 2 fails, wait 10
 minutes, attempt 3 fails: one failure message, `streak` + 1, and the next scheduled run at the normal interval.
@@ -721,6 +734,10 @@ under `task="scheduler"`, `kind="ping"`. To have Fly scrape it, set the address 
   path = "/metrics"
 ```
 
+Set `healthcheck` on every task. A node-control that crash-loops re-runs the interrupted attempt at each start (the
+startup sweep records the old one as `lost` and the persisted attempt is retried), while the scheduler heartbeat still
+pings at every start; only the per-task healthchecks (and the staleness rule below) notice that no task ever completes.
+
 Useful alerts: `time() - task_last_success_timestamp_seconds > 2 * <every seconds>` (the same rule as `stale`),
 `task_failure_streak >= 2`, and `increase(task_notify_failures_total[1d]) > 0` (a message that did not go out).
 
@@ -747,7 +764,9 @@ The runner executes JavaScript supplied by whoever may push a config: treat `TAS
 on your nodes. The code runs as a rootless podman container (read-only root file system, all capabilities dropped,
 memory and pid limits, a timeout, one run at a time) started by an unprivileged service user, and the
 `task-runner` Ansible role adds a kernel firewall rule that keeps that user (and so every container) off loopback, the LAN
-and the tailnet while leaving the public internet open. Allow the runner port from node-control only in the tailnet ACL.
+and the tailnet while leaving the public internet open. Allow the runner port from node-control only in the tailnet ACL,
+with the runner tag as the destination; node-control never sends the runner token or a task's secrets to a node without
+that tag.
 The public internet is open to the container, so a pushed script can send anything it can read, including the secrets it
 was given, to any host. That is why only operators may push scripts and why `TASKS_ADMIN_USERS` matters.
 Secrets are sent with each run over the tailnet and passed to the container through its environment. The runner never

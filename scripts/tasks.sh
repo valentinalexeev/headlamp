@@ -200,7 +200,8 @@ send_secrets() {
     | curl -q --silent --show-error --max-time "${REQ_MAX_TIME:-30}" -X PUT -H 'Content-Type: application/json' \
       --data-binary @- -o "$tmp/resp" -w '%{http_code}' "$url/tasks/secrets") || _c=1
   [ "$(sops_rc)" = 0 ] || die 2 "sops failed while the secrets were being sent; do not trust the stored secrets, run again"
-  [ "$_c" = 0 ] || die 3 "could not send the secrets to node-control; secrets were not stored"
+  # A transport failure (a timeout, say) may follow a request the server did process: do not claim either way.
+  [ "$_c" = 0 ] || die 3 "could not reach node-control while sending the secrets; could not confirm that the secrets were stored; rerun push"
   if [ "$code" != 200 ]; then
     _d=$(detail)
     case $code in

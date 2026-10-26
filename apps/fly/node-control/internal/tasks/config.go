@@ -62,9 +62,10 @@ type Task struct {
 }
 
 // Target is either a named node or a tag selector, never both. Node is the
-// node's headscale given name (unique and set by the admin), never the host
-// name the node reports. Either way only nodes that carry the runner tag
-// (TASKS_RUNNER_TAG) are candidates; see WithTag and Select.
+// node's headscale given name (unique in headscale; fixed once the admin
+// renames the node), never the host name the node reports. Either way only
+// nodes that carry the runner tag (TASKS_RUNNER_TAG, admin-set) are
+// candidates: the tag is the trust boundary. See WithTag and Select.
 type Target struct {
 	Node   string   `json:"node,omitempty"`
 	Tags   []string `json:"tags,omitempty"`

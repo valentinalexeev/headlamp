@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -25,6 +26,7 @@ const fakeBin = `#!/bin/sh
 d="$FAKE_DIR"
 prev=""
 for a in "$@"; do
+  if [ "$a" = rm ]; then echo "rm $*" >> "$d/rms"; exit 0; fi
   if [ "$prev" = kill ]; then
     echo "kill $a" >> "$d/kills"
     if [ ! -f "$d/ignorekill" ] && [ -f "$d/pid" ]; then kill "$(cat "$d/pid")"; fi
@@ -58,7 +60,25 @@ esac
 exit 0
 `
 
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
 type harness struct {
+	logs  *lockedBuf
 	t     *testing.T
 	s     *Server
 	ts    *httptest.Server
@@ -79,13 +99,14 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Setenv("FAKE_DIR", fakeDir)
 	stateDir := filepath.Join(root, "state")
+	logs := &lockedBuf{}
 	s, err := New(Config{
 		Token:        testToken,
 		Image:        "example.com/img@sha256:abc",
 		StateDir:     stateDir,
 		ContainerBin: bin,
 		KillGrace:    300 * time.Millisecond,
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:       slog.New(slog.NewTextHandler(logs, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +118,7 @@ func newHarness(t *testing.T) *harness {
 		defer cancel()
 		s.Shutdown(ctx)
 	})
-	return &harness{t: t, s: s, ts: ts, fake: fakeDir, state: stateDir}
+	return &harness{logs: logs, t: t, s: s, ts: ts, fake: fakeDir, state: stateDir}
 }
 
 func (h *harness) do(method, path string, body any, token string) (int, []byte) {
@@ -275,6 +296,12 @@ func TestRunnerTimeoutKillsContainerByName(t *testing.T) {
 			if !strings.Contains(h.readFake("kills"), "kill task-"+id) {
 				t.Errorf("fake did not see kill task-%s: %q", id, h.readFake("kills"))
 			}
+			if rms := h.readFake("rms"); !strings.Contains(rms, "rm -f --time 0 task-"+id) {
+				t.Errorf("fake did not see rm -f task-%s: %q", id, rms)
+			}
+			if argv := h.readFake("argv"); !strings.Contains(argv, "--timeout\n2\n") { // 1 s + 300 ms grace, rounded up
+				t.Errorf("run argv lacks --timeout 2:\n%s", argv)
+			}
 			h.waitIdle()
 		})
 	}
@@ -294,6 +321,10 @@ func TestRunnerCancel(t *testing.T) {
 	h.waitIdle()
 	if !strings.Contains(h.readFake("kills"), "kill task-"+id) {
 		t.Errorf("no kill by name: %q", h.readFake("kills"))
+	}
+	rms := h.readFake("rms")
+	if !strings.Contains(rms, "rm --cgroup-manager=cgroupfs rm -f --time 0 task-"+id) && !strings.Contains(rms, "rm -f --time 0 task-"+id) {
+		t.Errorf("no rm -f by name after cancel: %q", rms)
 	}
 	if code, _ := h.do("DELETE", "/v1/runs/"+id, nil, testToken); code != 204 {
 		t.Errorf("repeat delete: %d", code)
@@ -353,6 +384,9 @@ func TestRunnerSecretsNeverInArgvOrLogOrError(t *testing.T) {
 			t.Errorf("%s lacks the placeholder: %q", name, text)
 		}
 	}
+	if logs := h.logs.String(); strings.Contains(logs, secret) || !strings.Contains(logs, "run started") {
+		t.Errorf("logs must exist and never hold the secret:\n%s", logs)
+	}
 	argv := h.readFake("argv")
 	if strings.Contains(argv, secret) {
 		t.Errorf("argv contains the secret:\n%s", argv)
@@ -387,6 +421,22 @@ func TestRunnerTempFilesRemoved(t *testing.T) {
 	if len(left) != 0 {
 		t.Errorf("temp dirs left after failure: %v", left)
 	}
+	for name, body := range map[string]map[string]any{
+		"timeout": {"script": "# mode: sleep", "timeout_seconds": 1},
+		"cancel":  {"script": "# mode: sleep"},
+	} {
+		id = h.start(body)
+		if name == "cancel" {
+			for h.readFake("pid") == "" {
+				time.Sleep(10 * time.Millisecond)
+			}
+			h.do("DELETE", "/v1/runs/"+id, nil, testToken)
+		}
+		h.waitIdle()
+		if left, _ = filepath.Glob(filepath.Join(h.state, "run-*")); len(left) != 0 {
+			t.Errorf("temp dirs left after %s: %v", name, left)
+		}
+	}
 	sp := strings.TrimSpace(h.readFake("scriptpath"))
 	if _, err := os.Stat(sp); err == nil {
 		t.Errorf("script file %s still exists", sp)
@@ -420,6 +470,8 @@ func TestRunnerRejectsBadRequests(t *testing.T) {
 		"secret non-str":   map[string]any{"script": "x", "secrets": map[string]any{"A": 1}},
 		"params string":    map[string]any{"script": "x", "params": "nope"},
 		"not json":         "{{{",
+		"trailing data":    "{\"script\":\"x\"} {}",
+		"params array":     map[string]any{"script": "x", "params": []int{1}},
 		"too large":        map[string]any{"script": big},
 	} {
 		if code, out := h.do("POST", "/v1/runs", body, testToken); code != 422 {
@@ -427,4 +479,18 @@ func TestRunnerRejectsBadRequests(t *testing.T) {
 		}
 	}
 	h.waitIdle()
+}
+
+func TestRunnerParamsKeepBigIntegers(t *testing.T) {
+	h := newHarness(t)
+	id := h.start(map[string]any{"script": "# mode: ok\n{}"})
+	h.wait(id, "succeeded")
+	code, out := h.do("POST", "/v1/runs", "{\"script\":\"# mode: ok\\n{}\",\"params\":{ \"n\": 12345678901234567890 }}", testToken)
+	if code != 201 {
+		t.Fatalf("%d %s", code, out)
+	}
+	h.waitIdle()
+	if env := h.readFake("env"); !strings.Contains(env, `TASK_PARAMS_JSON={"n":12345678901234567890}`) {
+		t.Errorf("params not passed through verbatim: %q", env)
+	}
 }

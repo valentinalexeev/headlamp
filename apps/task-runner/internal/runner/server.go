@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -10,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -101,7 +103,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	stale, _ := filepath.Glob(filepath.Join(cfg.StateDir, "run-*"))
 	for _, d := range stale {
-		_ = os.RemoveAll(d)
+		if err := os.RemoveAll(d); err != nil {
+			cfg.Logger.Error("remove stale run dir failed", "dir", filepath.Base(d), "err", err.Error())
+		}
 	}
 	return &Server{cfg: cfg, log: cfg.Logger, tokenH: sha256.Sum256([]byte(cfg.Token)), runs: map[string]*run{}}, nil
 }
@@ -176,7 +180,9 @@ type startRequest struct {
 
 func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 	var req startRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&req); err != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
+	// Exactly one JSON value: anything after it is a malformed request.
+	if err := dec.Decode(&req); err != nil || dec.Decode(&struct{}{}) != io.EOF {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		return
 	}
@@ -185,14 +191,23 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		timeout = *req.TimeoutSeconds
 	}
 	secrets := map[string]string{}
-	params := map[string]any{}
-	if req.Script == "" || timeout < 1 || timeout > maxTimeout ||
-		!decodeOptional(req.Secrets, &secrets) || !decodeOptional(req.Params, &params) {
+	// Params stay raw JSON (checked to be an object) so big integers keep their
+	// digits; they are only compacted.
+	paramsJSON := []byte("{}")
+	if len(req.Params) > 0 && string(req.Params) != "null" {
+		var obj map[string]json.RawMessage
+		var buf bytes.Buffer
+		if json.Unmarshal(req.Params, &obj) != nil || obj == nil || json.Compact(&buf, req.Params) != nil {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			return
+		}
+		paramsJSON = buf.Bytes()
+	}
+	if req.Script == "" || timeout < 1 || timeout > maxTimeout || !decodeOptional(req.Secrets, &secrets) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		return
 	}
 	secretsJSON, _ := json.Marshal(secrets)
-	paramsJSON, _ := json.Marshal(params)
 	if len(secretsJSON) > maxEnvJSON || len(paramsJSON) > maxEnvJSON {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		return

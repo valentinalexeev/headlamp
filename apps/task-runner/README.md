@@ -36,10 +36,11 @@ characters replaced by `***`.
 
 Per run: `podman --cgroup-manager=cgroupfs run --rm --name task-<id>
 --read-only --cap-drop=ALL --security-opt no-new-privileges --pids-limit N
---memory M --tmpfs /tmp`, the script mounted read-only at `/run/task` and a
+--memory M --timeout T --tmpfs /tmp`, the script mounted read-only at `/run/task` and a
 writable result dir at `/run/result`, both in a 0700 temp dir under
 `RUNNER_STATE_DIR` that is removed afterwards (and any stale `run-*` dirs at
-startup). Secrets and params go in as `-e TASK_SECRETS_JSON -e
+startup). After a timeout or cancel the runner also runs `rm -f --time 0 task-<id>`
+(twice, best effort), since the container outlives its client. Secrets and params go in as `-e TASK_SECRETS_JSON -e
 TASK_PARAMS_JSON` with no value on the command line; the values are set only in
 the environment of that one child process. The `--cgroup-manager=cgroupfs`
 global flag is required for a service user without a login session.
@@ -62,9 +63,10 @@ Logs are JSON on stderr and carry run ids, states and durations only.
 
 `image/Containerfile` builds from the official Playwright image and installs a
 pinned `playwright`; `host.js` is the entrypoint program (`node /app/host.js`).
-`BASE` defaults to a tag for convenience: the deployment must override it with
-an `@sha256:` digest (`--build-arg BASE=mcr.microsoft.com/playwright@sha256:...`)
-so the base cannot change under a running node.
+`BASE` has no default on purpose: a build without
+`--build-arg BASE=mcr.microsoft.com/playwright@sha256:...` fails, so the base
+cannot change under a running node (the version tag the pinned `playwright`
+matches is v1.64.1-noble; resolve it to a digest at deploy time).
 
     podman build --build-arg BASE=<image@sha256:digest> -t task-run image/
 

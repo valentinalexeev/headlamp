@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -49,5 +50,38 @@ func TestChildEnvDropsRunnerVars(t *testing.T) {
 	}
 	if !strings.Contains(joined, "HOME=/h") || !strings.Contains(joined, "TASK_SECRETS_JSON=S") || !strings.Contains(joined, "TASK_PARAMS_JSON=P") {
 		t.Errorf("env missing entries: %v", env)
+	}
+}
+
+func TestRingTrimsSecretFragmentAtWindowStart(t *testing.T) {
+	const secret = "supersecret"
+	s := newScrubber(map[string]string{"K": secret})
+	r := newRing(s.maxLen())
+	// Window (last 4107 bytes) starts 6 bytes into the first secret; the
+	// scrubbed text shrinks, so a naive tail would begin with "ecret".
+	r.Write([]byte(secret + strings.Repeat("-", 4079) + secret + secret))
+	if !r.overflowed {
+		t.Fatal("ring should have overflowed")
+	}
+	out := r.tail(s)
+	for k := 3; k < len(secret); k++ {
+		for _, frag := range []string{secret[:k], secret[len(secret)-k:]} {
+			if strings.Contains(out, frag) {
+				t.Fatalf("fragment %q leaked; tail starts %q", frag, out[:20])
+			}
+		}
+	}
+	if !strings.HasSuffix(out, "******") {
+		t.Errorf("full occurrences should be masked: %q", out[len(out)-12:])
+	}
+}
+
+func TestScrubberCoversJSONEscapedForms(t *testing.T) {
+	secret := "pa\"ss\u00e9<w"
+	s := newScrubber(map[string]string{"K": secret})
+	esc, _ := json.Marshal(secret)
+	in := "raw " + secret + " json " + string(esc) + " bare " + strings.Trim(string(esc), `"`)
+	if got := s.scrub(in); strings.Contains(got, "ss") || strings.Contains(got, "u003c") {
+		t.Errorf("not scrubbed: %q", got)
 	}
 }

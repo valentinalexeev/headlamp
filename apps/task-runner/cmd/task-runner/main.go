@@ -50,7 +50,8 @@ func main() {
 	}
 
 	addr := env("RUNNER_LISTEN", "127.0.0.1:9100")
-	hs := &http.Server{Addr: addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
+	hs := &http.Server{Addr: addr, Handler: srv, ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go func() {

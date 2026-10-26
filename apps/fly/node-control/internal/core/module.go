@@ -20,7 +20,7 @@ type Module interface {
 // Routes is what the core hands to every module.
 type Routes struct {
 	Admin   *http.ServeMux
-	Public  *http.ServeMux // nil unless ENROLL_DB is set
+	Public  *http.ServeMux // nil unless enrolment is enabled (ENROLL_DB or ENROLL_REDIS=1)
 	Env     Env
 	Tailnet Tailnet
 	Log     *slog.Logger

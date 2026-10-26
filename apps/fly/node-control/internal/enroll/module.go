@@ -64,7 +64,7 @@ func hasKey(data []byte, key string) bool {
 
 func (m *Module) Register(r *core.Routes) error {
 	useRedis := RedisEnabled(m.env)
-	if m.env.Getenv("ENROLL_DB") == "" && !useRedis {
+	if !core.EnrolmentEnabled(m.env) {
 		return nil
 	}
 	why := "ENROLL_DB set"
@@ -196,7 +196,7 @@ func (m *Module) Stop(ctx context.Context) error {
 	return m.store.Close()
 }
 
-// Nav puts the enrolment page in the top bar, but only when the module registered (ENROLL_DB set).
+// Nav puts the enrolment page in the top bar, but only when the module registered (enrolment enabled).
 func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {
 		return nil

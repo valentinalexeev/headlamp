@@ -18,7 +18,9 @@ CANARY='hskey-api-canary-s3cr3t'
 CANARY2='hskey-api-canary-fr0m-cmd'
 printf '%s' "$CANARY2" > "$KEYDIR/key"
 
-# Fake curl: a small headscale. State: $FIX/nodes.json (the "nodes" array as headscale returns it).
+# Fake curl: a small headscale. State: $FIX/nodes.json (the "nodes" array as headscale returns it). A node with a
+# forcedTags field is a legacy node (SetTags replaces forcedTags); one with only `tags` is a unified node (0.28+,
+# SetTags replaces tags).
 # Flags: $FIX/unreachable (transport failure), $FIX/status (forced HTTP status for every call), $FIX/noop (POST answers
 # 200 but changes nothing), $FIX/snake (answer with snake_case field names). Every call logs "METHOD /path", its argv
 # and its first argument, checks the bearer key read from the -K - config on stdin against $EXPECT_KEY, and scans
@@ -58,10 +60,12 @@ case "$method $path" in
     id=${path#/api/v1/node/}; id=${id%/tags}
     cp "$body" "$FIX/lastbody"
     if [ ! -e "$FIX/noop" ]; then
-      jq --arg id "$id" --slurpfile b "$body" 'map(if .id == $id then .forcedTags = $b[0].tags else . end)' \
+      # legacy nodes (with forcedTags) get their forced set replaced; unified nodes their tags
+      jq --arg id "$id" --slurpfile b "$body" 'map(if (.id | tostring) == $id then
+          (if has("forcedTags") then .forcedTags = $b[0].tags else .tags = $b[0].tags end) else . end)' \
         "$FIX/nodes.json" > "$FIX/nodes.new" && mv "$FIX/nodes.new" "$FIX/nodes.json"
     fi
-    reply 200 "$(jq -c --arg id "$id" '{node: (.[] | select(.id == $id))}' "$FIX/nodes.json")" ;;
+    reply 200 "$(jq -c --arg id "$id" '{node: (.[] | select((.id | tostring) == $id))}' "$FIX/nodes.json")" ;;
 esac
 reply 404 '{"message":"not found"}'
 STUB
@@ -89,7 +93,8 @@ run() { sh "$script" "$@" > "$T/out" 2> "$T/err"; rc=$?; }
 runenv() {
   ( while [ "$1" != -- ]; do export "$1"; shift; done; shift; exec sh "$script" "$@" ) > "$T/out" 2> "$T/err"; rc=$?
 }
-forced() { jq -c --arg id "$1" '.[] | select(.id == $id) | .forcedTags' "$FIX/nodes.json"; }
+forced() { jq -c --arg id "$1" '.[] | select((.id | tostring) == $id) | .forcedTags' "$FIX/nodes.json"; }
+utags() { jq -c --arg id "$1" '.[] | select((.id | tostring) == $id) | .tags' "$FIX/nodes.json"; }
 posts() { grep -c '^POST' "$CALLS" | tr -d ' '; }
 leak_check() { # DESCRIPTION: the keys must not be in stdout, stderr, any curl argv, the call log or a temp file
   _l=0
@@ -102,7 +107,7 @@ leak_check() { # DESCRIPTION: the keys must not be in stdout, stderr, any curl a
 # --- show
 reset; run show --node runner-1
 check "show exits 0 and only reads" '[ $rc = 0 ] && [ "$(cat "$CALLS")" = "GET /api/v1/node" ]'
-check "show prints id and forced/valid/other split" 'grep -qx "node: runner-1 (id 1)" "$T/out" && grep -qx "forced (admin-set): \[tag:aaa tag:exit\]" "$T/out" && grep -q "^valid .*: \[tag:self\]$" "$T/out" && grep -qx "other: \[\]" "$T/out"'
+check "show prints id, the legacy model and the forced/valid/other split" 'grep -qx "node: runner-1 (id 1)" "$T/out" && grep -q "^model: legacy" "$T/out" && grep -qx "forced (admin-set): \[tag:aaa tag:exit\]" "$T/out" && grep -q "^valid .*: \[tag:self\]$" "$T/out" && grep -qx "other: \[\]" "$T/out"'
 check "invalid tags are ignored" '! grep -q "tag:nope" "$T/out"'
 check "show matches the given name, never the host name" 'run show --node host-a; [ $rc = 2 ]'
 leak_check "show: the key is nowhere in output, argv or temp files"
@@ -181,10 +186,63 @@ leak_check "no leak on the refusal paths"
 reset; : > "$FIX/unreachable"; run show --node runner-1
 check "unreachable headscale exits 3" '[ $rc = 3 ]'
 
-# --- a headscale that reports tags only in one list
-reset; printf '%s' '[{"id":"9","givenName":"uni","tags":["tag:keep"]}]' > "$FIX/nodes.json"
-run add --node uni --tag tag:task-runner --yes
-check "tags without a forced field: refuse to replace (exit 2, no POST)" '[ $rc = 2 ] && [ "$(posts)" = 0 ]'
+# --- legacy extras
+reset; : > "$FIX/snake"; run add --node runner-1 --tag tag:task-runner --yes
+check "legacy snake_case: add --yes keeps the forced tags and verifies" '[ $rc = 0 ] && [ "$(forced 1)" = "[\"tag:aaa\",\"tag:exit\",\"tag:task-runner\"]" ]'
+reset; run add --node runner-1 --tag tag:self
+check "legacy add of a requested-only tag notes it becomes admin-held" '[ $rc = 1 ] && grep -q "admin-held" "$T/err"'
+reset; printf '%s' '[{"id":7,"name":"h","givenName":"num","forcedTags":["tag:a"],"validTags":[]}]' > "$FIX/nodes.json"
+run add --node num --tag tag:task-runner --yes
+check "a numeric id works (route and read-back)" '[ $rc = 0 ] && grep -qx "POST /api/v1/node/7/tags" "$CALLS" && [ "$(forced 7)" = "[\"tag:a\",\"tag:task-runner\"]" ]'
+
+# --- unified model (headscale 0.28+: one tags list)
+UNODES='[
+ {"id":"11","name":"h1","givenName":"u-tagged","tags":["tag:exit","tag:aaa"]},
+ {"id":"12","name":"h2","givenName":"u-owned","tags":[]},
+ {"id":"13","name":"h3","givenName":"u-one","tags":["tag:task-runner"]},
+ {"id":"14","name":"h4","givenName":"odd"}
+]'
+ureset() { reset; printf '%s' "$UNODES" > "$FIX/nodes.json"; }
+ureset; run show --node u-tagged
+check "unified: show prints the model and the tags list" '[ $rc = 0 ] && grep -q "^model: unified" "$T/out" && grep -qx "tags (admin-held after registration): \[tag:aaa tag:exit\]" "$T/out" && ! grep -q "^forced" "$T/out"'
+ureset; run add --node u-tagged --tag tag:task-runner
+check "unified: add without --yes plans on tags, exit 1, no POST" '[ $rc = 1 ] && [ "$(posts)" = 0 ] && grep -qx "tags: \[tag:aaa tag:exit\] -> \[tag:aaa tag:exit tag:task-runner\]" "$T/out"'
+ureset; run add --node u-tagged --tag tag:task-runner --yes
+check "unified: add --yes on a tagged node keeps the other tags and verifies" '[ $rc = 0 ] && [ "$(jq -c . "$FIX/lastbody")" = "{\"tags\":[\"tag:aaa\",\"tag:exit\",\"tag:task-runner\"]}" ] && [ "$(utags 11)" = "[\"tag:aaa\",\"tag:exit\",\"tag:task-runner\"]" ]'
+leak_check "unified: the key is nowhere in output, argv or temp files"
+ureset; run add --node u-owned --tag tag:task-runner
+check "unified: first tag without --yes: plan with the ownership warning, exit 1, no POST" '[ $rc = 1 ] && [ "$(posts)" = 0 ] && grep -q "REMOVES that user ownership" "$T/out" && grep -q "allow-ownership-change" "$T/err"'
+ureset; run add --node u-owned --tag tag:task-runner --yes
+check "unified: first tag with --yes only exits 2, no POST" '[ $rc = 2 ] && [ "$(posts)" = 0 ] && grep -q "allow-ownership-change" "$T/err"'
+ureset; run add --node u-owned --tag tag:task-runner --yes --allow-ownership-change
+check "unified: first tag with --yes and --allow-ownership-change applies" '[ $rc = 0 ] && [ "$(utags 12)" = "[\"tag:task-runner\"]" ]'
+ureset; run remove --node u-tagged --tag tag:exit --yes
+check "unified: remove keeps the rest" '[ $rc = 0 ] && [ "$(utags 11)" = "[\"tag:aaa\"]" ]'
+ureset; run remove --node u-one --tag tag:task-runner --yes
+check "unified: removing the last tag is refused without the flag (exit 2, no POST)" '[ $rc = 2 ] && [ "$(posts)" = 0 ] && grep -q "re-authentication" "$T/err"'
+ureset; run remove --node u-one --tag tag:task-runner
+check "unified: removing the last tag without --yes is refused too (exit 2)" '[ $rc = 2 ] && [ "$(posts)" = 0 ]'
+ureset; run remove --node u-one --tag tag:task-runner --yes --allow-ownership-change
+check "unified: removing the last tag with the flag is sent" '[ $rc = 0 ] && [ "$(jq -c . "$FIX/lastbody")" = "{\"tags\":[]}" ]'
+ureset; run add --node u-one --tag tag:task-runner --yes
+check "unified: add is idempotent (no POST)" '[ $rc = 0 ] && [ "$(posts)" = 0 ] && grep -q "(no change)" "$T/out"'
+ureset; : > "$FIX/noop"; run add --node u-tagged --tag tag:task-runner --yes
+check "unified: failed verification exits 3" '[ $rc = 3 ] && [ "$(posts)" = 1 ]'
+ureset; run show --node odd
+check "unrecognised node shape (no forced field, no tags) exits 2" '[ $rc = 2 ] && grep -q "unrecognised node shape" "$T/err"'
+ureset; run add --node odd --tag tag:task-runner --yes
+check "unrecognised node shape: add exits 2 without a POST" '[ $rc = 2 ] && [ "$(posts)" = 0 ]'
+reset; run show --node runner-1 --allow-ownership-change
+check "show with --allow-ownership-change is a usage error" '[ $rc = 2 ]'
+
+# --- key hygiene
+printf '%s\r\n' "$CANARY2" > "$KEYDIR/key-crlf"
+reset; runenv EXPECT_KEY="$CANARY2" HEADSCALE_API_KEY_CMD="cat '$KEYDIR/key-crlf'" -- show --node runner-1
+check "a trailing CR from HEADSCALE_API_KEY_CMD is stripped" '[ $rc = 0 ]'
+reset; runenv "HEADSCALE_API_KEY=$(printf 'abc\rdef')" -- show --node runner-1
+check "a key with an inner CR is rejected before any request" '[ $rc = 2 ] && grep -q "unusable API key" "$T/err" && [ ! -s "$CALLS" ]'
+reset; runenv 'HEADSCALE_API_KEY=ab$cd' -- show --node runner-1
+check "a key with a shell character is rejected" '[ $rc = 2 ] && [ ! -s "$CALLS" ]'
 
 echo "$pass passed, $fails failed"
 [ "$fails" = 0 ]

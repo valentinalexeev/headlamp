@@ -2,8 +2,11 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"time"
+
+	"example.com/node-control/internal/headscale"
 )
 
 // sweep finalises runs a previous process left as running or queued (it was
@@ -24,6 +27,7 @@ func (e *Engine) sweep(ctx context.Context) {
 	total, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepCancelTotal)
 	defer cancel()
 	var tagged map[string]bool // nil until needed; empty when the list failed
+	listErr := ""              // class of the node-list failure, "" when it worked
 	skipped := false
 	for task := range cfg.Tasks {
 		for _, r := range e.d.Store.Runs(task) {
@@ -39,7 +43,7 @@ func (e *Engine) sweep(ctx context.Context) {
 			}
 			if r.RunnerID != "" && r.RunnerAddr != "" && total.Err() == nil {
 				if tagged == nil {
-					tagged = e.taggedAddrs(total)
+					tagged, listErr = e.taggedAddrs(total)
 				}
 				if a, err := netip.ParseAddr(r.RunnerAddr); err == nil && tagged[a.String()] {
 					cctx, cc := context.WithTimeout(total, sweepCancelEach)
@@ -47,8 +51,12 @@ func (e *Engine) sweep(ctx context.Context) {
 					cc()
 				} else if !skipped {
 					skipped = true
-					e.log.Info("ghost runs not cancelled on their node: the stored address is not a node with the runner tag now (or the node list is unavailable); they are recorded as lost",
-						"tag", e.d.RunnerTag)
+					cause := "not a runner-tag node"
+					if listErr != "" {
+						cause = listErr
+					}
+					e.log.Info("ghost runs not cancelled on their node; they are recorded as lost",
+						"tag", e.d.RunnerTag, "cause", cause)
 				}
 			}
 			r.State, r.Reason, r.Ended = RunLost, reasonRestarted, e.d.Now()
@@ -62,12 +70,20 @@ func (e *Engine) sweep(ctx context.Context) {
 }
 
 // taggedAddrs lists the tailnet addresses of the nodes that carry the runner
-// tag. An error yields an empty set, so nothing is cancelled (fail closed).
-func (e *Engine) taggedAddrs(ctx context.Context) map[string]bool {
+// tag. An error yields an empty set, so nothing is cancelled (fail closed), and
+// a fixed label for its class (never the error text, which may quote a server
+// answer).
+func (e *Engine) taggedAddrs(ctx context.Context) (map[string]bool, string) {
 	out := map[string]bool{}
 	nodes, err := e.d.Nodes.Nodes(ctx)
-	if err != nil {
-		return out
+	switch {
+	case err == nil:
+	case errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled):
+		return out, "list timed out"
+	case errors.Is(err, headscale.ErrNotConfigured):
+		return out, "list not configured"
+	default:
+		return out, "list failed"
 	}
 	for _, n := range WithTag(nodes, e.d.RunnerTag) {
 		for _, s := range n.IPAddresses {
@@ -76,7 +92,7 @@ func (e *Engine) taggedAddrs(ctx context.Context) map[string]bool {
 			}
 		}
 	}
-	return out
+	return out, ""
 }
 
 // spreadStart gives every task its own random startup delay, so tasks that

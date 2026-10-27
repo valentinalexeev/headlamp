@@ -48,7 +48,7 @@ func TestSweepCancelsOnlyAtTaggedNodeAddresses(t *testing.T) {
 		t.Fatalf("node list fetched %d times, want once", n)
 	}
 	out := buf.String()
-	if strings.Count(out, "not cancelled") != 1 {
+	if strings.Count(out, "not cancelled") != 1 || !strings.Contains(out, `cause="not a runner-tag node"`) {
 		t.Fatalf("want one skip line, got:\n%s", out)
 	}
 	if strings.Contains(out, "100.64.0.3") || strings.Contains(out, "100.64.0.9") {
@@ -58,10 +58,21 @@ func TestSweepCancelsOnlyAtTaggedNodeAddresses(t *testing.T) {
 
 func TestSweepNodeListErrorSkipsCancels(t *testing.T) {
 	f := newEngFixture(t, oneTask(nil))
-	f.nodes.err = errors.New("headscale down")
+	f.nodes.err = errors.New("listing nodes: 500 secret-detail-xyz")
+	var buf bytes.Buffer
+	f.e.log = slog.New(slog.NewTextHandler(&buf, nil))
 	sweepGhosts(t, f, "100.64.0.1", "100.64.0.2")
 	if n := f.runner.cancelCount(); n != 0 {
 		t.Fatalf("cancels = %d, want none when the node list is unavailable", n)
+	}
+	out := buf.String()
+	if strings.Count(out, "not cancelled") != 1 || !strings.Contains(out, `cause="list failed"`) {
+		t.Fatalf("want one skip line with the error class:\n%s", out)
+	}
+	for _, bad := range []string{"secret-detail-xyz", "100.64.0.1", "100.64.0.2"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("skip line carries %q:\n%s", bad, out)
+		}
 	}
 }
 

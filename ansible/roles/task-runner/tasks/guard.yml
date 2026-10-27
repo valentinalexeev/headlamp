@@ -1,0 +1,102 @@
+---
+# nftables guard for the service user (README "Guard"). Loaded before the
+# runner starts; task-runner.service Requires= it (fail closed). Same design as
+# the ingress guard of the reality-ingress role, in its own table.
+- name: Look for the nft binary
+  ansible.builtin.stat:
+    path: "{{ task_runner_nft_bin }}"
+  register: task_runner_nft_stat
+
+- name: Install nftables (nft is missing)
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+    update_cache: true
+  become: true
+  when: not task_runner_nft_stat.stat.exists
+
+# The rules match the numeric uid. The user is created by install.yml; in check
+# mode on a fresh host it may not exist yet, and nothing is written then.
+- name: Look up the service user's uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ task_runner_user }}"
+    fail_key: false
+
+- name: Remember the service user's uid
+  ansible.builtin.set_fact:
+    task_runner_uid: >-
+      {{ (ansible_facts.getent_passwd | default({}))[task_runner_user][1]
+         if (ansible_facts.getent_passwd | default({}))[task_runner_user] is defined
+            and (ansible_facts.getent_passwd | default({}))[task_runner_user] is not none
+         else '' }}
+
+- name: Check the service user exists and is not root
+  ansible.builtin.assert:
+    that:
+      - task_runner_uid is regex('^[0-9]+\\Z')
+      - (task_runner_uid | int) > 0
+    fail_msg: >-
+      task-runner: user {{ task_runner_user }} does not exist or has uid 0; run the
+      role without --tags (or with --tags install) first. The guard must never
+      match root.
+    quiet: true
+  when: not ansible_check_mode
+
+# `nft -c` (dry run in the kernel) validates before the file is replaced, so an
+# empty or broken rule set is never installed.
+- name: Write the guard rule set
+  ansible.builtin.template:
+    src: task-runner-guard.nft.j2
+    dest: "{{ task_runner_guard_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "{{ task_runner_nft_bin }} -c -f %s"
+  become: true
+  notify: reload task-runner-guard
+
+- name: Install the guard unit
+  ansible.builtin.template:
+    src: task-runner-guard.service.j2
+    dest: /etc/systemd/system/task-runner-guard.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify:
+    - task-runner daemon-reload
+    - reload task-runner-guard
+
+- name: Enable and start the guard
+  ansible.builtin.systemd:
+    name: task-runner-guard
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode
+
+# A runtime `nft flush ruleset` deletes the table while the unit stays "active
+# (exited)"; this timer reapplies it within task_runner_guard_check_interval.
+- name: Install the guard check service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - task-runner-guard-check.service
+    - task-runner-guard-check.timer
+  become: true
+  notify: task-runner daemon-reload
+
+- name: Enable and start the guard check timer
+  ansible.builtin.systemd:
+    name: task-runner-guard-check.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode

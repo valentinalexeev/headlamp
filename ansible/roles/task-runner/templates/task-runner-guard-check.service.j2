@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Reapply the task runner nftables guard if its table is missing (for example after `nft flush ruleset`)
+After=task-runner-guard.service
+
+[Service]
+Type=oneshot
+# Quiet when the table is there; otherwise log loudly and reload (never restart: task-runner Requires= the guard).
+ExecStart=/bin/sh -c '{{ task_runner_nft_bin }} list table inet task_runner_guard >/dev/null 2>&1 || { logger -p daemon.warning -t task-runner-guard-check "table inet task_runner_guard missing, reapplying"; systemctl reload task-runner-guard; }'

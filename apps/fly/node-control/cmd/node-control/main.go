@@ -19,6 +19,7 @@ import (
 	"example.com/node-control/internal/nodes"
 	"example.com/node-control/internal/policy"
 	"example.com/node-control/internal/tailnet"
+	"example.com/node-control/internal/tasks"
 )
 
 const defaultNodesConfig = "/srv/app/nodes.json"
@@ -26,8 +27,8 @@ const defaultNodesConfig = "/srv/app/nodes.json"
 // trackedTimeout bounds the headscale lookup done on behalf of the tailnet status route.
 const trackedTimeout = 10 * time.Second
 
-// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy. One cached
-// headscale source feeds the tailnet, the nodes and the enroll module, so a page load costs one fetch.
+// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy, tasks. One cached
+// headscale source feeds the tailnet, nodes, enroll and tasks modules, so a page load costs one fetch.
 func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	cfg, err := nodes.LoadConfig(env.Default("NODES_CONFIG", defaultNodesConfig))
 	if err != nil {
@@ -67,6 +68,7 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 			APIKey:  env.Getenv("HEADSCALE_API_KEY"),
 			HTTP:    hc,
 		}),
+		tasks.New(env, src),
 	}, nil
 }
 

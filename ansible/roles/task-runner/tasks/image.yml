@@ -1,0 +1,159 @@
+---
+# The run image is built (or loaded) as the service user, into its rootless
+# storage under task_runner_state_dir. Every podman call passes the global
+# --cgroup-manager=cgroupfs flag (the systemd manager fails for a user without
+# a login session) and the service's HOME and XDG_RUNTIME_DIR (podman refuses
+# a storage whose recorded run root differs). Skipped in check mode: podman and
+# the user may not exist yet.
+- name: Check whether the run image exists
+  ansible.builtin.command:
+    argv: [podman, --cgroup-manager=cgroupfs, image, exists, "{{ task_runner_image }}"]
+  become: true
+  become_user: "{{ task_runner_user }}"
+  environment: &task_runner_podman_env
+    HOME: "{{ task_runner_state_dir }}"
+    XDG_RUNTIME_DIR: "{{ task_runner_runtime_dir }}"
+  register: task_runner_image_exists
+  changed_when: false
+  failed_when: task_runner_image_exists.rc not in [0, 1]
+  when: not ansible_check_mode
+
+- name: Show the run image
+  ansible.builtin.debug:
+    msg: >-
+      task-runner: run image {{ task_runner_image }}
+      {{ '(check mode: not inspected)' if ansible_check_mode
+         else ('present, nothing to do' if task_runner_image_exists.rc == 0
+               else ('missing, loading ' ~ task_runner_image_archive if task_runner_image_archive | length > 0
+                     else 'missing, building from ' ~ task_runner_base_image)) }}
+
+- name: Check there is enough free disk for the image
+  ansible.builtin.assert:
+    that: (task_runner_free_disk_mb | int) >= (task_runner_min_free_disk_mb | int)
+    fail_msg: &task_runner_disk_msg >-
+      task-runner: {{ task_runner_free_disk_mb }} MB free on the file system of
+      {{ task_runner_state_dir }} (-1 = mount not found); building or loading the
+      run image needs task_runner_min_free_disk_mb={{ task_runner_min_free_disk_mb }}.
+    quiet: true
+  when:
+    - not ansible_check_mode
+    - task_runner_image_exists.rc == 1
+
+- name: Warn about low free disk (check mode, image not inspected)
+  ansible.builtin.debug:
+    msg: *task_runner_disk_msg
+  when:
+    - ansible_check_mode
+    - (task_runner_free_disk_mb | int) < (task_runner_min_free_disk_mb | int)
+
+# Build on the node. The first build pulls the base image (about 2.5 GB, about
+# 30 minutes on a small node), hence async with a generous limit.
+- name: Build the run image on the node
+  when:
+    - not ansible_check_mode
+    - task_runner_image_exists.rc == 1
+    - task_runner_image_archive | length == 0
+  block:
+    - name: Create the build directory
+      ansible.builtin.file:
+        path: "{{ task_runner_state_dir }}/image-build"
+        state: directory
+        owner: "{{ task_runner_user }}"
+        group: "{{ task_runner_user }}"
+        mode: "0700"
+      become: true
+
+    - name: Copy the image files
+      ansible.builtin.copy:
+        src: "{{ task_runner_src }}/image/{{ item }}"
+        dest: "{{ task_runner_state_dir }}/image-build/{{ item }}"
+        owner: "{{ task_runner_user }}"
+        group: "{{ task_runner_user }}"
+        mode: "0644"
+      loop: [Containerfile, host.js]
+      become: true
+
+    - name: Build the image (first run pulls the base image, this can take long)
+      ansible.builtin.command:
+        argv:
+          - podman
+          - --cgroup-manager=cgroupfs
+          - build
+          - --pull=missing
+          - --build-arg
+          - "BASE={{ task_runner_base_image }}"
+          - --tag
+          - "{{ task_runner_image }}"
+          - --file
+          - "{{ task_runner_state_dir }}/image-build/Containerfile"
+          - "{{ task_runner_state_dir }}/image-build"
+      become: true
+      become_user: "{{ task_runner_user }}"
+      environment: *task_runner_podman_env
+      async: "{{ task_runner_image_async | int }}"
+      poll: "{{ task_runner_image_poll | int }}"
+      changed_when: true
+  always:
+    - name: Remove the build directory
+      ansible.builtin.file:
+        path: "{{ task_runner_state_dir }}/image-build"
+        state: absent
+      become: true
+
+# Alternative for nodes that cannot reach the registry: load a `podman save`
+# tarball made elsewhere and tag it with the archive's content hash.
+- name: Load the run image from the archive
+  when:
+    - not ansible_check_mode
+    - task_runner_image_exists.rc == 1
+    - task_runner_image_archive | length > 0
+  block:
+    - name: Copy the image archive to the node
+      ansible.builtin.copy:
+        src: "{{ task_runner_image_archive }}"
+        dest: "{{ task_runner_state_dir }}/image-load.tar"
+        owner: "{{ task_runner_user }}"
+        group: "{{ task_runner_user }}"
+        mode: "0600"
+      become: true
+
+    - name: Load the archive
+      ansible.builtin.command:
+        argv: [podman, --cgroup-manager=cgroupfs, load, --input, "{{ task_runner_state_dir }}/image-load.tar"]
+      become: true
+      become_user: "{{ task_runner_user }}"
+      environment: *task_runner_podman_env
+      async: "{{ task_runner_image_async | int }}"
+      poll: "{{ task_runner_image_poll | int }}"
+      register: task_runner_load
+      changed_when: true
+
+    - name: Work out the loaded image
+      ansible.builtin.set_fact:
+        task_runner_loaded: >-
+          {{ (task_runner_load.stdout | default('')).splitlines()
+             | select('match', '^Loaded image([(]s[)])?: ')
+             | map('regex_replace', '^Loaded image([(]s[)])?: ', '')
+             | map('split', ',') | flatten | map('trim') | select | list }}
+
+    - name: Check the archive held exactly one image
+      ansible.builtin.assert:
+        that: task_runner_loaded | length == 1
+        fail_msg: >-
+          task-runner: task_runner_image_archive must hold exactly one image
+          (`podman save -o <file> <image>`); podman loaded {{ task_runner_loaded }}.
+        quiet: true
+
+    - name: Tag the loaded image
+      ansible.builtin.command:
+        argv: [podman, --cgroup-manager=cgroupfs, tag, "{{ task_runner_loaded[0] }}", "{{ task_runner_image }}"]
+      become: true
+      become_user: "{{ task_runner_user }}"
+      environment: *task_runner_podman_env
+      changed_when: true
+  always:
+    - name: Remove the copied archive
+      ansible.builtin.file:
+        path: "{{ task_runner_state_dir }}/image-load.tar"
+        state: absent
+      become: true

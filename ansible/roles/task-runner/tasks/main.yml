@@ -1,0 +1,50 @@
+---
+# See README.md. Order matters: preflight, install (packages, user, binary,
+# unit), guard (loaded before the service can start), image, config (env file,
+# start), then pruning of old image tags. Preflight runs under every tag: it
+# also works out facts (architecture, image tag) the other parts use. The
+# `always` tag (and only that one: a task is skipped when ANY of its tags is
+# skipped) keeps it running under --tags and --skip-tags of any other tag.
+- name: Preflight checks
+  ansible.builtin.include_tasks:
+    file: preflight.yml
+    apply:
+      tags: [always]
+  tags: [always]
+
+- name: Install packages, the service user, the binary and the unit
+  ansible.builtin.include_tasks:
+    file: install.yml
+    apply:
+      tags: [task-runner, install]
+  tags: [task-runner, install]
+
+- name: Kernel guard for the service user (nftables)
+  ansible.builtin.include_tasks:
+    file: guard.yml
+    apply:
+      tags: [task-runner, guard]
+  tags: [task-runner, guard]
+
+- name: Build or load the run image
+  ansible.builtin.include_tasks:
+    file: image.yml
+    apply:
+      tags: [task-runner, image]
+  tags: [task-runner, image]
+
+# Also under `image`: a new image tag changes RUNNER_IMAGE in the env file.
+- name: Write the environment file and start the service
+  ansible.builtin.include_tasks:
+    file: config.yml
+    apply:
+      tags: [task-runner, config, image]
+  tags: [task-runner, config, image]
+
+# Own file so `--tags image-prune` runs just this (plus preflight for the tag).
+- name: Prune old run image tags
+  ansible.builtin.include_tasks:
+    file: prune.yml
+    apply:
+      tags: [task-runner, image, image-prune]
+  tags: [task-runner, image, image-prune]

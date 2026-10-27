@@ -1,0 +1,32 @@
+{
+  "tasks": {
+    "check-balance": {
+      "script": "check-balance.js",
+      "params": { "account_url": "https://example.com/account" },
+      "target": { "tags": ["tag:region-xx"], "online": true },
+      "schedule": { "every": "12h", "jitter": "30m" },
+      "timeout": "3m",
+      "retry": { "attempts": 3, "backoff": ["2m", "10m"] },
+      "secrets": ["LOGIN", "PASSWORD"],
+      "healthcheck": "CHECK_BALANCE_PING",
+      "alert": {
+        "when": { "field": "balance", "op": "<", "value": 10 },
+        "cooldown": "24h",
+        "notify": {
+          "topic": "NTFY_TOPIC",
+          "priority": "high",
+          "title": "{task}: balance is low",
+          "message": "Balance is {balance}"
+        }
+      },
+      "on_failure": {
+        "cooldown": "24h",
+        "notify": {
+          "topic": "NTFY_TOPIC",
+          "title": "{task} failed",
+          "message": "{reason}"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Check that the task runner nftables guard is loaded
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec={{ task_runner_guard_check_interval }}
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

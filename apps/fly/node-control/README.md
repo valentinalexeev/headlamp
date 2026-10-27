@@ -499,19 +499,30 @@ protects the page and API from DNS rebinding.
 Rollout: give every runner node the runner tag in headscale and write the tailnet ACL rule that opens the runner port
 with that tag as the destination. A node without the tag is ignored even when a task names it.
 
-The tag is what node-control trusts with the runner token and the task secrets, and a node can carry a tag in two ways:
-forced tags, which an admin sets, and tags the node requested itself (`tailscale up --advertise-tags`), which headscale
-grants when the policy's `tagOwners` lets the node's user own that tag. node-control reads both. So the trust boundary
-for the runner tag is the policy's `tagOwners` entry: list ONLY the admin/service identity as owner of the runner tag,
-never human users whose devices are not runners. The safest way to tag a node is as an admin (forced tags:
-`headscale nodes tag`, `scripts/headscale-tag-node.sh` below, or a pre-auth key created with that tag as its ACL tag); a
-node that merely advertises the tag is accepted only if the policy lets its user own it.
+The tag is what node-control trusts with the runner token and the task secrets. It is trusted because the policy's
+`tagOwners` decides who may have it when a node registers (`tailscale up --advertise-tags` is checked against it), and
+afterwards only an admin changes a node's tags (`headscale nodes tag` or the API). How headscale stores tags depends on
+the version, and node-control reads both forms:
 
-With the helper (needs `HEADSCALE_URL` and `HEADSCALE_API_KEY`, or `HEADSCALE_API_KEY_CMD` printing the key):
-`scripts/headscale-tag-node.sh add --node <given-name> --tag tag:task-runner` prints the plan
-(`forced: [...] -> [...]`), the same command with `--yes` applies it (it keeps the node's other forced tags: the API
-replaces the whole forced set), and `scripts/headscale-tag-node.sh show --node <given-name>` confirms the tag is listed
-under forced.
+- headscale 0.28 and later (unified model): a node has one `tags` list. Tags and user ownership exclude each other:
+  tagging a user-owned (tag-less) node removes its user ownership, and only re-authenticating it with empty tags undoes
+  that.
+- Older headscale (legacy model): forced tags, which an admin sets, plus valid tags, which a node can request at any
+  time with `--advertise-tags` and gets when `tagOwners` lets its user own them.
+
+So the trust boundary for the runner tag is the policy's `tagOwners` entry: list ONLY the admin/service identity as
+owner of the runner tag, never human users whose devices are not runners. The safest way to tag a node is as an admin
+(`headscale nodes tag`, `scripts/headscale-tag-node.sh` below, or a pre-auth key created with that tag as its ACL tag);
+a node that merely advertises the tag gets it only if the policy lets its user own it.
+
+With the helper (needs `HEADSCALE_URL` and `HEADSCALE_API_KEY`, or `HEADSCALE_API_KEY_CMD` printing the key): first run
+`scripts/headscale-tag-node.sh show --node <given-name>` and read the model it prints (`unified` or `legacy`), then
+`scripts/headscale-tag-node.sh add --node <given-name> --tag tag:task-runner` without `--yes` to see the plan
+(`tags: [...] -> [...]`, or `forced: [...] -> [...]` on a legacy server). The same command with `--yes` applies it,
+keeping the node's other tags (the API replaces the whole set: `tags` on the unified model, the forced tags on the
+legacy one), and checks the result by reading the node again. On the unified model, tagging a node that has no tags yet
+removes its user ownership, so the helper also requires `--allow-ownership-change` there. Run `show` again afterwards:
+the runner tag is listed under `tags` (unified) or `forced` (legacy).
 
 A given name follows the node's reported hostname until it is set with `headscale nodes rename` (see "Names in
 headscale" above), so rename the runner nodes if `node` targets should not depend on what a runner reports.

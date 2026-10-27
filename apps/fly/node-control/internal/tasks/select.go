@@ -26,14 +26,15 @@ const DefaultRunnerTag = "tag:task-runner"
 // runnerTagRe is the accepted form of TASKS_RUNNER_TAG.
 var runnerTagRe = regexp.MustCompile(`^tag:[a-z0-9][a-z0-9-]{0,62}$`)
 
-// WithTag keeps the nodes that carry tag (headscale.Node.Tags: forced tags
-// set by an admin, and valid tags, which a node requested itself with
-// --advertise-tags and the policy's tagOwners allowed). This filter is what
-// keeps any other tailnet node from ever being probed or sent the runner token,
-// so the trust boundary for the runner tag is its tagOwners entry in the
-// policy: only the admin/service identity may own it, never a human user whose
-// devices are not runners. Tag runners as an admin (forced tags). An empty tag
-// keeps nothing.
+// WithTag keeps the nodes that carry tag (headscale.Node.Tags: the single tags
+// list of headscale 0.28+, or the forced and valid tags of older versions).
+// This filter is what keeps any other tailnet node from ever being probed or
+// sent the runner token. A node gets a tag at registration only if the
+// policy's tagOwners allows it (older versions also accept a later request),
+// and otherwise only from an admin, so the trust boundary for the runner tag
+// is its tagOwners entry: only the admin/service identity may own it, never a
+// human user whose devices are not runners. Tag runners as an admin. An empty
+// tag keeps nothing.
 func WithTag(nodes []headscale.Node, tag string) []headscale.Node {
 	var out []headscale.Node
 	if tag == "" {

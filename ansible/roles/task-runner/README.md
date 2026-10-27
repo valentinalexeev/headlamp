@@ -31,11 +31,14 @@ task_runner_base_image: "<registry>/<repository>@sha256:<64 hex>"
 
 Give the node the runner tag in headscale (node-control's `TASKS_RUNNER_TAG`, default `tag:task-runner`): node-control
 never contacts an untagged node. Allow the runner port (`task_runner_port`, default 9100) to that tag from node-control
-only, in the tailnet ACL. Tag the node as an admin (forced tags: `scripts/headscale-tag-node.sh add --node <given-name>
---tag tag:task-runner --yes`, then `show` to verify; or `headscale nodes tag`, or a pre-auth key with that ACL tag).
-node-control also accepts a tag the node advertised itself when the policy's `tagOwners` lets its user own it, so that
-`tagOwners` entry is the trust boundary: list only the admin/service identity as owner of the runner tag, never human
-users whose devices are not runners.
+only, in the tailnet ACL. Tag the node as an admin: run `scripts/headscale-tag-node.sh show --node <given-name>` first
+and read the tag model it prints (`unified` on headscale 0.28+, one `tags` list; `legacy` before, forced and valid
+tags), then `add --node <given-name> --tag tag:task-runner` without `--yes` to see the plan, then with `--yes`, and
+`show` again to verify. On the unified model, tagging a node that has no tags removes its user ownership (undone only
+by re-authenticating with empty tags), so the helper also asks for `--allow-ownership-change`. `headscale nodes tag` or
+a pre-auth key with that ACL tag work too. The policy's `tagOwners` decides who may have the tag at registration (and,
+on legacy servers, who may request it later), so that entry is the trust boundary: list only the admin/service
+identity as owner of the runner tag, never human users whose devices are not runners.
 
 **systemd-resolved hosts:** if `/etc/resolv.conf` points at the local stub (`nameserver 127.0.0.53`), add
 `127.0.0.53` to `task_runner_guard_resolvers` (keep the tailnet entries if they are used). Preflight fails safe when a
@@ -276,6 +279,8 @@ until the container limits are confirmed.
     HOME=/var/lib/task-runner XDG_RUNTIME_DIR=/run/task-runner podman --cgroup-manager=cgroupfs ps -a` is empty.
 11. Flush (test node only): `nft flush ruleset`, and the table is back within the check interval
     (`journalctl -t task-runner-guard-check`).
+12. Runner tag (from the operator machine): `scripts/headscale-tag-node.sh show --node <given-name>` first, read the
+    printed model, then `add --node <given-name> --tag tag:task-runner` without `--yes`, check the plan, then apply.
 
 ## Not verified against a real host
 

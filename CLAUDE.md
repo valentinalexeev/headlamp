@@ -97,7 +97,7 @@ commits on top of it or attempt a rewrite on your own.
 | `scripts/rotate-headscale-api-key.sh` | check (`--check`) and rotate the headscale API key used by the route approver and other apps; all site values come from env vars (`HS_APP`, `HS_URL`, `STAGE_APPS`, `DEPLOY_CMD`, optional sops `SECRET_FILE`/`SECRET_FIELD`). API keys expire: the approver logs `ERROR ... HTTP 401` when its key has, and keeps retrying |
 | `scripts/tasks.sh`, `scripts/test/tasks/` | CLI client of the node-control tasks API: check/diff/push (secrets first, from a sops file)/pull the task config and scripts (env: `NODE_CONTROL_URL`, `TASKS_FILE`, `TASKS_SCRIPTS_DIR`, `TASKS_SECRETS_FILE`); tests run against fake `curl` and `sops` (`make test-tasks-cli`) |
 | `scripts/headscale-policy.sh` | CLI client of the node-control policy console: check/diff/apply (with confirm-or-revert)/pull the headscale ACL; `bootstrap` loads the first policy through `fly ssh` (env: `NODE_CONTROL_URL`, `POLICY_FILE`, `HS_APP`) |
-| `scripts/headscale-tag-node.sh` | show, add or remove an admin-set (forced) tag on one headscale node by its given name, keeping its other forced tags (the API replaces the whole forced set); plan without `--yes`, verify after applying (env: `HEADSCALE_URL`, `HEADSCALE_API_KEY` or `HEADSCALE_API_KEY_CMD`). Used to tag task runners |
+| `scripts/headscale-tag-node.sh` | show, add or remove an admin-held tag on one headscale node by its given name, keeping its other tags (the API replaces the whole set). Prints the tag model: unified (headscale 0.28+, one `tags` list; tagging a user-owned node drops its user ownership, so that needs `--allow-ownership-change`) or legacy (only forced tags change). Plan without `--yes`, verify after applying (env: `HEADSCALE_URL`, `HEADSCALE_API_KEY` or `HEADSCALE_API_KEY_CMD`). Used to tag task runners |
 | `examples/private-repo/` | the skeleton of the private site repo (Makefile, terraform, ansible, fly deploy) |
 
 Anything that identifies a deployment is a placeholder here (`example.com`, `<your-...>`). The
@@ -306,8 +306,9 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
   `ENROLL_ALLOWED_HOSTS` (required by the module), deploy the `task-runner` role (`ansible/roles/task-runner`) to the nodes
   that should run scripts, give those nodes the runner tag (`TASKS_RUNNER_TAG`, default `tag:task-runner`; untagged nodes
   are never used, and a `node` target means the headscale given name) as an admin (`scripts/headscale-tag-node.sh`),
-  list only the admin/service identity as owner of that tag in the policy's `tagOwners` (a node that advertises a tag
-  its user owns gets it, so `tagOwners` is the trust boundary), allow node-control to reach the runner port of
+  list only the admin/service identity as owner of that tag in the policy's `tagOwners` (it decides who may have the
+  tag at registration, and on pre-0.28 headscale a node can also request one later, so `tagOwners` is the trust
+  boundary; on 0.28+ tagging a user-owned node drops its user ownership), allow node-control to reach the runner port of
   that tag in the tailnet ACL, and manage config, scripts and secrets from your private repo with `scripts/tasks.sh`
   (example files: `examples/private-repo/fly/node-control/tasks/`). Variables, API, metrics and the trust model:
   `apps/fly/node-control/README.md`, section "Tasks module".

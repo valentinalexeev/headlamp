@@ -66,8 +66,9 @@ type Task struct {
 // renames the node), never the host name the node reports. Either way only
 // nodes that carry the runner tag (TASKS_RUNNER_TAG) are candidates. A node
 // can carry a tag it advertised itself if the policy's tagOwners lets its user
-// own it, so the trust boundary is that tagOwners entry: list only the
-// admin/service identity as its owner. See WithTag and Select.
+// own it (at registration; older headscale also later), so the trust boundary
+// is that tagOwners entry: list only the admin/service identity as its owner.
+// See WithTag and Select.
 type Target struct {
 	Node   string   `json:"node,omitempty"`
 	Tags   []string `json:"tags,omitempty"`

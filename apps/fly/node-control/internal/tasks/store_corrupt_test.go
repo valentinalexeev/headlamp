@@ -210,3 +210,66 @@ func TestModuleOpensOverCorruptConfigAndPushRepairs(t *testing.T) {
 		t.Fatal("push did not repair the config")
 	}
 }
+
+// Field names that contain transport words ("timeout", "eof", "dial-tcp")
+// must not make an unreadable value look like a Redis failure: the
+// encryption errors quote the field name.
+func TestStoreOpensOverUnreadableFieldsWithTransportWordsInName(t *testing.T) {
+	c := newCorruptEnv(t)
+	cfg, err := ParseConfig([]byte(`{"tasks":{
+		"dns-timeout":{"script":"dial-tcp-x.sh","target":{"node":"n1"},"schedule":{"every":"1h"},"secrets":["timeout_token"]},
+		"eof-check":{"script":"dial-tcp-x.sh","target":{"node":"n1"},"schedule":{"every":"1h"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s0 := openStore(t, c.enc)
+	if err := s0.PutSecret("timeout_token", "s3cret-value"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s0.PutConfig(cfg, map[string]string{"dial-tcp-x.sh": "echo hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s0.SaveState("eof-check", TaskState{Streak: 2}); err != nil {
+		t.Fatal(err)
+	}
+	c.write(t, c.other, "state:dns-timeout", "sealed-with-another-key")
+	c.write(t, c.other, "runs:eof-check", "sealed-with-another-key")
+	c.write(t, c.other, "script:dial-tcp-x.sh", "sealed-with-another-key")
+	c.write(t, c.other, "secret:timeout_token", "sealed-with-another-key")
+
+	s, err := OpenStore(c.enc, c.log)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	if s.Config() == nil || len(s.Runs("eof-check")) != 0 || s.State("dns-timeout") != (TaskState{}) {
+		t.Fatal("unreadable fields must read as absent, the config as stored")
+	}
+	if s.State("eof-check").Streak != 2 {
+		t.Fatal("readable state lost")
+	}
+	if len(s.SecretNames()) != 0 {
+		t.Fatalf("unreadable secret listed: %v", s.SecretNames())
+	}
+	for _, f := range []string{"state:dns-timeout", "runs:eof-check", "script:dial-tcp-x.sh", "secret:timeout_token"} {
+		if !strings.Contains(c.logs.String(), "field="+f) {
+			t.Fatalf("no warning for %s:\n%s", f, c.logs.String())
+		}
+	}
+}
+
+// A value written without encryption under a field whose name holds a
+// transport word ("not encrypted" quotes the field) is a value error too.
+func TestStoreOpensOverPlaintextFieldWithTransportWordInName(t *testing.T) {
+	c := newCorruptEnv(t)
+	cfg, err := ParseConfig([]byte(`{"tasks":{"dns-timeout":{"script":"a.sh","target":{"node":"n1"},"schedule":{"every":"1h"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := openStore(t, c.enc).PutConfig(cfg, map[string]string{"a.sh": "echo hi"}); err != nil {
+		t.Fatal(err)
+	}
+	c.mr.HSet(storeScope, "state:dns-timeout", "{}")
+	if _, err := OpenStore(c.enc, c.log); err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+}

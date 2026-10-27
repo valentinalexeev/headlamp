@@ -25,7 +25,7 @@ Secrets go in Fly secrets; plain settings in `fly.toml`.
 | `STATE_ALLOW_PLAINTEXT` | `1` stores the Redis state unencrypted. Explicit opt-out; not recommended, the state holds node private keys |
 | `STATE_IMPORT_FROM` | optional path of an existing tailscaled/tsnet state file (for example `/var/lib/tailscale/tailscaled.state`); imported once on start when the Redis hash is empty, otherwise ignored |
 | `NODES_CONFIG` | optional overrides file, default `/srv/app/nodes.json`; a missing file is fine, a malformed one stops startup |
-| `ENROLL_ALLOWED_HOSTS` | optional, comma-separated Host values the admin listener accepts (anything else gets 400); set it to block DNS rebinding. `*` allows any host and `*.example.com` any host ending in `.example.com` (list `example.com` too for the bare name), as in the Python app |
+| `ENROLL_ALLOWED_HOSTS` | optional for the core, **required** by the policy module (`POLICY_DB`) and the tasks module (on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set); comma-separated Host values the admin listener accepts (anything else gets 400); set it to block DNS rebinding. `*` allows any host (those two modules refuse it) and `*.example.com` any host ending in `.example.com` (list `example.com` too for the bare name), as in the Python app |
 | `ENROLL_DB` | path of the SQLite database; enables enrolment. Put it on the state volume: `/var/lib/tailscale/enroll.db` |
 | `ENROLL_REDIS` | `1` keeps the enrolment data in Redis instead of SQLite: no volume needed (see "Enrolment in Redis"). Needs `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `ENROLL_SECRET_KEY`; `ENROLL_DB` is then not used |
 | `ENROLL_REDIS_KEY` | key prefix of the enrolment data, `<app>:<name>`. Default `<app>:enroll` |
@@ -182,7 +182,8 @@ Environment (secrets via Fly secrets, the rest in `fly.toml`):
 - `AGENT_URL`, `AGENT_TOKEN`: address and bearer token of the first ingress's agent (the old single-host setup).
   Further ingresses use `agent_url` in their entry (or are found through headscale) and `AGENT_TOKEN_<NAME>`.
 
-- `ENROLL_ALLOWED_HOSTS` (optional): comma-separated Host header values the admin app accepts, for example
+- `ENROLL_ALLOWED_HOSTS` (optional for the core; required, and must not be a bare `*`, when the policy or tasks module
+  is on): comma-separated Host header values the admin app accepts, for example
   `node-control.<tailnet-domain>,<tailnet-ip>`. Any other Host gets `400` (the same rules as Starlette's `TrustedHostMiddleware`, applied
   to the whole admin app on port 80). Set it: it stops a malicious web page from reaching the admin API through DNS
   rebinding in an operator's browser. List every name/IP you open the page with.
@@ -495,11 +496,25 @@ The module requires the admin listener's Host guard, like the policy console: on
 must list the host names the admin listener answers to, and an unset, empty or `*` value stops startup. The guard
 protects the page and API from DNS rebinding.
 
-Rollout: give every runner node the runner tag in headscale (tags are set by the admin; a node cannot give itself one) and
-write the tailnet ACL rule that opens the runner port with that tag as the destination. A node without the tag is
-ignored even when a task names it. The tag is the trust boundary: a given name follows the node's reported hostname
-until it is set with `headscale nodes rename` (see "Names in headscale" above), so rename the runner nodes if `node`
-targets should not depend on what a runner reports.
+Rollout: give every runner node the runner tag in headscale and write the tailnet ACL rule that opens the runner port
+with that tag as the destination. A node without the tag is ignored even when a task names it.
+
+The tag is what node-control trusts with the runner token and the task secrets, and a node can carry a tag in two ways:
+forced tags, which an admin sets, and tags the node requested itself (`tailscale up --advertise-tags`), which headscale
+grants when the policy's `tagOwners` lets the node's user own that tag. node-control reads both. So the trust boundary
+for the runner tag is the policy's `tagOwners` entry: list ONLY the admin/service identity as owner of the runner tag,
+never human users whose devices are not runners. The safest way to tag a node is as an admin (forced tags:
+`headscale nodes tag`, `scripts/headscale-tag-node.sh` below, or a pre-auth key created with that tag as its ACL tag); a
+node that merely advertises the tag is accepted only if the policy lets its user own it.
+
+With the helper (needs `HEADSCALE_URL` and `HEADSCALE_API_KEY`, or `HEADSCALE_API_KEY_CMD` printing the key):
+`scripts/headscale-tag-node.sh add --node <given-name> --tag tag:task-runner` prints the plan
+(`forced: [...] -> [...]`), the same command with `--yes` applies it (it keeps the node's other forced tags: the API
+replaces the whole forced set), and `scripts/headscale-tag-node.sh show --node <given-name>` confirms the tag is listed
+under forced.
+
+A given name follows the node's reported hostname until it is set with `headscale nodes rename` (see "Names in
+headscale" above), so rename the runner nodes if `node` targets should not depend on what a runner reports.
 
 ### Task configuration
 

@@ -971,6 +971,37 @@ func TestConfigRejectsTaskOverRunnerEnvCap(t *testing.T) {
 	}
 }
 
+// Updating a secret re-checks every configured task that lists it: a larger
+// value must not push a task over the runner's environment cap.
+func TestSecretsUpdateChecksEnvCap(t *testing.T) {
+	h := newModHarness(t, nil)
+	store := h.waitOpen()
+	if rec := h.alice("PUT", "/tasks/secrets", `{"BIG_A":"`+strings.Repeat("s", 4000)+`"}`); rec.Code != 200 {
+		t.Fatalf("put secrets: %d %s", rec.Code, rec.Body)
+	}
+	// {"BIG_A":"<4000>"} is 4012 bytes, {"p":"<95950>"} 95958: 99970, just fits.
+	task := `"near-cap":{"script":"x.js","target":{"node":"n1"},"schedule":{"every":"1h"},"secrets":["BIG_A"],` +
+		`"params":{"p":"` + strings.Repeat("x", 95950) + `"}}`
+	if rec := h.alice("PUT", "/tasks/config", configBody(task, map[string]string{"x.js": scriptA})); rec.Code != 200 {
+		t.Fatalf("config: %d %s", rec.Code, rec.Body)
+	}
+	rec := h.alice("PUT", "/tasks/secrets", `{"BIG_A":"`+strings.Repeat("t", 4096)+`","OTHER":"v"}`)
+	body := rec.Body.String()
+	if rec.Code != 422 || !strings.Contains(body, "task near-cap") || !strings.Contains(body, "100000") || strings.Contains(body, "ttt") {
+		t.Fatalf("want 422 naming the task and the cap, never a value: %d %s", rec.Code, body)
+	}
+	if v, err := store.Secrets([]string{"BIG_A"}); err != nil || v["BIG_A"] != strings.Repeat("s", 4000) {
+		t.Fatal("refused update was stored")
+	}
+	if names := store.SecretNames(); len(names) != 1 {
+		t.Fatalf("nothing in a refused request may be stored: %v", names)
+	}
+	// A value that keeps the task under the cap, and a secret no task lists, are fine.
+	if rec := h.alice("PUT", "/tasks/secrets", `{"BIG_A":"`+strings.Repeat("u", 3990)+`","OTHER":"v"}`); rec.Code != 200 {
+		t.Fatalf("fits: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestStopClosesRedisOnlyAfterEngineStopped(t *testing.T) {
 	mr := miniredis.RunT(t)
 	env := modEnv("redis://" + mr.Addr())

@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"tailscale.com/ipn"
+
+	"example.com/node-control/internal/statestore"
 )
 
 // The shared Redis is billed per command, so the store reads every field once
@@ -222,10 +224,16 @@ func (s *Store) readValue(field string) ([]byte, bool, error) {
 }
 
 // isValueErr tells a stored value the encryption layer cannot open (wrong
-// key, not encrypted, truncated: its errors all say "stored state") from a
-// failure to talk to Redis. Anything unrecognised is not a value error, so
-// the open fails and is retried rather than starting from an empty store.
+// key, not encrypted, truncated) from a failure to talk to Redis. The
+// encryption layer marks its refusals with statestore.ErrUnreadable, checked
+// first: those messages quote the field name, which may itself contain words
+// such as "timeout" or "eof". The text fallback is only for errors that carry
+// no sentinel. Anything unrecognised is not a value error, so the open fails
+// and is retried rather than starting from an empty store.
 func isValueErr(err error) bool {
+	if errors.Is(err, statestore.ErrUnreadable) {
+		return true
+	}
 	return !isTransportErr(err) && strings.Contains(err.Error(), "stored state")
 }
 

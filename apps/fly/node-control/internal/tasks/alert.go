@@ -233,8 +233,11 @@ func (n *HTTPNotifier) alert(ctx context.Context, task string, t Task, result ma
 		vars[k] = v
 	}
 	vars["task"] = task
-	outcome := n.send(ctx, task, "alert", t.Alert.Notify, vars)
-	n.settle(task, "alert", alertField, now.Add(time.Duration(t.Alert.Cooldown)), outcome == "sent")
+	var outcome string // stays "" if send panics: the slot is freed, nothing stored
+	defer func() {
+		n.settle(task, "alert", alertField, now.Add(time.Duration(t.Alert.Cooldown)), outcome == "sent")
+	}()
+	outcome = n.send(ctx, task, "alert", t.Alert.Notify, vars)
 	return true, outcome
 }
 
@@ -253,8 +256,10 @@ func (n *HTTPNotifier) Failure(ctx context.Context, task string, t Task, reason 
 	}
 	reason = capBytes(scrub.Scrub(reason, n.known(t)), maxNotifyReason)
 	vars := map[string]any{"task": task, "reason": reason}
+	var sent bool // stays false if send panics: the slot is freed, nothing stored
+	defer func() { n.settle(task, "failure", failField, now.Add(time.Duration(t.OnFailure.Cooldown)), sent) }()
 	res.Alert = n.send(ctx, task, "failure", t.OnFailure.Notify, vars)
-	n.settle(task, "failure", failField, now.Add(time.Duration(t.OnFailure.Cooldown)), res.Alert == "sent")
+	sent = res.Alert == "sent"
 	return res
 }
 
@@ -280,7 +285,8 @@ func (n *HTTPNotifier) reserve(task, kind string, now time.Time, field func(*Tas
 	return true
 }
 
-// settle ends a reservation. Only a successful send stores the cooldown, and
+// settle ends a reservation; callers defer it, so a panic in the send frees
+// the slot too. Only a successful send stores the cooldown, and
 // it is stored before the slot is freed, so a caller that reserves next sees
 // either the reservation or the cooldown. A failed or interrupted send stores
 // nothing: the next run retries.

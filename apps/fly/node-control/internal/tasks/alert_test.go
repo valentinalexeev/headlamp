@@ -783,3 +783,44 @@ func TestFailureReasonScrubbed(t *testing.T) {
 		}
 	}
 }
+
+type panicTransport struct{}
+
+func (panicTransport) RoundTrip(*http.Request) (*http.Response, error) { panic("transport blew up") }
+
+// A panic inside a send must not pin the in-flight slot: the next run can
+// send again once the panic has been recovered further up.
+func TestPanicInSendFreesTheSlot(t *testing.T) {
+	for _, kind := range []string{"alert", "failure"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newFixture(t)
+			f.n = NewNotifier(f.store, &http.Client{Transport: panicTransport{}}, "http://ntfy.example.com", quiet,
+				func() time.Time { return f.now })
+			f.n.sleep = func(context.Context, time.Duration) {}
+			task := alertTask()
+			task.Healthcheck = "" // the ping would panic before the send
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Fatal("expected the transport panic")
+					}
+				}()
+				if kind == "alert" {
+					f.n.Success(context.Background(), "tk", task, map[string]any{"balance": 500.0})
+				} else {
+					f.n.Failure(context.Background(), "tk", task, "boom")
+				}
+			}()
+			field := alertField
+			if kind == "failure" {
+				field = failField
+			}
+			if !f.n.reserve("tk", kind, f.now, field) {
+				t.Fatal("slot still held after a panic in send")
+			}
+			if st := f.store.State("tk"); !st.AlertUntil.IsZero() || !st.FailNotifyUntil.IsZero() {
+				t.Fatalf("a panicked send stored a cooldown: %+v", st)
+			}
+		})
+	}
+}

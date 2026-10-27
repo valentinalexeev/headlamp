@@ -64,8 +64,10 @@ type Task struct {
 // Target is either a named node or a tag selector, never both. Node is the
 // node's headscale given name (unique in headscale; fixed once the admin
 // renames the node), never the host name the node reports. Either way only
-// nodes that carry the runner tag (TASKS_RUNNER_TAG, admin-set) are
-// candidates: the tag is the trust boundary. See WithTag and Select.
+// nodes that carry the runner tag (TASKS_RUNNER_TAG) are candidates. A node
+// can carry a tag it advertised itself if the policy's tagOwners lets its user
+// own it, so the trust boundary is that tagOwners entry: list only the
+// admin/service identity as its owner. See WithTag and Select.
 type Target struct {
 	Node   string   `json:"node,omitempty"`
 	Tags   []string `json:"tags,omitempty"`

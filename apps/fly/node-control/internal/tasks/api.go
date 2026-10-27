@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -314,9 +315,21 @@ func secretRefs(t Task) []string {
 
 // envSize is what the runner receives in its two environment variables for
 // the task: the JSON of its secrets (stored values) plus its params JSON.
-func envSize(s *Store, t Task) int {
+func envSize(s *Store, t Task) int { return envSizeWith(s, t, nil) }
+
+// envSizeWith is envSize with the values in override taking the place of the
+// stored ones (a secrets update not yet stored).
+func envSizeWith(s *Store, t Task, override map[string]string) int {
 	n := 0
-	if vals, err := s.Secrets(t.Secrets); err == nil && len(vals) > 0 {
+	vals := map[string]string{}
+	for _, name := range t.Secrets {
+		if v, ok := override[name]; ok {
+			vals[name] = v
+		} else if cur, err := s.Secrets([]string{name}); err == nil {
+			vals[name] = cur[name]
+		}
+	}
+	if len(vals) > 0 {
 		b, _ := json.Marshal(vals)
 		n += len(b)
 	}
@@ -553,6 +566,25 @@ func (a *api) putSecrets(w http.ResponseWriter, r *http.Request) {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	// The same cap as PUT /tasks/config, for every configured task that lists
+	// an updated secret: nothing is stored if one would exceed it.
+	if cfg := s.Config(); cfg != nil {
+		var problems []string
+		for _, id := range sortedTasks(cfg) {
+			t := cfg.Tasks[id]
+			if !slices.ContainsFunc(t.Secrets, func(n string) bool { _, ok := in[n]; return ok }) {
+				continue
+			}
+			if envSizeWith(s, t, in) > runnerMaxEnvJSON {
+				problems = append(problems, fmt.Sprintf("task %s: its secrets and params together would exceed the runner's %d-byte limit",
+					id, runnerMaxEnvJSON))
+			}
+		}
+		if len(problems) > 0 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "secrets not stored", "problems": problems})
+			return
+		}
+	}
 	pending := false
 	for _, n := range names {
 		if cur, err := s.Secrets([]string{n}); err == nil && cur[n] == in[n] {

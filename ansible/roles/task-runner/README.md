@@ -31,7 +31,11 @@ task_runner_base_image: "<registry>/<repository>@sha256:<64 hex>"
 
 Give the node the runner tag in headscale (node-control's `TASKS_RUNNER_TAG`, default `tag:task-runner`): node-control
 never contacts an untagged node. Allow the runner port (`task_runner_port`, default 9100) to that tag from node-control
-only, in the tailnet ACL.
+only, in the tailnet ACL. Tag the node as an admin (forced tags: `scripts/headscale-tag-node.sh add --node <given-name>
+--tag tag:task-runner --yes`, then `show` to verify; or `headscale nodes tag`, or a pre-auth key with that ACL tag).
+node-control also accepts a tag the node advertised itself when the policy's `tagOwners` lets its user own it, so that
+`tagOwners` entry is the trust boundary: list only the admin/service identity as owner of the runner tag, never human
+users whose devices are not runners.
 
 **systemd-resolved hosts:** if `/etc/resolv.conf` points at the local stub (`nameserver 127.0.0.53`), add
 `127.0.0.53` to `task_runner_guard_resolvers` (keep the tailnet entries if they are used). Preflight fails safe when a

@@ -232,6 +232,8 @@ func (m *Module) Start(ctx context.Context) error {
 	}
 	ctx, m.cancel = context.WithCancel(ctx)
 	m.loopDone = make(chan struct{})
+	m.log.Info("tasks: only nodes with the runner tag are candidates; tag them as an admin and let only the admin/service identity own the tag in the policy's tagOwners",
+		"tag", m.tag)
 	if m.metricsAddr != "" {
 		m.bg.Add(1)
 		go func() {

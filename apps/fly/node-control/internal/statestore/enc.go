@@ -15,6 +15,18 @@ import (
 // encMagic prefixes every encrypted value: magic | 12-byte nonce | AES-256-GCM ciphertext.
 var encMagic = []byte("ncenc1:")
 
+// ErrUnreadable marks a stored value this layer refuses to hand back: it does
+// not decrypt, is truncated, is plaintext while encryption is on, or is
+// ciphertext while it is off. Test with errors.Is; the messages stay as they
+// are (callers that only show them see no change).
+var ErrUnreadable = errors.New("stored state unreadable")
+
+// unreadable is an error with its own message that matches ErrUnreadable.
+type unreadable string
+
+func (u unreadable) Error() string        { return string(u) }
+func (u unreadable) Is(target error) bool { return target == ErrUnreadable }
+
 // Encrypted encrypts values before they reach the wrapped store (ported from botboard's encstore.go). The
 // additional authenticated data is the location (scope + state id), so a value copied to another key or app
 // fails to decrypt. With no key it passes values through but refuses to hand back ciphertext as if it were
@@ -62,20 +74,20 @@ func (e *Encrypted) ReadState(id ipn.StateKey) ([]byte, error) {
 	isEnc := bytes.HasPrefix(b, encMagic)
 	switch {
 	case e.aead == nil && isEnc:
-		return nil, errors.New("stored state is encrypted: set NODE_CONTROL_STATE_KEY")
+		return nil, unreadable("stored state is encrypted: set NODE_CONTROL_STATE_KEY")
 	case e.aead == nil:
 		return b, nil
 	case !isEnc:
-		return nil, fmt.Errorf("stored state %q is not encrypted: delete it to re-register the node, then restart", e.scope+"/"+string(id))
+		return nil, unreadable(fmt.Sprintf("stored state %q is not encrypted: delete it to re-register the node, then restart", e.scope+"/"+string(id)))
 	}
 	b = b[len(encMagic):]
 	if len(b) < e.aead.NonceSize() {
-		return nil, errors.New("stored state is truncated")
+		return nil, unreadable("stored state is truncated")
 	}
 	nonce, ct := b[:e.aead.NonceSize()], b[e.aead.NonceSize():]
 	pt, err := e.aead.Open(nil, nonce, ct, e.aad(id))
 	if err != nil {
-		return nil, fmt.Errorf("cannot decrypt stored state %q (wrong NODE_CONTROL_STATE_KEY?)", e.scope+"/"+string(id))
+		return nil, unreadable(fmt.Sprintf("cannot decrypt stored state %q (wrong NODE_CONTROL_STATE_KEY?)", e.scope+"/"+string(id)))
 	}
 	return pt, nil
 }

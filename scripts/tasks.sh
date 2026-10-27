@@ -205,7 +205,7 @@ send_secrets() {
   if [ "$code" != 200 ]; then
     _d=$(detail)
     case $code in
-      413|422) die 2 "secrets were not stored (HTTP $code)${_d:+: $_d}" ;;
+      413|422) show_problems; die 2 "secrets were not stored (HTTP $code)${_d:+: $_d}" ;;
       403) die 3 "secrets were not stored: node-control refused this identity (HTTP 403)" ;;
       *) die 3 "secrets were not stored (HTTP $code)${_d:+: $_d}" ;;
     esac

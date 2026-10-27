@@ -305,7 +305,9 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
   metrics and a heartbeat. Set `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `TASKS_RUNNER_TOKEN`, `TASKS_ADMIN_USERS` and
   `ENROLL_ALLOWED_HOSTS` (required by the module), deploy the `task-runner` role (`ansible/roles/task-runner`) to the nodes
   that should run scripts, give those nodes the runner tag (`TASKS_RUNNER_TAG`, default `tag:task-runner`; untagged nodes
-  are never used, and a `node` target means the headscale given name), allow node-control to reach the runner port of
+  are never used, and a `node` target means the headscale given name) as an admin (`scripts/headscale-tag-node.sh`),
+  list only the admin/service identity as owner of that tag in the policy's `tagOwners` (a node that advertises a tag
+  its user owns gets it, so `tagOwners` is the trust boundary), allow node-control to reach the runner port of
   that tag in the tailnet ACL, and manage config, scripts and secrets from your private repo with `scripts/tasks.sh`
   (example files: `examples/private-repo/fly/node-control/tasks/`). Variables, API, metrics and the trust model:
   `apps/fly/node-control/README.md`, section "Tasks module".

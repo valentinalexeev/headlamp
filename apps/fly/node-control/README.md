@@ -501,7 +501,7 @@ with that tag as the destination. A node without the tag is ignored even when a 
 
 The tag is what node-control trusts with the runner token and the task secrets. It is trusted because the policy's
 `tagOwners` decides who may have it when a node registers (`tailscale up --advertise-tags` is checked against it), and
-afterwards only an admin changes a node's tags (`headscale nodes tag` or the API). How headscale stores tags depends on
+on 0.28 and later only an admin changes a node's tags afterwards (`headscale nodes tag` or the API). How headscale stores tags depends on
 the version, and node-control reads both forms:
 
 - headscale 0.28 and later (unified model): a node has one `tags` list. Tags and user ownership exclude each other:

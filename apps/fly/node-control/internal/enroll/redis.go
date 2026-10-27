@@ -24,7 +24,8 @@ import (
 //
 //	<prefix>:meta        hash; field seq = last device id (never reused, like SQLite AUTOINCREMENT)
 //	<prefix>:d:<id>      hash per device, no TTL: meta = sealed JSON {name, owner, client, uuids}; plain numbers
-//	                     expires_at, revoked, epoch (so revoke, extend and rotate are single atomic commands)
+//	                     expires_at, revoked, epoch (so revoke, extend and rotate are single atomic commands) and
+//	                     enrolled_at, enrol_count, last_active (activity times; absent in older records, read as 0)
 //	<prefix>:t:<hash>    hash per one-time link, with a TTL: device_id, expires, max_uses, uses
 //	<prefix>:approvals   hash; field = ingress name, value = sealed JSON
 //
@@ -144,9 +145,15 @@ func (s *RedisStore) parseDevice(id int64, h map[string]string) (devRec, error) 
 	if m.UUIDs == nil {
 		m.UUIDs = map[string]string{}
 	}
+	// The activity numbers are optional: records written before they existed read as 0.
+	opt := func(k string) int64 {
+		v, _ := strconv.ParseInt(h[k], 10, 64)
+		return v
+	}
 	return devRec{
-		Device: Device{ID: id, Name: m.Name, Owner: m.Owner, Client: m.Client, ExpiresAt: exp, Revoked: h["revoked"] == "1", UUIDs: m.UUIDs},
-		Epoch:  epoch,
+		Device: Device{ID: id, Name: m.Name, Owner: m.Owner, Client: m.Client, ExpiresAt: exp, Revoked: h["revoked"] == "1", UUIDs: m.UUIDs,
+			EnrolledAt: opt("enrolled_at"), Enrolments: opt("enrol_count"), LastActive: opt("last_active")},
+		Epoch: epoch,
 	}, nil
 }
 
@@ -201,7 +208,9 @@ func (s *RedisStore) putDevice(ctx context.Context, d Device, epoch int64) error
 	}
 	// One HSET with all fields: a device record is written whole or not at all.
 	if err := s.rdb.HSet(ctx, s.deviceKey(d.ID),
-		"meta", sealed, "expires_at", strconv.FormatInt(d.ExpiresAt, 10), "revoked", revoked, "epoch", strconv.FormatInt(epoch, 10)).Err(); err != nil {
+		"meta", sealed, "expires_at", strconv.FormatInt(d.ExpiresAt, 10), "revoked", revoked, "epoch", strconv.FormatInt(epoch, 10),
+		"enrolled_at", strconv.FormatInt(d.EnrolledAt, 10), "enrol_count", strconv.FormatInt(d.Enrolments, 10),
+		"last_active", strconv.FormatInt(d.LastActive, 10)).Err(); err != nil {
 		return s.wrap("writing device to redis", err)
 	}
 	return nil
@@ -275,6 +284,33 @@ func (s *RedisStore) RotateSecret(deviceID int64) error { return s.update("rotat
 func (s *RedisStore) Revoke(deviceID int64) error       { return s.update("revoke", deviceID, "") }
 func (s *RedisStore) Extend(deviceID int64, expiresAt int64) error {
 	return s.update("extend", deviceID, strconv.FormatInt(expiresAt, 10))
+}
+
+// deleteScript removes a device record only if it exists and is revoked, in one step (an active device is never deleted
+// by a racing request). It returns 1 when deleted, 0 when the device is not revoked and -1 when it does not exist.
+var deleteScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+if redis.call('HGET', KEYS[1], 'revoked') ~= '1' then return 0 end
+redis.call('DEL', KEYS[1])
+return 1`)
+
+// DeleteDevice removes a revoked device. Its links cannot be listed without a scan, so they stay until their TTL
+// ends; a spend of one fails at once, because the device no longer exists. The counter is untouched, so the id is
+// never issued again.
+func (s *RedisStore) DeleteDevice(deviceID int64) error {
+	ctx, cancel := opCtx()
+	defer cancel()
+	res, err := deleteScript.Eval(ctx, s.rdb, []string{s.deviceKey(deviceID)}).Int()
+	if err != nil {
+		return s.wrap("deleting device in redis", err)
+	}
+	switch res {
+	case 1:
+		return nil
+	case 0:
+		return ErrNotRevoked
+	}
+	return ErrNotFound
 }
 
 func (s *RedisStore) listRecs(ctx context.Context) ([]devRec, error) {
@@ -409,16 +445,23 @@ func (s *RedisStore) NewLink(deviceID int64, ttl time.Duration, maxUses int) (st
 	return token, nil
 }
 
-// spendScript spends one use of a link only if the key still exists, has a use left and has not expired. A bare
-// HINCRBY would, on a link whose key has just expired, create a fresh hash with no TTL and revive it.
+// spendScript spends one use of a link and marks the device as enrolled, in one step. It writes nothing unless the
+// link key and the device exist, the device is not revoked or expired, and the link has a use left and has not
+// expired: a bare HINCRBY on an expired link would create a fresh hash with no TTL and revive it, and a write to a
+// deleted device would leave a stray half-empty record. KEYS: link, device. ARGV: now (seconds), now as an integer.
 var spendScript = redis.NewScript(`
-if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+if redis.call('EXISTS', KEYS[1]) == 0 or redis.call('EXISTS', KEYS[2]) == 0 then return 0 end
+if redis.call('HGET', KEYS[2], 'revoked') == '1' then return 0 end
+local dexp = tonumber(redis.call('HGET', KEYS[2], 'expires_at'))
+if dexp == nil or dexp <= tonumber(ARGV[1]) then return 0 end
 local uses = tonumber(redis.call('HGET', KEYS[1], 'uses'))
 local max = tonumber(redis.call('HGET', KEYS[1], 'max_uses'))
 local exp = tonumber(redis.call('HGET', KEYS[1], 'expires'))
 if uses == nil or max == nil or exp == nil then return 0 end
 if uses >= max or tonumber(ARGV[1]) >= exp then return 0 end
 redis.call('HINCRBY', KEYS[1], 'uses', 1)
+redis.call('HSET', KEYS[2], 'enrolled_at', ARGV[2])
+redis.call('HINCRBY', KEYS[2], 'enrol_count', 1)
 return 1`)
 
 func (s *RedisStore) ConsumeToken(token string) (*Device, error) {
@@ -456,7 +499,7 @@ func (s *RedisStore) ConsumeToken(token string) (*Device, error) {
 	if r.Revoked || float64(r.ExpiresAt) <= now {
 		return nil, nil
 	}
-	ok, err := spendScript.Eval(ctx, s.rdb, []string{tk}, fnum(now)).Int()
+	ok, err := spendScript.Eval(ctx, s.rdb, []string{tk, s.deviceKey(devID)}, fnum(now), strconv.FormatInt(int64(now), 10)).Int()
 	if err != nil {
 		return nil, s.wrap("spending link in redis", err)
 	}
@@ -464,7 +507,25 @@ func (s *RedisStore) ConsumeToken(token string) (*Device, error) {
 		return nil, nil
 	}
 	d := r.Device
+	d.EnrolledAt, d.Enrolments = int64(now), d.Enrolments+1
 	return &d, nil
+}
+
+// touchScript moves a device's last_active time forward, only for an existing device.
+var touchScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+local cur = tonumber(redis.call('HGET', KEYS[1], 'last_active')) or 0
+if cur < tonumber(ARGV[1]) then redis.call('HSET', KEYS[1], 'last_active', ARGV[1]) end
+return 1`)
+
+// TouchActive records that the device's traffic grew at the given time. It never creates a record.
+func (s *RedisStore) TouchActive(deviceID, at int64) error {
+	ctx, cancel := opCtx()
+	defer cancel()
+	if err := touchScript.Eval(ctx, s.rdb, []string{s.deviceKey(deviceID)}, strconv.FormatInt(at, 10)).Err(); err != nil {
+		return s.wrap("recording activity in redis", err)
+	}
+	return nil
 }
 
 func (s *RedisStore) approvalScope(name string) string { return "a:" + name }

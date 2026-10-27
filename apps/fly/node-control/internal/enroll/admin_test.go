@@ -364,7 +364,13 @@ func TestListLeaksNothingAndHasTraffic(t *testing.T) {
 			t.Fatalf("%s = %v want %v", k, row[k], v)
 		}
 	}
-	if len(row) != len(want)+1 {
+	// Plus traffic and the three activity numbers (enrolled_at, enrol_count, last_active): times and a count, no secrets.
+	for _, k := range []string{"enrolled_at", "enrol_count", "last_active"} {
+		if v, ok := row[k].(float64); !ok || v != 0 {
+			t.Fatalf("%s = %v, want 0 for a device nobody enrolled", k, row[k])
+		}
+	}
+	if len(row) != len(want)+1+3 {
 		t.Fatalf("unexpected fields: %v", row)
 	}
 }

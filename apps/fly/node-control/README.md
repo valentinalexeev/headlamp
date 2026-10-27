@@ -96,10 +96,11 @@ store refuses to start without it unless `STATE_ALLOW_PLAINTEXT=1`), `ENROLL_SEC
 secrets are derived from it, device id and epoch), optional `ENROLL_REDIS_KEY`.
 
 Layout under the prefix `P` (all DB 0): `P:meta` (hash; `seq` is the last device id, never reused), `P:d:<id>` (one hash
-per device, no TTL: sealed name/owner/client/UUIDs plus plain `expires_at`, `revoked`, `epoch`, so revoke, extend and
+per device, no TTL: sealed name/owner/client/UUIDs plus plain `expires_at`, `revoked`, `epoch` and the activity numbers below, so revoke, extend and
 rotate are single atomic commands), `P:t:<hash>` (one hash per one-time link, **with a TTL**), `P:approvals` (sealed).
-A link's key expires through its TTL, and every spend also checks the stored expiry. Spending is one Lua script that
-writes nothing unless the key exists, has a use left and has not expired (a bare `HINCRBY` on an expired key would
+A link's key expires through its TTL, and every spend also checks the stored expiry. Spending is one Lua script (link
+key and device key) that writes nothing unless both exist, the device is not revoked or expired, and the link has a use left
+and has not expired (a bare `HINCRBY` on an expired key would
 recreate it without a TTL). Commands sent: `EVAL` (never `EVALSHA`), `HGET`, `HGETALL`, `HINCRBY`, `HSET`, `HDEL`,
 `HEXISTS`; the scripts also use `EXISTS`, `HSET`, `HINCRBY` and `PEXPIRE`. Nothing scans, selects a database or
 flushes. A Redis error is an error, never an empty set: the sync to the agents does not push when the store cannot be
@@ -112,9 +113,36 @@ link hashes are carried over verbatim, so issued subscription secrets and one-ti
 overwrites records with the same ids and never deletes others. An interrupted import leaves no device counter, so the
 store still reads as empty and the import can simply be run again.
 
-Backup: `node-control enroll-export [-to <file>]` writes the devices, UUIDs and approvals as JSON (one-time links are not
-included: Redis cannot list them without a scan). The output holds device names, owners and credentials; encrypt it
-before it is stored anywhere.
+Backup and restore:
+- `node-control enroll-export [-to <file>]` writes the devices, UUIDs and approvals as JSON (stdout by default; one-time
+  links are not included: Redis cannot list them without a scan).
+- `node-control enroll-import -json <file|->` restores such a file into an empty Redis (`-` reads stdin, so an encrypted
+  backup can be piped in without a plaintext file) and verifies the copy. Exactly one of `-from` and `-json` is given;
+  the JSON is checked for shape first (unknown fields, duplicate ids, unknown modes, empty UUIDs are refused, and error
+  texts never echo the file).
+- `node-control enroll-export -format sqlite -to <new file>` writes a new SQLite enrolment database that the SQLite store
+  (and so a release without Redis support) opens as it is, with the id counter kept ahead of every id ever issued. It
+  refuses an existing file and creates it mode 0600. Use it to roll back.
+
+The output of both exports holds device names, owners and credentials: treat it as a secret and encrypt it before it is
+stored anywhere.
+
+`scripts/enroll-backup.sh` wraps both for a Fly deployment (needs `flyctl` logged in and `jq`):
+
+```sh
+scripts/enroll-backup.sh backup  <fly-app> backup.sops.json --sops           # or: --age <recipient>
+scripts/enroll-backup.sh restore <fly-app> backup.sops.json --sops [--force] # or: --age-identity <file>
+```
+
+`backup` runs `enroll-export` in the machine, keeps the output in memory (no unencrypted file is ever written), checks the JSON
+shape and that it holds at least one device, encrypts it with `sops` or `age`, writes the result atomically (never over an
+existing file, mode 0600), checks that no device UUID is left in the encrypted result, and prints counts only. `--plaintext`
+exists for a throwaway file and must be given explicitly. With `--sops` the file name decides which `.sops.yaml` creation rule
+applies, and the key names of the JSON stay readable (sops encrypts values only). Export `SOPS_AGE_KEY` (or your sops key
+source) before running it. `restore` decrypts and pipes the data into `node-control enroll-import -json -` in the machine
+(stdin through `fly ssh console -C`), which checks the shape, writes and verifies the copy; without `--force` a store that
+already holds data refuses. Run a backup after enrolment changes; it is a manual step until an automatic one exists.
+`sh scripts/test_enroll_backup.sh` tests the script against a fake `fly` (real `age` and `jq` needed, no network).
 
 ## Node discovery
 
@@ -255,6 +283,29 @@ Consequences to plan for:
 ### Sync with the ingress host
 
 Every create/revoke/extend pushes the full credential set to the agent; a reconcile loop retries every 5 minutes.
+
+Activity (no connection log, no client addresses): each device row shows **Enrolled** (when a one-time link of the device was
+last spent, and how often) and **Last active** (when its traffic last grew). Spending a link marks the device in the same
+step as the spend (one SQLite transaction; one script on Redis). Last active is derived from the traffic totals the agents
+already report: node-control looks every 5 minutes (and at each page load) and records the time when a device's total grew
+since the previous look. The counters reset when xray restarts (the agent restarts it whenever the credential set changes),
+so a total that fell but is above zero also counts as activity since the reset. The first look at a device only seeds the
+baseline, and a look at which an ingress did not answer is skipped (its missing counters would read as a reset). The
+resolution is therefore about 5 minutes, and a device that was active only while node-control was down shows nothing for that
+time. `GET /enroll/devices` rows carry `enrolled_at`, `enrol_count` and `last_active` (unix seconds, 0 = never). SQLite databases
+gain the three columns on open; Redis device records without them read as 0. JSON and SQLite exports and imports carry them.
+
+Which buttons a row offers depends on its state, so nothing useless is shown: a revoked device only has Delete; an expired
+one has Extend and Revoke; an active one that has never been enrolled has New link, Extend and Revoke; an active one that
+is already enrolled has Extend and Revoke (it has its profile). `POST /enroll/devices/{id}/links` answers `409` for a revoked
+or expired device, because a link for it would be created and never work.
+
+Deleting: `DELETE /enroll/devices/{id}` (JSON content type, like the other changes) removes a **revoked** device with its
+UUIDs and links for good. An active or merely expired device is refused with `409` ("revoke the device before deleting
+it"), an unknown id with `404`. The id is never issued again. Nothing is pushed to an agent (only active devices are ever
+sent). The `/enroll` page hides revoked devices by default ("Show revoked devices (N)", remembered in the browser) and
+offers only a Delete button on a revoked row. On Redis the delete is one guarded script (`DEL` on the device key only when
+it exists and is revoked); links of the device expire on their own TTL and can no longer be spent.
 A failed push is logged (exception class, and the HTTP status for HTTP failures; never payloads or credentials) and
 classified, per ingress: `unreachable` (no connection), `unauthorized` (401/403, `AGENT_TOKEN` mismatch), `rejected` (other
 non-2xx, typically 503: xray refused the generated config), `conflict` (409), `error` (unexpected exception in the

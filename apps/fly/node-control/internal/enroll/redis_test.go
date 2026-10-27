@@ -47,7 +47,7 @@ func TestRedisExpiredLinkIsNotRevivedBySpend(t *testing.T) {
 	got, err := s.ConsumeToken(tok)
 	mustNil(t, got, err, "consume after the key expired")
 	// A blind HINCRBY would have created a fresh hash with no TTL; the guarded script must not.
-	if err := spendScript.Eval(context.Background(), s.rdb, []string{key}, "1").Err(); err != nil {
+	if err := spendScript.Eval(context.Background(), s.rdb, []string{key, s.deviceKey(d.ID)}, "1", "1").Err(); err != nil {
 		t.Fatal(err)
 	}
 	if e.mr.Exists(key) {

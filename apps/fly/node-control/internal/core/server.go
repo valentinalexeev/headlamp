@@ -96,6 +96,12 @@ func newHTTPServer(h http.Handler, public bool) *http.Server {
 	return s
 }
 
+// EnrolmentEnabled reports whether enrolment is switched on: ENROLL_DB (SQLite on a volume) or ENROLL_REDIS=1 (Redis).
+// The core uses it to decide whether a public listener exists, so the enrolment module and the core always agree.
+func EnrolmentEnabled(env Env) bool {
+	return env.Getenv("ENROLL_DB") != "" || env.Getenv("ENROLL_REDIS") == "1"
+}
+
 // shutdownTimeout bounds graceful shutdown; a var so tests can shorten it.
 var shutdownTimeout = 5 * time.Second
 
@@ -107,7 +113,7 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 	// The enrolment module owns its database; the core only decides whether a
 	// public listener exists.
 	var public *http.ServeMux
-	if env.Getenv("ENROLL_DB") != "" {
+	if EnrolmentEnabled(env) {
 		public = http.NewServeMux()
 	}
 

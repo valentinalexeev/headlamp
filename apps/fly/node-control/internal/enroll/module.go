@@ -25,7 +25,8 @@ type Module struct {
 	admin *Admin
 	reg   *Registry
 
-	loopDone chan struct{} // closed when the reconcile loop has returned; nil if never started
+	loopDone     chan struct{} // closed when the reconcile loop has returned; nil if never started
+	activityDone chan struct{} // the same for the activity loop
 }
 
 // Option configures the module.
@@ -63,7 +64,7 @@ func hasKey(data []byte, key string) bool {
 
 func (m *Module) Register(r *core.Routes) error {
 	useRedis := RedisEnabled(m.env)
-	if m.env.Getenv("ENROLL_DB") == "" && !useRedis {
+	if !core.EnrolmentEnabled(m.env) {
 		return nil
 	}
 	why := "ENROLL_DB set"
@@ -163,6 +164,11 @@ func (m *Module) Start(ctx context.Context) error {
 	if m.store == nil {
 		return nil
 	}
+	m.activityDone = make(chan struct{})
+	go func() {
+		defer close(m.activityDone)
+		ActivityLoop(ctx, m.admin)
+	}()
 	m.loopDone = make(chan struct{})
 	go func() {
 		defer close(m.loopDone)
@@ -179,16 +185,18 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.store == nil {
 		return nil
 	}
-	if m.loopDone != nil {
-		select {
-		case <-m.loopDone:
-		case <-ctx.Done():
+	for _, done := range []chan struct{}{m.loopDone, m.activityDone} {
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+			}
 		}
 	}
 	return m.store.Close()
 }
 
-// Nav puts the enrolment page in the top bar, but only when the module registered (ENROLL_DB set).
+// Nav puts the enrolment page in the top bar, but only when the module registered (enrolment enabled).
 func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {
 		return nil

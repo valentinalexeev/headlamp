@@ -126,6 +126,23 @@ Backup and restore:
 The output of both exports holds device names, owners and credentials: treat it as a secret and encrypt it before it is
 stored anywhere.
 
+`scripts/enroll-backup.sh` wraps both for a Fly deployment (needs `flyctl` logged in and `jq`):
+
+```sh
+scripts/enroll-backup.sh backup  <fly-app> backup.sops.json --sops           # or: --age <recipient>
+scripts/enroll-backup.sh restore <fly-app> backup.sops.json --sops [--force] # or: --age-identity <file>
+```
+
+`backup` runs `enroll-export` in the machine, keeps the output in memory (no unencrypted file is ever written), checks the JSON
+shape and that it holds at least one device, encrypts it with `sops` or `age`, writes the result atomically (never over an
+existing file, mode 0600), checks that no device UUID is left in the encrypted result, and prints counts only. `--plaintext`
+exists for a throwaway file and must be given explicitly. With `--sops` the file name decides which `.sops.yaml` creation rule
+applies, and the key names of the JSON stay readable (sops encrypts values only). Export `SOPS_AGE_KEY` (or your sops key
+source) before running it. `restore` decrypts and pipes the data into `node-control enroll-import -json -` in the machine
+(stdin through `fly ssh console -C`), which checks the shape, writes and verifies the copy; without `--force` a store that
+already holds data refuses. Run a backup after enrolment changes; it is a manual step until an automatic one exists.
+`sh scripts/test_enroll_backup.sh` tests the script against a fake `fly` (real `age` and `jq` needed, no network).
+
 ## Node discovery
 
 There is no per-node list to maintain. Each headscale node is looked at on every refresh (cached for 15 seconds, one

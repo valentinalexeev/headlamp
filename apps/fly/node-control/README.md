@@ -110,7 +110,9 @@ it once, verifies the copy and logs counts only), or run `node-control enroll-im
 file is opened read-only and never modified, so the previous release can still run against it. Ids, epochs, UUIDs and
 link hashes are carried over verbatim, so issued subscription secrets and one-time links keep working. `-force`
 overwrites records with the same ids and never deletes others. An interrupted import leaves no device counter, so the
-store still reads as empty and the import can simply be run again.
+store still reads as empty and the import can simply be run again. A copy that fails the read-back verification removes the
+counter again (when the store was empty before), so the next start imports again instead of serving a copy that never
+verified.
 
 Backup and restore:
 - `node-control enroll-export [-to <file>]` writes the devices, UUIDs and approvals as JSON (stdout by default; one-time

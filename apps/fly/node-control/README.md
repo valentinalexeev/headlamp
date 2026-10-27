@@ -501,6 +501,47 @@ Confirm is then the way out, keeping the change.
 The console adds a "Policy" entry to the top bar. Its Content-Security-Policy allows inline styles (the bar is one) but scripts only from the
 page's own files.
 
+## Funnel module (optional)
+
+Setting `FUNNEL_DB` makes node-control the single admin surface of the `funnel-ingress` app (`apps/fly/funnel-ingress`):
+the ingress has no admin page of its own, it **pulls** its configuration from here and **reports** what it observes.
+Without `FUNNEL_DB` nothing is registered. The module needs the policy console (`POLICY_DB`), because every ACL change it
+makes goes through the console's confirm-or-revert, and the same `ENROLL_ALLOWED_HOSTS` rule (no bare `*`).
+
+What the Funnel page (`/funnel`, users in `FUNNEL_ADMIN_USERS` only, tagged nodes never) does:
+
+- **Namespaces** (a name plus allowed port ranges). Creating, changing the ports of, or deleting one regenerates its ACL
+  entries (`tagOwners` for `<prefix><ns>` and one `ingress tag -> <prefix><ns>:<ports>` rule) and submits them as one policy
+  change. The namespace is `pending` until that change is confirmed, `active` after, `failed` if it was reverted; the ingress is
+  only ever given active namespaces. A port change keeps serving the old ports until confirmed. Delete is refused while the
+  namespace has manual routes or the ingress still reports registered routes in it. If the live policy has comments or trailing
+  commas the change is refused (edit it in the policy console instead): nothing is dropped silently.
+- **Publisher keys**: minted through the headscale API for the user `FUNNEL_KEY_USER` with the tags fixed by the server
+  (`FUNNEL_TAG` plus `<prefix><ns>`; other request fields are ignored), shown once and never stored, logged or audited. Listing
+  shows keys carrying the namespace tag; expiring only works on publisher keys.
+- **Manual routes**: the namespace must be active, the target a headscale node (name or tailnet address) carrying the namespace
+  tag, the port inside the namespace's ports.
+- **Blocked names**: the ingress removes a registered route for the name and refuses re-registration.
+- The latest **ingress report** with its age (stale after 90 s), a per-namespace DNS and certificate checklist, and an audit log.
+
+The ingress reaches two machine endpoints on the admin listener, `GET /ingress/v1/config` (with `ETag`, version = hash of the
+content) and `POST /ingress/v1/state` (1 MiB cap), and only as a node carrying `FUNNEL_INGRESS_TAG`; a human is refused there
+and a tagged node on `/funnel/*`.
+
+| variable | purpose |
+|---|---|
+| `FUNNEL_DB` | path of the SQLite database; enables the module. On the state volume, for example `/var/lib/tailscale/funnel.db` |
+| `FUNNEL_PUBLIC_DOMAIN` | lower-case DNS name the namespaces live under (`<service>.<ns>.<domain>`); not under the headscale base domain |
+| `FUNNEL_INGRESS_HOSTNAME` | optional name the wildcard record points at, for example `<app>.fly.dev` (shown in the checklist) |
+| `FUNNEL_TAG`, `FUNNEL_NS_TAG_PREFIX`, `FUNNEL_INGRESS_TAG` | tags: publishers, namespace prefix, the ingress node; defaults `tag:funnel`, `tag:ns-`, `tag:funnel-ingress` |
+| `FUNNEL_TAG_OWNERS` | owners written into the generated `tagOwners` entries (comma-separated users or groups) |
+| `FUNNEL_KEY_USER` | headscale user NAME that owns publisher keys (resolved to an id when minting) |
+| `FUNNEL_ADMIN_USERS` | tailnet logins allowed to use the page and API (required) |
+| `FUNNEL_RESERVED_PORTS` | ports the ingress uses itself, default `8080,9100`; no namespace may allow them (the ingress would reject the whole configuration) |
+
+Headscale does not check tag ownership when a key is created or used, so `FUNNEL_TAG_OWNERS` does not gate minting: the fixed
+tags and the user gate are the controls.
+
 ## Tasks module (optional)
 
 Scheduled checks that drive a browser script on one of your nodes, with retries, alerts and observability. A task

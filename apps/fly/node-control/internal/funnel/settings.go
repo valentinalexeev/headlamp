@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"example.com/node-control/internal/authz"
@@ -31,6 +32,7 @@ type Settings struct {
 	IngressTag      string // tag of the ingress node
 	TagOwners       []string
 	KeyUser         string // a headscale user NAME, resolved to an id when minting keys
+	ReservedPorts   []int  // the ingress's own proxy and API ports: no namespace may allow them (the ingress would reject the whole configuration)
 	Admins          authz.Allowed
 }
 
@@ -60,6 +62,9 @@ func SettingsFromEnv(env core.Env) (*Settings, error) {
 	}
 	if strings.ContainsFunc(s.KeyUser, isSpaceOrControl) {
 		return nil, errors.New("FUNNEL_KEY_USER must not contain spaces")
+	}
+	if s.ReservedPorts, err = reservedPortsEnv(env); err != nil {
+		return nil, err
 	}
 	admins := env.List("FUNNEL_ADMIN_USERS")
 	if len(admins) == 0 {
@@ -105,6 +110,23 @@ func checkTag(key, v string) error {
 		return fmt.Errorf("%s must be at most %d characters with no spaces", key, maxTagLen)
 	}
 	return nil
+}
+
+// reservedPortsEnv reads FUNNEL_RESERVED_PORTS (default "8080,9100", the ingress's default proxy and API ports).
+func reservedPortsEnv(env core.Env) ([]int, error) {
+	items := env.List("FUNNEL_RESERVED_PORTS")
+	if len(items) == 0 {
+		return []int{8080, 9100}, nil
+	}
+	var out []int
+	for _, it := range items {
+		n, err := strconv.Atoi(it)
+		if err != nil || n < 1 || n > 65535 {
+			return nil, errors.New("FUNNEL_RESERVED_PORTS must be a comma-separated list of ports (1-65535)")
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 func ownersEnv(env core.Env) ([]string, error) {

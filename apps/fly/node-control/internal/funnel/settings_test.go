@@ -144,3 +144,19 @@ func TestAdminsParsedWithAuthz(t *testing.T) {
 		t.Fatalf("admins: %+v", s.Admins)
 	}
 }
+
+func TestReservedPorts(t *testing.T) {
+	s, err := SettingsFromEnv(core.MapEnv(goodEnv()))
+	if err != nil || !reflect.DeepEqual(s.ReservedPorts, []int{8080, 9100}) {
+		t.Fatalf("default: %v %v", s, err)
+	}
+	s, err = SettingsFromEnv(core.MapEnv(with("FUNNEL_RESERVED_PORTS", "80, 8081")))
+	if err != nil || !reflect.DeepEqual(s.ReservedPorts, []int{80, 8081}) {
+		t.Fatalf("custom: %v %v", s, err)
+	}
+	for _, bad := range []string{"0", "70000", "http", "80,x"} {
+		if _, err := SettingsFromEnv(core.MapEnv(with("FUNNEL_RESERVED_PORTS", bad))); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}

@@ -69,7 +69,7 @@ reaches the node. On a fresh host the steps that need the service user may fail 
 | `task_runner_pids_limit` / `task_runner_tasks_max` | `512` / `2048` | Per container (`RUNNER_PIDS_LIMIT`) / whole service (`TasksMax`). |
 | `task_runner_min_free_mb` / `task_runner_min_free_disk_mb` | `1500` / `6000` | Free memory without page cache (preflight); free disk on the file system of the state dir (checked in the image step, only when an image has to be built or loaded). |
 | `task_runner_guard_resolvers` | `["100.100.100.100", "fd7a:115c:a1e0::53"]` | Resolvers the service user may query on port 53 although they are in a blocked range. |
-| `task_runner_guard_extra_drop` | `[]` | IPv4/IPv6 addresses or CIDRs the service user may never reach, dropped after the DNS accepts. List the node's public address here when it is not configured on an interface (1:1 NAT, see Guard). |
+| `task_runner_guard_extra_drop` | `[]` | IPv4/IPv6 addresses or CIDRs the service user may never reach, dropped after the DNS accepts. List the node's public address here when it is not configured on an interface (1:1 NAT, see Guard). Entries must not overlap (preflight checks IPv4 ranges and IPv6 duplicates). |
 | `task_runner_guard_check_interval` | `30s` | How often the guard check timer looks for the table. |
 | `task_runner_protect_kernel_tunables` | `false` | systemd `ProtectKernelTunables=`; off because it very likely breaks every run (see Service hardening). |
 | `task_runner_image_async` / `task_runner_image_poll` | `3600` / `30` | Seconds allowed for a build or load, and the poll interval. |
@@ -86,7 +86,11 @@ Fixed layout (variables exist, change only with reason): user `task-runner`, sta
    `/etc/resolv.conf` listed in `task_runner_guard_resolvers`. Free memory fails the play only when the service is not
    running yet (otherwise a warning); free disk is checked in the image step, only when the image has to be built or
    loaded. Warns (never fails) when the inventory address (`ansible_host`) is an IP that is not on any interface of the
-   node and not in `task_runner_guard_extra_drop` (a likely 1:1-NAT public address the guard would not cover).
+   node and not in `task_runner_guard_extra_drop` (a likely 1:1-NAT public address the guard would not cover). That
+   warning only sees `ansible_host`: when the inventory reaches nodes by their tailnet address (the usual case here) it
+   never fires, so the `ip -o addr` check in "Rollout checks" (step 3) is the real control for a NAT'd public address.
+   Fails when `task_runner_guard_extra_drop` has an octet above 255 or overlapping/duplicate entries (nft refuses
+   overlapping intervals in one set; IPv4 entries are compared as ranges, IPv6 entries only for exact duplicates).
    Works out the image tag.
 2. **Install**: `podman`, `uidmap`, `passt`, `acl` (Ansible needs `setfacl` to run commands as the service user); the
    package's root-level units (`podman.socket`, `podman-restart.service`, `podman-auto-update.timer`,

@@ -97,6 +97,7 @@ commits on top of it or attempt a rewrite on your own.
 | `scripts/rotate-headscale-api-key.sh` | check (`--check`) and rotate the headscale API key used by the route approver and other apps; all site values come from env vars (`HS_APP`, `HS_URL`, `STAGE_APPS`, `DEPLOY_CMD`, optional sops `SECRET_FILE`/`SECRET_FIELD`). API keys expire: the approver logs `ERROR ... HTTP 401` when its key has, and keeps retrying |
 | `scripts/tasks.sh`, `scripts/test/tasks/` | CLI client of the node-control tasks API: check/diff/push (secrets first, from a sops file)/pull the task config and scripts (env: `NODE_CONTROL_URL`, `TASKS_FILE`, `TASKS_SCRIPTS_DIR`, `TASKS_SECRETS_FILE`); tests run against fake `curl` and `sops` (`make test-tasks-cli`) |
 | `scripts/headscale-policy.sh` | CLI client of the node-control policy console: check/diff/apply (with confirm-or-revert)/pull the headscale ACL; `bootstrap` loads the first policy through `fly ssh` (env: `NODE_CONTROL_URL`, `POLICY_FILE`, `HS_APP`) |
+| `scripts/headscale-tag-node.sh` | show, add or remove an admin-set (forced) tag on one headscale node by its given name, keeping its other forced tags (the API replaces the whole forced set); plan without `--yes`, verify after applying (env: `HEADSCALE_URL`, `HEADSCALE_API_KEY` or `HEADSCALE_API_KEY_CMD`). Used to tag task runners |
 | `examples/private-repo/` | the skeleton of the private site repo (Makefile, terraform, ansible, fly deploy) |
 
 Anything that identifies a deployment is a placeholder here (`example.com`, `<your-...>`). The

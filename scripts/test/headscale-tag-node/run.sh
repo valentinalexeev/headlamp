@@ -195,6 +195,21 @@ reset; printf '%s' '[{"id":7,"name":"h","givenName":"num","forcedTags":["tag:a"]
 run add --node num --tag tag:task-runner --yes
 check "a numeric id works (route and read-back)" '[ $rc = 0 ] && grep -qx "POST /api/v1/node/7/tags" "$CALLS" && [ "$(forced 7)" = "[\"tag:a\",\"tag:task-runner\"]" ]'
 
+# --- legacy mode is exempt from the ownership guard
+reset; printf '%s' '[{"id":"21","givenName":"l-empty","forcedTags":[],"validTags":[]},{"id":"22","givenName":"l-one","forcedTags":["tag:x"],"validTags":[]}]' > "$FIX/nodes.json"
+run add --node l-empty --tag tag:task-runner --yes
+check "legacy: add to an empty forced set needs only --yes (one POST)" '[ $rc = 0 ] && [ "$(posts)" = 1 ] && [ "$(forced 21)" = "[\"tag:task-runner\"]" ]'
+: > "$CALLS"; run remove --node l-one --tag tag:x --yes
+check "legacy: removing the last forced tag needs only --yes (one POST)" '[ $rc = 0 ] && [ "$(posts)" = 1 ] && [ "$(forced 22)" = "[]" ]'
+
+# --- forced field present but tags outside forced/valid: ambiguous, never replaced
+for c in "add --tag tag:task-runner --yes" "remove --tag tag:t --yes" "show"; do
+  reset; printf '%s' '[{"id":"31","givenName":"amb","forcedTags":[],"tags":["tag:t"]}]' > "$FIX/nodes.json"
+  # shellcheck disable=SC2086 # word splitting of $c is intended
+  run $c --node amb
+  check "ambiguous shape: $(printf '%s' "$c" | cut -d' ' -f1) exits 2 with no POST" '[ $rc = 2 ] && [ "$(posts)" = 0 ] && grep -q "ambiguous node shape" "$T/err"'
+done
+
 # --- unified model (headscale 0.28+: one tags list)
 UNODES='[
  {"id":"11","name":"h1","givenName":"u-tagged","tags":["tag:exit","tag:aaa"]},

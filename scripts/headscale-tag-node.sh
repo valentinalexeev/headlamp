@@ -30,10 +30,10 @@
 # The key never appears on a command line, in a file or in the output (xtrace is disabled in the script): it reaches
 # curl as a config on stdin (-K -).
 #
-# Exit codes: 0 ok / nothing to change; 1 a change is planned but --yes (or --allow-ownership-change, for a first tag)
-# was not given; 2 usage or validation failure (bad tag, no node or several nodes with that given name, unusable key,
-# unrecognised node shape, an ownership change without --allow-ownership-change); 3 remote failure (unreachable,
-# refused, unexpected answer) or the node's tags are not the intended ones after the change.
+# Exit codes: 0 ok / nothing to change; 1 a change is planned but --yes was not given; 2 usage or validation failure
+# (bad tag, no node or several nodes with that given name, unusable key, unrecognised or ambiguous node shape, an
+# ownership change with --yes but without --allow-ownership-change); 3 remote failure (unreachable, refused,
+# unexpected answer), or after the change the node's tags are not the intended ones or its shape changed.
 set -eu
 set +x
 
@@ -126,8 +126,9 @@ refuse() { # WHAT
 }
 
 # Field names as node-control's headscale client reads them (camelCase and snake_case; invalid tags are ignored).
-# model: legacy when a forced-tags field exists, unified when only `tags` exists, unknown otherwise. "set" is what the
-# tags call replaces.
+# model: legacy when a forced-tags field exists, unified when only `tags` exists, unknown otherwise; ambiguous when a
+# forced-tags field exists but `tags` holds tags that are neither forced nor valid (a newer server that still emits an
+# empty forced field: replacing "forced" would drop them). "set" is what the tags call replaces.
 NORM='def first(a; b): if (a // "") != "" then a else (b // "") end;
   def norm: {
     id: ((.id // "") | tostring),
@@ -137,6 +138,7 @@ NORM='def first(a; b): if (a // "") != "" then a else (b // "") end;
     tags: ((.tags // []) | unique),
     model: (if has("forcedTags") or has("forced_tags") then "legacy" elif has("tags") then "unified" else "unknown" end)
   } | .other = (.tags - .forced - .valid)
+    | if .model == "legacy" and (.other | length) > 0 then .model = "ambiguous" else . end
     | .set = (if .model == "legacy" then .forced else .tags end);'
 
 # find_node: the one node whose given name equals $node, normalised, into $tmp/node.json.
@@ -163,8 +165,12 @@ show_node() {
     unified)
       printf 'model: unified (headscale 0.28+: one tags list; tagging a user-owned node removes its user ownership)\n'
       printf 'tags (admin-held after registration): %s\n' "$(list tags)" ;;
-    legacy)
-      printf 'model: legacy (forced and valid tags; only the forced tags are changed)\n'
+    legacy|ambiguous)
+      if [ "$(field model)" = legacy ]; then
+        printf 'model: legacy (forced and valid tags; only the forced tags are changed)\n'
+      else
+        printf 'model: ambiguous (a forced-tags field, but also tags that are neither forced nor valid)\n'
+      fi
       printf 'forced (admin-set): %s\n' "$(list forced)"
       printf 'valid (requested by the node, allowed by tagOwners): %s\n' "$(list valid)"
       printf 'other: %s\n' "$(list other)" ;;
@@ -176,6 +182,10 @@ id=$(field id)
 case $id in ''|*[!0-9]*) die 3 "headscale returned no usable id for '$node'" ;; esac
 model=$(field model)
 [ "$model" != unknown ] || die 2 "unrecognised node shape: the node has neither a forced-tags field nor a tags field; refusing (use the headscale CLI)"
+if [ "$model" = ambiguous ]; then
+  show_node
+  die 2 "ambiguous node shape: tags present that are neither forced nor valid; refusing to replace them (use the headscale CLI)"
+fi
 if [ "$model" = legacy ]; then label=forced; else label=tags; fi
 
 if [ "$cmd" = show ]; then
@@ -238,8 +248,11 @@ api POST "$route" "$tmp/body" || die 3 "cannot reach headscale (POST $route); th
 [ "$code" = 200 ] || refuse "setting the tags (the tags may or may not have changed: run show)"
 
 find_node
-if [ "$(field id)" != "$id" ] || [ "$(field model)" != "$model" ] \
-   || [ "$(jq -c '.set' "$tmp/node.json")" != "$(jq -c '.' "$tmp/want.json")" ]; then
+if [ "$(field id)" != "$id" ] || [ "$(field model)" != "$model" ]; then
+  show_node
+  die 3 "node shape changed after the change (model was $model, now $(field model)); check the node with show"
+fi
+if [ "$(jq -c '.set' "$tmp/node.json")" != "$(jq -c '.' "$tmp/want.json")" ]; then
   show_node
   die 3 "after the change the node's $label set is $(list set), not $want"
 fi

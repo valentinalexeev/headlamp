@@ -72,7 +72,7 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,tasks" {
+	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,funnel,tasks" {
 		t.Fatalf("module order %s", got)
 	}
 	tn, _ := serve(t, env, mods)
@@ -80,6 +80,11 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 	for _, p := range []string{"/", "/nodes.json", "/status", "/tailnet/status", "/healthz"} {
 		if code, _ := fetch(t, base+p); code != 200 {
 			t.Errorf("GET %s = %d", p, code)
+		}
+	}
+	for _, p := range []string{"/funnel", "/funnel/state", "/ingress/v1/config"} {
+		if code, _ := fetch(t, base+p); code != 404 {
+			t.Errorf("funnel route %s present without FUNNEL_DB: %d", p, code)
 		}
 	}
 	if code, _ := fetch(t, base+"/enroll/devices"); code != 404 {
@@ -96,7 +101,7 @@ func TestBuildModulesIncludesTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := mods[len(mods)-1]; last.Name() != "tasks" || mods[len(mods)-2].Name() != "policy" {
+	if last := mods[len(mods)-1]; last.Name() != "tasks" || mods[len(mods)-2].Name() != "funnel" || mods[len(mods)-3].Name() != "policy" {
 		t.Fatalf("module order %v", names(mods))
 	}
 	// Without its variables the module registers nothing and node-control serves as before.

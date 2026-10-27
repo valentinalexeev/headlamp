@@ -15,6 +15,7 @@ import (
 
 	"example.com/node-control/internal/core"
 	"example.com/node-control/internal/enroll"
+	"example.com/node-control/internal/funnel"
 	"example.com/node-control/internal/headscale"
 	"example.com/node-control/internal/nodes"
 	"example.com/node-control/internal/policy"
@@ -27,7 +28,7 @@ const defaultNodesConfig = "/srv/app/nodes.json"
 // trackedTimeout bounds the headscale lookup done on behalf of the tailnet status route.
 const trackedTimeout = 10 * time.Second
 
-// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy, tasks. One cached
+// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy, funnel, tasks (funnel submits its ACL changes through the policy module). One cached
 // headscale source feeds the tailnet, nodes, enroll and tasks modules, so a page load costs one fetch.
 func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	cfg, err := nodes.LoadConfig(env.Default("NODES_CONFIG", defaultNodesConfig))
@@ -59,14 +60,25 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		defer cancel()
 		return nodes.TailnetNames(cfg, nm.Targets(ctx))
 	}
+	hsClient := &headscale.Client{
+		BaseURL: env.Getenv("HEADSCALE_LOGIN_SERVER"),
+		APIKey:  env.Getenv("HEADSCALE_API_KEY"),
+		HTTP:    hc,
+	}
+	pol := policy.New(env, hsClient)
 	return []core.Module{
 		tailnet.New(src, tracked),
 		nm,
 		enroll.New(env, enroll.WithNodeSource(src)),
-		policy.New(env, &headscale.Client{
-			BaseURL: env.Getenv("HEADSCALE_LOGIN_SERVER"),
-			APIKey:  env.Getenv("HEADSCALE_API_KEY"),
-			HTTP:    hc,
+		pol,
+		funnel.New(env, hsClient, func() funnel.PolicyService {
+			// Only an active console has a service; a typed nil must not become a non-nil interface.
+			if p, ok := pol.(interface{ Service() *policy.Service }); ok {
+				if svc := p.Service(); svc != nil {
+					return svc
+				}
+			}
+			return nil
 		}),
 		tasks.New(env, src),
 	}, nil

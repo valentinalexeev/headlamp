@@ -56,5 +56,5 @@ func (c IngressConfig) UUIDFor(ing Ingress, mode, base string) (string, error) {
 		}
 		return u, nil
 	}
-	return "", fmt.Errorf("uuids is not set for ingress %s", ing.Name)
+	return "", fmt.Errorf("uuids is not set for bridge %s", ing.Name)
 }

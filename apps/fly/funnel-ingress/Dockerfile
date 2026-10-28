@@ -20,8 +20,10 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/funnel-ingress ./c
 # alpine rather than a bare image: `fly ssh console` needs a shell.
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates \
-  && adduser -D -u 10001 funnel
+  && adduser -D -u 10001 funnel \
+  && mkdir -p /data && chown funnel:funnel /data
 COPY --from=build /out/funnel-ingress /usr/local/bin/funnel-ingress
 USER funnel
-# File state (no REDIS_URL) needs a writable FUNNEL_STATE_DIR; mount a volume there and chown it to uid 10001.
+# FUNNEL_STATE_DIR (default /data) exists and is writable by the app user. With REDIS_URL it only holds scratch files of the
+# embedded node; file state (no REDIS_URL) needs a volume there, chowned to uid 10001.
 ENTRYPOINT ["/usr/local/bin/funnel-ingress"]

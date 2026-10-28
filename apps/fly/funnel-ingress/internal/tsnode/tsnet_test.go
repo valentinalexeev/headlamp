@@ -1,8 +1,13 @@
 package tsnode
 
 import (
+	"context"
 	"net/netip"
+	"strings"
 	"testing"
+	"time"
+
+	"funnel-ingress/internal/config"
 )
 
 func TestWhoIsRemoteAddrParsing(t *testing.T) {
@@ -37,4 +42,21 @@ func TestWhoIsRemoteAddrParsing(t *testing.T) {
 func TestFakeImplementsNode(t *testing.T) {
 	var _ Node = NewFake()
 	var _ Node = (*TSNet)(nil)
+}
+
+func TestCloseAfterFailedUpDoesNotPanic(t *testing.T) {
+	// An unusable state directory makes Up fail at once; closing the never-started server used to panic inside tsnet.
+	n := NewTSNet(config.Config{Hostname: "x", AuthKey: "tskey-auth-secret", StateDir: "/dev/null/nope"}, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := n.Up(ctx)
+	if err == nil {
+		t.Fatal("Up succeeded on an unusable state directory")
+	}
+	if strings.Contains(err.Error(), "tskey-auth-secret") {
+		t.Fatalf("the auth key leaked: %v", err)
+	}
+	if err := n.Close(); err != nil {
+		t.Fatal(err)
+	}
 }

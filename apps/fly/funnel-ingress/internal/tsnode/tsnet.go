@@ -24,6 +24,7 @@ type TSNet struct {
 
 	mu     sync.Mutex
 	self   Identity
+	up     bool // Up succeeded; only then is there anything to close
 	loaded bool // a status with a running backend and a self node has been seen
 }
 
@@ -53,6 +54,7 @@ func (t *TSNet) Up(ctx context.Context) error {
 		return errors.New(msg)
 	}
 	t.mu.Lock()
+	t.up = true
 	if st.Self != nil {
 		t.self = Identity{NodeID: string(st.Self.ID), Name: st.Self.HostName, Tags: tagsOf(st.Self.Tags)}
 	}
@@ -70,8 +72,17 @@ func (t *TSNet) ListenAPI(port int) (net.Listener, error) {
 	return t.srv.Listen("tcp", fmt.Sprintf(":%d", port))
 }
 
-// Close shuts the embedded node down.
-func (t *TSNet) Close() error { return t.srv.Close() }
+// Close shuts the embedded node down. It does nothing when Up never succeeded: closing a tsnet server whose start
+// failed (for example on an unwritable state directory) panics inside tsnet and would hide the real error.
+func (t *TSNet) Close() error {
+	t.mu.Lock()
+	up := t.up
+	t.mu.Unlock()
+	if !up {
+		return nil
+	}
+	return t.srv.Close()
+}
 
 func (t *TSNet) Self() Identity {
 	t.mu.Lock()

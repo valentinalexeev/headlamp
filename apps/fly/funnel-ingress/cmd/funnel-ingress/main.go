@@ -76,6 +76,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	// Serve from the cached configuration before the first fetch and before the listener opens.
 	controlsync.ApplyCached(cache, applier, logf)
 
+	// tsnet keeps some files under the state directory even when its state is in Redis; it must exist and be writable.
+	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
+		return fmt.Errorf("the state directory FUNNEL_STATE_DIR is not usable: %w", err)
+	}
 	node := tsnode.NewTSNet(cfg, stores.TSNet)
 	defer node.Close()
 	upCtx, cancel := context.WithTimeout(ctx, tailnetUpTimeout)

@@ -95,7 +95,7 @@ func Load(getenv func(string) string) (Config, error) {
 		ControlURL:        str("FUNNEL_CONTROL_URL", ""),
 		AuthKey:           strings.TrimSpace(getenv("TS_AUTHKEY")),
 		Hostname:          str("FUNNEL_HOSTNAME", "funnel-ingress"),
-		StateDir:          str("FUNNEL_STATE_DIR", "/data"),
+		StateDir:          str("FUNNEL_STATE_DIR", "/var/lib/tailscale"),
 		RedisURL:          strings.TrimSpace(getenv("REDIS_URL")),
 		StateKey:          strings.TrimSpace(getenv("FUNNEL_STATE_KEY")),
 		AllowPlaintext:    getenv("STATE_ALLOW_PLAINTEXT") == "1",

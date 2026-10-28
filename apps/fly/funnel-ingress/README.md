@@ -98,7 +98,7 @@ process settings; they arrive through the configuration source.
 | `FUNNEL_MAX_ROUTES_PER_NODE`, `FUNNEL_MAX_BODY_BYTES` | defaults `20`, `33554432` |
 | `FUNNEL_CONNECT_TIMEOUT`, `FUNNEL_IDLE_TIMEOUT`, `FUNNEL_REQUEST_TIMEOUT` | defaults `10s`, `120s`, `300s` |
 | `REDIS_URL`, `REDIS_KEY`, `FUNNEL_STATE_KEY`, `STATE_ALLOW_PLAINTEXT`, `STATE_IMPORT_FROM` | state store, see below |
-| `FUNNEL_STATE_DIR` | file state only (no `REDIS_URL`), default `/data` |
+| `FUNNEL_STATE_DIR` | file state only (no `REDIS_URL`), default `/var/lib/tailscale` (as in node-control; the image creates it for the app user) |
 
 Startup failures print one line and exit non-zero; error texts never contain the auth key, the Redis URL or the state key.
 

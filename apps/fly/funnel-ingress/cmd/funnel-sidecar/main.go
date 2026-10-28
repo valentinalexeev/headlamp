@@ -53,14 +53,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 		Ephemeral: true, // headscale removes the node (and so the route) when the pod disappears
 		UserLogf:  func(format string, args ...any) { slog.Info(fmt.Sprintf("tailnet: "+format, args...)) },
 	}
-	defer srv.Close()
 	upCtx, cancel := context.WithTimeout(ctx, tailnetUpTimeout)
 	_, err = srv.Up(upCtx)
 	cancel()
 	if err != nil {
+		// No deferred Close before this point: closing a tsnet server whose start failed panics inside tsnet.
 		msg := strings.ReplaceAll(err.Error(), cfg.AuthKey, "***")
 		return fmt.Errorf("joining the tailnet failed (check TS_AUTHKEY and FUNNEL_CONTROL_URL): %s", msg)
 	}
+	defer srv.Close()
 
 	// /readyz answers 200 only while every service is registered, and nothing else.
 	var isReady atomic.Bool

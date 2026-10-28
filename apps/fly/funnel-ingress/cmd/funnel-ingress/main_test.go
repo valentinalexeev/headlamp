@@ -82,3 +82,17 @@ func TestPortOf(t *testing.T) {
 		}
 	}
 }
+
+func TestRunReportsAnUnusableStateDirectory(t *testing.T) {
+	mr := miniredis.RunT(t)
+	err := run(context.Background(), env(map[string]string{
+		"FUNNEL_CONFIG_FILE": "/x", "TS_AUTHKEY": "tskey-secret", "REDIS_URL": "redis://" + mr.Addr(), "FUNNEL_STATE_KEY": stateKey(),
+		"FUNNEL_STATE_DIR": "/dev/null/nope",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "FUNNEL_STATE_DIR") {
+		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(err.Error(), "tskey-secret") {
+		t.Fatal("the auth key leaked")
+	}
+}

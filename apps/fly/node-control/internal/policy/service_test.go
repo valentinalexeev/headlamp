@@ -753,3 +753,58 @@ func TestEmptyPolicyIsRefusedBeforeAnyAPICall(t *testing.T) {
 		t.Error("preview called the API")
 	}
 }
+
+func TestRevertPendingWritesBackBeforeAndSettles(t *testing.T) {
+	api := newFakeAPI("old")
+	svc, _, _ := newTestService(t, api)
+	id := applyOK(t, svc, "new")
+	if err := svc.RevertPending(context.Background(), "alice", id); err != nil {
+		t.Fatal(err)
+	}
+	if api.current() != "old" || svc.Outcome(id) != OutcomeReverted {
+		t.Fatalf("text = %q, outcome = %q", api.current(), svc.Outcome(id))
+	}
+	if _, pending, _ := svc.store.Pending(); pending {
+		t.Fatal("still pending")
+	}
+	// Nothing is pending any more, so the next change can start at once.
+	applyOK(t, svc, "newer")
+	if api.current() != "newer" {
+		t.Fatalf("text = %q", api.current())
+	}
+}
+
+func TestRevertPendingRefusals(t *testing.T) {
+	api := newFakeAPI("old")
+	svc, _, _ := newTestService(t, api)
+	if err := svc.RevertPending(context.Background(), "alice", 1); !errors.Is(err, ErrNothingPending) {
+		t.Fatalf("nothing pending: %v", err)
+	}
+	id := applyOK(t, svc, "new")
+	if err := svc.RevertPending(context.Background(), "alice", id+1); !errors.Is(err, ErrNotPending) {
+		t.Fatalf("wrong id: %v", err)
+	}
+	if api.current() != "new" || svc.Outcome(id) != OutcomePending {
+		t.Fatal("a refused revert changed something")
+	}
+}
+
+func TestRevertPendingFailureKeepsTheChangePendingWithItsRevertArmed(t *testing.T) {
+	api := newFakeAPI("old")
+	svc, clk, _ := newTestService(t, api)
+	id := applyOK(t, svc, "new")
+	api.setErr = errors.New("headscale down")
+	if err := svc.RevertPending(context.Background(), "alice", id); err == nil {
+		t.Fatal("a failed write was reported as success")
+	}
+	if svc.Outcome(id) != OutcomePending {
+		t.Fatalf("outcome = %q, want pending", svc.Outcome(id))
+	}
+	// The automatic revert still fires at the deadline once headscale answers again.
+	api.setErr = nil
+	clk.Advance(testRevert)
+	svc.checkRevert(context.Background())
+	if api.current() != "old" || svc.Outcome(id) != OutcomeReverted {
+		t.Fatalf("text = %q, outcome = %q", api.current(), svc.Outcome(id))
+	}
+}

@@ -139,6 +139,7 @@ var allRoutes = []struct{ method, path string }{
 	{"POST", "/policy/apply"},
 	{"POST", "/policy/confirm"},
 	{"POST", "/policy/revert/1"},
+	{"POST", "/policy/revert-now"},
 }
 
 func TestDisabledWithoutPolicyDB(t *testing.T) {
@@ -226,7 +227,7 @@ func TestEveryRoute403ForNonAdminTaggedAndWhoIsError(t *testing.T) {
 
 func TestPostRequiresJSON(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
-	for _, p := range []string{"/policy/preview", "/policy/apply", "/policy/confirm", "/policy/revert/1"} {
+	for _, p := range []string{"/policy/preview", "/policy/apply", "/policy/confirm", "/policy/revert/1", "/policy/revert-now"} {
 		rec := h.do("POST", p, adminAddr, "policy=x", false)
 		if rec.Code != 422 {
 			t.Errorf("%s: %d", p, rec.Code)
@@ -829,5 +830,77 @@ func TestPageWithTopBarKeepsScriptsStrict(t *testing.T) {
 	}
 	if !strings.Contains(csp, "script-src 'self';") || strings.Contains(csp, "script-src 'self' 'unsafe") {
 		t.Errorf("script-src must stay same-origin only: %q", csp)
+	}
+}
+
+func TestRevertNowUndoesThePendingChange(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.apply(t, "second")
+	if h.api.current() != "second" {
+		t.Fatalf("policy %q", h.api.current())
+	}
+	p, _ := h.state(t)["pending"].(map[string]any)
+	id := int64(p["id"].(float64))
+	if rec := h.post("/policy/revert-now", `{"change_id":`+itoa(id)+`}`); rec.Code != 204 || rec.Body.Len() != 0 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if h.api.current() == "second" {
+		t.Fatalf("the pending policy is still live: %q", h.api.current())
+	}
+	st := h.state(t)
+	if st["pending"] != nil {
+		t.Fatalf("still pending: %v", st["pending"])
+	}
+	hist := st["history"].([]any)
+	if hist[0].(map[string]any)["state"] != "reverted" {
+		t.Fatalf("history = %v", hist)
+	}
+	// Nothing is pending any more, so a new change can start at once and the old id is refused.
+	if rec := h.apply(t, "third"); rec.Code != 200 {
+		t.Fatalf("apply after revert-now: %d %s", rec.Code, rec.Body)
+	}
+	if rec := h.post("/policy/revert-now", `{"change_id":`+itoa(id)+`}`); rec.Code != 409 {
+		t.Fatalf("stale id: %d", rec.Code)
+	}
+}
+
+func TestRevertNowRefusals(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	if rec := h.post("/policy/revert-now", `{"change_id":1}`); rec.Code != 409 || !strings.Contains(rec.Body.String(), "no change is pending") {
+		t.Errorf("nothing pending: %d %s", rec.Code, rec.Body)
+	}
+	h.apply(t, "second")
+	if rec := h.post("/policy/revert-now", `{"change_id":99}`); rec.Code != 409 || !strings.Contains(rec.Body.String(), "not the pending") {
+		t.Errorf("wrong id: %d %s", rec.Code, rec.Body)
+	}
+	for _, b := range []string{`{}`, `{"change_id":0}`, `{"change_id":-1}`, `{"change_id":"x"}`, `[`} {
+		if rec := h.post("/policy/revert-now", b); rec.Code != 422 {
+			t.Errorf("body %s: %d", b, rec.Code)
+		}
+	}
+	if h.api.current() != "second" {
+		t.Fatalf("a refused request changed the policy: %q", h.api.current())
+	}
+}
+
+func TestBusyMessageTellsWhatToDo(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.apply(t, "second")
+	id := int64(h.state(t)["pending"].(map[string]any)["id"].(float64))
+	rec := h.post("/policy/revert/"+itoa(id), "{}")
+	if rec.Code != 409 || !strings.Contains(rec.Body.String(), "confirm it or revert it now") {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPageOffersRevertNowAndDisablesHistoryRevertWhilePending(t *testing.T) {
+	if !strings.Contains(string(pageHTML), `id="revert-now"`) {
+		t.Error("the pending banner has no Revert now button")
+	}
+	js := string(pageJS)
+	for _, want := range []string{"/policy/revert-now", "b.disabled = true"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("policy.js lacks %q", want)
+		}
 	}
 }

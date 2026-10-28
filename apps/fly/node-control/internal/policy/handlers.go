@@ -58,6 +58,7 @@ func (c *console) register(mux *http.ServeMux, gate func(http.Handler) http.Hand
 	post("POST /policy/apply", c.apply)
 	post("POST /policy/confirm", c.confirm)
 	post("POST /policy/revert/{id}", c.revert)
+	post("POST /policy/revert-now", c.revertNow)
 }
 
 // asset serves an embedded file with headers that forbid framing, sniffing, caching and any
@@ -103,7 +104,7 @@ func fail(w http.ResponseWriter, err error, id int64, deadline time.Time) {
 	case errors.Is(err, ErrConflict):
 		detail(w, http.StatusConflict, "the policy changed since you loaded it")
 	case errors.Is(err, ErrBusy):
-		detail(w, http.StatusConflict, "another change is pending")
+		detail(w, http.StatusConflict, "another change is pending: confirm it or revert it now first")
 	case errors.Is(err, ErrNothingPending):
 		detail(w, http.StatusConflict, "no change is pending")
 	case errors.Is(err, ErrNotPending):
@@ -249,6 +250,25 @@ func (c *console) confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := c.svc.Confirm(r.Context(), authz.LoginFrom(r.Context()), in.ChangeID); err != nil {
+		fail(w, err, 0, time.Time{})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// revertNow undoes the pending change right away (the same as letting it time out).
+func (c *console) revertNow(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ChangeID int64 `json:"change_id"`
+	}
+	if !c.readJSON(w, r, &in) {
+		return
+	}
+	if in.ChangeID < 1 {
+		detail(w, http.StatusUnprocessableEntity, "change_id must be a positive whole number")
+		return
+	}
+	if err := c.svc.RevertPending(r.Context(), authz.LoginFrom(r.Context()), in.ChangeID); err != nil {
 		fail(w, err, 0, time.Time{})
 		return
 	}

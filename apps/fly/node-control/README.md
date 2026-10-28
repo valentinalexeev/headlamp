@@ -496,7 +496,8 @@ it is confirmed, which also covers a restart of this app mid-window. Every route
 for tagged nodes; policy text is never logged. Headscale must run its policy in database mode.
 `ENROLL_ALLOWED_HOSTS` is required with `POLICY_DB` and must not contain a bare `*` (a `*.example.com` suffix is fine):
 the core's Host guard is what protects the console from DNS rebinding. Confirm names the pending change and succeeds
-only while headscale still serves that change's policy. If the automatic revert keeps failing, the page shows a warning;
+only while headscale still serves that change's policy. "Revert now" in the pending banner undoes the pending change at once instead of
+waiting for its deadline (the history "Revert" buttons restore an older policy as a new change, so they are disabled while one is pending). If the automatic revert keeps failing, the page shows a warning;
 Confirm is then the way out, keeping the change.
 The console adds a "Policy" entry to the top bar. Its Content-Security-Policy allows inline styles (the bar is one) but scripts only from the
 page's own files.

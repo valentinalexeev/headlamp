@@ -10,7 +10,7 @@ func TestPageHasTheIngressTable(t *testing.T) {
 	page := string(enrollHTML)
 	t.Run("container, columns and buttons", func(t *testing.T) {
 		for _, want := range []string{
-			`id="ingresses"`, `id="ingrows"`, "<th>Ingress</th>", "<th>Online</th>", "<th>Sync</th>", "<th>Since</th>", "<th>Approval</th>",
+			`id="ingresses"`, `id="ingrows"`, "<th>Bridge</th>", "<th>Online</th>", "<th>Sync</th>", "<th>Since</th>", "<th>Approval</th>",
 			`"Approve"`, `"Remove approval"`, "/approve", "/unapprove", "fingerprint: v.fingerprint, node_id: v.node_id", "headscale nodes list", "v.address", "plain(v.hostname)", "plain(v.given_name)", "machine_key_prefix", "v.fingerprint.slice(0, 12)", "Fingerprint \" + v.fingerprint", "/enroll/ingresses",
 		} {
 			if !strings.Contains(page, want) {
@@ -27,7 +27,7 @@ func TestPageHasTheIngressTable(t *testing.T) {
 		}
 	})
 	t.Run("banner names every lagging ingress, single case unchanged", func(t *testing.T) {
-		for _, want := range []string{"behind.map((r) => r.name)", "out of sync since", "ingress host out of sync since"} {
+		for _, want := range []string{"behind.map((r) => r.name)", "out of sync since", "bridge host out of sync since"} {
 			if !strings.Contains(page, want) {
 				t.Errorf("page lacks %q", want)
 			}

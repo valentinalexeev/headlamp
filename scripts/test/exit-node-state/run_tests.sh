@@ -25,6 +25,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 cmd="$1"; key="${2:-}"; f="$TESTTMP/redis/${key//:/_}"
+[ -e "$TESTTMP/redis_slow" ] && sleep 3
 [ -e "$TESTTMP/redis_down" ] && { echo "Could not connect to Redis" >&2; exit 1; }
 case "$cmd" in
   PING) if [ -f "$TESTTMP/ping_reply" ]; then cat "$TESTTMP/ping_reply"; else echo PONG; fi;;
@@ -64,7 +65,7 @@ rkey="$tmp/redis/app_state"; setlog="$tmp/redis/set.log"
 await_watch() { i=0; while ! grep -q "state-sync: watching" "$1" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.5; i=$((i + 1)); done; }
 # wait (max 15 s) until set.log has at least $1 lines
 await_sets() { i=0; while [ "$(nsets)" -lt "$1" ] && [ "$i" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done; }
-reset() { rm -rf "$tmp/state" "$tmp/redis" "$tmp/redis_down" "$tmp/ping_reply" "$tmp/exists_reply" "$tmp/redis_calls.log"; mkdir -p "$tmp/state" "$tmp/redis"; }
+reset() { rm -rf "$tmp/state" "$tmp/redis" "$tmp/redis_down" "$tmp/redis_slow" "$tmp/timeout.log" "$tmp/ping_reply" "$tmp/exists_reply" "$tmp/redis_calls.log"; mkdir -p "$tmp/state" "$tmp/redis"; }
 # put an "encrypted" value into the fake Redis, as identity $1 would have produced it
 seed_redis() { printf '%s' "$2" | PATH="$tmp/bin:$PATH" age -r "pub-$1" -a > "$rkey"; }
 nsets() { if [ -f "$setlog" ]; then wc -l < "$setlog" | tr -d ' '; else echo 0; fi; }
@@ -185,4 +186,25 @@ if [ -n "$real_age" ] && [ -n "$real_keygen" ]; then
 else
   echo "skip - real age round trip (age/age-keygen not installed)"
 fi
+# redis calls are bounded by `timeout` (default 5 s, REDIS_TIMEOUT_SECONDS overrides)
+mkdir -p "$tmp/tbin"
+cat > "$tmp/tbin/timeout" <<'STUB'
+#!/usr/bin/env bash
+echo "$1 $2" >> "$TESTTMP/timeout.log"
+shift; exec "$@"
+STUB
+chmod +x "$tmp/tbin/timeout"
+reset; echo local-state > "$state"
+PATH="$tmp/tbin:$PATH" "$sync" restore >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && [ -s "$tmp/timeout.log" ] && [ "$(sort -u "$tmp/timeout.log")" = "5 redis-cli" ] && ok "redis calls run under timeout 5 by default" || fail "default timeout: rc=$rc log=$(sort -u "$tmp/timeout.log" 2>/dev/null)"
+reset; echo local-state > "$state"
+REDIS_TIMEOUT_SECONDS=3 PATH="$tmp/tbin:$PATH" "$sync" restore >/dev/null 2>&1
+[ "$(sort -u "$tmp/timeout.log")" = "3 redis-cli" ] && ok "REDIS_TIMEOUT_SECONDS overrides the per-call timeout" || fail "override timeout: $(sort -u "$tmp/timeout.log" 2>/dev/null)"
+
+# the boot wait is wall-clock: slow failing calls must not stretch it to several multiples of BOOT_WAIT_SECONDS
+reset; touch "$tmp/redis_down" "$tmp/redis_slow"
+t0="$(date +%s)"; "$sync" restore >/dev/null 2>&1; rc=$?; t1="$(date +%s)"
+[ "$rc" = 1 ] && [ $((t1 - t0)) -le 5 ] && ok "boot wait is wall-clock (3 s calls, BOOT_WAIT_SECONDS=2 -> gives up within 5 s)" || fail "wall-clock wait: rc=$rc took $((t1 - t0))s"
+rm -f "$tmp/redis_slow"
+
 exit "$fails"

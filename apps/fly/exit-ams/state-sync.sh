@@ -7,7 +7,8 @@
 #
 # Env: REDIS_URL (secret; unset = sync off, exit 0 and do nothing), STATE_AGE_IDENTITY (secret, AGE-SECRET-KEY-...),
 #      STATE_REDIS_KEY (default exit-node:tailscaled-state), STATE_FILE (default /var/lib/tailscale/tailscaled.state),
-#      STATE_POLL_SECONDS (default 60), BOOT_WAIT_SECONDS (how long restore waits for Redis, default 60).
+#      STATE_POLL_SECONDS (default 60), BOOT_WAIT_SECONDS (wall-clock seconds restore waits for Redis, default 60),
+#      REDIS_TIMEOUT_SECONDS (per redis-cli call, default 5; needs a `timeout` binary).
 # Values are never logged.
 set -eu
 
@@ -15,6 +16,7 @@ STATE_FILE="${STATE_FILE:-/var/lib/tailscale/tailscaled.state}"
 STATE_REDIS_KEY="${STATE_REDIS_KEY:-exit-node:tailscaled-state}"
 STATE_POLL_SECONDS="${STATE_POLL_SECONDS:-60}"
 BOOT_WAIT_SECONDS="${BOOT_WAIT_SECONDS:-60}"
+REDIS_TIMEOUT_SECONDS="${REDIS_TIMEOUT_SECONDS:-5}"
 REDIS_URL="${REDIS_URL:-}"
 IDFILE=""
 RECIPIENT=""
@@ -30,7 +32,15 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM INT
 
-redis() { redis-cli -u "$REDIS_URL" --no-auth-warning "$@"; }
+# Every Redis call is bounded by `timeout` (busybox/coreutils) when available, so a hung connect cannot stall the
+# boot wait or a shutdown push; without it the call is unbounded.
+redis() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$REDIS_TIMEOUT_SECONDS" redis-cli -u "$REDIS_URL" --no-auth-warning "$@"
+  else
+    redis-cli -u "$REDIS_URL" --no-auth-warning "$@"
+  fi
+}
 
 enabled() { [ -n "$REDIS_URL" ]; }
 
@@ -52,13 +62,12 @@ setup_identity() {
 }
 
 wait_redis() {
-  waited=0
+  started="$(date +%s)"
   while :; do
     pong="$(redis PING 2>/dev/null)" || pong=""
     if [ "$pong" = PONG ]; then return 0; fi
-    [ "$waited" -lt "$BOOT_WAIT_SECONDS" ] || return 1
+    [ $(($(date +%s) - started)) -lt "$BOOT_WAIT_SECONDS" ] || return 1
     sleep 1
-    waited=$((waited + 1))
   done
 }
 

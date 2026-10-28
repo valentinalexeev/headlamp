@@ -29,7 +29,8 @@ unset everything below is off and the node behaves exactly as described above.
 | `STATE_REDIS_KEY` | env | `exit-node:tailscaled-state` | Redis key holding the encrypted state |
 | `STATE_FILE` | env | `/var/lib/tailscale/tailscaled.state` | local state file |
 | `STATE_POLL_SECONDS` | env | `60` | how often the watcher checks the file |
-| `BOOT_WAIT_SECONDS` | env | `60` | how long `restore` waits for Redis at boot |
+| `BOOT_WAIT_SECONDS` | env | `60` | wall-clock seconds `restore` waits for Redis at boot |
+| `REDIS_TIMEOUT_SECONDS` | env | `5` | per `redis-cli` call limit (uses `timeout`, present in the image); keeps a hung connection from stalling boot or the shutdown push |
 
 - Secrets: `flyctl secrets set REDIS_URL=<redis url> STATE_AGE_IDENTITY=<age secret key>`.
   Generate the identity with `age-keygen`; keep a copy outside the app, since without it the

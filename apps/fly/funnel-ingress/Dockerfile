@@ -21,9 +21,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/funnel-ingress ./c
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates \
   && adduser -D -u 10001 funnel \
-  && mkdir -p /data && chown funnel:funnel /data
+  && mkdir -p /var/lib/tailscale && chown funnel:funnel /var/lib/tailscale
 COPY --from=build /out/funnel-ingress /usr/local/bin/funnel-ingress
 USER funnel
-# FUNNEL_STATE_DIR (default /data) exists and is writable by the app user. With REDIS_URL it only holds scratch files of the
+# FUNNEL_STATE_DIR (default /var/lib/tailscale, the same directory node-control uses) exists and is writable by the app user. With REDIS_URL it only holds scratch files of the
 # embedded node; file state (no REDIS_URL) needs a volume there, chowned to uid 10001.
 ENTRYPOINT ["/usr/local/bin/funnel-ingress"]

@@ -33,7 +33,7 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.FunnelTag != "tag:funnel" || c.NSTagPrefix != "tag:ns-" || c.SyncInterval != 30*time.Second ||
-		c.StateDir != "/data" || c.ProxyAddr != ":8080" || c.APIPort != 9100 || c.MissingChecks != 3 ||
+		c.StateDir != "/var/lib/tailscale" || c.ProxyAddr != ":8080" || c.APIPort != 9100 || c.MissingChecks != 3 ||
 		c.ReconcileInterval != 60*time.Second || c.MaxRoutesPerNode != 20 || c.MaxBodyBytes != 33554432 ||
 		c.ConnectTimeout != 10*time.Second || c.IdleTimeout != 120*time.Second || c.RequestTimeout != 300*time.Second ||
 		c.Hostname != "funnel-ingress" || c.RedisKey != "funnel-ingress:tsnet" || c.AuthKey != "tskey-auth-secret" {

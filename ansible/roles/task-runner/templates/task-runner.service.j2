@@ -36,8 +36,13 @@ TimeoutStopSec=45
 # result dir inside a 0700 parent) so the container can read and write them.
 
 # Rootless podman under cgroupfs: the service user manages the cgroup subtree
-# below this unit (container memory and pids limits).
+# below this unit (container memory and pids limits). DelegateSubgroup= (systemd
+# >= 254) moves the runner into a "runner" sub-cgroup: with the runner process in
+# the unit cgroup itself, cgroup v2 refuses to hand controllers down, and the
+# containers' --memory/--pids-limit were silently not applied (verified on a host
+# with a transient unit: 256m/100 inside the container only with the sub-cgroup).
 Delegate=yes
+DelegateSubgroup=runner
 MemoryMax={{ task_runner_memory_max }}
 TasksMax={{ task_runner_tasks_max }}
 

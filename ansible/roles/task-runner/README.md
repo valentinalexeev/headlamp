@@ -161,7 +161,8 @@ The index digest of a multi-arch image works for every architecture. A tag or a 
 
 `User=task-runner`, `PrivateTmp`, `ProtectHome` (HOME is the state dir), `ProtectSystem=strict` with
 `ReadWritePaths=` the state and runtime dirs, `ProtectControlGroups=no` (cgroupfs writes
-below the unit), `Delegate=yes` (the user manages the cgroup subtree, for the container's memory and pids limits),
+below the unit), `Delegate=yes` with `DelegateSubgroup=runner` (the user manages the cgroup subtree, for the container's memory and pids limits;
+the runner lives in the `runner` sub-cgroup so the unit cgroup can hand controllers down; needs systemd >= 254),
 `MemoryMax`, `TasksMax`, `RuntimeDirectory=task-runner` (0700, preserved across restarts),
 `KillMode=mixed` with `TimeoutStopSec=45` (the runner shuts down within 30 s, killing its container by name),
 `Restart=on-failure`. Two `ExecStartPre` steps: one (as root) refuses the start when the guard table has no rule for
@@ -266,10 +267,10 @@ until the container limits are confirmed.
    `find /sys/fs/cgroup/system.slice/task-runner.service -name memory.max -exec grep -H . {} +` and the same for
    `pids.max` show the container's `task_runner_container_memory` and `task_runner_pids_limit`
    (`systemd-cgls -u task-runner.service` locates the container cgroup).
-8. If step 7 shows no container limit or the run fails with a cgroup error, the delegation is not enough: try
-   `DelegateSubgroup=` in the unit (systemd >= 254), which moves the runner out of the delegated cgroup's root so
-   child cgroups can get controllers. Until then the unit's `MemoryMax`/`TasksMax` still bound the whole subtree
-   (runner plus container), but one run can use all of it.
+8. If step 7 shows no container limit (the container sees the unit's `MemoryMax`/`TasksMax` instead), check that the unit
+   has `DelegateSubgroup=runner` and that `cat /sys/fs/cgroup/system.slice/task-runner.service/cgroup.subtree_control`
+   lists `memory pids`. Without the sub-cgroup the runner sits in the delegated cgroup itself, controllers are not
+   passed down, and the unit's limits bound the whole subtree (runner plus container) but one run can use all of it.
 9. DNS and the guard from inside a container: a run whose script prints `/etc/resolv.conf` (via `fs`) and resolves
    and opens `https://example.com` succeeds; runs that fetch `http://169.254.169.254/`, `http://<node tailnet ip>:9100/`,
    `http://10.0.0.1/`, `http://host.containers.internal:22/` and `http://<node public ip>:22/` all fail (time out).
@@ -294,7 +295,7 @@ Only static checks were run (syntax check, template rendering). Unverified:
    (`loginctl enable-linger task-runner`) and point `XDG_RUNTIME_DIR` at `/run/user/<uid>` instead of the unit's
    `RuntimeDirectory`.
 3. The sandbox is compatible with rootless podman with `ProtectSystem=strict` (and `ProtectKernelTunables` off).
-4. `Delegate=yes` makes the container's `--memory`/`--pids-limit` effective under cgroupfs (see the check above).
+4. `Delegate=yes` with `DelegateSubgroup=runner` makes the container's `--memory`/`--pids-limit` effective under cgroupfs (see the check above).
 5. The subordinate id ranges added by the role are picked up (`podman unshare cat /proc/self/uid_map` as the user).
    If ranges are ever changed after the storage exists, run `podman system migrate` as the user.
 6. The guard (including the `fib` rule) leaves the build (registry, npm) and runs working, DNS included, and blocks the private ranges.

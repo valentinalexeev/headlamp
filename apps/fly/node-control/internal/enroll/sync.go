@@ -117,7 +117,7 @@ func (c IngressConfig) CredentialsFor(ing Ingress, base []Credential) ([]Credent
 // devices (all revoked/expired is deliberate); an empty store is never pushed, and an unreadable
 // store is a failure, never an empty set. It is the one-target form of SyncAll: a "base" ingress
 // without a name, which uses the stored credentials as they are.
-func Sync(ctx context.Context, store *Store, agent Agent, state *SyncState) bool {
+func Sync(ctx context.Context, store Backend, agent Agent, state *SyncState) bool {
 	return SyncAll(ctx, store, IngressConfig{}, []SyncTarget{{
 		Agent: agent, State: state, Ingress: Ingress{UUIDs: uuidsBase}}})
 }
@@ -137,7 +137,7 @@ func syncLog(name, msg string, attrs ...any) {
 // snapshot never lands after a newer one; the price is that one slow or dead ingress delays the
 // next round by at most its push timeout (10 s). An unreadable store fails every target and pushes
 // nothing; an empty store is never pushed to any target.
-func SyncAll(ctx context.Context, store *Store, cfg IngressConfig, targets []SyncTarget) bool {
+func SyncAll(ctx context.Context, store Backend, cfg IngressConfig, targets []SyncTarget) bool {
 	syncMu.Lock()
 	defer syncMu.Unlock()
 	base, err := store.ActiveCredentials()
@@ -266,12 +266,12 @@ func errType(err error) string { return typeName(err) }
 
 // ReconcileLoop retries the sync on a timer until ctx is cancelled. A panic or failure in one run
 // is logged by class only and marks the state "error"; the loop continues.
-func ReconcileLoop(ctx context.Context, store *Store, agent Agent, state *SyncState) {
+func ReconcileLoop(ctx context.Context, store Backend, agent Agent, state *SyncState) {
 	reconcile(ctx, func(ctx context.Context) { runOnce(ctx, store, agent, state) })
 }
 
 // ReconcileLoopAll is ReconcileLoop for every CURRENT target (the set can change at runtime).
-func ReconcileLoopAll(ctx context.Context, store *Store, cfg IngressConfig, targets func() []SyncTarget) {
+func ReconcileLoopAll(ctx context.Context, store Backend, cfg IngressConfig, targets func() []SyncTarget) {
 	reconcile(ctx, func(ctx context.Context) {
 		var ts []SyncTarget
 		defer func() {
@@ -301,7 +301,7 @@ func reconcile(ctx context.Context, run func(context.Context)) {
 	}
 }
 
-func runOnce(ctx context.Context, store *Store, agent Agent, state *SyncState) {
+func runOnce(ctx context.Context, store Backend, agent Agent, state *SyncState) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("enrolment reconcile failed", "error_type", typeName(r))

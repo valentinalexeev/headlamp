@@ -8,12 +8,16 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+
 	"example.com/node-control/internal/core"
+	"example.com/node-control/internal/enroll"
 )
 
 // serve runs the built modules on a plain-TCP tailnet and returns it with a stop func.
@@ -68,7 +72,7 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy" {
+	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,funnel,tasks" {
 		t.Fatalf("module order %s", got)
 	}
 	tn, _ := serve(t, env, mods)
@@ -78,11 +82,32 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 			t.Errorf("GET %s = %d", p, code)
 		}
 	}
+	for _, p := range []string{"/funnel", "/funnel/state", "/ingress/v1/config"} {
+		if code, _ := fetch(t, base+p); code != 404 {
+			t.Errorf("funnel route %s present without FUNNEL_DB: %d", p, code)
+		}
+	}
 	if code, _ := fetch(t, base+"/enroll/devices"); code != 404 {
 		t.Errorf("enrolment admin route present without ENROLL_DB: %d", code)
 	}
 	if tn.PublicListened() {
 		t.Fatal("public listener opened without ENROLL_DB")
+	}
+}
+
+func TestBuildModulesIncludesTasks(t *testing.T) {
+	env := core.MapEnv(map[string]string{"NODES_CONFIG": filepath.Join(t.TempDir(), "absent.json")})
+	mods, err := buildModules(env, http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := mods[len(mods)-1]; last.Name() != "tasks" || mods[len(mods)-2].Name() != "funnel" || mods[len(mods)-3].Name() != "policy" {
+		t.Fatalf("module order %v", names(mods))
+	}
+	// Without its variables the module registers nothing and node-control serves as before.
+	tn, _ := serve(t, env, mods)
+	if code, _ := fetch(t, "http://"+tn.AdminAddr()+"/tasks"); code != 404 {
+		t.Fatalf("tasks route present without its env: %d", code)
 	}
 }
 
@@ -338,5 +363,62 @@ func TestEnrolmentUsesTheHeadscaleSource(t *testing.T) {
 	}
 	if fetches.Load() == 0 {
 		t.Fatal("the headscale source was not used")
+	}
+}
+
+// TestEnrolmentInRedisIsWiredEndToEnd boots the real module list on ENROLL_REDIS=1 with no ENROLL_DB at all, as the
+// deployed app runs: the public listener must exist, the one-time import from an old SQLite file must happen, and the
+// public handler must accept a subscription secret issued before the move. A unit test of the module alone passes a
+// public mux in by hand and so cannot see a core that never creates one.
+func TestEnrolmentInRedisIsWiredEndToEnd(t *testing.T) {
+	mr := miniredis.RunT(t)
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "ingress.json")
+	if err := os.WriteFile(cfg, []byte(`{"host": "ingress.example.test", "public_key": "P", "short_id": "ab", "sni": "s.example.test"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key := strings.Repeat("k", 32)
+
+	old := filepath.Join(dir, "old-enroll.db")
+	src, err := enroll.OpenStore(old, []byte(key), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, secret, err := src.CreateDevice("phone", "alice", "clash", 4_000_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.Close()
+
+	env := core.MapEnv(map[string]string{
+		"NODES_CONFIG":           filepath.Join(dir, "absent.json"),
+		"ENROLL_ALLOWED_HOSTS":   "admin.test",
+		"ENROLL_CONFIG":          cfg,
+		"ENROLL_SECRET_KEY":      key,
+		"AGENT_URL":              "http://agent.test",
+		"AGENT_TOKEN":            "agent-token-value",
+		"ENROLL_REDIS":           "1",
+		"ENROLL_IMPORT_FROM":     old,
+		"REDIS_URL":              "redis://:s3cretpw@" + mr.Addr(),
+		"NODE_CONTROL_STATE_KEY": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+	})
+	mods, err := buildModules(env, http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn, _ := serve(t, env, mods)
+
+	if tn.PublicAddr() == "" {
+		t.Fatal("no public listener with ENROLL_REDIS=1")
+	}
+	code, body := getHost(t, tn.AdminAddr(), "admin.test", "/enroll/devices")
+	if code != 200 || !strings.Contains(body, `"name":"phone"`) {
+		t.Fatalf("admin list after the import: %d %s", code, body)
+	}
+	if code, _ := getHost(t, tn.PublicAddr(), "ingress.example.test", "/sub/"+secret); code != 200 {
+		t.Fatalf("a subscription secret issued before the move was refused by the public handler: %d", code)
+	}
+	if mr.Exists("node-control:enroll:d:"+strconv.FormatInt(d.ID, 10)) == false {
+		t.Fatal("the device is not in Redis")
 	}
 }

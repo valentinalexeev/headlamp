@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,10 +15,12 @@ import (
 
 	"example.com/node-control/internal/core"
 	"example.com/node-control/internal/enroll"
+	"example.com/node-control/internal/funnel"
 	"example.com/node-control/internal/headscale"
 	"example.com/node-control/internal/nodes"
 	"example.com/node-control/internal/policy"
 	"example.com/node-control/internal/tailnet"
+	"example.com/node-control/internal/tasks"
 )
 
 const defaultNodesConfig = "/srv/app/nodes.json"
@@ -25,8 +28,8 @@ const defaultNodesConfig = "/srv/app/nodes.json"
 // trackedTimeout bounds the headscale lookup done on behalf of the tailnet status route.
 const trackedTimeout = 10 * time.Second
 
-// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy. One cached
-// headscale source feeds the tailnet, the nodes and the enroll module, so a page load costs one fetch.
+// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy, funnel, tasks (funnel submits its ACL changes through the policy module). One cached
+// headscale source feeds the tailnet, nodes, enroll and tasks modules, so a page load costs one fetch.
 func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	cfg, err := nodes.LoadConfig(env.Default("NODES_CONFIG", defaultNodesConfig))
 	if err != nil {
@@ -57,15 +60,27 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		defer cancel()
 		return nodes.TailnetNames(cfg, nm.Targets(ctx))
 	}
+	hsClient := &headscale.Client{
+		BaseURL: env.Getenv("HEADSCALE_LOGIN_SERVER"),
+		APIKey:  env.Getenv("HEADSCALE_API_KEY"),
+		HTTP:    hc,
+	}
+	pol := policy.New(env, hsClient)
 	return []core.Module{
 		tailnet.New(src, tracked),
 		nm,
 		enroll.New(env, enroll.WithNodeSource(src)),
-		policy.New(env, &headscale.Client{
-			BaseURL: env.Getenv("HEADSCALE_LOGIN_SERVER"),
-			APIKey:  env.Getenv("HEADSCALE_API_KEY"),
-			HTTP:    hc,
+		pol,
+		funnel.New(env, hsClient, func() funnel.PolicyService {
+			// Only an active console has a service; a typed nil must not become a non-nil interface.
+			if p, ok := pol.(interface{ Service() *policy.Service }); ok {
+				if svc := p.Service(); svc != nil {
+					return svc
+				}
+			}
+			return nil
 		}),
+		tasks.New(env, src),
 	}, nil
 }
 
@@ -86,6 +101,19 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "state-import" {
 		if err := runStateImport(context.Background(), os.Args[2:], core.OSEnv(), os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "state-import failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "enroll-import" || os.Args[1] == "enroll-export") {
+		run := func(args []string, env core.Env, out io.Writer) error {
+			return runEnrollImport(args, env, out, os.Stdin)
+		}
+		if os.Args[1] == "enroll-export" {
+			run = runEnrollExport
+		}
+		if err := run(os.Args[2:], core.OSEnv(), os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, os.Args[1]+" failed:", err)
 			os.Exit(1)
 		}
 		return

@@ -7,7 +7,10 @@ Infrastructure code for a self-hosted, Tailscale-compatible network:
   Cloud, AWS, Cloud.ru or Selectel (`terraform/modules/exit-node-vm`, configured by the Ansible roles in `ansible/`)
 - **split-tunnel route provisioning**: nodes advertise routes for chosen ASNs/hostnames so those
   services leave from a chosen country (`ansible/roles/route-provisioner`)
-- **node-control**: a small tailnet-only web UI to start/stop the VM nodes (`apps/fly/node-control`)
+- **node-control**: a small tailnet-only web UI to start/stop the VM nodes (`apps/fly/node-control`), with optional
+  scheduled browser-script checks that run on a node through **task-runner** (`apps/task-runner`,
+  `ansible/roles/task-runner`)
+- **funnel-ingress**: publishes tailnet services under stable public names, Funnel-style (`apps/fly/funnel-ingress`)
 - **tailguard** (`apps/tailguard`): a WireGuard server that egresses through a tailnet exit node,
   so a plain-WireGuard device (e.g. a home router) can use your exit nodes, with watchdog and
   exit-node-following sidecars

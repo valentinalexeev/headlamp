@@ -21,6 +21,10 @@ kill_timeout = "25s"
   # Enrolment (optional, see README "Enrolment"): the database lives on the tailscale_state volume below,
   # because a Machine mounts only one volume.
   # ENROLL_DB = "/var/lib/tailscale/enroll.db"
+  # Or, without a volume, keep the enrolment data in Redis (needs REDIS_URL and NODE_CONTROL_STATE_KEY secrets):
+  # ENROLL_REDIS = "1"
+  # Once, to copy an existing SQLite database into Redis (read-only on the file; ignored when Redis has data):
+  # ENROLL_IMPORT_FROM = "/var/lib/tailscale/enroll.db"
   # ENROLL_CONFIG = "/srv/app/enroll.json"
   # AGENT_URL = "http://<agent-tailnet-ip>:<port>"
   # ENROLL_ALLOWED_HOSTS = "node-control.example.com,<this-node-tailnet-ip>"
@@ -29,6 +33,14 @@ kill_timeout = "25s"
   # POLICY_DB = "/var/lib/tailscale/policy.db"
   # POLICY_ADMIN_USERS = "<tailnet-login>,<another-login>"
   # POLICY_REVERT_SECONDS = "120"
+  # Funnel module (optional, see README "Funnel module (optional)"): admin surface of funnel-ingress. Needs the
+  # policy console above.
+  # FUNNEL_DB = "/var/lib/tailscale/funnel.db"
+  # FUNNEL_PUBLIC_DOMAIN = "example.com"
+  # FUNNEL_INGRESS_HOSTNAME = "<funnel-ingress-app>.fly.dev"
+  # FUNNEL_TAG_OWNERS = "<tailnet-login>"
+  # FUNNEL_KEY_USER = "<headscale-user>"
+  # FUNNEL_ADMIN_USERS = "<tailnet-login>"
 
 # Tailscale state in the shared Redis (optional, see README "Tailscale state"). Secrets, never values here:
 #   flyctl secrets set -a <app> REDIS_URL=... NODE_CONTROL_STATE_KEY="$(openssl rand -base64 32)"

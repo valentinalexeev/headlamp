@@ -13,4 +13,10 @@ Makefile                      glue: sops key, tf-run.sh targets, ansible, versio
 terraform/                    root stack using vendor/headlamp/terraform/modules (+ example vars)
 ansible/                      ansible.cfg, site.yml, inventory + vars examples
 fly/deploy.sh                 overlay deploy for the Fly apps
+fly/node-control/tasks/       placeholder task config and a commented task script (tasks module)
 ```
+
+`fly/node-control/tasks/` is only an example of how to keep your scheduled-task config and scripts in git: push
+them with `scripts/tasks.sh` (see "Tasks module" in `apps/fly/node-control/README.md`). node-control never reads git,
+and the node-control image does not copy this directory, so the overlay deploy ships nothing from it. Rename
+`tasks.example.json` to `tasks.json` and the script to the name your task's `script` field uses.

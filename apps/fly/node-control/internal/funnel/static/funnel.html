@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Funnel</title>
+<link rel="stylesheet" href="/funnel/static/funnel.css">
+</head>
+<body>
+<main>
+<h1>Funnel</h1>
+<div id="banner" class="banner bad" hidden></div>
+
+<section class="panel">
+  <h2>Ingress</h2>
+  <div id="ingress-banner" class="banner bad" hidden></div>
+  <p id="ingress-summary" class="muted">No report yet.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Name</th><th>Target</th><th>Port</th><th>Owner</th><th>Online</th><th></th></tr></thead>
+      <tbody id="ingress-routes"></tbody>
+    </table>
+  </div>
+  <ul id="ingress-errors" class="muted"></ul>
+</section>
+
+<section class="panel">
+  <h2>Namespaces</h2>
+  <p class="muted">Creating, changing or deleting a namespace edits the ACL. Confirm it on the <a href="/policy">policy page</a> or it reverts by itself.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Name</th><th>State</th><th>Ports</th><th>Note</th><th></th></tr></thead>
+      <tbody id="namespaces"></tbody>
+    </table>
+  </div>
+  <form id="ns-form" class="row">
+    <label>Name <input name="name" required maxlength="63" pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?" autocomplete="off"></label>
+    <label>Ports <input name="ports" required placeholder="9000-9010,9100" autocomplete="off"></label>
+    <label>Note <input name="note" maxlength="200" autocomplete="off"></label>
+    <button type="submit">Add namespace</button>
+  </form>
+  <p id="ns-message" class="muted"></p>
+  <div id="checklist" class="muted" hidden></div>
+</section>
+
+<section class="panel" id="keys-panel" hidden>
+  <h2>Publisher keys <span id="keys-ns" class="pill"></span></h2>
+  <form id="key-form" class="row">
+    <label>Valid for (hours) <input name="ttl" type="number" min="1" max="8760" placeholder="default"></label>
+    <label class="check"><input name="ephemeral" type="checkbox"> Ephemeral</label>
+    <label class="check"><input name="reusable" type="checkbox" checked> Reusable</label>
+    <button type="submit">Mint key</button>
+  </form>
+  <div id="key-secret" hidden>
+    <p class="bad">Shown once. Copy it now.</p>
+    <textarea id="key-text" readonly rows="2"></textarea>
+    <button id="key-copy" type="button" class="ghost">Copy</button>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Id</th><th>Expires</th><th>Flags</th><th></th></tr></thead>
+      <tbody id="keys"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Manual routes</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Name</th><th>Target</th><th>Port</th><th>Scheme</th><th></th></tr></thead>
+      <tbody id="routes"></tbody>
+    </table>
+  </div>
+  <form id="route-form" class="row">
+    <label>Namespace <input name="ns" required autocomplete="off"></label>
+    <label>Service <input name="service" required autocomplete="off"></label>
+    <label>Target (node name or tailnet IP) <input name="target" required autocomplete="off"></label>
+    <label>Port <input name="port" type="number" min="1" max="65535" required></label>
+    <label>Scheme <select name="scheme"><option>http</option><option>https</option></select></label>
+    <label class="check"><input name="insecure" type="checkbox"> Skip TLS verification</label>
+    <button type="submit">Add route</button>
+  </form>
+  <p id="route-message" class="muted"></p>
+</section>
+
+<section class="panel">
+  <h2>Blocked names</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Name</th><th>Reason</th><th>By</th><th>Since</th><th></th></tr></thead>
+      <tbody id="blocks"></tbody>
+    </table>
+  </div>
+  <form id="block-form" class="row">
+    <label>Namespace <input name="ns" required autocomplete="off"></label>
+    <label>Service <input name="service" required autocomplete="off"></label>
+    <label>Reason <input name="reason" maxlength="500" autocomplete="off"></label>
+    <button type="submit">Block</button>
+  </form>
+  <p id="block-message" class="muted"></p>
+</section>
+
+<section class="panel">
+  <h2>Audit</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead>
+      <tbody id="audit"></tbody>
+    </table>
+  </div>
+</section>
+</main>
+<script src="/funnel/static/funnel.js"></script>
+</body>
+</html>

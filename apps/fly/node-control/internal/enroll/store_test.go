@@ -143,8 +143,10 @@ func TestSecondConsumeOfSingleUseTokenIsNil(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := e.store.ConsumeToken(tok)
-	if g := mustDevice(t, got, err, "first"); !reflect.DeepEqual(*g, dev) {
-		t.Fatalf("got %+v want %+v", *g, dev)
+	want := dev // a spend also marks the device as enrolled, now and once
+	want.EnrolledAt, want.Enrolments = e.clock.Now().Unix(), 1
+	if g := mustDevice(t, got, err, "first"); !reflect.DeepEqual(*g, want) {
+		t.Fatalf("got %+v want %+v", *g, want)
 	}
 	got, err = e.store.ConsumeToken(tok)
 	mustNil(t, got, err, "second")
@@ -361,7 +363,8 @@ func TestDeviceHasNoSecretFields(t *testing.T) {
 	for i := 0; i < typ.NumField(); i++ {
 		got = append(got, typ.Field(i).Name)
 	}
-	want := []string{"ID", "Name", "Owner", "Client", "ExpiresAt", "Revoked", "UUIDs"}
+	// EnrolledAt, Enrolments and LastActive are activity times and a count, not secrets.
+	want := []string{"ID", "Name", "Owner", "Client", "ExpiresAt", "Revoked", "UUIDs", "EnrolledAt", "Enrolments", "LastActive"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("fields = %v", got)
 	}
@@ -560,7 +563,7 @@ func openFixture(t *testing.T, name string, x expectedFile) *Store {
 	return s
 }
 
-func checkSet(t *testing.T, s *Store, want expectedSet) {
+func checkSet(t *testing.T, s Backend, want expectedSet) {
 	t.Helper()
 	list, err := s.ListDevices()
 	if err != nil {

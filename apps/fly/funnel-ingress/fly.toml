@@ -1,0 +1,70 @@
+# Placeholder values: your private repo keeps the real fly.toml and copies it over this one at deploy time
+# (see CLAUDE.md, "overlay procedure").
+#
+# Public side: Fly's proxy terminates TLS (wildcard certificates, see README "DNS and certificates") and
+# forwards plain HTTP to the proxy port below. The registration API (FUNNEL_API_PORT) is deliberately NOT a
+# service here: it listens on the tailnet only.
+#
+# No [mounts]: the tailscale node's state, the dynamic routes and the cached configuration live in the shared
+# Redis (README "State"). Without REDIS_URL the app falls back to files under FUNNEL_STATE_DIR and needs a
+# volume there.
+app = "<your-funnel-ingress-app>"
+# Set your Fly region.
+primary_region = "<region>"
+# The app handles SIGTERM and SIGINT; Fly sends kill_signal and waits kill_timeout before killing the machine.
+kill_signal = "SIGTERM"
+# Graceful shutdown drains both listeners (up to 20 s), then closes the embedded node.
+kill_timeout = "30s"
+
+[env]
+  # Control server (headscale) the embedded node joins.
+  FUNNEL_CONTROL_URL = "https://headscale.example.com"
+  # Name this app registers under on the tailnet; the sidecars and register-service.sh reach the API there.
+  FUNNEL_HOSTNAME = "funnel-ingress"
+  # node-control base URL as reachable from this container. Containers have no tailnet DNS, so use the
+  # tailnet IP of node-control, not its name.
+  FUNNEL_CONFIG_URL = "http://<node-control-tailnet-ip>:80"
+  # Defaults, shown for reference.
+  # FUNNEL_PROXY_ADDR = ":8080"
+  # FUNNEL_API_PORT = "9100"
+  # FUNNEL_TAG = "tag:funnel"
+  # FUNNEL_NS_TAG_PREFIX = "tag:ns-"
+  # FUNNEL_SYNC_INTERVAL = "30s"
+  # FUNNEL_RECONCILE_INTERVAL = "60s"
+  # FUNNEL_MISSING_CHECKS = "3"
+  # First start only (plain setting, not a secret): carry over an existing tailscale identity.
+  # STATE_IMPORT_FROM = "/path/to/tailscaled.state"
+
+# Secrets, never values here:
+#   flyctl secrets set -a <app> TS_AUTHKEY=<tagged pre-auth key> \
+#     REDIS_URL=<plain redis:// URL of the shared Redis> \
+#     FUNNEL_STATE_KEY="$(openssl rand -base64 32)"
+# Keep FUNNEL_STATE_KEY in your password manager first: without it the stored state cannot be read.
+# The Redis hash defaults to <app>:tsnet.
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "get"
+    path = "/healthz"
+
+# A Go binary with an embedded tailscale node should fit in 256 MB. Verify before relying on it.
+[[vm]]
+  memory = "256mb"

@@ -40,6 +40,10 @@ func New(env core.Env, api API) core.Module { return &Module{env: env, api: api}
 
 func (m *Module) Name() string { return "policy" }
 
+// Service returns the policy service once Register has set it up, nil while the console is inactive. Other
+// modules (funnel) submit their ACL changes through it.
+func (m *Module) Service() *Service { return m.svc }
+
 // Nav puts the console in the admin top bar; an inactive module advertises nothing.
 func (m *Module) Nav() []core.NavItem {
 	if m.svc == nil {

@@ -1,0 +1,29 @@
+---
+# Handler names are global across roles: every name here carries the role's
+# prefix. Order matters (handlers run in the order defined): daemon-reload,
+# then the guard, then the runner.
+- name: task-runner daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  # Units are not written in check mode.
+  when: not ansible_check_mode
+
+# Atomic (nft -f replaces the table); `reloaded` starts the unit if inactive.
+# Never `restarted`: task-runner Requires= this unit and would restart with it.
+- name: reload task-runner-guard
+  ansible.builtin.systemd:
+    name: task-runner-guard
+    daemon_reload: true
+    state: reloaded
+  become: true
+  when: not ansible_check_mode
+
+# Binary, unit or env file changed. A stop cancels the active run.
+- name: restart task-runner
+  ansible.builtin.systemd:
+    name: task-runner
+    daemon_reload: true
+    state: restarted
+  become: true
+  when: not ansible_check_mode

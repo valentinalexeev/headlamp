@@ -51,18 +51,21 @@ var syncWait = 3 * time.Second
 
 // Admin serves the operator API.
 type Admin struct {
-	store *Store
-	reg   *Registry
+	store    Backend
+	reg      *Registry
+	activity *ActivityTracker
 }
 
 // NewAdmin returns the operator API over store and one agent that serves every configured
 // ingress. Its sync state takes time from the store's clock.
-func NewAdmin(store *Store, cfg IngressConfig, agent Agent) *Admin {
-	return &Admin{store: store, reg: newStaticRegistry(store, cfg, agent)}
+func NewAdmin(store Backend, cfg IngressConfig, agent Agent) *Admin {
+	return &Admin{store: store, reg: newStaticRegistry(store, cfg, agent), activity: NewActivityTracker(store)}
 }
 
 // NewAdminFor returns the operator API over the ingress registry.
-func NewAdminFor(store *Store, reg *Registry) *Admin { return &Admin{store: store, reg: reg} }
+func NewAdminFor(store Backend, reg *Registry) *Admin {
+	return &Admin{store: store, reg: reg, activity: NewActivityTracker(store)}
+}
 
 // State is the sync state of the first configured ingress.
 func (a *Admin) State() *SyncState { return a.reg.First().State }
@@ -72,6 +75,7 @@ func (a *Admin) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /enroll", a.page)
 	mux.HandleFunc("GET /enroll/devices", a.listDevices)
 	mux.HandleFunc("POST /enroll/devices", a.jsonOnly(a.createDevice))
+	mux.HandleFunc("DELETE /enroll/devices/{id}", a.jsonOnly(a.deleteDevice))
 	mux.HandleFunc("POST /enroll/devices/{id}/links", a.jsonOnly(a.newLink))
 	mux.HandleFunc("POST /enroll/devices/{id}/revoke", a.jsonOnly(a.revoke))
 	mux.HandleFunc("POST /enroll/devices/{id}/extend", a.jsonOnly(a.extend))
@@ -239,6 +243,11 @@ type deviceRow struct {
 	ExpiresAt int64  `json:"expires_at"`
 	Revoked   bool   `json:"revoked"`
 	Traffic   any    `json:"traffic"`
+	// When a one-time link of the device was last spent and how often, and when its traffic last grew (unix seconds;
+	// 0 = never). No client addresses.
+	EnrolledAt int64 `json:"enrolled_at"`
+	Enrolments int64 `json:"enrol_count"`
+	LastActive int64 `json:"last_active"`
 }
 
 // ingressRow is one active ingress in the responses.
@@ -282,13 +291,22 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats, partial := MergedStats(r.Context(), cur.SyncTargets, cur.Cfg, devs)
+	if !partial { // partial counters would read as a reset
+		for id, at := range a.activity.Observe(devs, stats) {
+			for i := range devs {
+				if devs[i].ID == id && at > devs[i].LastActive {
+					devs[i].LastActive = at
+				}
+			}
+		}
+	}
 	rows := make([]deviceRow, 0, len(devs))
 	for _, d := range devs {
 		var traffic any
 		if tr, ok := stats[d.ID]; ok {
 			traffic = map[string]any{"up": tr.Up, "down": tr.Down}
 		}
-		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, d.Client, d.ExpiresAt, d.Revoked, traffic})
+		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, d.Client, d.ExpiresAt, d.Revoked, traffic, d.EnrolledAt, d.Enrolments, d.LastActive})
 	}
 	snaps := snapshotsOf(cur.SyncTargets)
 	pending := cur.Pending
@@ -345,7 +363,7 @@ func (a *Admin) syncNow(r *http.Request) syncResult {
 	}
 	snaps := snapshotsOf(targets)
 	if !finished {
-		now := a.store.clock().Unix()
+		now := a.store.Clock()().Unix()
 		for i, t := range targets {
 			if t.State.version() == before[i] && !snaps[i].Pending {
 				snaps[i] = SyncSnapshot{Pending: true, State: "unknown", Since: &now}
@@ -390,7 +408,7 @@ func (a *Admin) createDevice(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Admin) future(w http.ResponseWriter, ts int64) bool {
-	if float64(ts) <= a.store.nowSec() {
+	if float64(ts) <= nowSec(a.store) {
 		detail(w, http.StatusUnprocessableEntity, "expires_at must be in the future")
 		return false
 	}
@@ -435,7 +453,18 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 		invalid(w, v.errs...)
 		return
 	}
-	if !a.known(w, id) {
+	d, err := a.store.GetDevice(id)
+	if errors.Is(err, ErrNotFound) {
+		detail(w, http.StatusNotFound, "unknown device")
+		return
+	}
+	if err != nil {
+		a.internal(w, err)
+		return
+	}
+	// A link is spent only for an active device: for a revoked or expired one it would be created and never work.
+	if d.Revoked || float64(d.ExpiresAt) <= nowSec(a.store) {
+		detail(w, http.StatusConflict, "the device is revoked or expired; a link would not work")
 		return
 	}
 	tok, err := a.store.NewLink(id, time.Duration(ttl)*time.Second, int(uses))
@@ -456,6 +485,25 @@ func (a *Admin) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
+}
+
+// deleteDevice removes a revoked device for good. An active or expired-but-not-revoked device must be revoked first,
+// so one stray click cannot remove a working phone. No push is needed: only active devices are ever sent to an agent.
+func (a *Admin) deleteDevice(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	switch err := a.store.DeleteDevice(id); {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case errors.Is(err, ErrNotFound):
+		detail(w, http.StatusNotFound, "unknown device")
+	case errors.Is(err, ErrNotRevoked):
+		detail(w, http.StatusConflict, "revoke the device before deleting it")
+	default:
+		a.internal(w, err)
+	}
 }
 
 func (a *Admin) extend(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,99 @@
+---
+# task-runner (apps/task-runner) as a systemd service on a VM node: a rootless
+# podman container per run, an nftables guard for the service user.
+# Values marked REQUIRED have no default on purpose; preflight.yml fails early
+# if they are missing. Real values (token, address, digest) live in the private
+# repo (vault, host_vars), never here.
+
+# Path ON THE CONTROL HOST to the apps/task-runner directory (REQUIRED), e.g.
+# "{{ playbook_dir }}/../vendor/headlamp/apps/task-runner". The Go binary is
+# built from it on the control host and image/ is copied to the node.
+task_runner_src: ""
+
+# Bearer token node-control uses (REQUIRED, vault, at least 24 characters, no
+# whitespace, quotes, backslash, $ or backtick; e.g. `openssl rand -hex 32`).
+# Lives only in the env file; never logged, never on a command line.
+task_runner_token: ""
+
+# Tailnet address of this node (REQUIRED), e.g. "<tailnet-ip>" (what
+# `tailscale ip -4` prints on the node, a 100.64.0.0/10 address; an IPv6
+# tailnet address in fd7a:115c:a1e0::/48 is accepted too). The runner binds to
+# it only, never 0.0.0.0; preflight checks the node really has it.
+task_runner_listen_addr: ""
+task_runner_port: 9100
+
+# Base image of the run image, pinned by digest (REQUIRED unless
+# task_runner_image_archive is set): "<registry>/<repository>@sha256:<64 hex>".
+# The README explains how to obtain the digest of a tag.
+task_runner_base_image: ""
+# Optional: path ON THE CONTROL HOST to a `podman save` tarball of a ready run
+# image, for nodes that cannot reach the registry. When set, the node loads it
+# instead of building, and task_runner_base_image is not used.
+task_runner_image_archive: ""
+# Repository of the derived image on the node; the tag is a content hash.
+task_runner_image_repo: localhost/task-runner
+# Limits for the first pull/build (the base image is about 2.5 GB; the first
+# pull has taken about 30 minutes on a small node).
+task_runner_image_async: 3600
+task_runner_image_poll: 30
+
+# Optional: path ON THE CONTROL HOST to a prebuilt linux binary for the node's
+# architecture. When empty, the role builds one with the control host's `go`.
+task_runner_binary: ""
+
+# Service user and locations.
+task_runner_user: task-runner
+# Home of the service user and the runner's state (podman storage, run dirs).
+# Mode 0700. Must be /var/lib/<dir>.
+task_runner_state_dir: /var/lib/task-runner
+# XDG_RUNTIME_DIR of the service user (systemd RuntimeDirectory). The role's
+# own podman calls use the same directory: podman refuses a storage whose
+# recorded run root differs from the current one.
+task_runner_runtime_dir: /run/task-runner
+task_runner_env_file: /etc/task-runner/env
+task_runner_bin: /usr/local/bin/task-runner
+# Subordinate uid/gid range size for rootless podman (added only if the user
+# has no range yet; the start is chosen after the highest existing range).
+task_runner_subid_count: 65536
+
+# Resource limits.
+# Whole service (runner, podman, the container): systemd MemoryMax (K/M/G).
+task_runner_memory_max: 2G
+# Per container: RUNNER_MEMORY, podman --memory (k/m/g). Must leave at least
+# 256 MB of task_runner_memory_max for the runner and podman.
+task_runner_container_memory: 1g
+# Per container: RUNNER_PIDS_LIMIT, podman --pids-limit.
+task_runner_pids_limit: 512
+# Whole service: systemd TasksMax.
+task_runner_tasks_max: 2048
+
+# Preflight thresholds (free memory without page cache; free disk on the file
+# system holding task_runner_state_dir). Chromium needs a few hundred MB, the
+# base and derived images a few GB.
+task_runner_min_free_mb: 1500
+task_runner_min_free_disk_mb: 6000
+
+# systemd ProtectKernelTunables= for the unit. Off: its read-only mounts over
+# /proc/sys etc. become locked mounts in the container's user namespace and the
+# kernel refuses the fresh /proc mount, so every run would fail. To try it,
+# set true on one node after a verified run, redeploy, start a run and check
+# `journalctl -u task-runner` for a proc mount error; revert if it fails.
+task_runner_protect_kernel_tunables: false
+
+# nftables guard (tasks/guard.yml).
+task_runner_guard_file: /etc/task-runner-guard.nft
+# Resolvers the service user (and so every container, whose traffic leaves as
+# that user) may query on port 53 although they lie in a blocked range. The
+# defaults are the tailnet resolver (v4 and v6). Add the systemd-resolved stub
+# (127.0.0.53) if /etc/resolv.conf points at it; preflight fails when a
+# blocked-range resolver from /etc/resolv.conf is missing here.
+task_runner_guard_resolvers: ["100.100.100.100", "fd7a:115c:a1e0::53"]
+# Extra destinations the service user may never reach: IPv4/IPv6 addresses or
+# CIDRs. The guard already drops every address configured on an interface of
+# this host (fib daddr type local); on a 1:1-NAT cloud the node's public
+# address is NOT on any interface, so list it here (`ip -o addr` shows whether
+# it is configured). Default: none.
+task_runner_guard_extra_drop: []
+# How often the guard check timer verifies the table exists (systemd time span).
+task_runner_guard_check_interval: 30s
+task_runner_nft_bin: /usr/sbin/nft

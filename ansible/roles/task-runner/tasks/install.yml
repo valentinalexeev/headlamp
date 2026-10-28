@@ -1,0 +1,192 @@
+---
+# podman 5 with rootless user-space networking (passt/pasta) and the setuid
+# id mappers (uidmap). acl: Ansible needs setfacl to hand its temp files to the
+# unprivileged service user (become_user) in image.yml.
+- name: Install podman and its rootless helpers
+  ansible.builtin.apt:
+    name:
+      - podman
+      - uidmap
+      - passt
+      - acl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+# The podman package ships ROOT-level units (API socket, restart of root
+# containers, auto-update, transient cleanup). They are unrelated to the
+# rootless service and stay off. Only these units are touched; a unit the
+# installed version does not ship is skipped. podman-restart.service is only
+# disabled, never stopped: stopping it stops every root container that uses
+# restart=always, which would hit other workloads on a shared host.
+- name: Disable the podman package's root-level units
+  ansible.builtin.systemd:
+    name: "{{ item.name }}"
+    enabled: false
+    state: "{{ item.state | default(omit) }}"
+  loop:
+    - {name: podman.socket, state: stopped}
+    - {name: podman-restart.service}
+    - {name: podman-auto-update.timer, state: stopped}
+    - {name: podman-clean-transient.service, state: stopped}
+  register: task_runner_podman_units
+  failed_when:
+    - task_runner_podman_units is failed
+    - "'Could not find the requested service' not in (task_runner_podman_units.msg | default(''))"
+  become: true
+
+- name: Create the service group
+  ansible.builtin.group:
+    name: "{{ task_runner_user }}"
+    system: true
+  become: true
+
+# HOME is the state dir (podman keeps its storage under it), not /home: the
+# unit sets ProtectHome=yes.
+- name: Create the service user
+  ansible.builtin.user:
+    name: "{{ task_runner_user }}"
+    group: "{{ task_runner_user }}"
+    system: true
+    home: "{{ task_runner_state_dir }}"
+    create_home: false
+    shell: /usr/sbin/nologin
+    comment: task-runner service
+  become: true
+
+- name: Create the state directory (podman storage, run directories)
+  ansible.builtin.file:
+    path: "{{ task_runner_state_dir }}"
+    state: directory
+    owner: "{{ task_runner_user }}"
+    group: "{{ task_runner_user }}"
+    mode: "0700"
+  become: true
+
+# The unit's RuntimeDirectory= creates it at service start (and keeps it, see
+# RuntimeDirectoryPreserve); the role needs it earlier for its own podman
+# calls, which must use the same run root as the service.
+- name: Create the runtime directory
+  ansible.builtin.file:
+    path: "{{ task_runner_runtime_dir }}"
+    state: directory
+    owner: "{{ task_runner_user }}"
+    group: "{{ task_runner_user }}"
+    mode: "0700"
+  become: true
+
+# useradd gives system users no subordinate ids. Add one range per file if the
+# user has none, starting above the highest range already allocated (at least
+# 100000), the same start in both files. Existing ranges are never changed.
+- name: Read the subordinate id files
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop: [/etc/subuid, /etc/subgid]
+  register: task_runner_subid_files
+  failed_when: false
+  become: true
+
+- name: Work out the start of a free subordinate id range
+  ansible.builtin.set_fact:
+    task_runner_subid_start: >-
+      {%- set ns = namespace(top=100000) -%}
+      {%- for r in task_runner_subid_files.results -%}
+        {%- for l in ((r.content | default('')) | b64decode).splitlines() -%}
+          {%- set f = l.split(':') -%}
+          {%- if f | length == 3 and f[1] is match('^[0-9]+$') and f[2] is match('^[0-9]+$') -%}
+            {%- set ns.top = [ns.top, (f[1] | int) + (f[2] | int)] | max -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.top }}
+
+- name: Add a subordinate id range for the service user
+  ansible.builtin.lineinfile:
+    path: "{{ item.item }}"
+    line: "{{ task_runner_user }}:{{ task_runner_subid_start }}:{{ task_runner_subid_count }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ task_runner_subid_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: >-
+    ((item.content | default('')) | b64decode).splitlines()
+    | select('match', '^' ~ (task_runner_user | regex_escape) ~ ':') | list | length == 0
+  become: true
+
+# The binary is built on the control host, once per architecture in the play,
+# without cgo and without VCS stamping (so an unrelated commit does not change
+# the bytes and restart the service).
+- name: Create a build directory on the control host
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: task-runner-build.
+  delegate_to: localhost
+  become: false
+  run_once: true
+  check_mode: false
+  register: task_runner_build_dir
+  when: task_runner_binary | length == 0
+
+- name: Build the runner binary on the control host
+  ansible.builtin.command:
+    argv:
+      - go
+      - build
+      - -trimpath
+      - -buildvcs=false
+      - -ldflags=-s -w
+      - -o
+      - "{{ task_runner_build_dir.path }}/task-runner-linux-{{ item }}"
+      - ./cmd/task-runner
+    chdir: "{{ task_runner_src }}"
+  environment:
+    CGO_ENABLED: "0"
+    GOOS: linux
+    GOARCH: "{{ item }}"
+  loop: >-
+    {{ ansible_play_hosts | map('extract', hostvars) | map(attribute='task_runner_goarch')
+       | select('defined') | unique | sort | list }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  check_mode: false
+  changed_when: false
+  when: task_runner_binary | length == 0
+
+- name: Install the runner binary
+  ansible.builtin.copy:
+    src: >-
+      {{ task_runner_binary if task_runner_binary | length > 0
+         else task_runner_build_dir.path ~ '/task-runner-linux-' ~ task_runner_goarch }}
+    dest: "{{ task_runner_bin }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  notify: restart task-runner
+
+- name: Remove the build directory on the control host
+  ansible.builtin.file:
+    path: "{{ task_runner_build_dir.path }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+  check_mode: false
+  when: task_runner_binary | length == 0
+
+- name: Install the unit
+  ansible.builtin.template:
+    src: task-runner.service.j2
+    dest: /etc/systemd/system/task-runner.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify:
+    - task-runner daemon-reload
+    - restart task-runner

@@ -152,3 +152,29 @@ func TestEncErrorsHaveNoKeyMaterial(t *testing.T) {
 		t.Fatalf("error: %v", err)
 	}
 }
+
+// Every refusal of a stored value matches ErrUnreadable, so callers can tell it
+// from a backend failure without reading the text; a missing key does not.
+func TestEncRefusalsMatchErrUnreadable(t *testing.T) {
+	raw := new(mem.Store)
+	key := newB64Key(t)
+	s, _ := NewEncrypted(raw, key, testKey)
+	s.WriteState("ok", []byte("secret"))
+	other, _ := NewEncrypted(raw, newB64Key(t), testKey)
+	off, _ := NewEncrypted(raw, "", testKey)
+	raw.WriteState("plain", []byte("plain"))
+	raw.WriteState("short", []byte("ncenc1:short"))
+	for name, read := range map[string]func() error{
+		"wrong key":              func() error { _, err := other.ReadState("ok"); return err },
+		"plaintext":              func() error { _, err := s.ReadState("plain"); return err },
+		"truncated":              func() error { _, err := s.ReadState("short"); return err },
+		"ciphertext without key": func() error { _, err := off.ReadState("ok"); return err },
+	} {
+		if err := read(); !errors.Is(err, ErrUnreadable) {
+			t.Fatalf("%s: %v does not match ErrUnreadable", name, err)
+		}
+	}
+	if _, err := s.ReadState("missing"); errors.Is(err, ErrUnreadable) || !errors.Is(err, ipn.ErrStateNotExist) {
+		t.Fatalf("missing: %v", err)
+	}
+}

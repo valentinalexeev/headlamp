@@ -1,0 +1,35 @@
+# HELP task_alert_sent_total Notifications and pings attempted, by kind and outcome.
+# TYPE task_alert_sent_total counter
+task_alert_sent_total{task="job",kind="alert",ok="true"} 1
+task_alert_sent_total{task="job",kind="ping",ok="false"} 2
+task_alert_sent_total{task="scheduler",kind="ping",ok="true"} 1
+# HELP task_failure_streak Sequences in a row that ended in failure.
+# TYPE task_failure_streak gauge
+task_failure_streak{task="idle"} 0
+task_failure_streak{task="job"} 0
+task_failure_streak{task="never"} 3
+task_failure_streak{task="retrying"} 1
+# HELP task_last_success_timestamp_seconds Unix time of the last successful attempt.
+# TYPE task_last_success_timestamp_seconds gauge
+task_last_success_timestamp_seconds{task="job"} 1893499200
+task_last_success_timestamp_seconds{task="retrying"} 1893495600
+# HELP task_next_run_timestamp_seconds Unix time the next attempt is due.
+# TYPE task_next_run_timestamp_seconds gauge
+task_next_run_timestamp_seconds{task="job"} 1893502800
+task_next_run_timestamp_seconds{task="never"} 1893499260.5
+task_next_run_timestamp_seconds{task="retrying"} 1893499500
+# HELP task_notify_failures_total Notifications and pings that failed.
+# TYPE task_notify_failures_total counter
+task_notify_failures_total{task="job"} 2
+# HELP task_run_duration_seconds Duration of finished attempts.
+# TYPE task_run_duration_seconds summary
+task_run_duration_seconds_sum{task="job"} 4
+task_run_duration_seconds_count{task="job"} 3
+task_run_duration_seconds_sum{task="we\"ird\\task\nx"} 30.25
+task_run_duration_seconds_count{task="we\"ird\\task\nx"} 1
+# HELP task_runs_total Finished attempts, by task, node and state.
+# TYPE task_runs_total counter
+task_runs_total{task="job",node="n1",state="failed"} 1
+task_runs_total{task="job",node="n1",state="succeeded"} 1
+task_runs_total{task="job",node="n2",state="succeeded"} 1
+task_runs_total{task="we\"ird\\task\nx",node="n1",state="lost"} 1

@@ -68,11 +68,11 @@ type Public struct {
 }
 
 // NewPublic returns the public handler over store.
-func NewPublic(store *Store, cfg IngressConfig) *Public { return newPublic(store, cfg) }
+func NewPublic(store Backend, cfg IngressConfig) *Public { return newPublic(store, cfg) }
 
 // NewPublicFor returns the public handler over store whose profiles list the ingresses the
 // registry has approved at the time of the request.
-func NewPublicFor(store *Store, reg *Registry) *Public {
+func NewPublicFor(store Backend, reg *Registry) *Public {
 	p := newPublic(store, reg.LinkConfig())
 	p.profileCfg = func(ctx context.Context) IngressConfig {
 		// the readings the page and the reconcile loop keep fresh: a profile request never waits for

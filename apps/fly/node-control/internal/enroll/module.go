@@ -16,16 +16,17 @@ import (
 )
 
 // Module is the enrolment module: the operator API on the admin mux and the public handler on the
-// public mux, active only when ENROLL_DB is set. Errors never carry secret values.
+// public mux, active only when ENROLL_DB (SQLite) or ENROLL_REDIS=1 (Redis, no volume) is set. Errors never carry secret values.
 type Module struct {
 	env   core.Env
 	src   headscale.NodeSource
 	now   func() time.Time
-	store *Store
+	store Backend
 	admin *Admin
 	reg   *Registry
 
-	loopDone chan struct{} // closed when the reconcile loop has returned; nil if never started
+	loopDone     chan struct{} // closed when the reconcile loop has returned; nil if never started
+	activityDone chan struct{} // the same for the activity loop
 }
 
 // Option configures the module.
@@ -62,8 +63,13 @@ func hasKey(data []byte, key string) bool {
 }
 
 func (m *Module) Register(r *core.Routes) error {
-	if m.env.Getenv("ENROLL_DB") == "" {
+	useRedis := RedisEnabled(m.env)
+	if !core.EnrolmentEnabled(m.env) {
 		return nil
+	}
+	why := "ENROLL_DB set"
+	if useRedis {
+		why = "ENROLL_REDIS set"
 	}
 	// The configuration is read first only to learn its shape: the single-host file still needs
 	// AGENT_URL and AGENT_TOKEN, the list shape names its tokens per ingress.
@@ -93,10 +99,10 @@ func (m *Module) Register(r *core.Routes) error {
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("enrolment enabled (ENROLL_DB set) but missing: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("enrolment enabled (%s) but missing: %s", why, strings.Join(missing, ", "))
 	}
 	if r.Public == nil {
-		return errors.New("enrolment enabled (ENROLL_DB set) but the core has no public mux")
+		return fmt.Errorf("enrolment enabled (%s) but the core has no public mux", why)
 	}
 	if readErr != nil {
 		return fmt.Errorf("ENROLL_CONFIG: cannot read the file: %w", readErr)
@@ -126,9 +132,23 @@ func (m *Module) Register(r *core.Routes) error {
 	if err != nil {
 		return err
 	}
-	store, err := OpenStore(m.env.Getenv("ENROLL_DB"), []byte(key), nil)
-	if err != nil {
-		return err
+	var store Backend
+	if useRedis {
+		rs, err := OpenRedisStore(m.env, []byte(key), nil)
+		if err != nil {
+			return err
+		}
+		if err := ImportOnStart(m.env, rs, []byte(key)); err != nil {
+			rs.Close()
+			return err
+		}
+		store = rs
+	} else {
+		ss, err := OpenStore(m.env.Getenv("ENROLL_DB"), []byte(key), nil)
+		if err != nil {
+			return err
+		}
+		store = ss
 	}
 	reg.SetStore(store)
 	m.store, m.reg = store, reg
@@ -144,6 +164,11 @@ func (m *Module) Start(ctx context.Context) error {
 	if m.store == nil {
 		return nil
 	}
+	m.activityDone = make(chan struct{})
+	go func() {
+		defer close(m.activityDone)
+		ActivityLoop(ctx, m.admin)
+	}()
 	m.loopDone = make(chan struct{})
 	go func() {
 		defer close(m.loopDone)
@@ -160,16 +185,18 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.store == nil {
 		return nil
 	}
-	if m.loopDone != nil {
-		select {
-		case <-m.loopDone:
-		case <-ctx.Done():
+	for _, done := range []chan struct{}{m.loopDone, m.activityDone} {
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+			}
 		}
 	}
 	return m.store.Close()
 }
 
-// Nav puts the enrolment page in the top bar, but only when the module registered (ENROLL_DB set).
+// Nav puts the enrolment page in the top bar, but only when the module registered (enrolment enabled).
 func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {
 		return nil

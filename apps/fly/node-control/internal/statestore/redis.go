@@ -80,10 +80,22 @@ func secretsFor(rawURL, password string) []string {
 // NewRedis connects to rawURL (redis:// only; it does not select a database) and uses hash key. It pings once
 // and returns an error when Redis is unreachable. No error text contains rawURL.
 func NewRedis(rawURL, key string) (*Redis, error) {
+	rdb, secrets, err := OpenClient(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	return &Redis{rdb: rdb, key: key, secrets: secrets}, nil
+}
+
+// OpenClient connects to rawURL with the shared-Redis options (small pool, RESP2, no CLIENT SETINFO, no
+// maintenance handshake) and pings once. The second result lists the strings (the URL, the password and its
+// escaped forms) that must be removed from any error text before it is logged; use scrub.Scrub. No error text
+// contains rawURL.
+func OpenClient(rawURL string) (*redis.Client, []string, error) {
 	opt, err := redis.ParseURL(rawURL)
 	if err != nil {
 		// ParseURL errors may echo the URL, so none of it is passed on.
-		return nil, errors.New("invalid REDIS_URL")
+		return nil, nil, errors.New("invalid REDIS_URL")
 	}
 	opt.DialTimeout = opTimeout
 	opt.ReadTimeout = opTimeout
@@ -94,15 +106,15 @@ func NewRedis(rawURL, key string) (*Redis, error) {
 	opt.MaintNotificationsConfig = &maintnotifications.Config{Mode: maintnotifications.ModeDisabled}
 	secrets := secretsFor(rawURL, opt.Password)
 	installLogger(secrets)
-	r := &Redis{rdb: redis.NewClient(opt), key: key, secrets: secrets}
+	rdb := redis.NewClient(opt)
 
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	defer cancel()
-	if err := r.rdb.Ping(ctx).Err(); err != nil {
-		r.rdb.Close()
-		return nil, r.wrap("redis unreachable", err)
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		rdb.Close()
+		return nil, nil, errors.New("redis unreachable: " + scrub.Scrub(err.Error(), secrets))
 	}
-	return r, nil
+	return rdb, secrets, nil
 }
 
 // wrap turns a go-redis error into one that is safe to log.

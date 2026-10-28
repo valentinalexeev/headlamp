@@ -338,7 +338,7 @@ func TestEndToEndThroughCore(t *testing.T) {
 	// shutdown stops the loop; core.Run then calls Stop, which closes the store
 	stop()
 	m := mod.(*Module)
-	waitFor(t, "store closed", func() bool { return m.store.db.Ping() != nil })
+	waitFor(t, "store closed", func() bool { return m.store.(*Store).db.Ping() != nil })
 	settled := agent.putCount()
 	time.Sleep(100 * time.Millisecond)
 	if agent.putCount() != settled {
@@ -367,7 +367,7 @@ func TestStartReturnsPromptlyAndLoopStopsWithContext(t *testing.T) {
 	mod := m.(*Module)
 	<-mod.loopDone // the loop ends with ctx
 	// ctx cancellation alone must not close the store: in-flight requests may still use it
-	if err := mod.store.db.Ping(); err != nil {
+	if err := mod.store.(*Store).db.Ping(); err != nil {
 		t.Fatalf("store closed on ctx cancel: %v", err)
 	}
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -375,7 +375,7 @@ func TestStartReturnsPromptlyAndLoopStopsWithContext(t *testing.T) {
 	if err := mod.Stop(stopCtx); err != nil {
 		t.Fatal(err)
 	}
-	if mod.store.db.Ping() == nil {
+	if mod.store.(*Store).db.Ping() == nil {
 		t.Fatal("store still open after Stop")
 	}
 	if err := mod.Stop(stopCtx); err != nil {
@@ -396,7 +396,7 @@ func TestStopWithoutStartAndWhenDisabled(t *testing.T) {
 	if err := m.Stop(ctx); err != nil { // registered but never started
 		t.Fatal(err)
 	}
-	if m.store.db.Ping() == nil {
+	if m.store.(*Store).db.Ping() == nil {
 		t.Fatal("store still open")
 	}
 }

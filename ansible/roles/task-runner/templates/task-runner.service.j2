@@ -1,0 +1,79 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Task runner (one rootless podman container per run, API on the tailnet address)
+After=network-online.target tailscaled.service task-runner-guard.service
+Wants=network-online.target tailscaled.service
+# Fail closed: no runner without the nftables guard for its user.
+Requires=task-runner-guard.service
+
+[Service]
+Type=simple
+User={{ task_runner_user }}
+Group={{ task_runner_user }}
+EnvironmentFile={{ task_runner_env_file }}
+# HOME holds podman's storage; XDG_RUNTIME_DIR its run root. Both must match
+# what the role uses for its own podman calls (build, load, image checks).
+Environment=HOME={{ task_runner_state_dir }}
+Environment=XDG_RUNTIME_DIR={{ task_runner_runtime_dir }}
+WorkingDirectory={{ task_runner_state_dir }}
+# Wait up to 60 s for the tailnet address (tailscaled may still be coming up);
+# the runner binds to it only, never 0.0.0.0. ("$$" is a literal "$" for the
+# shell: systemd would otherwise expand $i itself.)
+# Fail closed if the guard does not match the CURRENT uid of the user (for
+# example after the user was recreated): the rule holds a numeric uid. Runs as
+# root ("+") to read the rule set; accepts the uid or the name it resolves to.
+ExecStartPre=+/bin/sh -c 'uid=$$(id -u {{ task_runner_user }}) || exit 1; {{ task_runner_nft_bin }} -n list table inet task_runner_guard 2>/dev/null | grep -Eq "skuid ($${uid}|[[:punct:]]?{{ task_runner_user }}[[:punct:]]?)( |$$)" || { echo "task-runner: table inet task_runner_guard has no rule for uid $${uid}; rerun the role (--tags guard)" >&2; exit 1; }'
+ExecStartPre=/bin/sh -c 'i=0; while [ "$$i" -lt 60 ]; do ip -o addr show | grep -qF " {{ task_runner_listen_addr }}/" && exit 0; i=$$((i + 1)); sleep 1; done; echo "task-runner: {{ task_runner_listen_addr }} not configured after 60 s" >&2; exit 1'
+ExecStart={{ task_runner_bin }}
+Restart=on-failure
+RestartSec=5
+# The runner cancels the active run and shuts down within 30 s on SIGTERM.
+# mixed: SIGTERM to the runner only (it kills its container by name), then
+# SIGKILL to whatever is left in the cgroup (conmon, pasta).
+KillMode=mixed
+TimeoutStopSec=45
+# No UMask=: the runner sets explicit modes on its run dirs (0755/0644, a 0777
+# result dir inside a 0700 parent) so the container can read and write them.
+
+# Rootless podman under cgroupfs: the service user manages the cgroup subtree
+# below this unit (container memory and pids limits). DelegateSubgroup= (systemd
+# >= 254) moves the runner into a "runner" sub-cgroup: with the runner process in
+# the unit cgroup itself, cgroup v2 refuses to hand controllers down, and the
+# containers' --memory/--pids-limit were silently not applied (verified on a host
+# with a transient unit: 256m/100 inside the container only with the sub-cgroup).
+Delegate=yes
+DelegateSubgroup=runner
+MemoryMax={{ task_runner_memory_max }}
+TasksMax={{ task_runner_tasks_max }}
+
+RuntimeDirectory={{ task_runner_runtime_dir | regex_replace('^/run/', '') }}
+RuntimeDirectoryMode=0700
+# Keep podman's run root across restarts (and the role's calls while stopped).
+RuntimeDirectoryPreserve=yes
+ReadWritePaths={{ task_runner_state_dir }} {{ task_runner_runtime_dir }}
+
+# NoNewPrivileges= is deliberately NOT set: rootless podman runs the setuid
+# newuidmap/newgidmap to map the subordinate id ranges, and no_new_privs would
+# make that fail. RestrictSUIDSGID= is not set either (it would refuse setuid
+# files in image layers). The container itself runs with
+# --security-opt no-new-privileges and --cap-drop=ALL (set by the runner).
+# ProtectControlGroups=no: cgroupfs writes below this unit's cgroup.
+#
+# WARNING: under User=, every seccomp-based option silently implies
+# NoNewPrivileges=yes and would recreate the newuidmap failure: never add
+# SystemCallFilter=, RestrictNamespaces=, PrivateDevices=, ProtectKernelModules=,
+# ProtectKernelLogs=, ProtectClock=, RestrictSUIDSGID=, LockPersonality= or
+# MemoryDenyWriteExecute= without a verified run (and check
+# `systemctl show task-runner -p NoNewPrivileges` says "no").
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# Off by default (task_runner_protect_kernel_tunables): its read-only mounts
+# over /proc/sys and friends become locked mounts in the container's user
+# namespace, and the kernel then refuses the fresh /proc mount of every run.
+ProtectKernelTunables={{ 'yes' if task_runner_protect_kernel_tunables | bool else 'no' }}
+ProtectControlGroups=no
+# No access log: the runner logs run ids, states and durations only.
+
+[Install]
+WantedBy=multi-user.target

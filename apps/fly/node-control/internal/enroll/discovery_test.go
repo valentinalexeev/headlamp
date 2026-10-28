@@ -726,7 +726,7 @@ func TestNewRegistryTokenErrorsNameTheVariableOnly(t *testing.T) {
 	}}
 	env := map[string]string{"AGENT_TOKEN": "first-token-value", "AGENT_TOKEN_INGRESS_2": "wrong-variable-value"}
 	_, err := NewRegistry(RegistryConfig{Cfg: cfg, Getenv: func(k string) string { return env[k] }})
-	want := "ingress ingress-2: token variable AGENT_TOKEN_TWO is not set"
+	want := "bridge ingress-2: token variable AGENT_TOKEN_TWO is not set"
 	if err == nil || err.Error() != want {
 		t.Fatalf("%v", err)
 	}
@@ -739,7 +739,7 @@ func TestNewRegistryTokenErrorsNameTheVariableOnly(t *testing.T) {
 		cfg.Ingresses[1].TokenEnv = ""
 		delete(env, "AGENT_TOKEN_INGRESS_2")
 		_, err := NewRegistry(RegistryConfig{Cfg: cfg, Getenv: func(k string) string { return env[k] }})
-		if err == nil || err.Error() != "ingress ingress-2: token variable AGENT_TOKEN_INGRESS_2 is not set" {
+		if err == nil || err.Error() != "bridge ingress-2: token variable AGENT_TOKEN_INGRESS_2 is not set" {
 			t.Fatalf("%v", err)
 		}
 	})
@@ -923,7 +923,7 @@ func TestFirstIngressTokenErrorNamesTheFallback(t *testing.T) {
 	cfg := IngressConfig{LinkHost: "h.example.com", Ingresses: []Ingress{
 		{Name: "ingress-1", Host: "h.example.com", PublicKey: "P", ShortID: "a1", Port: 443, UUIDs: uuidsBase, AgentURL: "http://a.example.com"}}}
 	_, err := NewRegistry(RegistryConfig{Cfg: cfg, Getenv: func(string) string { return "" }})
-	want := "ingress ingress-1: token variable AGENT_TOKEN_INGRESS_1 is not set (nor AGENT_TOKEN)"
+	want := "bridge ingress-1: token variable AGENT_TOKEN_INGRESS_1 is not set (nor AGENT_TOKEN)"
 	if err == nil || err.Error() != want {
 		t.Fatalf("%v", err)
 	}

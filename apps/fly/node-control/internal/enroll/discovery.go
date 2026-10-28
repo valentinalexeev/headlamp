@@ -192,7 +192,7 @@ func NewRegistry(rc RegistryConfig) (*Registry, error) {
 			case r.src != nil:
 				agent = NewAgentFunc(r.resolver(ing.Name), token, r.hc)
 			default:
-				return nil, fmt.Errorf("ingress %s: no agent_url and no headscale source to find its agent", ing.Name)
+				return nil, fmt.Errorf("bridge %s: no agent_url and no headscale source to find its agent", ing.Name)
 			}
 		}
 		r.configured = append(r.configured, SyncTarget{Name: ing.Name, Agent: agent, State: NewSyncState(r.now), Ingress: ing})
@@ -226,13 +226,13 @@ func (r *Registry) configuredToken(i int, ing Ingress) (string, error) {
 		if v := r.getenv("AGENT_TOKEN"); v != "" {
 			return v, nil
 		}
-		return "", fmt.Errorf("ingress %s: token variable AGENT_TOKEN is not set", ing.Name)
+		return "", fmt.Errorf("bridge %s: token variable AGENT_TOKEN is not set", ing.Name)
 	}
 	if ing.TokenEnv != "" {
 		if v := r.getenv(ing.TokenEnv); v != "" {
 			return v, nil
 		}
-		return "", fmt.Errorf("ingress %s: token variable %s is not set", ing.Name, ing.TokenEnv)
+		return "", fmt.Errorf("bridge %s: token variable %s is not set", ing.Name, ing.TokenEnv)
 	}
 	if v := r.getenv(tokenVar(ing.Name)); v != "" {
 		return v, nil
@@ -241,9 +241,9 @@ func (r *Registry) configuredToken(i int, ing Ingress) (string, error) {
 		if v := r.getenv("AGENT_TOKEN"); v != "" {
 			return v, nil
 		}
-		return "", fmt.Errorf("ingress %s: token variable %s is not set (nor AGENT_TOKEN)", ing.Name, tokenVar(ing.Name))
+		return "", fmt.Errorf("bridge %s: token variable %s is not set (nor AGENT_TOKEN)", ing.Name, tokenVar(ing.Name))
 	}
-	return "", fmt.Errorf("ingress %s: token variable %s is not set", ing.Name, tokenVar(ing.Name))
+	return "", fmt.Errorf("bridge %s: token variable %s is not set", ing.Name, tokenVar(ing.Name))
 }
 
 // resolver finds the agent of a configured ingress at every call: the tailnet IPv4 of the tagged
@@ -274,7 +274,7 @@ func (r *Registry) resolver(name string) func(ctx context.Context) (string, erro
 		// Two nodes answering to one name is ambiguous: the agent's token and credentials must not
 		// go to a guess.
 		if len(found) != 1 {
-			return headscale.Node{}, errors.New("no unique administrator-named tagged node for this ingress")
+			return headscale.Node{}, errors.New("no unique administrator-named tagged node for this bridge")
 		}
 		return found[0], nil
 	})
@@ -534,7 +534,7 @@ func (r *Registry) refresh(ctx context.Context, force string) {
 		}
 		token := r.getenv(tokenVar(name))
 		if token == "" {
-			r.probes[name] = &probe{at: now, nodeID: n.ID, node: n, state: stNoToken, detail: "no token variable for this ingress"}
+			r.probes[name] = &probe{at: now, nodeID: n.ID, node: n, state: stNoToken, detail: "no token variable for this bridge"}
 			continue
 		}
 		if p := r.probes[name]; p != nil && p.nodeID == n.ID && p.state != stNoToken &&
@@ -805,7 +805,7 @@ func (r *Registry) buildLocked() Current {
 		}
 		host := infos[k].ing.Host
 		if hosts[host] {
-			views[k].Approval, views[k].Detail = stInvalid, "the host is already used by another ingress"
+			views[k].Approval, views[k].Detail = stInvalid, "the host is already used by another bridge"
 			return
 		}
 		hosts[host] = true
@@ -923,28 +923,28 @@ func (r *Registry) Approve(ctx context.Context, name, fingerprint string, nodeID
 	off, st := r.discoveryOff != "", r.store
 	r.mu.Unlock()
 	if off || st == nil {
-		return &ApprovalError{http.StatusNotFound, "unknown ingress"}
+		return &ApprovalError{http.StatusNotFound, "unknown bridge"}
 	}
 	r.refresh(ctx, name) // network, outside the lock
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	p := r.probes[name]
 	if p == nil {
-		return &ApprovalError{http.StatusNotFound, "unknown ingress"}
+		return &ApprovalError{http.StatusNotFound, "unknown bridge"}
 	}
 	if p.info == nil || p.state != "" {
-		return &ApprovalError{http.StatusConflict, "the ingress parameters cannot be read now"}
+		return &ApprovalError{http.StatusConflict, "the bridge parameters cannot be read now"}
 	}
 	for _, v := range r.buildLocked().Views {
 		if v.Name == name && v.Approval == stInvalid {
-			return &ApprovalError{http.StatusConflict, "the ingress parameters are not valid: " + v.Detail}
+			return &ApprovalError{http.StatusConflict, "the bridge parameters are not valid: " + v.Detail}
 		}
 	}
 	if nodeID == 0 || p.nodeID != nodeID {
-		return &ApprovalError{http.StatusConflict, "the node that publishes this ingress is not the one that was reviewed; reload and review it"}
+		return &ApprovalError{http.StatusConflict, "the node that publishes this bridge is not the one that was reviewed; reload and review it"}
 	}
 	if p.info.fp != fingerprint {
-		return &ApprovalError{http.StatusConflict, "the fingerprint does not match the parameters the ingress publishes now; reload and review them"}
+		return &ApprovalError{http.StatusConflict, "the fingerprint does not match the parameters the bridge publishes now; reload and review them"}
 	}
 	if p.node.MachineKey == "" {
 		return &ApprovalError{http.StatusConflict, "the node list does not report the machine key of this node, so it cannot be pinned"}
@@ -958,10 +958,10 @@ func (r *Registry) Unapprove(ctx context.Context, name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.isConfigured(name) {
-		return &ApprovalError{http.StatusConflict, "a configured ingress is not approved here; remove it from ENROLL_CONFIG"}
+		return &ApprovalError{http.StatusConflict, "a configured bridge is not approved here; remove it from ENROLL_CONFIG"}
 	}
 	if r.discoveryOff != "" || r.store == nil {
-		return &ApprovalError{http.StatusNotFound, "unknown ingress"}
+		return &ApprovalError{http.StatusNotFound, "unknown bridge"}
 	}
 	approvals, err := r.store.Approvals()
 	if err != nil {
@@ -969,7 +969,7 @@ func (r *Registry) Unapprove(ctx context.Context, name string) error {
 	}
 	_, has := approvals[name]
 	if _, known := r.probes[name]; !has && !known {
-		return &ApprovalError{http.StatusNotFound, "unknown ingress"}
+		return &ApprovalError{http.StatusNotFound, "unknown bridge"}
 	}
 	return r.store.Unapprove(name)
 }

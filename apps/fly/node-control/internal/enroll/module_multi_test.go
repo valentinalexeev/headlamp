@@ -275,7 +275,7 @@ func TestMissingTokenVariableFailsStartup(t *testing.T) {
 	os.WriteFile(f.env["ENROLL_CONFIG"], []byte(f.cfg), 0o600)
 	env := core.MapEnv(f.env)
 	err := New(env, WithNodeSource(f.nodes)).Register(routesFor(env))
-	if err == nil || err.Error() != "ingress ingress-2: token variable AGENT_TOKEN_TWO is not set" {
+	if err == nil || err.Error() != "bridge ingress-2: token variable AGENT_TOKEN_TWO is not set" {
 		t.Fatalf("%v", err)
 	}
 	for _, secret := range []string{token1, token2, moduleKey} {

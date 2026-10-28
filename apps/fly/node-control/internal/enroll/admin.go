@@ -563,7 +563,7 @@ func (a *Admin) listIngresses(w http.ResponseWriter, r *http.Request) {
 func ingressName(w http.ResponseWriter, r *http.Request) (string, bool) {
 	name := r.PathValue("name")
 	if !ingressNameRe.MatchString(name) {
-		detail(w, http.StatusNotFound, "unknown ingress")
+		detail(w, http.StatusNotFound, "unknown bridge")
 		return "", false
 	}
 	return name, true

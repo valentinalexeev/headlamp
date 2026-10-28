@@ -199,7 +199,7 @@ func TestUUIDForUnsetErrors(t *testing.T) {
 		in := c.Ingresses[0]
 		in.UUIDs = ""
 		_, err := c.UUIDFor(in, "auto", "11111111-1111-4111-8111-111111111111")
-		if err == nil || !strings.Contains(err.Error(), "uuids is not set for ingress "+in.Name) {
+		if err == nil || !strings.Contains(err.Error(), "uuids is not set for bridge "+in.Name) {
 			t.Errorf("err = %v", err)
 		}
 	}

@@ -596,7 +596,7 @@ func TestPage(t *testing.T) {
 		t.Fatal(ct)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"<form", `id="syncbanner"`, "ingress host out of sync since"} {
+	for _, want := range []string{"<form", `id="syncbanner"`, "bridge host out of sync since"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("page lacks %q", want)
 		}

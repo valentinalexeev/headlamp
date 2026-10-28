@@ -101,10 +101,10 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 		return IngressConfig{}, errors.New("ENROLL_CONFIG: ingresses must be an array of objects")
 	}
 	if len(items) == 0 {
-		return IngressConfig{}, errors.New("ENROLL_CONFIG: at least one ingress is required")
+		return IngressConfig{}, errors.New("ENROLL_CONFIG: at least one bridge is required")
 	}
 	if len(items) > maxIngresses {
-		return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: at most %d ingresses are supported", maxIngresses)
+		return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: at most %d bridges are supported", maxIngresses)
 	}
 	names := map[string]bool{}
 	hosts := map[string]bool{}
@@ -114,10 +114,10 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 			return IngressConfig{}, err
 		}
 		if names[in.Name] {
-			return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: ingress %s: duplicate name", in.Name)
+			return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: bridge %s: duplicate name", in.Name)
 		}
 		if hosts[in.Host] {
-			return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: ingress %s: duplicate host", in.Name)
+			return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: bridge %s: duplicate host", in.Name)
 		}
 		names[in.Name], hosts[in.Host] = true, true
 		cfg.Ingresses = append(cfg.Ingresses, in)
@@ -127,7 +127,7 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 		in := &cfg.Ingresses[i]
 		if in.UUIDs == uuidsBase {
 			if firstBase != "" {
-				return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: ingress %s: uuids \"base\" is already used by ingress %s (at most one ingress may use the stored credentials)", in.Name, firstBase)
+				return IngressConfig{}, fmt.Errorf("ENROLL_CONFIG: bridge %s: uuids \"base\" is already used by bridge %s (at most one bridge may use the stored credentials)", in.Name, firstBase)
 			}
 			firstBase = in.Name
 		}
@@ -141,7 +141,7 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 	} else if len(cfg.Ingresses) == 1 {
 		cfg.LinkHost = cfg.Ingresses[0].Host
 	} else {
-		return IngressConfig{}, errors.New("ENROLL_CONFIG: link_host is required with several ingresses")
+		return IngressConfig{}, errors.New("ENROLL_CONFIG: link_host is required with several bridges")
 	}
 	return cfg, nil
 }
@@ -159,7 +159,7 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 		return Ingress{}, err
 	}
 	fail := func(format string, a ...any) (Ingress, error) {
-		return Ingress{}, fmt.Errorf("ENROLL_CONFIG: ingress %s: %s", name, fmt.Sprintf(format, a...))
+		return Ingress{}, fmt.Errorf("ENROLL_CONFIG: bridge %s: %s", name, fmt.Sprintf(format, a...))
 	}
 	in := Ingress{Name: name, Port: 443}
 	host, _ := rawString(raw["host"])
@@ -241,7 +241,7 @@ func rejectUnknownKeys(raw map[string]json.RawMessage, ingress string, allowed [
 	if ingress == "" {
 		return fmt.Errorf("ENROLL_CONFIG: unknown key %q", k)
 	}
-	return fmt.Errorf("ENROLL_CONFIG: ingress %s: unknown key %q", ingress, k)
+	return fmt.Errorf("ENROLL_CONFIG: bridge %s: unknown key %q", ingress, k)
 }
 
 // rawString decodes a non-empty JSON string; anything else (absent, null, number, "") is !ok.

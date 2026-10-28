@@ -1,4 +1,4 @@
-# reality-ingress
+# reality-ingress (the bridge front)
 
 xray VLESS+Reality entry point with a Caddy "self-steal" front, for hosts that must be reachable
 from inside a restrictive network (one that blocks or throttles many destinations, so a relay that
@@ -54,29 +54,29 @@ port 53; must include every IPv4 resolver in `/etc/resolv.conf` that lies in a r
 resolver at `100.100.100.100` or a local stub; preflight checks this), `ingress_guard_file`, `nft_bin`, `ingress_agent_unit`
 (`ingress-agent`). See `defaults/main.yml`.
 
-## Several ingresses and discovery
+## Several bridges and discovery
 
-The ingress agent (role `ingress-agent`) serves the public parameters of this ingress at `GET /v1/info`
+The bridge agent (role `ingress-agent`) serves the public parameters of this bridge at `GET /v1/info`
 (`ingress_name`, `ingress_host`, `ingress_listen_port`, `reality_sni`, `reality_short_id` and the new
 `reality_public_key`), so node-control can discover it and the operator approves it there. It publishes public
 values only, never the private key. `reality_public_key` is the public half of the vaulted `reality_private_key`:
 get it with `xray x25519 -i <private key>` and set it as a variable (this role does not run xray for it). Optional:
-empty means `/v1/info` answers `503`. Use a token per ingress host. `ingress_name` is a short label such as
+empty means `/v1/info` answers `503`. Use a token per bridge host. `ingress_name` is a short label such as
 `ingress-1` (used only for discovery).
 
-With several ingresses, every ingress's Caddy front must serve node-control's `link_host` (a certificate for it, and
+With several bridges, every bridge's Caddy front must serve node-control's `link_host` (a certificate for it, and
 the `/e/<token>` and `/sub/<secret>` proxy to `enroll_upstream`, which is node-control's `:8081`), so the shared name
-can point at any of them. Give each ingress host its own agent token (`AGENT_TOKEN_<NAME>` in node-control, one
+can point at any of them. Give each bridge host its own agent token (`AGENT_TOKEN_<NAME>` in node-control, one
 distinct value per host).
 
-Risk to know about: TLS for `link_host` ends on this front, so a compromised ingress that `link_host` points at can
-read one-time link tokens and subscription secrets and serve phones a modified profile. Credentials are per ingress
+Risk to know about: TLS for `link_host` ends on this front, so a compromised bridge that `link_host` points at can
+read one-time link tokens and subscription secrets and serve phones a modified profile. Credentials are per bridge
 (`uuids: derived` in node-control's `enroll.json`), which limits what such a host holds, but not this. node-control
-ships `scripts/profile-canary.sh` to detect altered profiles; see "Compromised ingress" in its README.
+ships `scripts/profile-canary.sh` to detect altered profiles; see "Compromised bridge" in its README.
 
 ## Who owns which config file
 
-The role writes `/etc/xray/config.base.json`. The **ingress agent** (`apps/ingress-agent`) owns
+The role writes `/etc/xray/config.base.json`. The **bridge agent** (`apps/ingress-agent`) owns
 `/etc/xray/config.json`: it renders it from the base (clients into inbound `reality-in`, routing
 rules prepended, `domainStrategy` forced to `IPOnDemand`), validates it and restarts xray. The role
 only seeds `config.json` from the base when it does not exist (`force: false`), so xray can start

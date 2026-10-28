@@ -1,9 +1,11 @@
 # node-control (Go)
 
 A small web UI and JSON API to start, stop and inspect your exit nodes, plus optional user enrolment for a
-REALITY ingress proxy. It is a single static Go binary that embeds a tailscale node (`tsnet`), joins your
+REALITY bridge proxy. It is a single static Go binary that embeds a tailscale node (`tsnet`), joins your
 headscale tailnet and listens **only on its tailnet address**: `:80` admin, and `:8081` public enrolment when
 `ENROLL_DB` is set. Nothing is exposed through Fly's proxy (`fly.toml` has no `[[services]]`).
+
+A bridge is an entry host (xray/Reality front plus bridge agent) for clients on restrictive networks. For compatibility the code, the `ingresses` JSON key, the `tag:ingress` headscale tag, the `AGENT_*` variables, the `/enroll/ingresses` endpoint paths and the Ansible role/service names keep the historical name `ingress`.
 
 It replaces the earlier Python implementation with the same HTTP API and the same enrolment database format.
 Providers: Yandex Compute, OCI Compute, Selectel Cloud, Fly Machines.
@@ -30,10 +32,10 @@ Secrets go in Fly secrets; plain settings in `fly.toml`.
 | `ENROLL_REDIS` | `1` keeps the enrolment data in Redis instead of SQLite: no volume needed (see "Enrolment in Redis"). Needs `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `ENROLL_SECRET_KEY`; `ENROLL_DB` is then not used |
 | `ENROLL_REDIS_KEY` | key prefix of the enrolment data, `<app>:<name>`. Default `<app>:enroll` |
 | `ENROLL_IMPORT_FROM` | with `ENROLL_REDIS=1`: path of an old enrolment SQLite file, copied into Redis once when Redis holds no enrolment data (the file is opened read-only and left untouched) |
-| `ENROLL_CONFIG` | enrolment ingress description, for example `/srv/app/enroll.json` (required with `ENROLL_DB`; shape under "Enrolment") |
+| `ENROLL_CONFIG` | enrolment bridge description, for example `/srv/app/enroll.json` (required with `ENROLL_DB`; shape under "Enrolment") |
 | `ENROLL_SECRET_KEY` | secret, at least 16 bytes; derives subscription secrets (required with `ENROLL_DB`) |
-| `AGENT_URL`, `AGENT_TOKEN` | address (dialled through the tailnet) and bearer token of the first ingress's agent. Required with `ENROLL_DB` only for the old single-host `enroll.json`; in the list shape they are the optional fallback of the FIRST entry (no `agent_url` / no `AGENT_TOKEN_<NAME>`) |
-| `AGENT_TOKEN_<NAME>` | one bearer token per ingress: `<NAME>` is the ingress name upper-cased with `-` as `_` (`ingress-2` reads `AGENT_TOKEN_INGRESS_2`). An entry's `token_env` names another variable instead |
+| `AGENT_URL`, `AGENT_TOKEN` | address (dialled through the tailnet) and bearer token of the first bridge's agent. Required with `ENROLL_DB` only for the old single-host `enroll.json`; in the list shape they are the optional fallback of the FIRST entry (no `agent_url` / no `AGENT_TOKEN_<NAME>`) |
+| `AGENT_TOKEN_<NAME>` | one bearer token per bridge: `<NAME>` is the bridge name upper-cased with `-` as `_` (`ingress-2` reads `AGENT_TOKEN_INGRESS_2`). An entry's `token_env` names another variable instead |
 | `POLICY_DB` | path of the SQLite change history; enables the policy console (`/policy`). On the state volume: `/var/lib/tailscale/policy.db`. Needs `HEADSCALE_LOGIN_SERVER` and `HEADSCALE_API_KEY` |
 | `POLICY_ADMIN_USERS` | comma-separated tailnet logins allowed to use the console (required with `POLICY_DB`); tagged nodes are never allowed |
 | `POLICY_REVERT_SECONDS` | seconds to confirm a change before it is reverted automatically, 30 to 900, default 120 |
@@ -189,13 +191,13 @@ shows up as `error` on that node only.
 
 ## Enrolment (optional)
 
-Setting `ENROLL_DB` turns on user enrolment for a REALITY ingress proxy. The binary then serves a second, public
+Setting `ENROLL_DB` turns on user enrolment for a REALITY bridge proxy. The binary then serves a second, public
 enrolment listener next to the admin app. Both bind to the tailnet address only:
 
 | port | serves | reachable by |
 |---|---|---|
 | 80 | admin app, including the `/enroll` admin pages | operators on the tailnet |
-| 8081 | public enrolment | the ingress proxy only (restrict it in the tailnet ACL) |
+| 8081 | public enrolment | the bridge proxy only (restrict it in the tailnet ACL) |
 
 Environment (secrets via Fly secrets, the rest in `fly.toml`):
 
@@ -205,12 +207,12 @@ Environment (secrets via Fly secrets, the rest in `fly.toml`):
   enrolment database (device names and owners, not the subscription secrets, which are derived from
   `ENROLL_SECRET_KEY`); treat them accordingly. Back it up with `sqlite3 ... .backup` before risky changes.
 - `ENROLL_REDIS=1`: store the enrolment data in Redis instead (next subsection). `ENROLL_DB` is then not used.
-- `ENROLL_CONFIG`: path of a JSON file describing the ingress nodes (shape below). Keep the real file in your
+- `ENROLL_CONFIG`: path of a JSON file describing the bridge nodes (shape below). Keep the real file in your
   private repo and overlay it.
-- `ENROLL_SECRET_KEY`: at least 16 bytes; derives the subscription secrets and the per-ingress credentials. Changing
-  it invalidates both (see "Credentials per ingress").
-- `AGENT_URL`, `AGENT_TOKEN`: address and bearer token of the first ingress's agent (the old single-host setup).
-  Further ingresses use `agent_url` in their entry (or are found through headscale) and `AGENT_TOKEN_<NAME>`.
+- `ENROLL_SECRET_KEY`: at least 16 bytes; derives the subscription secrets and the per-bridge credentials. Changing
+  it invalidates both (see "Credentials per bridge").
+- `AGENT_URL`, `AGENT_TOKEN`: address and bearer token of the first bridge's agent (the old single-host setup).
+  Further bridges use `agent_url` in their entry (or are found through headscale) and `AGENT_TOKEN_<NAME>`.
 
 - `ENROLL_ALLOWED_HOSTS` (optional for the core; required, and must not be a bare `*`, when the policy or tasks module
   is on): comma-separated Host header values the admin app accepts, for example
@@ -220,8 +222,8 @@ Environment (secrets via Fly secrets, the rest in `fly.toml`):
 
 ### `enroll.json`
 
-One or more ingress nodes. Each entry is an ingress host with its own agent; a device gets a credential on every
-active ingress and the phone profile lists them all.
+One or more bridge nodes. Each entry is a bridge host with its own agent; a device gets a credential on every
+active bridge and the phone profile lists them all.
 
 ```json
 {
@@ -237,8 +239,8 @@ active ingress and the phone profile lists them all.
 }
 ```
 
-- Top level: `ingresses` (1 to 8 entries, required), `link_host` (required with more than one ingress; with one it
-  defaults to that ingress's `host`), `profile_name` (label of the imported profile, default `tunnel`). Unknown keys
+- Top level: `ingresses` (1 to 8 entries, required), `link_host` (required with more than one bridge; with one it
+  defaults to that bridge's `host`), `profile_name` (label of the imported profile, default `tunnel`). Unknown keys
   are an error.
 - Per entry: `name` (`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`, unique), `host` (unique DNS name), `public_key`,
   `short_id`, `uuids` (required, see below). Optional: `sni` (default `host`), `port` (default 443),
@@ -248,41 +250,41 @@ active ingress and the phone profile lists them all.
   `sni`, `short_id` and `public_key` must equal the `reality-ingress` role's `reality_sni`, `reality_short_id` and
   the public half of `reality_private_key` (`xray x25519 -i <private>`); `port` must equal its `ingress_listen_port`.
 - `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>`
-  and `/e/<token>`, so the name must resolve to an ingress whose front serves it and proxies to node-control's
+  and `/e/<token>`, so the name must resolve to a bridge whose front serves it and proxies to node-control's
   `:8081`, with a certificate for it. Prerequisite: DNS for `link_host` and a working certificate on whichever
-  ingress it points at, before the first device is enrolled. Every ingress's front must be able to serve it, so
-  moving the name to another ingress is enough to fail over.
+  bridge it points at, before the first device is enrolled. Every bridge's front must be able to serve it, so
+  moving the name to another bridge is enough to fail over.
 - The old single-host file (`host`, `public_key`, `short_id`, `sni`, `port` at the top level, no `ingresses`) still
-  loads as one ingress named `default` with `"uuids": "base"`, and uses `AGENT_TOKEN`. Mixing the two shapes is an
+  loads as one bridge named `default` with `"uuids": "base"`, and uses `AGENT_TOKEN`. Mixing the two shapes is an
   error.
 
-### Credentials per ingress (`uuids`)
+### Credentials per bridge (`uuids`)
 
-`uuids` is required on every ingress in the list shape; there is no default, because a value that depended on
+`uuids` is required on every bridge in the list shape; there is no default, because a value that depended on
 the other entries would change meaning when one is added or removed.
 
-- `"base"`: the device's stored UUIDs are the credential on this ingress. At most one ingress may use it, the one that
+- `"base"`: the device's stored UUIDs are the credential on this bridge. At most one bridge may use it, the one that
   exists today.
-- `"derived"`: the credential is computed per ingress and device mode with HMAC-SHA256 keyed by
-  `ENROLL_SECRET_KEY`, so a credential taken from one ingress is useless on the others, and a compromised ingress
-  cannot compute any other ingress's values.
+- `"derived"`: the credential is computed per bridge and device mode with HMAC-SHA256 keyed by
+  `ENROLL_SECRET_KEY`, so a credential taken from one bridge is useless on the others, and a compromised bridge
+  cannot compute any other bridge's values.
 
-Migration from the single-host file: write the list shape with the existing ingress as an entry with
-`"uuids": "base"` (its name does not matter for `base`, `default` or any other) and every new ingress as `"derived"`.
-Existing phones keep working untouched, because their credential on the old ingress did not change.
+Migration from the single-host file: write the list shape with the existing bridge as an entry with
+`"uuids": "base"` (its name does not matter for `base`, `default` or any other) and every new bridge as `"derived"`.
+Existing phones keep working untouched, because their credential on the old bridge did not change.
 
 Consequences to plan for:
 
-- The ingress NAME is part of a derived credential. Renaming a `derived` ingress rotates its credentials: phones need a
+- The bridge NAME is part of a derived credential. Renaming a `derived` bridge rotates its credentials: phones need a
   new profile. Reordering entries does not change any credential, but the FIRST entry owns the `AGENT_URL` /
   `AGENT_TOKEN` fallback and the link view (key, short id and sni used for import links), so moving another entry to
   the top changes which agent those variables reach.
 - Rotating `ENROLL_SECRET_KEY` invalidates the subscription secrets AND every derived credential. Re-publish
   and re-enrol the profiles. `base` credentials survive.
-- Removing an entry from the file stops syncing to it: that ingress keeps its last credential set, and a later
+- Removing an entry from the file stops syncing to it: that bridge keeps its last credential set, and a later
   revocation does not reach it. Take the host down or wipe its agent first.
 
-### Sync with the ingress host
+### Sync with the bridge host
 
 Every create/revoke/extend pushes the full credential set to the agent; a reconcile loop retries every 5 minutes.
 
@@ -292,7 +294,7 @@ step as the spend (one SQLite transaction; one script on Redis). Last active is 
 already report: node-control looks every 5 minutes (and at each page load) and records the time when a device's total grew
 since the previous look. The counters reset when xray restarts (the agent restarts it whenever the credential set changes),
 so a total that fell but is above zero also counts as activity since the reset. The first look at a device only seeds the
-baseline, and a look at which an ingress did not answer is skipped (its missing counters would read as a reset). The
+baseline, and a look at which a bridge did not answer is skipped (its missing counters would read as a reset). The
 resolution is therefore about 5 minutes, and a device that was active only while node-control was down shows nothing for that
 time. `GET /enroll/devices` rows carry `enrolled_at`, `enrol_count` and `last_active` (unix seconds, 0 = never). SQLite databases
 gain the three columns on open; Redis device records without them read as 0. JSON and SQLite exports and imports carry them.
@@ -309,56 +311,56 @@ sent). The `/enroll` page hides revoked devices by default ("Show revoked device
 offers only a Delete button on a revoked row. On Redis the delete is one guarded script (`DEL` on the device key only when
 it exists and is revoked); links of the device expire on their own TTL and can no longer be spent.
 A failed push is logged (exception class, and the HTTP status for HTTP failures; never payloads or credentials) and
-classified, per ingress: `unreachable` (no connection), `unauthorized` (401/403, `AGENT_TOKEN` mismatch), `rejected` (other
+classified, per bridge: `unreachable` (no connection), `unauthorized` (401/403, `AGENT_TOKEN` mismatch), `rejected` (other
 non-2xx, typically 503: xray refused the generated config), `conflict` (409), `error` (unexpected exception in the
 loop). `GET /enroll/devices` returns `{"devices": [...], "sync": {"pending": bool, "state": "...", "since": <unix>|null}}`;
 create/revoke/extend responses carry `sync_pending` and `sync`. While `pending`, the `/enroll` page shows a banner
-"ingress host out of sync since <time>: <state>": until it clears, revocations and extensions are not in effect on
-the ingress host. A store with no devices at all is never pushed (state `empty`): the agent would refuse an
+"bridge host out of sync since <time>: <state>": until it clears, revocations and extensions are not in effect on
+the bridge host. A store with no devices at all is never pushed (state `empty`): the agent would refuse an
 unconfirmed empty set, and an empty store must never wipe the agent.
 
-Every ingress has its own sync state and gets its own credential set (the derived ones for a `derived` ingress). A
-failure on one ingress never fails the operation: a create, revoke or extend is recorded first and answers success,
-the response and the page show the ingress that is behind (`sync` aggregates, `GET /enroll/ingresses` has one row per
-ingress), and the reconcile loop retries it. Revoking therefore never blocks on an unreachable ingress; until that
-ingress is back, the revoked credential still works there. The banner and the per-ingress rows tell which one.
-Traffic figures are merged per device across the ingresses; when an ingress with a pending sync answered nothing,
+Every bridge has its own sync state and gets its own credential set (the derived ones for a `derived` bridge). A
+failure on one bridge never fails the operation: a create, revoke or extend is recorded first and answers success,
+the response and the page show the bridge that is behind (`sync` aggregates, `GET /enroll/ingresses` has one row per
+bridge), and the reconcile loop retries it. Revoking therefore never blocks on an unreachable bridge; until that
+bridge is back, the revoked credential still works there. The banner and the per-bridge rows tell which one.
+Traffic figures are merged per device across the bridges; when a bridge with a pending sync answered nothing,
 `stats_partial` is `true` and the page marks the column `Traffic*`: the numbers are a lower bound.
 
-### Discovered ingresses, approval and slow agents
+### Discovered bridges, approval and slow agents
 
 Nodes tagged `tag:ingress` in headscale that are not listed in `enroll.json` are discovered (needs `link_host` in the
 file and `HEADSCALE_API_KEY`; the discovery line on the page says why it is off) and shown on the `/enroll` page. Each
 one is asked for its public parameters (`GET /v1/info` on its agent, bearer token `AGENT_TOKEN_<NAME>`, `<NAME>` the
-node name). A discovered ingress is used only after the operator approves it; the approval pins the fingerprint of its
-published parameters AND the headscale node id that published them. Discovered ingresses always use derived
+node name). A discovered bridge is used only after the operator approves it; the approval pins the fingerprint of its
+published parameters AND the headscale node id that published them. Discovered bridges always use derived
 credentials. Approvals live in the enrolment database. States of a row: `configured` (listed in `enroll.json`,
 approved by definition), `pending` (never approved), `approved`, `changed`, `unreachable`, `no token`, `invalid`.
 
-Adding an ingress, step by step:
+Adding a bridge, step by step:
 
 1. Deploy the host with the `reality-ingress` and `ingress-agent` roles; give its agent its own token and set the
-   `INGRESS_*` values so `/v1/info` answers. Its front must serve `link_host` (see "Compromised ingress").
+   `INGRESS_*` values so `/v1/info` answers. Its front must serve `link_host` (see "Compromised bridge").
 2. Register the node in headscale with `tag:ingress` and a name that fits `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`
-   (this becomes the ingress name). Then pin the name with `headscale nodes rename <id> <name>`, using a name that the
+   (this becomes the bridge name). Then pin the name with `headscale nodes rename <id> <name>`, using a name that the
    machine's hostname does not produce (otherwise headscale follows a hostname change). `headscale nodes list` shows
    the id, addresses and names.
 3. Set the token as a secret named `AGENT_TOKEN_<NAME>` and redeploy node-control (or use an `enroll.json` entry
    instead, see above, which needs no approval).
-4. Open `/enroll`. The ingress appears as `pending` with its host, the node id, tailnet address and names, a short
+4. Open `/enroll`. The bridge appears as `pending` with its host, the node id, tailnet address and names, a short
    prefix of its public key and short id, a short prefix of its machine key and a fingerprint. Compare the node id,
-   address, name and machine key with `headscale nodes list`: an impostor holding the name can publish the real ingress's public values, so the node
+   address, name and machine key with `headscale nodes list`: an impostor holding the name can publish the real bridge's public values, so the node
    itself must be the one you registered. The agent does not report a fingerprint: it is node-control's SHA-256 over the canonical JSON of
    `name`, `host`, `port`, `sni`, `public_key` and `short_id`. Compare the host, public key and short id that
    `GET /v1/info` on the agent reports (over a channel you trust) with what the page shows, then press Approve. The
    API is `POST /enroll/ingresses/<name>/approve` with `{"fingerprint": "<shown fingerprint>", "node_id": <shown node id>}`;
-   a fingerprint that no longer matches the parameters the ingress publishes at that moment, or a node id other than
+   a fingerprint that no longer matches the parameters the bridge publishes at that moment, or a node id other than
    the node that publishes them, is refused (409). `POST
    /enroll/ingresses/<name>/unapprove` takes it out again. Both POSTs need `Content-Type: application/json`.
-5. Approval pushes the credential set at once; the row shows its sync state. Phones pick the new ingress up when they
+5. Approval pushes the credential set at once; the row shows its sync state. Phones pick the new bridge up when they
    refresh their subscription; a profile imported by a one-time link needs the person to refresh it.
 
-- A `changed` ingress (its parameters differ, or another node id publishes them) is frozen: it is out of profiles
+- A `changed` bridge (its parameters differ, or another node id publishes them) is frozen: it is out of profiles
   and no longer synced, so it keeps its old credential set until it is approved again or un-approved. A revocation
   does not reach it meanwhile.
 - Names in headscale are NOT proof of who owns a node. The given name starts as the hostname the machine reports
@@ -366,18 +368,18 @@ Adding an ingress, step by step:
   hostname, or the hostname plus `-<digits>`). Only a name set with `headscale nodes rename <id> <name>` to something
   the hostname does not produce stays put. So:
   - **Set an explicit `agent_url` (the node's tailnet IP, for example `http://100.64.0.12:9000`) on every configured
-    ingress.** It removes the headscale lookup altogether: the token goes only to that address, which no machine
+    bridge.** It removes the headscale lookup altogether: the token goes only to that address, which no machine
     can influence. (`AGENT_URL` does the same for the first entry.) The name lookup is only the fallback, and it
     is the weaker setting.
-  - For a CONFIGURED ingress without `agent_url`, the lookup accepts a tagged node only when its given name does not
+  - For a CONFIGURED bridge without `agent_url`, the lookup accepts a tagged node only when its given name does not
     follow its hostname, by headscale's own rule (the given name equals what headscale derives from the hostname,
     optionally followed by `-<number>`; hostnames that sanitise to nothing are refused too). Run
-    `headscale nodes rename <id> <name>` on the ingress node first (the log says so when a lookup is refused). When
+    `headscale nodes rename <id> <name>` on the bridge node first (the log says so when a lookup is refused). When
     several nodes share the name the lookup fails and nothing is sent to any of them.
-  - A DISCOVERED ingress is identified by the node id AND the machine key it was approved on, not by its name: the
+  - A DISCOVERED bridge is identified by the node id AND the machine key it was approved on, not by its name: the
     agent is found by that pair, and no other node is ever sent its token or credentials. The id alone is not enough
     (ids can repeat after a headscale database is rebuilt or restored); the machine key is what a node cannot
-    choose. If the node list does not report machine keys, an ingress cannot be approved. Approvals made before
+    choose. If the node list does not report machine keys, a bridge cannot be approved. Approvals made before
     machine keys were pinned show `changed` ("approve again") until you approve them once more. If that node disappears, the row turns `invalid`
     ("the approved node is not present") and nothing is contacted until you remove the approval; a different node that
     now carries the name can then be reviewed and approved.
@@ -388,29 +390,29 @@ Adding an ingress, step by step:
 - A create, revoke, extend or approval answers after at most 3 seconds. If an agent has not answered by then, its row
   reads `pending` with state `unknown` until the push ends; the change itself is already recorded and never fails.
 
-### Compromised ingress
+### Compromised bridge
 
-Threat model, in short: a root attacker on one ingress host sees client source addresses and traffic per credential,
+Threat model, in short: a root attacker on one bridge host sees client source addresses and traffic per credential,
 its own Reality private key, and the credentials pushed to it, and controls its own xray and agent (a revocation
-does not bind it). Because TLS ends on the ingress's front, then plain HTTP goes over the tailnet to node-control, it
+does not bind it). Because TLS ends on the bridge's front, then plain HTTP goes over the tailnet to node-control, it
 also sees every one-time link token and subscription secret that passes through it. It cannot reach node-control's
-admin port or the other ingresses' agents (restrict both in the tailnet ACL: the agent port only from node-control,
-`:8081` only from the ingress hosts), nor the tailnet through xray.
+admin port or the other bridges' agents (restrict both in the tailnet ACL: the agent port only from node-control,
+`:8081` only from the bridge hosts), nor the tailnet through xray.
 
 What the design limits:
 
-- Credentials are per ingress (`derived`), so what is stolen from an ingress's agent or xray is valid on that
-  ingress only. This holds for an ingress that never served `link_host`. An ingress whose front serves `link_host`
-  terminates TLS for profiles and subscription secrets: it sees complete profiles, with every ingress's credentials
+- Credentials are per bridge (`derived`), so what is stolen from a bridge's agent or xray is valid on that
+  bridge only. This holds for a bridge that never served `link_host`. A bridge whose front serves `link_host`
+  terminates TLS for profiles and subscription secrets: it sees complete profiles, with every bridge's credentials
   (the `base` ones included), and any host tagged `tag:ingress` may fetch `:8081/sub/` with a secret it harvested. If
-  such an ingress is compromised, rotate the subscription secrets and `ENROLL_SECRET_KEY` (this also changes every
-  derived credential) and re-enrol the devices that held `base` credentials. The `base` ingress holds the stored
+  such a bridge is compromised, rotate the subscription secrets and `ENROLL_SECRET_KEY` (this also changes every
+  derived credential) and re-enrol the devices that held `base` credentials. The `base` bridge holds the stored
   credentials; keep it the one you trust most or migrate it to a derived entry in time.
-- A discovered ingress is never used before approval, and the approval pins the fingerprint and the node id. A
+- A discovered bridge is never used before approval, and the approval pins the fingerprint and the node id. A
   changed host is frozen out of profiles and sync until approved again.
-- Each ingress is asked with its own token and is pushed only its own credential set (see the condition above for an ingress that serves `link_host`).
+- Each bridge is asked with its own token and is pushed only its own credential set (see the condition above for a bridge that serves `link_host`).
 
-What it does not limit: a compromised ingress that serves `link_host` can hand phones a modified profile (clients do
+What it does not limit: a compromised bridge that serves `link_host` can hand phones a modified profile (clients do
 not verify a signature) and read the tokens and secrets that pass through. The canary only detects this.
 
 Detection: `scripts/profile-canary.sh <tailnet-base-url> <link-host> [<canary-sub-secret> | -]` fetches a dedicated canary
@@ -420,22 +422,22 @@ secret (exit 0 identical, 1 different, 2 usage or fetch error; each side must an
 body, a redirect or an empty answer is an error). Create a device just for it and run the script from cron or CI on a
 machine on the tailnet; the secret is the canary device's `<digits>.<token>`. Give it as the environment variable
 `CANARY_SECRET` or as `-` (one line on stdin): an argument shows in `ps`, and `sh -x` would print it. A false
-`MISMATCH` is possible if the approved set of ingresses changes between the two fetches; run it once more before
+`MISMATCH` is possible if the approved set of bridges changes between the two fetches; run it once more before
 acting. It needs `curl`
 and `sha256sum` or `shasum`; `sh scripts/test_profile_canary.sh` tests it against local fakes. It only catches an
-ingress that serves the canary a different profile than everybody else; one that targets other phones, that only
+bridge that serves the canary a different profile than everybody else; one that targets other phones, that only
 watches, or that recognises the canary by its fixed `User-Agent` (`profile-canary`) or its source address and serves it
 the honest profile, passes.
 
-Structural fixes (not built): serve `link_host` from a host that is not on the data path of any ingress, or pass TLS
-through the front to a certificate held by node-control's side, so no ingress terminates it.
+Structural fixes (not built): serve `link_host` from a host that is not on the data path of any bridge, or pass TLS
+through the front to a certificate held by node-control's side, so no bridge terminates it.
 
-If an ingress is compromised, follow the site's incident runbook (`ingress-compromise`, kept in the private site
+If a bridge is compromised, follow the site's incident runbook (`ingress-compromise`, kept in the private site
 repository that runs this deployment): cut the host off, rebuild it, rotate what it held and re-enrol affected devices.
 
-### What the ingress host sees
+### What the bridge host sees
 
-The one-time link (`/e/<token>`), its redirect and the subscription (`/sub/<secret>`) all pass through the ingress
+The one-time link (`/e/<token>`), its redirect and the subscription (`/sub/<secret>`) all pass through the bridge
 host's Caddy front. None of them carries the device name or owner: the redirect's deep link uses the neutral
 `profile_name` as the profile label.
 
@@ -454,9 +456,9 @@ User-Agent can still burn a link: create another one.
 The profile is a sing-box config: tun (`172.19.0.1/30`, `fdfe:dcba:9876::1/126`, auto/strict route), a selector
 `select` over the `auto`/`direct`/`exit` VLESS+Reality outbounds, DNS hijacked on the tun and resolved by
 `tls://1.1.1.1` through the selected outbound (`detour: select`, sing-box legacy DNS format, valid through 1.13).
-The ingress hostname (the VLESS outbounds' `server`) is the exception: a DNS rule `outbound: any` resolves it with the
+The bridge hostname (the VLESS outbounds' `server`) is the exception: a DNS rule `outbound: any` resolves it with the
 phone's local resolver (`local` server, no detour), since resolving it through `select` would need the outbound that
-needs the lookup. All other lookups go through the selected outbound. That this works, and that only the ingress
+needs the lookup. All other lookups go through the selected outbound. That this works, and that only the bridge
 hostname reaches the local resolver, is verified only in the phone test:
 in `exit` mode a site that is unreachable from the client's own network must open, and a DNS leak test must show only the exit's resolver.
 
@@ -938,7 +940,7 @@ tsnet.
 
 ## Trial, cutover and canary helpers
 
-These scripts only read (`profile-canary.sh` is described under "Compromised ingress").
+These scripts only read (`profile-canary.sh` is described under "Compromised bridge").
 
 - `scripts/parity.sh <python-url> <go-url>` fetches `/nodes.json`, `/status`, `/tailnet/status` and `/enroll/devices` from
   both apps, normalises JSON with `jq -S` and prints a unified diff; exit 1 on any difference. Needs `curl` and `jq`.

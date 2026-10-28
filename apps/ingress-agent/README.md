@@ -1,7 +1,7 @@
-# ingress-agent
+# ingress-agent (the bridge agent)
 
-A small service that runs next to xray on the Reality ingress host. It holds **only opaque
-credentials** (`uuid`, `mode`, `not_after`), never names or owners, so a compromised ingress host
+A small service that runs next to xray on the Reality bridge host. It holds **only opaque
+credentials** (`uuid`, `mode`, `not_after`), never names or owners, so a compromised bridge host
 does not learn who the clients are. The operator side (node-control's enrolment code) pushes the
 full list of valid credentials over a tailnet-only API; the agent renders the xray config from a
 base file and restarts xray when the set changes.
@@ -24,7 +24,7 @@ base file and restarts xray when the set changes.
   UUID. Stats never contain a UUID.
 
 - `GET /v1/info` -> `{"name","host","port","sni","public_key","short_id"}`: the PUBLIC parameters a client needs to
-  reach this ingress (see "Several ingresses and discovery"). `503` with an empty body when `INGRESS_NAME`,
+  reach this bridge (see "Several bridges and discovery"). `503` with an empty body when `INGRESS_NAME`,
   `INGRESS_HOST`, `INGRESS_PUBLIC_KEY` or `INGRESS_SHORT_ID` is unset or empty (an older deployment keeps working for
   everything else). It never contains the Reality private key, the agent token or any credential.
 
@@ -39,7 +39,7 @@ From the base file (`XRAY_BASE_CONFIG`), which must contain an inbound tagged `r
 - `routing.domainStrategy` is forced to `IPOnDemand` (the base value is overridden: domain destinations must
   be resolved before the block rule, or a hostname pointing at a private address would bypass it);
 - routing rules prepended, in order: block `geoip:private` and `100.64.0.0/10` for everyone on the `reality-in` inbound (so phone
-  users cannot reach the ingress host's LAN or the tailnet; present even with zero clients), then
+  users cannot reach the bridge host's LAN or the tailnet; present even with zero clients), then
   `direct` -> `direct`, `exit` -> `via-exit`, and `auto` -> `direct` for destinations on the configured direct lists
   (`INGRESS_DIRECT_GEOIP` / `INGRESS_DIRECT_GEOSITE`, comma-separated geodata list names; empty by default) and `via-exit`
   for everything else; then the base rules unchanged.
@@ -62,8 +62,8 @@ expired entries are swept and the config re-applied.
 | `XRAY_API` | `127.0.0.1:10085` (xray stats API, must be enabled in the base config) |
 | `INGRESS_DIRECT_GEOIP` | empty. Comma-separated geodata list names; in `auto` mode, destinations on them leave from this host |
 | `INGRESS_DIRECT_GEOSITE` | empty. Same, for geosite lists |
-| `INGRESS_NAME` | unset. Short label of this ingress, `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`. Needed for `/v1/info` |
-| `INGRESS_HOST` | unset. Public DNS name of the ingress (lowercase, no scheme, port or path). Needed for `/v1/info` |
+| `INGRESS_NAME` | unset. Short label of this bridge, `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`. Needed for `/v1/info` |
+| `INGRESS_HOST` | unset. Public DNS name of the bridge (lowercase, no scheme, port or path). Needed for `/v1/info` |
 | `INGRESS_PORT` | `443`. Public port, 1-65535 |
 | `INGRESS_SNI` | `INGRESS_HOST`. Reality server name, same format as the host |
 | `INGRESS_PUBLIC_KEY` | unset. Public half of the Reality key pair, no whitespace. Needed for `/v1/info` |
@@ -72,16 +72,16 @@ expired entries are swept and the config re-applied.
 The `INGRESS_*` values above are validated when the app starts; an invalid one stops the start with an error
 that names the variable (never the value). There is no variable for the private key and none must be added.
 
-## Several ingresses and discovery
+## Several bridges and discovery
 
-`GET /v1/info` lets a newly deployed ingress tell node-control how clients reach it, so the operator does not
+`GET /v1/info` lets a newly deployed bridge tell node-control how clients reach it, so the operator does not
 copy the host, public key and short id by hand. It publishes only public values. node-control reads it, shows the
-values, and the operator approves the ingress there; nothing is used before that. Each ingress host has its own
-`AGENT_TOKEN` (a token per ingress host), so a leaked token opens one ingress only.
+values, and the operator approves the bridge there; nothing is used before that. Each bridge host has its own
+`AGENT_TOKEN` (a token per bridge host), so a leaked token opens one bridge only.
 
-The agent is not a trust boundary against its own host: whoever has root on an ingress controls its agent and xray,
-and sees the credentials pushed to it. node-control therefore derives a different credential per ingress and pins an
-approved ingress to its published parameters and its headscale node; see "Compromised ingress" in the node-control
+The agent is not a trust boundary against its own host: whoever has root on a bridge controls its agent and xray,
+and sees the credentials pushed to it. node-control therefore derives a different credential per bridge and pins an
+approved bridge to its published parameters and its headscale node; see "Compromised bridge" in the node-control
 README for what that does and does not protect.
 
 ## Run

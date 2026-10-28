@@ -1,7 +1,7 @@
 # ingress-agent
 
-Deploys the Python ingress agent (`apps/ingress-agent/` in this repo) as the systemd service
-`ingress-agent.service` on the Reality ingress host. The agent holds opaque credentials pushed
+Deploys the Python bridge agent (`apps/ingress-agent/` in this repo) as the systemd service
+`ingress-agent.service` on the Reality bridge host. The agent holds opaque credentials pushed
 by the operator side over the tailnet, renders `/etc/xray/config.json` from
 `/etc/xray/config.base.json`, validates it with `xray run -test`, replaces it atomically and
 restarts `xray.service`. See `apps/ingress-agent/README.md` for its API.
@@ -31,7 +31,7 @@ changes. The unit is ordered `After=xray.service` but does not require it.
 
 ## Public parameters and discovery (`GET /v1/info`)
 
-The agent publishes how clients reach this ingress, so node-control can discover it and the operator can approve it
+The agent publishes how clients reach this bridge, so node-control can discover it and the operator can approve it
 (no copying of host, key and short id). Public values only; the endpoint never returns a secret and the agent has no
 variable for the Reality private key. Role variables (shared names with `reality-ingress`, defaults keep existing
 deployments valid):
@@ -49,8 +49,8 @@ The six variables are exported only when `ingress_name`, `ingress_host`, `realit
 are all set; otherwise `/v1/info` answers `503` and everything else works as before. Preflight validates the six
 values only when `ingress_name` or `reality_public_key` is set (then all of them must be valid, so a partial
 configuration fails). Hosts that only have `ingress_host` and `reality_short_id` (required by `reality-ingress`) are
-unaffected, and `/v1/info` stays `503` there until the two new variables are set. Use a token per ingress host (`ingress_agent_token` differs on every host); the
-operator approves a discovered ingress in node-control before it is used.
+unaffected, and `/v1/info` stays `503` there until the two new variables are set. Use a token per bridge host (`ingress_agent_token` differs on every host); the
+operator approves a discovered bridge in node-control before it is used.
 
 ## Python dependencies
 

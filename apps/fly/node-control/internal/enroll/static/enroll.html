@@ -58,7 +58,7 @@
   <div class="panel tablewrap" id="ingresses">
     <div class="muted" id="ingnote"></div>
     <table>
-      <thead><tr><th>Ingress</th><th>Host</th><th>Online</th><th>Sync</th><th>Since</th><th>Approval</th><th></th></tr></thead>
+      <thead><tr><th>Bridge</th><th>Host</th><th>Online</th><th>Sync</th><th>Since</th><th>Approval</th><th></th></tr></thead>
       <tbody id="ingrows"></tbody>
     </table>
   </div>
@@ -107,21 +107,21 @@ function showSync(s, rows) {
   const when = (t) => t ? new Date(t * 1000).toLocaleString() : "?";
   const behind = (rows || []).filter((r) => r.sync && r.sync.pending);
   if ((rows || []).length > 1 && behind.length > 0) {
-    // several ingresses: name every one that is behind
-    b.textContent = "ingress " + behind.map((r) => r.name).join(", ") + " out of sync since " + when(s.since) + ": "
+    // several bridges: name every one that is behind
+    b.textContent = "bridge " + behind.map((r) => r.name).join(", ") + " out of sync since " + when(s.since) + ": "
       + behind.map((r) => r.name + " " + r.sync.state + " (" + (SYNC_HINT[r.sync.state] || "") + ")").join("; ") + "."
-      + " Revocations and extensions are NOT in effect on " + (behind.length > 1 ? "those ingresses" : "that ingress") + " until this clears.";
+      + " Revocations and extensions are NOT in effect on " + (behind.length > 1 ? "those bridges" : "that bridge") + " until this clears.";
   } else {
-    b.textContent = "ingress host out of sync since " + when(s.since) + ": " + s.state + " (" + (SYNC_HINT[s.state] || "") + ")."
-      + " Revocations and extensions are NOT in effect on the ingress host until this clears.";
+    b.textContent = "bridge host out of sync since " + when(s.since) + ": " + s.state + " (" + (SYNC_HINT[s.state] || "") + ")."
+      + " Revocations and extensions are NOT in effect on the bridge host until this clears.";
   }
   b.style.display = "block";
 }
 // text a machine reports about itself: printable characters only, shortened
 const plain = (t, n) => String(t === undefined || t === null ? "" : t).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, "").slice(0, n || 63);
 const yesNo = (v) => v === null || v === undefined ? "-" : (v ? "yes" : "no");
-// The ingress table is shown only when it has something to say: several active ingresses, or a
-// discovered one that is not approved. With one ingress and nothing pending the page stays as it was.
+// The bridge table is shown only when it has something to say: several active bridges, or a
+// discovered one that is not approved. With one bridge and nothing pending the page stays as it was.
 async function loadIngresses(j) {
   const panel = $("#ingresses");
   const need = (j.ingresses || []).length > 1 || (j.pending_ingresses || []).length > 0;
@@ -179,7 +179,7 @@ async function load() {
   showSync(j.sync, j.ingresses);
   const th = $("#trafficth");
   th.textContent = j.stats_partial ? "Traffic*" : "Traffic";
-  th.title = j.stats_partial ? "Partial: an ingress did not answer, so its traffic is missing." : "";
+  th.title = j.stats_partial ? "Partial: a bridge did not answer, so its traffic is missing." : "";
   loadIngresses(j);
   const all = j.devices;
   const nrev = all.filter((d) => d.revoked).length;
@@ -231,7 +231,7 @@ $("#create").onsubmit = async (ev) => {
   try {
     const j = await post("/enroll/devices", {name: f.get("name"), owner: f.get("owner"), client: f.get("client"), expires_at: endOfDay(f.get("expires"))});
     show("Subscription URL for the new device", j.subscription_url);
-    say(j.sync_pending ? "Created; not yet on the ingress host (" + j.sync.state + "), retried every 5 minutes." : "Created.");
+    say(j.sync_pending ? "Created; not yet on the bridge host (" + j.sync.state + "), retried every 5 minutes." : "Created.");
     showSync(j.sync, j.ingresses);
     ev.target.reset(); load();
   } catch (e) { say(e.message, true); }

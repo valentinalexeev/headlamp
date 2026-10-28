@@ -294,7 +294,7 @@ step as the spend (one SQLite transaction; one script on Redis). Last active is 
 already report: node-control looks every 5 minutes (and at each page load) and records the time when a device's total grew
 since the previous look. The counters reset when xray restarts (the agent restarts it whenever the credential set changes),
 so a total that fell but is above zero also counts as activity since the reset. The first look at a device only seeds the
-baseline, and a look at which an ingress did not answer is skipped (its missing counters would read as a reset). The
+baseline, and a look at which a bridge did not answer is skipped (its missing counters would read as a reset). The
 resolution is therefore about 5 minutes, and a device that was active only while node-control was down shows nothing for that
 time. `GET /enroll/devices` rows carry `enrolled_at`, `enrol_count` and `last_active` (unix seconds, 0 = never). SQLite databases
 gain the three columns on open; Redis device records without them read as 0. JSON and SQLite exports and imports carry them.

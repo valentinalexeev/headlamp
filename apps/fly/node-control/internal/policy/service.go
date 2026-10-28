@@ -226,6 +226,35 @@ func (s *Service) Confirm(ctx context.Context, actor string, id int64) error {
 	return nil
 }
 
+// RevertPending undoes the pending change id at once instead of waiting for its deadline: the policy that was live
+// before it is written back and the change is marked reverted. If headscale refuses or does not answer, the change
+// stays pending with its automatic revert armed and the error is returned (the caller may try again or confirm).
+func (s *Service) RevertPending(ctx context.Context, actor string, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok, err := s.store.Pending()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNothingPending
+	}
+	if p.ID != id {
+		return ErrNotPending
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+	if err := s.api.SetPolicy(wctx, p.Before); err != nil {
+		slog.Error("policy revert now failed", "id", p.ID, "cause", errCause(err))
+		return err
+	}
+	if err := s.store.MarkReverted(p.ID, true); err != nil {
+		return err
+	}
+	slog.Warn("policy change reverted on request", "id", p.ID, "actor", actor, "bytes", len(p.Before))
+	return nil
+}
+
 // RevertTo re-applies the policy that was live before history entry historyID, as a new change.
 func (s *Service) RevertTo(ctx context.Context, actor string, historyID int64) (int64, time.Time, error) {
 	s.mu.Lock()

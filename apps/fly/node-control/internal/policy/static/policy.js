@@ -84,6 +84,11 @@
       var b = document.createElement('button');
       b.type = 'button';
       b.textContent = 'Revert';
+      if (pendingId) {
+        // Restoring an older policy is a new change, which cannot start while one is pending.
+        b.disabled = true;
+        b.title = 'Confirm or revert the pending change first';
+      }
       b.addEventListener('click', function () {
         request('POST', '/policy/revert/' + e.id, {}).then(function (res) { say(res, 'Reverted; confirm below.'); load(); });
       });
@@ -133,6 +138,10 @@
 
   $('confirm').addEventListener('click', function () {
     request('POST', '/policy/confirm', { change_id: pendingId }).then(function (res) { say(res, 'Confirmed.'); load(); });
+  });
+
+  $('revert-now').addEventListener('click', function () {
+    request('POST', '/policy/revert-now', { change_id: pendingId }).then(function (res) { say(res, 'Reverted.'); load(); });
   });
 
   $('reload').addEventListener('click', function () { show($('message'), ''); load(); });

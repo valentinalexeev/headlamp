@@ -103,6 +103,12 @@ run backup myapp "$t/x2" --age "$recipient" >/dev/null 2>&1; check "an export wi
 cp "$t/real-export" "$FAKE_EXPORT"
 check "no temporary files after failures" "$(find "$t" -maxdepth 1 -name '.enroll-backup.*' | wc -l | tr -d ' ')" = 0
 
+# --- an app without approvals exports "approvals": null (as the live app does); that is a valid export
+jq '.approvals = null' "$t/real-export" >"$FAKE_EXPORT"
+run backup myapp "$t/null-approvals.json" --plaintext >/dev/null 2>&1; check "a null approvals list is accepted" "$(exists "$t/null-approvals.json")" = 1
+check "…and counted as 0" "$(run backup myapp "$t/null-approvals2.json" --plaintext 2>&1)" = "backup written: $t/null-approvals2.json (2 devices, 0 approvals, id counter 7; encryption: plain)"
+cp "$t/real-export" "$FAKE_EXPORT"
+
 # --- plaintext only when asked, mode 0600
 run backup myapp "$t/plain.json" --plaintext >/dev/null 2>&1
 check "plaintext backup equals the export" "$(jq -S . "$t/plain.json")" = "$(jq -S . "$FAKE_EXPORT")"

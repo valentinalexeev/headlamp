@@ -16,7 +16,7 @@
 #                       deletes others); without it a populated store refuses
 #
 # backup: runs `node-control enroll-export` in the machine, keeps the output in memory, checks that it is the expected JSON
-# (devices and approvals arrays, numeric counter, at least one device) BEFORE encrypting, writes <out-file> atomically (an
+# (devices array, approvals array or null (an app with no approvals exports null), numeric counter, at least one device) BEFORE encrypting, writes <out-file> atomically (an
 # encrypted temp file in the same directory, then rename; an existing file is never overwritten), verifies that no device
 # UUID appears in the encrypted result, and prints counts only (never names, owners or UUIDs). One-time links are not part
 # of an export. With --sops the key NAMES of the JSON stay readable (sops encrypts values only).
@@ -86,10 +86,10 @@ if [ "$mode" = backup ]; then
   # Only the (encrypted) result gets a temporary file, next to the destination so the final rename is atomic.
   json=$(fly ssh console -a "$app" -C "node-control enroll-export" 2>/dev/null) \
     || die "enroll-export failed (is the app running with ENROLL_REDIS=1, and flyctl logged in?)"
-  printf '%s' "$json" | jq -e '(.devices | type == "array") and (.approvals | type == "array") and (.seq | type == "number")' >/dev/null 2>&1 \
+  printf '%s' "$json" | jq -e '(.devices | type == "array") and ((.approvals | type) as $t | $t == "array" or $t == "null") and (.seq | type == "number")' >/dev/null 2>&1 \
     || die "the export is not the expected JSON; nothing was written"
   devices=$(printf '%s' "$json" | jq '.devices | length')
-  approvals=$(printf '%s' "$json" | jq '.approvals | length')
+  approvals=$(printf '%s' "$json" | jq '(.approvals // []) | length')
   seq=$(printf '%s' "$json" | jq '.seq')
   [ "$devices" -gt 0 ] || die "the export holds no devices (is this the right app, and is Redis populated?); nothing was written"
   marker=$(printf '%s' "$json" | jq -r '[.devices[].uuids | to_entries[].value] | first // empty')

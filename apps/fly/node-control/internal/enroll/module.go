@@ -201,5 +201,5 @@ func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {
 		return nil
 	}
-	return []core.NavItem{{Label: "Enrolment", Path: "/enroll", Order: 20}}
+	return []core.NavItem{{Label: "Bridge", Path: "/enroll", Order: 20}}
 }

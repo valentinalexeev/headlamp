@@ -254,7 +254,7 @@ func TestTopBarWiring(t *testing.T) {
 		if err := json.Unmarshal([]byte(nav), &items); err != nil {
 			t.Fatalf("%v: %s", err, nav)
 		}
-		want := []core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Enrolment", Path: "/enroll", Order: 20}}
+		want := []core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Bridge", Path: "/enroll", Order: 20}}
 		if len(items) != 2 || items[0] != want[0] || items[1] != want[1] {
 			t.Fatalf("entries %+v", items)
 		}

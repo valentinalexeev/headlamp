@@ -102,13 +102,15 @@ cannot change under a running node. Pick the base image tag whose Playwright
 version matches the pinned `playwright` package (1.64.1 in `image/Containerfile`)
 and resolve it to a digest at deploy time.
 
-The image also carries the browser session tools (Xvfb, openbox, x11vnc, noVNC).
-`sh /app/session.sh` starts a headed Chromium on a virtual display and serves it
-through noVNC on `SESSION_NOVNC_PORT`; x11vnc listens on loopback only and has no
-password; the network ACL gates the port and websockify only connects a WebSocket that carries the per-session
+The image also carries the browser session tools (TigerVNC's Xvnc, openbox, noVNC).
+`sh /app/session.sh` starts a headed Google Chrome (installed into the image at build time, linux/amd64; Playwright's Chromium is the fallback) on a virtual display and serves it
+through noVNC on `SESSION_NOVNC_PORT`; Xvnc (X server and VNC server in one) listens on loopback only, has no
+password and accepts client-driven desktop resizing, so a noVNC client using `resize=remote` gets a desktop of exactly
+the size of its browser tab (there is no maximum size: the container memory limit is the bound, so a very large tab
+costs memory); the network ACL gates the port and websockify only connects a WebSocket that carries the per-session
 `SESSION_TOKEN` (`?token=`, via a token file). The
-container exits 0 after `SESSION_IDLE_SECONDS` without a connected client (counted
-from start, and after each disconnect) and non-zero if any child process dies. The
+container exits 0 after `SESSION_IDLE_SECONDS` without a connected client (established connections to
+Xvnc's port, read from `/proc/net/tcp`; counted from start, and after each disconnect) and non-zero if any child process dies. The
 browser profile lives in tmpfs under `/tmp` only. `sh image/session_test.sh` runs
 static checks on the script.
 

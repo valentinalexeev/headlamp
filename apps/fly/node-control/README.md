@@ -955,6 +955,10 @@ Behaviour to know:
 - The link may show before noVNC is listening; a click in the first seconds can be refused, retry.
 - Closing the last browser window ends the session (it is reported as failed).
 - A node whose runner has sessions disabled answers `404` to the status call and shows `available: false`.
+- The link uses `resize=remote&quality=9`: the remote desktop is resized to the size of your browser tab (1:1 pixels,
+  no scaling blur) and follows it when you resize the window. There is no maximum size (the container's memory limit
+  is the bound). noVNC works in CSS pixels, so on a HiDPI display the browser still upscales the image by the device
+  pixel ratio. Two tabs on one session with different sizes resize the shared desktop against each other.
 
 ## Build and run
 

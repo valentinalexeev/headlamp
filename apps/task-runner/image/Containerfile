@@ -9,4 +9,11 @@ COPY host.js /app/host.js
 RUN apt-get update \
  && apt-get install -y --no-install-recommends xvfb x11vnc novnc websockify openbox \
  && rm -rf /var/lib/apt/lists/*
+# Google Chrome for browser sessions only (task runs keep Playwright's own Chromium). The installer downloads
+# Google's package at build time (linux/amd64 only). The managed policy hides the "unsupported command-line flag"
+# infobar that the required --no-sandbox would otherwise show.
+RUN cd /app && npx playwright install chrome \
+ && mkdir -p /etc/opt/chrome/policies/managed \
+ && printf '{"CommandLineFlagSecurityWarningsEnabled": false}\n' > /etc/opt/chrome/policies/managed/session.json \
+ && rm -rf /var/lib/apt/lists/*
 COPY session.sh /app/session.sh

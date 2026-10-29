@@ -52,9 +52,11 @@ done
 
 start openbox
 
-CHROME=$(node -e "console.log(require('playwright').chromium.executablePath())")
+# Real Chrome when the image has it, Playwright's Chromium otherwise.
+CHROME=/opt/google/chrome/chrome
+[ -x "$CHROME" ] || CHROME=$(node -e "console.log(require('playwright').chromium.executablePath())")
 start "$CHROME" --no-sandbox --disable-dev-shm-usage --no-first-run \
-  --no-default-browser-check --user-data-dir="$RUN/profile" \
+  --no-default-browser-check --password-store=basic --user-data-dir="$RUN/profile" \
   --start-maximized --window-position=0,0 --window-size=1280,800 about:blank
 
 # One marker file per connected client; the idle loop below counts them.

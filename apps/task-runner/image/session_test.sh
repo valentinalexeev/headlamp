@@ -14,4 +14,9 @@ if grep -Eq -- 'websockify .*127\.0\.0\.1:5900' "$f"; then fail "websockify stil
 grep -Eq -- 'umask 077|chmod 600' "$f" || fail "token file is not created 0600"
 if grep -Eq -- '(echo|printf).*SESSION_TOKEN.*(>&2|logger)|set -x' "$f"; then fail "token may be logged"; fi
 grep -Eq -- '--token-source=.*>/dev/null 2>&1' "$f" || fail "websockify output is not discarded"
+grep -q -- '/opt/google/chrome/chrome' "$f" || fail "session.sh does not prefer Google Chrome"
+grep -q -- 'playwright' "$f" || fail "session.sh has no Chromium fallback"
+cf="$dir/Containerfile"
+grep -q -- 'playwright install chrome' "$cf" || fail "Containerfile does not install Chrome"
+grep -q -- 'CommandLineFlagSecurityWarningsEnabled' "$cf" || fail "Containerfile has no flag-warning policy"
 echo "PASS"

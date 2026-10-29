@@ -103,7 +103,7 @@ version matches the pinned `playwright` package (1.64.1 in `image/Containerfile`
 and resolve it to a digest at deploy time.
 
 The image also carries the browser session tools (Xvfb, openbox, x11vnc, noVNC).
-`sh /app/session.sh` starts a headed Chromium on a virtual display and serves it
+`sh /app/session.sh` starts a headed Google Chrome (installed into the image at build time, linux/amd64; Playwright's Chromium is the fallback) on a virtual display and serves it
 through noVNC on `SESSION_NOVNC_PORT`; x11vnc listens on loopback only and has no
 password; the network ACL gates the port and websockify only connects a WebSocket that carries the per-session
 `SESSION_TOKEN` (`?token=`, via a token file). The

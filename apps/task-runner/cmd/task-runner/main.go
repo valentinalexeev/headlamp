@@ -35,6 +35,11 @@ func main() {
 		log.Error("RUNNER_PIDS_LIMIT is not a number")
 		os.Exit(2)
 	}
+	sessPort, err := strconv.Atoi(env("RUNNER_SESSION_PORT", "6080"))
+	if err != nil {
+		log.Error("RUNNER_SESSION_PORT is not a number")
+		os.Exit(2)
+	}
 	srv, err := runner.New(runner.Config{
 		Token:        token,
 		Image:        image,
@@ -42,6 +47,8 @@ func main() {
 		ContainerBin: env("RUNNER_CONTAINER_BIN", "podman"),
 		Memory:       env("RUNNER_MEMORY", "1g"),
 		PidsLimit:    pids,
+		SessionBind:  os.Getenv("RUNNER_SESSION_BIND"),
+		SessionPort:  sessPort,
 		Logger:       log,
 	})
 	if err != nil {
@@ -58,7 +65,7 @@ func main() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		srv.Shutdown(sctx) // cancel the active run first, then stop serving
+		srv.Shutdown(sctx) // cancel the active run or session first, then stop serving
 		_ = hs.Shutdown(sctx)
 	}()
 	log.Info("listening", "addr", addr, "version", runner.Version)

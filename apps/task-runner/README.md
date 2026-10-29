@@ -16,6 +16,12 @@ token gives an empty `401`. Unknown routes give an empty `404`.
 | `GET /v1/runs/{id}` | `{"state":"running\|succeeded\|failed\|cancelled","result":{...}\|null,"error":"","log_tail":"<last 4 KB>"}`; `404` for an unknown id, also after a restart |
 | `DELETE /v1/runs/{id}` | `204` (also for a run that already finished, which is left as it is); `404` for an unknown id. A running run is marked `cancelled` at once and its container is killed (`kill task-<id>`); the run slot frees when the container is reaped |
 | `GET /v1/health` | `{"version":"...","busy":false,"mem_available_mb":N}` (`-1` when `/proc/meminfo` is unreadable) |
+| `POST /v1/sessions` `{"ttl_seconds":3600,"idle_seconds":900}` (both optional) | `201 {"id","port","expires_at"}` (RFC 3339 UTC); `409` while a run or another session holds the slot; `422` for `ttl_seconds` outside 60..14400, `idle_seconds` outside 60..3600, bad JSON or trailing data; `404` when sessions are disabled (`RUNNER_SESSION_BIND` unset) |
+| `GET /v1/sessions` | `{"session":null}` or `{"session":{"id","state":"running\|ended","started_at","expires_at","port","reason":""}}`; `reason` is `ttl`, `idle`, `stopped` or `failed` once ended; the last ended session is kept for 5 minutes |
+| `DELETE /v1/sessions/{id}` | `204` (also for an ended session); `404` for an unknown id. The container is killed and removed; the slot frees when it is reaped |
+
+A session is an interactive browser (see Image) and shares the single slot with runs: a session while a run is
+active, or a run while a session is active, gets `409`. `busy` in `/v1/health` is true while a session runs.
 
 Finished runs are kept for an hour (at most the last 20).
 
@@ -50,6 +56,14 @@ files, but the values are in its memory (and swap, if enabled), and while a cont
 configuration, environment included, in the service user's storage. The `--cgroup-manager=cgroupfs`
 global flag is required for a service user without a login session.
 
+A session container gets the same hardening plus `--init`, `--shm-size=512m`, a writable tmpfs home and one
+published port: `-p <RUNNER_SESSION_BIND>:<port>:<port>` (noVNC). The host part is always a specific IP; an empty,
+invalid or unspecified `RUNNER_SESSION_BIND` is never published (empty disables sessions, the rest is a startup
+error). The guard still applies to the session's uid, so the browser reaches the public internet only (not the node,
+not the tailnet, not the runner API). The noVNC port is the one published port and has no password by design: the
+tailnet ACL gates it, and nothing is stored (no profile, no history beyond the container's tmpfs). The container
+is removed when the TTL passes, when it exits after the idle period, on `DELETE` and on runner shutdown.
+
 ## Configuration (environment)
 
 | Variable | Default | |
@@ -61,9 +75,11 @@ global flag is required for a service user without a login session.
 | `RUNNER_CONTAINER_BIN` | `podman` | tests point it at a fake |
 | `RUNNER_MEMORY` | `1g` | container memory limit |
 | `RUNNER_PIDS_LIMIT` | `512` | |
+| `RUNNER_SESSION_BIND` | | host IP (the tailnet address) to publish the session port on; empty disables sessions |
+| `RUNNER_SESSION_PORT` | `6080` | noVNC port, published and used inside the container |
 
 Logs are JSON on stderr and carry run ids, states and durations only. On SIGTERM or SIGINT the runner cancels the
-active run, waits for it to be reaped (up to 30 s) and exits.
+active run or session, waits for it to be reaped (up to 30 s) and exits.
 
 ## Image
 

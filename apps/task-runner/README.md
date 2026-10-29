@@ -75,6 +75,15 @@ cannot change under a running node. Pick the base image tag whose Playwright
 version matches the pinned `playwright` package (1.64.1 in `image/Containerfile`)
 and resolve it to a digest at deploy time.
 
+The image also carries the browser session tools (Xvfb, openbox, x11vnc, noVNC).
+`sh /app/session.sh` starts a headed Chromium on a virtual display and serves it
+through noVNC on `SESSION_NOVNC_PORT`; x11vnc listens on loopback only and has no
+password, so access control is the network ACL in front of that port. The
+container exits 0 after `SESSION_IDLE_SECONDS` without a connected client (counted
+from start, and after each disconnect) and non-zero if any child process dies. The
+browser profile lives in tmpfs under `/tmp` only. `sh image/session_test.sh` runs
+static checks on the script.
+
     podman build --build-arg BASE=<image@sha256:digest> -t task-run image/
 
 ## Develop

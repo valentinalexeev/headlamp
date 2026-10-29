@@ -26,16 +26,28 @@ export DISPLAY
 
 RUN=/tmp/session
 rm -rf "$RUN"
-mkdir -p "$RUN/profile" "$RUN/xdg"
+mkdir -p "$RUN/profile" "$RUN/xdg/openbox"
 # websockify token file: one "<token>: host:port" line, readable only by us.
 (umask 077 && printf '%s: 127.0.0.1:5900\n' "$TOKEN" > "$RUN/tokens") || exit 1
 unset SESSION_TOKEN TOKEN
 export XDG_CONFIG_HOME="$RUN/xdg" XDG_CACHE_HOME="$RUN/xdg"
+# The desktop menu (right click) only lists the open windows, so a minimized
+# browser can be restored; openbox's default menu has an Exit entry that would
+# end the window manager.
+cat > "$RUN/xdg/openbox/menu.xml" <<'MENU'
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="root-menu" label="Session">
+    <menu id="client-list-combined-menu"/>
+  </menu>
+</openbox_menu>
+MENU
 
 PIDS=""
+RESPAWNS=""
 cleanup() {
   # shellcheck disable=SC2086
-  [ -n "$PIDS" ] && kill $PIDS 2>/dev/null
+  [ -n "$PIDS$RESPAWNS" ] && kill $PIDS $RESPAWNS 2>/dev/null
   wait 2>/dev/null
 }
 trap 'cleanup; exit 143' TERM INT
@@ -43,6 +55,27 @@ trap 'cleanup; exit 143' TERM INT
 start() { # start <cmd...>: background a child and remember its pid
   "$@" &
   PIDS="$PIDS $!"
+}
+
+# respawn <cmd...>: run a child again whenever it exits (the window manager and
+# the browser may be closed from inside the session). A child that keeps dying
+# right after it starts ends the session instead of looping forever.
+respawn() {
+  (
+    quick=0
+    while :; do
+      t0=$(date +%s)
+      "$@"
+      if [ $(($(date +%s) - t0)) -lt 3 ]; then quick=$((quick + 1)); else quick=0; fi
+      if [ "$quick" -ge 5 ]; then
+        echo "session: $1 keeps exiting" >&2
+        kill -TERM $$
+        exit 1
+      fi
+      sleep 1
+    done
+  ) &
+  RESPAWNS="$RESPAWNS $!"
 }
 
 # Xvnc is the X server and the VNC server: loopback only, no VNC password, and
@@ -57,12 +90,12 @@ while [ ! -S /tmp/.X11-unix/X99 ] && [ "$i" -lt 100 ]; do
   i=$((i + 1))
 done
 
-start openbox
+respawn openbox >/dev/null 2>&1
 
 # Real Chrome when the image has it, Playwright's Chromium otherwise.
 CHROME=/opt/google/chrome/chrome
 [ -x "$CHROME" ] || CHROME=$(node -e "console.log(require('playwright').chromium.executablePath())")
-start "$CHROME" --no-sandbox --disable-dev-shm-usage --no-first-run \
+respawn "$CHROME" --no-sandbox --disable-dev-shm-usage --no-first-run \
   --no-default-browser-check --password-store=basic --user-data-dir="$RUN/profile" \
   --start-maximized about:blank
 

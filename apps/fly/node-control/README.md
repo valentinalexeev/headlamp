@@ -953,7 +953,8 @@ Behaviour to know:
   IPv4. The published port follows the runner role's `task_runner_listen_addr`; an IPv6-only listen address is not
   supported by the link.
 - The link may show before noVNC is listening; a click in the first seconds can be refused, retry.
-- Closing the last browser window ends the session (it is reported as failed).
+- Closing the last browser window just reopens Chrome (a minimized window is listed in the desktop right-click menu,
+  which has no Exit entry). A session ends by Stop, its length, the idle timeout, or if its display or bridge dies.
 - A node whose runner has sessions disabled answers `404` to the status call and shows `available: false`.
 - The link uses `resize=remote&quality=9`: the remote desktop is resized to the size of your browser tab (1:1 pixels,
   no scaling blur) and follows it when you resize the window. There is no maximum size (the container's memory limit

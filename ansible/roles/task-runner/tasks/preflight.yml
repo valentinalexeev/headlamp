@@ -219,6 +219,7 @@
     - cmd/task-runner/main.go
     - image/Containerfile
     - image/host.js
+    - image/session.sh
   delegate_to: localhost
   become: false
   # A read-only stat is safe, and the answer is needed in check mode too.
@@ -289,7 +290,7 @@
     quiet: true
   when: task_runner_image_archive | length > 0
 
-# The tag is a content hash: a change to the Containerfile, host.js or the base
+# The tag is a content hash: a change to the Containerfile, host.js, session.sh or the base
 # digest (or to the archive) yields a new tag and a rebuild; unchanged inputs
 # keep the tag, so the build is skipped. "b-" = built on the node, "a-" = loaded.
 - name: Work out the architecture, the listen address and the image tag
@@ -302,6 +303,7 @@
         ('a-' ~ task_runner_archive_stat.stat.checksum[:16]) if task_runner_image_archive | length > 0
         else ('b-' ~ ((lookup('ansible.builtin.file', task_runner_src ~ '/image/Containerfile')
                        ~ '\n--host.js--\n' ~ lookup('ansible.builtin.file', task_runner_src ~ '/image/host.js')
+                       ~ '\n--session.sh--\n' ~ lookup('ansible.builtin.file', task_runner_src ~ '/image/session.sh')
                        ~ '\n--base--\n' ~ task_runner_base_image) | hash('sha256'))[:16]) }}
 
 # Free disk on the file system of the state dir (longest mount prefix; -1 =

@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"errors"
 	"net/http"
-	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -89,7 +88,7 @@ func sessionURL(n headscale.Node, port int, token string) string {
 	if host == "" || token == "" || !validPort(port) {
 		return ""
 	}
-	return "http://" + host + ":" + strconv.Itoa(port) + "/vnc.html?autoconnect=1&resize=scale&path=websockify%3Ftoken%3D" + url.QueryEscape(token)
+	return "http://" + host + ":" + strconv.Itoa(port) + "/vnc.html?autoconnect=1&resize=scale&path=websockify%3Ftoken%3D" + token
 }
 
 func buildSessionView(n headscale.Node, available bool, s *SessionInfo) sessionNodeView {
@@ -231,7 +230,7 @@ func (a *sessionAPI) start(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "the node could not be reached")
 		return
 	}
-	a.m.log.Info("session started", "node", nodeID(n), "user", authz.LoginFrom(r.Context()), "ttl_seconds", ttl)
+	a.m.log.Info("session started", "node", nodeID(n), "session", s.ID, "user", authz.LoginFrom(r.Context()), "ttl_seconds", ttl)
 	writeJSON(w, http.StatusCreated, buildSessionView(n, true, &s))
 }
 

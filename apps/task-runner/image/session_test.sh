@@ -11,6 +11,7 @@ for k in -localhost SESSION_IDLE_SECONDS SESSION_NOVNC_PORT -nopw -forever -shar
 done
 if grep -Eq -- '-passwd|-rfbauth' "$f"; then fail "VNC password option used"; fi
 if grep -Eq -- 'websockify .*127\.0\.0\.1:5900' "$f"; then fail "websockify still has a fixed target"; fi
-grep -q -- 'umask 077\|chmod 600' "$f" || fail "token file is not created 0600"
+grep -Eq -- 'umask 077|chmod 600' "$f" || fail "token file is not created 0600"
 if grep -Eq -- '(echo|printf).*SESSION_TOKEN.*(>&2|logger)|set -x' "$f"; then fail "token may be logged"; fi
+grep -Eq -- '--token-source=.*>/dev/null 2>&1' "$f" || fail "websockify output is not discarded"
 echo "PASS"

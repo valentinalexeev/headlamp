@@ -63,7 +63,7 @@ start x11vnc -display "$DISPLAY" -localhost -rfbport 5900 -nopw -forever -shared
   -afteraccept "touch $RUN/clients/\$RFB_CLIENT_ID" \
   -gone "rm -f $RUN/clients/\$RFB_CLIENT_ID"
 
-start websockify --web "$NOVNC_ROOT" --token-plugin=TokenFile --token-source="$RUN/tokens" "$PORT"
+start websockify --web "$NOVNC_ROOT" --token-plugin=TokenFile --token-source="$RUN/tokens" "$PORT" >/dev/null 2>&1
 
 idle_since=$(date +%s)
 while :; do

@@ -96,7 +96,7 @@ func TestSessionStartPublishesOnBindOnly(t *testing.T) {
 		t.Fatalf("no -p in %v", argv)
 	}
 	joined := " " + strings.Join(argv, " ") + " "
-	for _, want := range []string{" --init ", " --read-only ", " --cap-drop=ALL ", " --shm-size=512m ", " task-" + id + " ", " sh /app/session.sh ", " --tmpfs /home/pwuser:rw "} {
+	for _, want := range []string{" --init ", " --read-only ", " --cap-drop=ALL ", " --shm-size=512m ", " task-" + id + " ", " sh /app/session.sh ", " --tmpfs /home/pwuser:rw ", " --log-driver=none "} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv lacks %q: %v", want, argv)
 		}

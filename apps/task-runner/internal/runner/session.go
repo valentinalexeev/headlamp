@@ -64,7 +64,7 @@ func (s *Server) sessionArgs(sess *session, ttl time.Duration) []string {
 	port := strconv.Itoa(s.cfg.SessionPort)
 	args := append([]string(nil), globalFlags...)
 	return append(args,
-		"run", "--rm", "--init", "--name", "task-"+sess.id,
+		"run", "--rm", "--init", "--log-driver=none", "--name", "task-"+sess.id,
 		"--timeout", strconv.Itoa(int((ttl+s.cfg.KillGrace+time.Second-1)/time.Second)),
 		"--read-only", "--cap-drop=ALL", "--security-opt", "no-new-privileges",
 		"--pids-limit", strconv.Itoa(s.cfg.PidsLimit), "--memory", s.cfg.Memory,

@@ -244,7 +244,7 @@ func TestSessionStartAuditLogsUser(t *testing.T) {
 	h.do("POST", "/sessions/a1/start", aliceAddr, `{"ttl_seconds":1800}`)
 	h.do("POST", "/sessions/a1/stop", aliceAddr, "{}")
 	out := h.logs.String()
-	for _, w := range []string{"session started", "session stopped", "node=a1", "user=alice", "ttl_seconds=1800"} {
+	for _, w := range []string{"session started", "session stopped", "node=a1", "session=s1", "user=alice", "ttl_seconds=1800"} {
 		if !strings.Contains(out, w) {
 			t.Fatalf("log lacks %q:\n%s", w, out)
 		}

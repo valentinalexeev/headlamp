@@ -70,7 +70,7 @@
         owner: "{{ task_runner_user }}"
         group: "{{ task_runner_user }}"
         mode: "0644"
-      loop: [Containerfile, host.js]
+      loop: [Containerfile, host.js, session.sh]
       become: true
 
     - name: Build the image (first run pulls the base image, this can take long)

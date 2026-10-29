@@ -104,10 +104,10 @@ Fixed layout (variables exist, change only with reason): user `task-runner`, sta
    none (above the highest existing range); the binary, built on the control host once per architecture in the play
    (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64|arm64 go build -trimpath -buildvcs=false`), copied to the node; the unit.
 3. **Guard**: the nftables table and its units (below).
-4. **Image**: `podman image exists <tag>`; if missing, copies `image/Containerfile` and `image/host.js` to a temp dir in
+4. **Image**: `podman image exists <tag>`; if missing, copies `image/Containerfile`, `image/host.js` and `image/session.sh` to a temp dir in
    the state dir and runs, as the service user,
    `podman --cgroup-manager=cgroupfs build --pull=missing --build-arg BASE=<digest> --tag localhost/task-runner:b-<hash>`
-   (async). The tag is the first 16 hex of sha256(Containerfile, host.js, base digest), so a change rebuilds and a rerun
+   (async). The tag is the first 16 hex of sha256(Containerfile, host.js, session.sh, base digest), so a change rebuilds and a rerun
    with the same inputs does nothing. With `task_runner_image_archive` the tarball is copied, `podman load`ed (it must
    hold exactly one image) and tagged `localhost/task-runner:a-<sha256 of the archive>`.
 5. **Config**: the env file (`RUNNER_TOKEN`, `RUNNER_LISTEN`, `RUNNER_STATE_DIR`, `RUNNER_CONTAINER_BIN`, `RUNNER_IMAGE`,

@@ -18,7 +18,7 @@ import (
 
 const testToken = "tok-for-tests"
 
-// fakeBin is a stand-in for podman. It records argv and the TASK_* env, finds
+// fakeBin is a stand-in for podman. It records argv and the TASK_* and SESSION_* env, finds
 // the mounted script/result dirs from the -v args, and behaves according to
 // the first line of the script ("# mode: X"), so tests drive it through the
 // same interface the real container gets.
@@ -35,7 +35,12 @@ for a in "$@"; do
   prev="$a"
 done
 printf '%s\n' "$@" > "$d/argv"
-env | grep '^TASK_' > "$d/env"
+env | grep -E '^(TASK|SESSION)_' > "$d/env"
+case " $* " in *" /app/session.sh "*)
+  # session mode: sessexit holds an exit status to return at once, else run until killed
+  if [ -f "$d/sessexit" ]; then exit "$(cat "$d/sessexit")"; fi
+  echo $$ > "$d/pid"; exec sleep 30 ;;
+esac
 for a in "$@"; do
   case "$a" in
     *:/run/task:ro) script="${a%:/run/task:ro}/script.js" ;;
@@ -90,7 +95,7 @@ type harness struct {
 	state string
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	t.Helper()
 	root := t.TempDir()
 	fakeDir := filepath.Join(root, "fake")
@@ -104,14 +109,18 @@ func newHarness(t *testing.T) *harness {
 	t.Setenv("FAKE_DIR", fakeDir)
 	stateDir := filepath.Join(root, "state")
 	logs := &lockedBuf{}
-	s, err := New(Config{
+	cfg := Config{
 		Token:        testToken,
 		Image:        "example.com/img@sha256:abc",
 		StateDir:     stateDir,
 		ContainerBin: bin,
 		KillGrace:    300 * time.Millisecond,
 		Logger:       slog.New(slog.NewTextHandler(logs, nil)),
-	})
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	s, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

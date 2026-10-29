@@ -44,7 +44,11 @@ type Config struct {
 	Memory       string
 	PidsLimit    int
 	KillGrace    time.Duration // wait after `kill <name>` before killing the process group
+	SessionBind  string        // host IP the session's noVNC port is published on; empty disables sessions
+	SessionPort  int           // noVNC port (default 6080)
 	Logger       *slog.Logger
+
+	sessionUnit time.Duration // test knob: length of one TTL "second" (default time.Second)
 }
 
 type run struct {
@@ -72,6 +76,11 @@ type Server struct {
 	mu     sync.Mutex
 	runs   map[string]*run
 	active *run
+
+	activeSession *session // the session holding the slot, until its container is reaped
+	lastSession   *session // newest session, running or ended (kept keepEndedSession)
+	bindHost      string   // validated SessionBind formatted for -p; empty = sessions off
+	ttlUnit       time.Duration
 }
 
 // New validates cfg, applies defaults and removes stale run dirs left by a
@@ -95,6 +104,23 @@ func New(cfg Config) (*Server, error) {
 	if cfg.KillGrace <= 0 {
 		cfg.KillGrace = 3 * time.Second
 	}
+	if cfg.SessionPort <= 0 {
+		cfg.SessionPort = defaultSessionPort
+	}
+	if cfg.SessionPort > 65535 {
+		return nil, errors.New("session port out of range")
+	}
+	bindHost := ""
+	if cfg.SessionBind != "" {
+		var err error
+		if bindHost, err = normalizeBind(cfg.SessionBind); err != nil {
+			return nil, err
+		}
+	}
+	ttlUnit := cfg.sessionUnit
+	if ttlUnit <= 0 {
+		ttlUnit = time.Second
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -107,7 +133,8 @@ func New(cfg Config) (*Server, error) {
 			cfg.Logger.Error("remove stale run dir failed", "dir", filepath.Base(d), "err", err.Error())
 		}
 	}
-	return &Server{cfg: cfg, log: cfg.Logger, tokenH: sha256.Sum256([]byte(cfg.Token)), runs: map[string]*run{}}, nil
+	return &Server{cfg: cfg, log: cfg.Logger, tokenH: sha256.Sum256([]byte(cfg.Token)), runs: map[string]*run{},
+		bindHost: bindHost, ttlUnit: ttlUnit}, nil
 }
 
 // authorized compares digests so neither content nor length of the token
@@ -137,6 +164,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.status(w, strings.TrimPrefix(p, "/v1/runs/"))
 	case strings.HasPrefix(p, "/v1/runs/") && r.Method == http.MethodDelete:
 		s.cancel(w, strings.TrimPrefix(p, "/v1/runs/"))
+	case p == "/v1/sessions" && r.Method == http.MethodPost:
+		s.startSession(w, r)
+	case p == "/v1/sessions" && r.Method == http.MethodGet:
+		s.sessionStatus(w)
+	case strings.HasPrefix(p, "/v1/sessions/") && r.Method == http.MethodDelete:
+		s.stopSession(w, strings.TrimPrefix(p, "/v1/sessions/"))
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -150,7 +183,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func (s *Server) health(w http.ResponseWriter) {
 	s.mu.Lock()
-	busy := s.active != nil
+	busy := s.active != nil || s.activeSession != nil
 	s.mu.Unlock()
 	writeJSON(w, 200, map[string]any{"version": Version, "busy": busy, "mem_available_mb": memAvailableMB()})
 }
@@ -220,7 +253,7 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.prune()
-	if s.active != nil {
+	if s.active != nil || s.activeSession != nil {
 		s.mu.Unlock()
 		w.WriteHeader(http.StatusConflict)
 		return
@@ -328,14 +361,23 @@ func (s *Server) cancelLocked(r *run) {
 	}
 }
 
-// Shutdown cancels the active run and waits for it to be reaped.
+// Shutdown cancels the active run or session and waits for it to be reaped.
 func (s *Server) Shutdown(ctx context.Context) {
 	s.mu.Lock()
-	r := s.active
+	r, sess := s.active, s.activeSession
 	if r != nil {
 		s.cancelLocked(r)
 	}
+	if sess != nil {
+		s.stopLocked(sess)
+	}
 	s.mu.Unlock()
+	if sess != nil {
+		select {
+		case <-sess.done:
+		case <-ctx.Done():
+		}
+	}
 	if r != nil {
 		select {
 		case <-r.done:

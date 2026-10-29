@@ -583,6 +583,7 @@ a bad value stops startup with a message that names the variable and never a sec
 | `TASKS_RUNNER_TOKEN` | | secret; bearer token the node runners accept (their `RUNNER_TOKEN`) |
 | `TASKS_ADMIN_USERS` | | comma-separated tailnet logins allowed to use the page and API. Required once the module is on; tagged nodes are never allowed |
 | `TASKS_RUNNER_TAG` | `tag:task-runner` | headscale tag a node must carry to run any task (matches `^tag:[a-z0-9][a-z0-9-]{0,62}$`). Nodes without it are never probed and never receive the runner token or a task's secrets |
+| `SESSIONS_TAG` | unset | headscale tag of the nodes that offer interactive browser sessions (same form as `TASKS_RUNNER_TAG`, for example `tag:browser-session`). Unset: no page, no routes, no nav item. Needs the tasks module to be on |
 | `TASKS_RUNNER_PORT` | `9100` | port of the runner on the nodes, 1 to 65535 |
 | `TASKS_NTFY_URL` | `https://ntfy.sh` | base URL of the ntfy server used for alerts and failure messages |
 | `TASKS_POLL_SECONDS` | `5` | how often a running attempt asks its runner for the status, 1 to 60 |
@@ -915,6 +916,45 @@ tasks.sh pull   --file tasks.json --scripts scripts     # write the live state b
 then the config and scripts, and verifies the live state equals the files. Git is the long-term store of config, scripts and
 encrypted secrets; node-control never reads git, it only holds the live copy in Redis. The header of the script lists the
 flags, environment and exit codes.
+
+
+### Browser sessions (optional)
+
+With `SESSIONS_TAG` set, the admin listener serves a **Browser** page (`/sessions`) where an admin starts and stops a
+short-lived interactive browser on a tagged node and opens it from the tailnet. The node's `task-runner` does the work
+(see its README for `RUNNER_SESSION_BIND`); node-control only relays, over the same bearer token and port as task runs.
+
+| Route | What |
+|---|---|
+| `GET /sessions` | the page: one row per tagged node with a status dot, a length choice (30 min, 1 h, 4 h), Start, Stop, a countdown and an Open link while running. Refreshes every 5 s |
+| `GET /sessions.json` | `{"nodes":[{"id","name","available","session":null or {"id","state","started_at","expires_at","port","reason"},"url"}]}`. A node whose runner cannot be reached shows `available: false`, never an error and never "no session" |
+| `POST /sessions/{node}/start` | JSON body `{"ttl_seconds":N,"idle_seconds":N}` (both optional; defaults 3600 and 900; the runner enforces 60 to 14400 and 60 to 3600). `201` with the node view, `409` busy, `422` settings refused, `503` unreachable or sessions disabled on that node, `404` for a node without the tag |
+| `POST /sessions/{node}/stop` | `204`, also when nothing is running; `404` for a node without the tag |
+
+`{node}` is the node's headscale given name. A node without `SESSIONS_TAG` is never contacted and never receives the
+runner token. The Open link points at the node's given name (or, when that is not a plain host name, its tailnet IPv4)
+and the session port, over plain http inside the tailnet; no public address is ever used. Every start and stop is
+logged with the node and the admin's login (`session started`, `session stopped`); the runner token and the session token never are. The link carries the session's access token (`path=websockify%3Ftoken%3D...`); it is
+returned only to authorised admins, only for a running session, and scrubbed from error text.
+
+Trust model: there is no stored browser profile. Reachability is gated by the ACL: allow the session port only to the
+people who should have it. The session token (random per session, carried in the link, dies with the session) stops
+other pages and users on allowed devices from using the endpoint. Starting and stopping is limited to the logins in `TASKS_ADMIN_USERS`. A session ends by
+itself when its length runs out or it sits idle, and nothing is kept afterwards.
+
+The token appears in the operator's browser history and in the page's address bar while the session is open, so do
+not share the link; stopping the session invalidates it.
+
+Behaviour to know:
+
+- A running session makes the node report `busy`, so scheduled tasks pinned to that node fail with "node busy" or
+  "no eligible node" until the session ends (up to its length).
+- The Open link uses the node's tailnet name when it resolves on the operator's device (MagicDNS), else the tailnet
+  IPv4. The published port follows the runner role's `task_runner_listen_addr`; an IPv6-only listen address is not
+  supported by the link.
+- The link may show before noVNC is listening; a click in the first seconds can be refused, retry.
+- Closing the last browser window ends the session (it is reported as failed).
+- A node whose runner has sessions disabled answers `404` to the status call and shows `available: false`.
 
 ## Build and run
 

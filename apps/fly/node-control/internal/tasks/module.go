@@ -52,10 +52,12 @@ type Module struct {
 	stateKey string
 	token    string
 	tag      string // TASKS_RUNNER_TAG
-	port     int
-	ntfyURL  string
-	tn       core.Tailnet
-	log      *slog.Logger
+	// sessionsTag is SESSIONS_TAG; "" means no browser-session page or API.
+	sessionsTag string
+	port        int
+	ntfyURL     string
+	tn          core.Tailnet
+	log         *slog.Logger
 
 	metricsAddr     string // TASKS_METRICS_ADDR; "" means no metrics listener
 	heartbeatSecret string // TASKS_HEARTBEAT_SECRET; "" means no heartbeat
@@ -65,6 +67,7 @@ type Module struct {
 	pollEvery    time.Duration
 	openKV       func(url, key string) (ipn.StateStore, func(), error)
 	newRunner    func() Runner
+	newSessions  func() SessionClient
 	newNotifier  func(*Store) Notifier
 	onOpenFail   func()
 	now          func() time.Time
@@ -96,7 +99,11 @@ func (m *Module) Nav() []core.NavItem {
 	if !m.on {
 		return nil
 	}
-	return []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40}}
+	items := []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40}}
+	if m.sessionsTag != "" {
+		items = append(items, core.NavItem{Label: "Browser", Path: "/sessions", Order: 45})
+	}
+	return items
 }
 
 // intEnv reads an integer variable with a default and an inclusive range.
@@ -165,6 +172,10 @@ func (m *Module) Register(r *core.Routes) error {
 	if !runnerTagRe.MatchString(tag) {
 		return fmt.Errorf("TASKS_RUNNER_TAG must look like tag:task-runner (match %s)", runnerTagRe)
 	}
+	sessTag := strings.TrimSpace(m.env.Getenv("SESSIONS_TAG"))
+	if sessTag != "" && !runnerTagRe.MatchString(sessTag) {
+		return fmt.Errorf("SESSIONS_TAG must look like tag:browser-session (match %s)", runnerTagRe)
+	}
 	if r.Tailnet == nil {
 		return errors.New(enabled + " but the core has no tailnet node to identify users")
 	}
@@ -188,7 +199,19 @@ func (m *Module) Register(r *core.Routes) error {
 	if m.pollEvery == 0 {
 		m.pollEvery = time.Duration(poll) * time.Second
 	}
-	(&api{m: m}).register(r.Admin, authz.UserGate(r.Tailnet, allowed, r.Log))
+	gate := authz.UserGate(r.Tailnet, allowed, r.Log)
+	(&api{m: m}).register(r.Admin, gate)
+	if sessTag != "" {
+		m.sessionsTag = sessTag
+		var sc SessionClient
+		if m.newSessions != nil {
+			sc = m.newSessions()
+		} else {
+			sc = NewSessionClient(m.tn, m.port, m.token)
+		}
+		(&sessionAPI{m: m, c: sc}).register(r.Admin, gate)
+		m.log.Info("browser sessions enabled", "tag", sessTag)
+	}
 	return nil
 }
 

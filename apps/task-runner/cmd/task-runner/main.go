@@ -65,8 +65,11 @@ func main() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		srv.Shutdown(sctx) // cancel the active run or session first, then stop serving
+		// Stop accepting first so no new run or session can start, then cancel the
+		// active one. Both share the 30 s bound; the cancel itself never waits on
+		// the context, only the reaping does.
 		_ = hs.Shutdown(sctx)
+		srv.Shutdown(sctx)
 	}()
 	log.Info("listening", "addr", addr, "version", runner.Version)
 	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

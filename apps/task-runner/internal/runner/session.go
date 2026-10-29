@@ -192,6 +192,10 @@ func (s *Server) currentSession() *session {
 }
 
 func (s *Server) sessionStatus(w http.ResponseWriter) {
+	if s.bindHost == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	s.mu.Lock()
 	sess := s.currentSession()
 	var view map[string]any
@@ -207,6 +211,10 @@ func (s *Server) sessionStatus(w http.ResponseWriter) {
 }
 
 func (s *Server) stopSession(w http.ResponseWriter, id string) {
+	if s.bindHost == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	s.mu.Lock()
 	sess := s.currentSession()
 	if sess == nil || sess.id != id {

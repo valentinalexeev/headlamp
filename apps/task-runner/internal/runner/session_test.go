@@ -74,7 +74,7 @@ func (h *harness) waitSessionEnded() sessView {
 func TestSessionStartPublishesOnBindOnly(t *testing.T) {
 	h := sessHarness(t, time.Second)
 	id := h.startSession(map[string]any{})
-	for i := 0; i < 250 && !strings.Contains(h.readFake("env"), "TASK_"); i++ { // fake writes argv before env
+	for i := 0; i < 250 && !strings.Contains(h.readFake("env"), "SESSION_"); i++ { // fake writes argv before env
 		time.Sleep(20 * time.Millisecond)
 	}
 	argv := strings.Split(strings.TrimSpace(h.readFake("argv")), "\n")
@@ -97,6 +97,12 @@ func TestSessionStartPublishesOnBindOnly(t *testing.T) {
 	for _, want := range []string{" --init ", " --read-only ", " --cap-drop=ALL ", " --shm-size=512m ", " task-" + id + " ", " sh /app/session.sh ", " --tmpfs /home/pwuser:rw "} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv lacks %q: %v", want, argv)
+		}
+	}
+	env := h.readFake("env")
+	for _, want := range []string{"SESSION_IDLE_SECONDS=900\n", "SESSION_NOVNC_PORT=6080\n"} {
+		if !strings.Contains(env, want) {
+			t.Errorf("child env lacks %q: %q", want, env)
 		}
 	}
 	v := h.sessionView()
@@ -128,6 +134,20 @@ func TestSessionDisabledWithoutBind(t *testing.T) {
 	}
 	if h.readFake("argv") != "" {
 		t.Fatal("a container was started")
+	}
+}
+
+func TestSessionStatusDisabledWithoutBind(t *testing.T) {
+	h := newHarness(t)
+	if code, body := h.do("GET", "/v1/sessions", nil, testToken); code != 404 || len(body) != 0 {
+		t.Fatalf("%d %q", code, body)
+	}
+}
+
+func TestSessionStopDisabledWithoutBind(t *testing.T) {
+	h := newHarness(t)
+	if code, body := h.do("DELETE", "/v1/sessions/abc", nil, testToken); code != 404 || len(body) != 0 {
+		t.Fatalf("%d %q", code, body)
 	}
 }
 

@@ -941,6 +941,22 @@ reach the session port can use the session while it runs, so reachability is the
 people who should have it. Starting and stopping is limited to the logins in `TASKS_ADMIN_USERS`. A session ends by
 itself when its length runs out or it sits idle, and nothing is kept afterwards.
 
+Known limitation: there is no VNC password and noVNC does not check the browser's Origin, so any web page open in
+the operator's own browser on an ACL-allowed device could, while a session is up, open a WebSocket to the session's
+tailnet address and see or drive it. Keep sessions short, do not browse untrusted sites in the same browser while
+one runs; stopping the session closes the exposure.
+
+Behaviour to know:
+
+- A running session makes the node report `busy`, so scheduled tasks pinned to that node fail with "node busy" or
+  "no eligible node" until the session ends (up to its length).
+- The Open link uses the node's tailnet name when it resolves on the operator's device (MagicDNS), else the tailnet
+  IPv4. The published port follows the runner role's `task_runner_listen_addr`; an IPv6-only listen address is not
+  supported by the link.
+- The link may show before noVNC is listening; a click in the first seconds can be refused, retry.
+- Closing the last browser window ends the session (it is reported as failed).
+- A node whose runner has sessions disabled answers `404` to the status call and shows `available: false`.
+
 ## Build and run
 
 ```

@@ -135,7 +135,7 @@ The env file then also carries `RUNNER_SESSION_BIND` (the node's tailnet address
 Redeploy restarts the service, so do it when the runner is idle.
 
 - **Tag.** The node must carry the session tag (node-control's `SESSIONS_TAG`, for example `tag:browser-session`), in
-  addition to the runner tag; node-control never contacts a node without it. Tag it as described under Use.
+  addition to the runner tag; node-control never contacts a node without it. Tag the node with the `SESSIONS_TAG` value, as for the runner tag.
 - **ACL.** The tailnet ACL must let the operator (the identity that opens the page's link) reach the session tag on the
   session port (`task_runner_session_port`), besides node-control reaching the runner port. Nothing else needs to reach
   that port. There is no per-session password: whoever the policy lets reach the port can use the browser while a
@@ -147,7 +147,18 @@ Redeploy restarts the service, so do it when the runner is idle.
 - **Image.** Sessions use the same run image as runs (it carries the session tools). Its tag is a content hash, so the
   image is rebuilt automatically when the inputs change; the first rebuild after upgrading to a version with session
   support is long (base pull and build, see First pull).
-- **Slot.** A session shares the single slot with runs: one at a time, `409` otherwise.
+- **Slot.** A session shares the single slot with runs: one at a time, `409` otherwise. A running session makes the
+  node report `busy`, so scheduled tasks pinned to that node fail with "node busy" or "no eligible node" until the
+  session ends (up to its length).
+- **Package.** The role installs `catatonit` besides podman: sessions run podman with `--init`, which needs it.
+- **Limitation.** There is no VNC password and noVNC does not check the browser's Origin. While a session is up, any
+  web page open in the operator's own browser on an ACL-allowed device could open a WebSocket to the session's
+  tailnet address and see or drive it. Keep sessions short and do not browse untrusted sites in that browser while
+  one runs; stopping the session closes the exposure.
+- **Link.** The Open link uses the node's tailnet name when it resolves on the operator's device (MagicDNS), else the
+  tailnet IPv4. The published port follows `task_runner_listen_addr`; an IPv6-only listen address is not supported by
+  the link. The link can show before noVNC is listening: a click in the first seconds may be refused, retry.
+  Closing the last browser window ends the session (reported as failed).
 
 Checks after the first deploy with sessions on: `grep RUNNER_SESSION /etc/task-runner/env` as root shows the tailnet
 address and the port; `ss -ltn` shows nothing listening on the session port while idle; start a session from the

@@ -64,6 +64,14 @@ not the tailnet, not the runner API). The noVNC port is the one published port a
 tailnet ACL gates it, and nothing is stored (no profile, no history beyond the container's tmpfs). The container
 is removed when the TTL passes, when it exits after the idle period, on `DELETE` and on runner shutdown.
 
+A running session makes the node report `busy`, so scheduled tasks pinned to that node fail with "node busy" or
+"no eligible node" until the session ends (up to the TTL). Known limitation: there is no VNC password and noVNC
+does not check the browser's Origin, so any web page open in the operator's own browser on an ACL-allowed device
+could, while a session is up, open a WebSocket to the session's tailnet address and see or drive it. Keep sessions
+short and do not browse untrusted sites in the same browser while one runs; stopping the session closes the
+exposure. Closing the last browser window ends the session (reported as `failed`). With sessions disabled
+(`RUNNER_SESSION_BIND` empty) all three session endpoints answer `404`.
+
 ## Configuration (environment)
 
 | Variable | Default | |

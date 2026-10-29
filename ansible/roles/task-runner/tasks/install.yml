@@ -1,7 +1,8 @@
 ---
 # podman 5 with rootless user-space networking (passt/pasta) and the setuid
 # id mappers (uidmap). acl: Ansible needs setfacl to hand its temp files to the
-# unprivileged service user (become_user) in image.yml.
+# unprivileged service user (become_user) in image.yml. catatonit: sessions
+# run podman with --init, which needs it.
 - name: Install podman and its rootless helpers
   ansible.builtin.apt:
     name:
@@ -9,6 +10,7 @@
       - uidmap
       - passt
       - acl
+      - catatonit
     state: present
     update_cache: true
     cache_valid_time: 3600

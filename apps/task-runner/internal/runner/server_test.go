@@ -18,7 +18,7 @@ import (
 
 const testToken = "tok-for-tests"
 
-// fakeBin is a stand-in for podman. It records argv and the TASK_* env, finds
+// fakeBin is a stand-in for podman. It records argv and the TASK_* and SESSION_* env, finds
 // the mounted script/result dirs from the -v args, and behaves according to
 // the first line of the script ("# mode: X"), so tests drive it through the
 // same interface the real container gets.
@@ -35,7 +35,7 @@ for a in "$@"; do
   prev="$a"
 done
 printf '%s\n' "$@" > "$d/argv"
-env | grep '^TASK_' > "$d/env"
+env | grep -E '^(TASK|SESSION)_' > "$d/env"
 case " $* " in *" /app/session.sh "*)
   # session mode: sessexit holds an exit status to return at once, else run until killed
   if [ -f "$d/sessexit" ]; then exit "$(cat "$d/sessexit")"; fi

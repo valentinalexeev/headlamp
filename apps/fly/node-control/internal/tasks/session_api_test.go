@@ -167,7 +167,7 @@ func TestSessionsJSONShowsRunningSession(t *testing.T) {
 	if !got.Available || got.Session == nil || got.Session.State != "running" || got.Session.Port != 6080 {
 		t.Fatalf("view = %+v", got)
 	}
-	if got.URL != "http://a1:6080/vnc.html?autoconnect=1&resize=scale&path=websockify%3Ftoken%3D"+sessTok {
+	if got.URL != "http://a1:6080/vnc.html?autoconnect=1&resize=remote&quality=9&path=websockify%3Ftoken%3D"+sessTok {
 		t.Fatalf("url = %q", got.URL)
 	}
 }

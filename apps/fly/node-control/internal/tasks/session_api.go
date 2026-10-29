@@ -88,7 +88,7 @@ func sessionURL(n headscale.Node, port int, token string) string {
 	if host == "" || token == "" || !validPort(port) {
 		return ""
 	}
-	return "http://" + host + ":" + strconv.Itoa(port) + "/vnc.html?autoconnect=1&resize=scale&path=websockify%3Ftoken%3D" + token
+	return "http://" + host + ":" + strconv.Itoa(port) + "/vnc.html?autoconnect=1&resize=remote&quality=9&path=websockify%3Ftoken%3D" + token
 }
 
 func buildSessionView(n headscale.Node, available bool, s *SessionInfo) sessionNodeView {

@@ -934,17 +934,16 @@ short-lived interactive browser on a tagged node and opens it from the tailnet. 
 `{node}` is the node's headscale given name. A node without `SESSIONS_TAG` is never contacted and never receives the
 runner token. The Open link points at the node's given name (or, when that is not a plain host name, its tailnet IPv4)
 and the session port, over plain http inside the tailnet; no public address is ever used. Every start and stop is
-logged with the node and the admin's login (`session started`, `session stopped`); the token never is.
+logged with the node and the admin's login (`session started`, `session stopped`); the runner token and the session token never are. The link carries the session's access token (`path=websockify%3Ftoken%3D...`); it is
+returned only to authorised admins, only for a running session, and scrubbed from error text.
 
-Trust model: there is no per-session password and no stored browser profile. Whoever the tailnet policy allows to
-reach the session port can use the session while it runs, so reachability is the ACL: allow that port only to the
-people who should have it. Starting and stopping is limited to the logins in `TASKS_ADMIN_USERS`. A session ends by
+Trust model: there is no stored browser profile. Reachability is gated by the ACL: allow the session port only to the
+people who should have it. The session token (random per session, carried in the link, dies with the session) stops
+other pages and users on allowed devices from using the endpoint. Starting and stopping is limited to the logins in `TASKS_ADMIN_USERS`. A session ends by
 itself when its length runs out or it sits idle, and nothing is kept afterwards.
 
-Known limitation: there is no VNC password and noVNC does not check the browser's Origin, so any web page open in
-the operator's own browser on an ACL-allowed device could, while a session is up, open a WebSocket to the session's
-tailnet address and see or drive it. Keep sessions short, do not browse untrusted sites in the same browser while
-one runs; stopping the session closes the exposure.
+The token appears in the operator's browser history and in the page's address bar while the session is open, so do
+not share the link; stopping the session invalidates it.
 
 Behaviour to know:
 

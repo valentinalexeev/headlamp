@@ -60,16 +60,19 @@ A session container gets the same hardening plus `--init`, `--shm-size=512m`, a 
 published port: `-p <RUNNER_SESSION_BIND>:<port>:<port>` (noVNC). The host part is always a specific IP; an empty,
 invalid or unspecified `RUNNER_SESSION_BIND` is never published (empty disables sessions, the rest is a startup
 error). The guard still applies to the session's uid, so the browser reaches the public internet only (not the node,
-not the tailnet, not the runner API). The noVNC port is the one published port and has no password by design: the
-tailnet ACL gates it, and nothing is stored (no profile, no history beyond the container's tmpfs). The container
+not the tailnet, not the runner API). The noVNC port is the one published port: the
+tailnet ACL gates who can reach it, and every session also carries a random 128-bit token (see below). Nothing else is stored (no profile, no history beyond the container's tmpfs). The container
 is removed when the TTL passes, when it exits after the idle period, on `DELETE` and on runner shutdown.
 
 A running session makes the node report `busy`, so scheduled tasks pinned to that node fail with "node busy" or
-"no eligible node" until the session ends (up to the TTL). Known limitation: there is no VNC password and noVNC
-does not check the browser's Origin, so any web page open in the operator's own browser on an ACL-allowed device
-could, while a session is up, open a WebSocket to the session's tailnet address and see or drive it. Keep sessions
-short and do not browse untrusted sites in the same browser while one runs; stopping the session closes the
-exposure. Closing the last browser window ends the session (reported as `failed`). With sessions disabled
+"no eligible node" until the session ends (up to the TTL). Trust model: reachability is gated by the ACL; the session token
+(random per session, carried in the link, dies with the session) stops other pages and users on allowed devices from
+using the endpoint. The runner generates it (`crypto/rand`, 32 hex chars), passes it to the container only as
+`-e SESSION_TOKEN` with the value in the child's environment (never on a command line), returns it in the `POST /v1/sessions`
+answer and in `GET /v1/sessions` while the session is running (never once it has ended), and never logs it. In the
+container it is only in the environment and a 0600 file under `/tmp`; websockify refuses a WebSocket that lacks
+`?token=`. The token appears in the operator's browser history and in the page's address bar while the session is
+open, so do not share the link; stopping the session invalidates it. Closing the last browser window ends the session (reported as `failed`). With sessions disabled
 (`RUNNER_SESSION_BIND` empty) all three session endpoints answer `404`.
 
 ## Configuration (environment)
@@ -102,7 +105,8 @@ and resolve it to a digest at deploy time.
 The image also carries the browser session tools (Xvfb, openbox, x11vnc, noVNC).
 `sh /app/session.sh` starts a headed Chromium on a virtual display and serves it
 through noVNC on `SESSION_NOVNC_PORT`; x11vnc listens on loopback only and has no
-password, so access control is the network ACL in front of that port. The
+password; the network ACL gates the port and websockify only connects a WebSocket that carries the per-session
+`SESSION_TOKEN` (`?token=`, via a token file). The
 container exits 0 after `SESSION_IDLE_SECONDS` without a connected client (counted
 from start, and after each disconnect) and non-zero if any child process dies. The
 browser profile lives in tmpfs under `/tmp` only. `sh image/session_test.sh` runs

@@ -18,7 +18,10 @@ import (
 	"example.com/node-control/internal/headscale"
 )
 
-const sessTag = "tag:browser-session"
+const (
+	sessTag = "tag:browser-session"
+	sessTok = "0123456789abcdef0123456789abcdef"
+)
 
 type fakeSessions struct {
 	mu       sync.Mutex
@@ -51,7 +54,7 @@ func (f *fakeSessions) Start(_ context.Context, addr string, ttl, idle int) (Ses
 	if f.startErr != nil {
 		return SessionInfo{}, f.startErr
 	}
-	return SessionInfo{ID: "s1", State: "running", Port: 6080, ExpiresAt: time.Now().Add(time.Hour)}, nil
+	return SessionInfo{ID: "s1", State: "running", Port: 6080, Token: sessTok, ExpiresAt: time.Now().Add(time.Hour)}, nil
 }
 
 func (f *fakeSessions) Stop(_ context.Context, addr, id string) error {
@@ -110,7 +113,8 @@ type sessView struct {
 		State string `json:"state"`
 		Port  int    `json:"port"`
 	} `json:"session"`
-	URL string `json:"url"`
+	Token string `json:"token"`
+	URL   string `json:"url"`
 }
 
 func (h *sessHarness) list(t *testing.T) []sessView {
@@ -158,12 +162,12 @@ func TestSessionsJSONMarksUnreachableUnavailable(t *testing.T) {
 
 func TestSessionsJSONShowsRunningSession(t *testing.T) {
 	h := newSessHarness(t, true, sessNode("a1", "100.64.0.10", sessTag))
-	h.fake.cur["100.64.0.10"] = &SessionInfo{ID: "s1", State: "running", Port: 6080, ExpiresAt: time.Now().Add(time.Hour)}
+	h.fake.cur["100.64.0.10"] = &SessionInfo{ID: "s1", State: "running", Port: 6080, Token: sessTok, ExpiresAt: time.Now().Add(time.Hour)}
 	got := h.list(t)[0]
 	if !got.Available || got.Session == nil || got.Session.State != "running" || got.Session.Port != 6080 {
 		t.Fatalf("view = %+v", got)
 	}
-	if got.URL != "http://a1:6080/vnc.html?autoconnect=1&resize=scale" {
+	if got.URL != "http://a1:6080/vnc.html?autoconnect=1&resize=scale&path=websockify%3Ftoken%3D"+sessTok {
 		t.Fatalf("url = %q", got.URL)
 	}
 }
@@ -361,7 +365,7 @@ func TestSessionURLUsesTailnetOnly(t *testing.T) {
 	noName.GivenName = ""
 	h := newSessHarness(t, true, named, odd, noName)
 	for _, ip := range []string{"100.64.0.10", "100.64.0.11", "100.64.0.12"} {
-		h.fake.cur[ip] = &SessionInfo{ID: "s", State: "running", Port: 6080}
+		h.fake.cur[ip] = &SessionInfo{ID: "s", State: "running", Port: 6080, Token: sessTok}
 	}
 	for _, v := range h.list(t) {
 		u := v.URL
@@ -399,5 +403,53 @@ func TestSessionsInvalidTagRefused(t *testing.T) {
 	err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet()})
 	if err == nil || !strings.Contains(err.Error(), "SESSIONS_TAG") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSessionURLCarriesToken(t *testing.T) {
+	h := newSessHarness(t, true, sessNode("a1", "100.64.0.10", sessTag))
+	rec := h.do("POST", "/sessions/a1/start", aliceAddr, "{}")
+	if rec.Code != 201 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var v sessView
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(v.URL, "path=websockify%3Ftoken%3D"+sessTok) {
+		t.Fatalf("url = %q", v.URL)
+	}
+}
+
+func TestSessionTokenNotLogged(t *testing.T) {
+	h := newSessHarness(t, true, sessNode("a1", "100.64.0.10", sessTag))
+	h.fake.cur["100.64.0.10"] = &SessionInfo{ID: "s1", State: "running", Port: 6080, Token: sessTok}
+	h.do("POST", "/sessions/a1/start", aliceAddr, "{}")
+	h.list(t)
+	h.do("POST", "/sessions/a1/stop", aliceAddr, "{}")
+	if out := h.logs.String(); !strings.Contains(out, "session started") || strings.Contains(out, sessTok) {
+		t.Fatalf("log must exist and not hold the token:\n%s", out)
+	}
+}
+
+func TestSessionTokenScrubbedFromErrors(t *testing.T) {
+	h := newSessHarness(t, true, sessNode("a1", "100.64.0.10", sessTag))
+	h.fake.cur["100.64.0.10"] = &SessionInfo{ID: "s1", State: "running", Port: 6080, Token: sessTok}
+	h.fake.stopErr = errors.New("boom " + sessTok)
+	rec := h.do("POST", "/sessions/a1/stop", aliceAddr, "{}")
+	if rec.Code != 503 || strings.Contains(rec.Body.String(), sessTok) || strings.Contains(h.logs.String(), sessTok) {
+		t.Fatalf("token leaked (%d): %s\n%s", rec.Code, rec.Body, h.logs)
+	}
+	if !strings.Contains(h.logs.String(), "***") {
+		t.Fatalf("expected a scrubbed error in the log:\n%s", h.logs)
+	}
+}
+
+func TestSessionsJSONNoTokenWhenNoSession(t *testing.T) {
+	h := newSessHarness(t, true, sessNode("a1", "100.64.0.10", sessTag), sessNode("b1", "100.64.0.11", sessTag))
+	h.fake.cur["100.64.0.11"] = &SessionInfo{ID: "s1", State: "ended", Reason: "ttl", Port: 6080, Token: sessTok}
+	rec := h.do("GET", "/sessions.json", aliceAddr, "")
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), sessTok) || strings.Contains(rec.Body.String(), "token") {
+		t.Fatalf("no running session must mean no token (%d): %s", rec.Code, rec.Body)
 	}
 }

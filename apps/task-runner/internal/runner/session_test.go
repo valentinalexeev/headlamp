@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 type sessView struct {
 	Session *struct {
 		ID        string `json:"id"`
+		Token     string `json:"token"`
 		State     string `json:"state"`
 		StartedAt string `json:"started_at"`
 		ExpiresAt string `json:"expires_at"`
@@ -306,4 +308,81 @@ func TestSessionNeedsToken(t *testing.T) {
 
 func writeFake(h *harness, name, content string) error {
 	return os.WriteFile(filepath.Join(h.fake, name), []byte(content), 0o644)
+}
+
+// startSessionToken starts a session and returns its id and token.
+func (h *harness) startSessionToken(body any) (string, string) {
+	h.t.Helper()
+	code, out := h.do("POST", "/v1/sessions", body, testToken)
+	var r struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if code != 201 || json.Unmarshal(out, &r) != nil {
+		h.t.Fatalf("start session: %d %s", code, out)
+	}
+	return r.ID, r.Token
+}
+
+var hex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+func TestSessionTokenInEnvNotArgv(t *testing.T) {
+	h := sessHarness(t, time.Second)
+	id, tok := h.startSessionToken(map[string]any{})
+	if !hex32.MatchString(tok) {
+		t.Fatalf("token %q is not 32 hex chars", tok)
+	}
+	for i := 0; i < 250 && !strings.Contains(h.readFake("env"), "SESSION_NOVNC_PORT"); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if env := h.readFake("env"); !strings.Contains(env, "SESSION_TOKEN="+tok+"\n") {
+		t.Errorf("child env lacks the token: %q", env)
+	}
+	argv := h.readFake("argv")
+	if strings.Contains(argv, tok) {
+		t.Errorf("token on the command line: %q", argv)
+	}
+	if !strings.Contains("\n"+argv, "\n-e\nSESSION_TOKEN\n") {
+		t.Errorf("argv lacks the bare -e SESSION_TOKEN: %q", argv)
+	}
+	if code, _ := h.do("DELETE", "/v1/sessions/"+id, nil, testToken); code != 204 {
+		t.Fatalf("delete: %d", code)
+	}
+	h.waitIdle()
+	if logs := h.logs.String(); strings.Contains(logs, tok) || !strings.Contains(logs, "session started") {
+		t.Errorf("logs must exist and never hold the token:\n%s", logs)
+	}
+}
+
+func TestSessionTokenReturnedWhileRunningOnly(t *testing.T) {
+	h := sessHarness(t, time.Second)
+	id, tok := h.startSessionToken(map[string]any{})
+	if v := h.sessionView(); v.Session == nil || v.Session.Token != tok {
+		t.Fatalf("running view lacks the token: %+v", v.Session)
+	}
+	if code, _ := h.do("DELETE", "/v1/sessions/"+id, nil, testToken); code != 204 {
+		t.Fatalf("delete: %d", code)
+	}
+	_, raw := h.do("GET", "/v1/sessions", nil, testToken)
+	if strings.Contains(string(raw), tok) || strings.Contains(string(raw), `"token"`) {
+		t.Errorf("ended session still carries the token: %s", raw)
+	}
+	h.waitIdle()
+	_, raw = h.do("GET", "/v1/sessions", nil, testToken)
+	if strings.Contains(string(raw), tok) {
+		t.Errorf("reaped session still carries the token: %s", raw)
+	}
+}
+
+func TestSessionTokensDiffer(t *testing.T) {
+	h := sessHarness(t, time.Second)
+	id1, t1 := h.startSessionToken(map[string]any{})
+	h.do("DELETE", "/v1/sessions/"+id1, nil, testToken)
+	h.waitIdle()
+	id2, t2 := h.startSessionToken(map[string]any{})
+	if t1 == t2 || !hex32.MatchString(t2) {
+		t.Fatalf("tokens %q %q", t1, t2)
+	}
+	h.do("DELETE", "/v1/sessions/"+id2, nil, testToken)
+	h.waitIdle()
 }

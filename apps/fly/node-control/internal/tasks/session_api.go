@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -78,17 +79,17 @@ func nodeID(n headscale.Node) string {
 // sessionURL is the link to the node's session. The host is the given name
 // when it is a plain host label, else the node's tailnet IPv4; never anything
 // the node could supply as a public address.
-func sessionURL(n headscale.Node, port int) string {
+func sessionURL(n headscale.Node, port int, token string) string {
 	host := ""
 	if hostLabelRe.MatchString(n.GivenName) {
 		host = n.GivenName
 	} else if ip, ok := firstIPv4(n); ok {
 		host = ip
 	}
-	if host == "" || !validPort(port) {
+	if host == "" || token == "" || !validPort(port) {
 		return ""
 	}
-	return "http://" + host + ":" + strconv.Itoa(port) + "/vnc.html?autoconnect=1&resize=scale"
+	return "http://" + host + ":" + strconv.Itoa(port) + "/vnc.html?autoconnect=1&resize=scale&path=websockify%3Ftoken%3D" + url.QueryEscape(token)
 }
 
 func buildSessionView(n headscale.Node, available bool, s *SessionInfo) sessionNodeView {
@@ -105,7 +106,7 @@ func buildSessionView(n headscale.Node, available bool, s *SessionInfo) sessionN
 	}
 	v.Session = j
 	if s.State == "running" {
-		v.URL = sessionURL(n, s.Port)
+		v.URL = sessionURL(n, s.Port, s.Token)
 	}
 	return v
 }
@@ -126,8 +127,9 @@ func (a *sessionAPI) tagged(ctx context.Context) ([]headscale.Node, error) {
 	return nodes, nil
 }
 
-func (a *sessionAPI) scrubbed(err error) string {
-	return scrub.Scrub(err.Error(), []string{a.m.token})
+// scrubbed removes the runner token and any session tokens from error text.
+func (a *sessionAPI) scrubbed(err error, sessionTokens ...string) string {
+	return scrub.Scrub(err.Error(), append([]string{a.m.token}, sessionTokens...))
 }
 
 func (a *sessionAPI) list(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +254,7 @@ func (a *sessionAPI) stop(w http.ResponseWriter, r *http.Request) {
 	switch err := a.c.Stop(r.Context(), addr, cur.ID); {
 	case err == nil, errors.Is(err, ErrRunUnknown):
 	default:
-		a.m.log.Warn("session stop failed", "node", nodeID(n), "err", a.scrubbed(err))
+		a.m.log.Warn("session stop failed", "node", nodeID(n), "err", a.scrubbed(err, cur.Token))
 		fail(w, http.StatusServiceUnavailable, "the node could not be reached")
 		return
 	}

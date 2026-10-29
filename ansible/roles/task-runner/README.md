@@ -138,8 +138,8 @@ Redeploy restarts the service, so do it when the runner is idle.
   addition to the runner tag; node-control never contacts a node without it. Tag the node with the `SESSIONS_TAG` value, as for the runner tag.
 - **ACL.** The tailnet ACL must let the operator (the identity that opens the page's link) reach the session tag on the
   session port (`task_runner_session_port`), besides node-control reaching the runner port. Nothing else needs to reach
-  that port. There is no per-session password: whoever the policy lets reach the port can use the browser while a
-  session runs, so keep that rule narrow.
+  that port. The ACL is the network gate: keep that rule narrow. Each session also has a random token (below) that
+  the link carries.
 - **Guard.** No change to the nftables guard. Inbound replies on connections the runner accepted on its tailnet address
   are covered by the existing `ct state established,related` accept, and enabling sessions does not change egress
   policy: the session's browser runs as the same service user, so it reaches the public internet only, never the node,
@@ -151,10 +151,10 @@ Redeploy restarts the service, so do it when the runner is idle.
   node report `busy`, so scheduled tasks pinned to that node fail with "node busy" or "no eligible node" until the
   session ends (up to its length).
 - **Package.** The role installs `catatonit` besides podman: sessions run podman with `--init`, which needs it.
-- **Limitation.** There is no VNC password and noVNC does not check the browser's Origin. While a session is up, any
-  web page open in the operator's own browser on an ACL-allowed device could open a WebSocket to the session's
-  tailnet address and see or drive it. Keep sessions short and do not browse untrusted sites in that browser while
-  one runs; stopping the session closes the exposure.
+- **Trust model.** Reachability is gated by the ACL; the session token (random per session, carried in the link, dies
+  with the session) stops other pages and users on allowed devices from using the endpoint. The token appears in the
+  operator's browser history and in the page's address bar while the session is open, so do not share the link;
+  stopping the session invalidates it.
 - **Link.** The Open link uses the node's tailnet name when it resolves on the operator's device (MagicDNS), else the
   tailnet IPv4. The published port follows `task_runner_listen_addr`; an IPv6-only listen address is not supported by
   the link. The link can show before noVNC is listening: a click in the first seconds may be refused, retry.

@@ -25,23 +25,23 @@ func TestSessionClientRoundTrip(t *testing.T) {
 		auth = r.Header.Get("Authorization")
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		w.WriteHeader(201)
-		_, _ = w.Write([]byte(`{"id":"s1","port":6080,"expires_at":"2026-01-01T01:00:00Z"}`))
+		_, _ = w.Write([]byte(`{"id":"s1","port":6080,"expires_at":"2026-01-01T01:00:00Z","token":"aabbccddeeff00112233445566778899"}`))
 	})
 	mux.HandleFunc("GET /v1/sessions", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"session":{"id":"s1","state":"running","started_at":"2026-01-01T00:00:00Z","expires_at":"2026-01-01T01:00:00Z","port":6080,"reason":""}}`))
+		_, _ = w.Write([]byte(`{"session":{"id":"s1","state":"running","started_at":"2026-01-01T00:00:00Z","expires_at":"2026-01-01T01:00:00Z","port":6080,"reason":"","token":"aabbccddeeff00112233445566778899"}}`))
 	})
 	mux.HandleFunc("DELETE /v1/sessions/s1", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	c := newTestSessionClient(t, mux, "tok")
 	ctx := context.Background()
 	s, err := c.Start(ctx, "100.64.0.9", 1800, 300)
-	if err != nil || s.ID != "s1" || s.Port != 6080 || s.ExpiresAt.IsZero() {
+	if err != nil || s.ID != "s1" || s.Port != 6080 || s.ExpiresAt.IsZero() || s.Token != "aabbccddeeff00112233445566778899" {
 		t.Fatalf("Start = %+v, %v", s, err)
 	}
 	if got["ttl_seconds"] != 1800 || got["idle_seconds"] != 300 || auth != "Bearer tok" {
 		t.Fatalf("sent %v, auth %q", got, auth)
 	}
 	cur, err := c.Current(ctx, "100.64.0.9")
-	if err != nil || cur == nil || cur.State != "running" || cur.Port != 6080 {
+	if err != nil || cur == nil || cur.State != "running" || cur.Port != 6080 || cur.Token != "aabbccddeeff00112233445566778899" {
 		t.Fatalf("Current = %+v, %v", cur, err)
 	}
 	if err := c.Stop(ctx, "100.64.0.9", "s1"); err != nil {

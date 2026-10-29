@@ -14,6 +14,7 @@ import (
 // SessionInfo is the runner's view of one interactive browser session.
 type SessionInfo struct {
 	ID        string
+	Token     string // only for a running session; never log it
 	State     string // "running" or "ended"
 	Reason    string // why it ended: ttl, idle, stopped or failed
 	Port      int
@@ -49,6 +50,7 @@ type sessionWire struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	Port      int       `json:"port"`
 	Reason    string    `json:"reason"`
+	Token     string    `json:"token"`
 }
 
 func (c *sessionClient) Current(ctx context.Context, addr string) (*SessionInfo, error) {
@@ -76,7 +78,11 @@ func (c *sessionClient) Current(ctx context.Context, addr string) (*SessionInfo,
 	if s.ID == "" || (s.State != "running" && s.State != "ended") || (s.State == "running" && !validPort(s.Port)) {
 		return nil, c.wrap("session status", errors.New("invalid session in answer"))
 	}
-	return &SessionInfo{ID: s.ID, State: s.State, Reason: s.Reason, Port: s.Port, StartedAt: s.StartedAt, ExpiresAt: s.ExpiresAt}, nil
+	tok := ""
+	if s.State == "running" {
+		tok = s.Token
+	}
+	return &SessionInfo{ID: s.ID, Token: tok, State: s.State, Reason: s.Reason, Port: s.Port, StartedAt: s.StartedAt, ExpiresAt: s.ExpiresAt}, nil
 }
 
 func (c *sessionClient) Start(ctx context.Context, addr string, ttl, idle int) (SessionInfo, error) {
@@ -95,10 +101,10 @@ func (c *sessionClient) Start(ctx context.Context, addr string, ttl, idle int) (
 		return SessionInfo{}, c.statusErr("session start", code)
 	}
 	var out sessionWire
-	if err := json.Unmarshal(data, &out); err != nil || out.ID == "" || !validPort(out.Port) {
+	if err := json.Unmarshal(data, &out); err != nil || out.ID == "" || !validPort(out.Port) || out.Token == "" {
 		return SessionInfo{}, c.wrap("session start", errors.New("answer has no usable session"))
 	}
-	return SessionInfo{ID: out.ID, State: "running", Port: out.Port, ExpiresAt: out.ExpiresAt}, nil
+	return SessionInfo{ID: out.ID, Token: out.Token, State: "running", Port: out.Port, ExpiresAt: out.ExpiresAt}, nil
 }
 
 func (c *sessionClient) Stop(ctx context.Context, addr, id string) error {

@@ -1,6 +1,8 @@
 package runner
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -27,6 +29,7 @@ const (
 // node's single slot (Server.activeSession) until its container is reaped.
 type session struct {
 	id       string
+	token    string // random per session; only ever in the child env and API answers while running
 	state    string // running | ended
 	reason   string // ttl | idle | stopped | failed, once ended
 	started  time.Time
@@ -67,7 +70,7 @@ func (s *Server) sessionArgs(sess *session, ttl time.Duration) []string {
 		"--pids-limit", strconv.Itoa(s.cfg.PidsLimit), "--memory", s.cfg.Memory,
 		"--tmpfs", "/tmp", "--tmpfs", "/home/pwuser:rw", "--shm-size=512m",
 		"-p", s.bindHost+":"+port+":"+port,
-		"-e", "SESSION_IDLE_SECONDS", "-e", "SESSION_NOVNC_PORT",
+		"-e", "SESSION_IDLE_SECONDS", "-e", "SESSION_NOVNC_PORT", "-e", "SESSION_TOKEN",
 		s.cfg.Image, "sh", "/app/session.sh")
 }
 
@@ -93,10 +96,16 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		return
 	}
+	tokBytes := make([]byte, 16)
+	if _, err := rand.Read(tokBytes); err != nil {
+		s.log.Error("session token generation failed")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	ttlDur := time.Duration(ttl) * s.ttlUnit
 	now := time.Now()
 	sess := &session{
-		id: newID(), state: "running", started: now, expires: now.Add(ttlDur),
+		id: newID(), token: hex.EncodeToString(tokBytes), state: "running", started: now, expires: now.Add(ttlDur),
 		port: s.cfg.SessionPort, idle: idle, stopCh: make(chan struct{}), done: make(chan struct{}),
 	}
 	s.mu.Lock()
@@ -124,7 +133,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("session finished", "session", sess.id, "reason", final)
 	}()
 	writeJSON(w, 201, map[string]any{
-		"id": sess.id, "port": sess.port,
+		"id": sess.id, "port": sess.port, "token": sess.token,
 		"expires_at": sess.expires.UTC().Format(time.RFC3339),
 	})
 }
@@ -136,7 +145,8 @@ func (s *Server) runSession(sess *session, ttl time.Duration) string {
 	cmd := exec.Command(s.cfg.ContainerBin, s.sessionArgs(sess, ttl)...)
 	cmd.Env = append(childEnv("", ""),
 		"SESSION_IDLE_SECONDS="+strconv.Itoa(sess.idle),
-		"SESSION_NOVNC_PORT="+strconv.Itoa(sess.port))
+		"SESSION_NOVNC_PORT="+strconv.Itoa(sess.port),
+		"SESSION_TOKEN="+sess.token)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = 2 * time.Second
 	if err := cmd.Start(); err != nil {
@@ -204,6 +214,9 @@ func (s *Server) sessionStatus(w http.ResponseWriter) {
 			"id": sess.id, "state": sess.state, "port": sess.port, "reason": sess.reason,
 			"started_at": sess.started.UTC().Format(time.RFC3339),
 			"expires_at": sess.expires.UTC().Format(time.RFC3339),
+		}
+		if sess.state == "running" { // an ended session never hands out its token
+			view["token"] = sess.token
 		}
 	}
 	s.mu.Unlock()

@@ -1,17 +1,22 @@
 #!/bin/sh
 # Browser session entrypoint: Xvfb + openbox + headed Chromium, exposed through
-# x11vnc (loopback only) and noVNC. No VNC password: access control is the
-# network ACL in front of SESSION_NOVNC_PORT. Everything is written under /tmp.
+# x11vnc (loopback only) and noVNC. No VNC password: the network ACL gates
+# SESSION_NOVNC_PORT and websockify only connects a WebSocket that carries
+# ?token=$SESSION_TOKEN. The token lives only in the environment and in a 0600
+# file; it is never put on a command line or printed. Everything is written
+# under /tmp.
 #
 # Env: SESSION_IDLE_SECONDS  exit 0 after this long without a VNC client
 #                            (counted from start until the first client, and
 #                            after each disconnect; a connected client is never
 #                            cut off)
 #      SESSION_NOVNC_PORT    port noVNC listens on (all interfaces)
+#      SESSION_TOKEN         secret a WebSocket client must present as ?token=
 set -u
 
 IDLE="${SESSION_IDLE_SECONDS:?SESSION_IDLE_SECONDS is required}"
 PORT="${SESSION_NOVNC_PORT:?SESSION_NOVNC_PORT is required}"
+TOKEN="${SESSION_TOKEN:?SESSION_TOKEN is required}"
 NOVNC_ROOT="${NOVNC_ROOT:-/usr/share/novnc}"
 DISPLAY=:99
 export DISPLAY
@@ -19,6 +24,9 @@ export DISPLAY
 RUN=/tmp/session
 rm -rf "$RUN"
 mkdir -p "$RUN/clients" "$RUN/profile" "$RUN/xdg"
+# websockify token file: one "<token>: host:port" line, readable only by us.
+(umask 077 && printf '%s: 127.0.0.1:5900\n' "$TOKEN" > "$RUN/tokens") || exit 1
+unset SESSION_TOKEN TOKEN
 export XDG_CONFIG_HOME="$RUN/xdg" XDG_CACHE_HOME="$RUN/xdg"
 
 PIDS=""
@@ -55,7 +63,7 @@ start x11vnc -display "$DISPLAY" -localhost -rfbport 5900 -nopw -forever -shared
   -afteraccept "touch $RUN/clients/\$RFB_CLIENT_ID" \
   -gone "rm -f $RUN/clients/\$RFB_CLIENT_ID"
 
-start websockify --web "$NOVNC_ROOT" "$PORT" 127.0.0.1:5900
+start websockify --web "$NOVNC_ROOT" --token-plugin=TokenFile --token-source="$RUN/tokens" "$PORT"
 
 idle_since=$(date +%s)
 while :; do

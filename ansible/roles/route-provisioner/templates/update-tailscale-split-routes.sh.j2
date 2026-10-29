@@ -18,13 +18,25 @@ LOG_TAG="ts-split-routes"
 MIN_PREFIX_V4={{ route_min_prefix_v4 }}
 MAX_PREFIX_V4={{ route_max_prefix_v4 }}
 
+# Reachability gate: a listed host is only published (its IPs, its ASNs, its /32s) when this node can open a TCP
+# connection to it. A service that blocks this node's address range would otherwise be advertised as reachable
+# through it and fail for every client.
+VERIFY_REACHABILITY={{ 'true' if route_verify_reachability else 'false' }}
+PROBE_PORTS="{{ route_probe_ports | join(' ') }}"
+PROBE_TIMEOUT={{ route_probe_timeout_seconds }}
+PROBE_ATTEMPTS={{ route_probe_attempts }}
+hosts_listed=0
+hosts_reachable=0
+
 mkdir -p "$WORKDIR"
 
 tmp_ips="$(mktemp)"
+tmp_direct_ips="$(mktemp)"
+tmp_blocked_ips="$(mktemp)"
 tmp_asns="$(mktemp)"
 tmp_raw_routes="$(mktemp)"
 tmp_routes="$(mktemp)"
-trap 'rm -f "$tmp_ips" "$tmp_asns" "$tmp_raw_routes" "$tmp_routes"' EXIT
+trap 'rm -f "$tmp_ips" "$tmp_direct_ips" "$tmp_blocked_ips" "$tmp_asns" "$tmp_raw_routes" "$tmp_routes"' EXIT
 
 log() {
   logger -t "$LOG_TAG" "$*"
@@ -61,6 +73,51 @@ ip_to_asns_cymru_dns() {
     | sort -u || true
 }
 
+tcp_probe() {
+  local ip="$1" port attempt
+  for ((attempt = 1; attempt <= PROBE_ATTEMPTS; attempt++)); do
+    for port in $PROBE_PORTS; do
+      if timeout "$PROBE_TIMEOUT" bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$ip" "$port" 2>/dev/null; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+# Resolve $1 and print its IPv4 addresses that pass the reachability gate (all of them when the gate is off).
+# Returns 1 and prints nothing when the host does not resolve or no address is reachable; the reason goes to the log
+# (stderr, so command substitution only captures addresses).
+reachable_ips() {
+  local host="$1" ips ip kept=0
+  ips="$(dig +short A "$host" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+  hosts_listed=$((hosts_listed + 1))
+
+  if [[ -z "$ips" ]]; then
+    log "WARN: $host does not resolve; not published" >&2
+    return 1
+  fi
+  if [[ "$VERIFY_REACHABILITY" != "true" ]]; then
+    echo "$ips"
+    hosts_reachable=$((hosts_reachable + 1))
+    return 0
+  fi
+
+  while read -r ip; do
+    [[ -z "$ip" ]] && continue
+    if tcp_probe "$ip"; then
+      echo "$ip"
+      kept=$((kept + 1))
+    else
+      log "UNREACHABLE: $host $ip (tcp ${PROBE_PORTS// /,}); not published" >&2
+      echo "$ip" >> "$tmp_blocked_ips"
+    fi
+  done <<< "$ips"
+
+  [[ "$kept" -gt 0 ]] || return 1
+  hosts_reachable=$((hosts_reachable + 1))
+}
+
 if [[ -f "$HOST_FILE" ]]; then
   while read -r host _comment; do
     [[ -z "${host:-}" ]] && continue
@@ -68,9 +125,8 @@ if [[ -f "$HOST_FILE" ]]; then
 
     log "Resolving host: $host"
 
-    dig +short A "$host" \
-      | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
-      >> "$tmp_ips" || true
+    # No pipe or command substitution here: the host counters must update this shell's variables.
+    reachable_ips "$host" >> "$tmp_ips" || true
   done < "$HOST_FILE"
 else
   log "Host file not found: $HOST_FILE"
@@ -148,20 +204,28 @@ if [[ -f "$DIRECT_HOST_FILE" ]]; then
 
     log "Resolving direct host (no ASN expansion): $host"
 
-    dig +short A "$host" \
-      | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
-      | sed 's#$#/32#' \
-      >> "$tmp_raw_routes" || true
+    reachable_ips "$host" >> "$tmp_direct_ips" || true
   done < "$DIRECT_HOST_FILE"
 fi
 
-python3 - "$tmp_raw_routes" "$MIN_PREFIX_V4" "$MAX_PREFIX_V4" > "$tmp_routes" <<'PY'
+sed 's#$#/32#' "$tmp_direct_ips" >> "$tmp_raw_routes"
+
+# Every listed host failing the gate points at this node's own connectivity, not at all of them being blocked:
+# keep the routes already advertised instead of withdrawing them.
+if [[ "$VERIFY_REACHABILITY" == "true" ]] && [[ "$hosts_listed" -gt 0 ]] && [[ "$hosts_reachable" -eq 0 ]]; then
+  log "None of the $hosts_listed listed hosts is reachable from this node. Refusing to change Tailscale routes."
+  exit 1
+fi
+log "Reachable hosts: $hosts_reachable of $hosts_listed"
+
+python3 - "$tmp_raw_routes" "$MIN_PREFIX_V4" "$MAX_PREFIX_V4" "$tmp_blocked_ips" > "$tmp_routes" <<'PY'
 import ipaddress
 import sys
 
 raw_file = sys.argv[1]
 min_prefix = int(sys.argv[2])
 max_prefix = int(sys.argv[3])
+blocked_file = sys.argv[4]
 
 nets = []
 
@@ -184,8 +248,26 @@ with open(raw_file, "r", encoding="utf-8") as f:
 
         nets.append(net)
 
+collapsed = list(ipaddress.collapse_addresses(nets))
+
+# Addresses that failed the reachability gate must not ride along inside a wider prefix that another listed host
+# pulled in (an ASN expansion): split the prefix around them. Peers that can reach them then keep the specific
+# routes, and the longer prefixes win.
+with open(blocked_file, "r", encoding="utf-8") as f:
+    blocked = {ipaddress.ip_address(l.strip()) for l in f if l.strip()}
+
+for addr in sorted(blocked):
+    hole = ipaddress.ip_network(addr)
+    carved = []
+    for net in collapsed:
+        if hole.subnet_of(net) and net != hole:
+            carved.extend(net.address_exclude(hole))
+        elif net != hole:
+            carved.append(net)
+    collapsed = carved
+
 collapsed = sorted(
-    ipaddress.collapse_addresses(nets),
+    ipaddress.collapse_addresses(collapsed),
     key=lambda n: (int(n.network_address), n.prefixlen)
 )
 

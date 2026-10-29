@@ -283,7 +283,9 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
   `tailscale_advertise_exit_node`, and the route lists `route_asns`, `route_hosts`,
   `route_hosts_direct` (see `ansible/roles/route-provisioner/defaults/main.yml` for what each does
   and when to prefer `route_hosts_direct` — large shared ASNs like AWS/Akamai must NOT go in
-  `route_asns`).
+  `route_asns`). Hosts in `route_hosts` / `route_hosts_direct` are published only if this node can open a TCP
+  connection to them (`route_verify_reachability`, default on; ports/timeout/attempts are `route_probe_*`), so a
+  service that filters the node's address range is not advertised. Test: `bash scripts/test/route-provisioner/run.sh`.
 - Run from `ansible/` with `SOPS_AGE_KEY` set:
   `ansible-playbook site.yml --extra-vars tailscale_version=<x.y.z>` (add `--check --diff` first).
 

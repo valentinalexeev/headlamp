@@ -12,3 +12,13 @@ route_hosts_direct: []
 route_min_prefix_v4: 8
 route_max_prefix_v4: 32
 route_cron_interval_hours: 3
+# Reachability gate. A host from route_hosts / route_hosts_direct is published (its addresses, the ASNs they sit in,
+# its /32s) only when this node can open a TCP connection to one of its addresses on one of route_probe_ports. A service
+# that drops or filters this node's address range is then left out instead of being advertised and failing for every
+# client. Retried route_probe_attempts times to ride out a transient loss. If NO listed host passes, the run exits
+# without touching the advertised routes (that looks like this node's own outage). route_asns entries are not probed:
+# they have no hostname to test.
+route_verify_reachability: true
+route_probe_ports: [443]
+route_probe_timeout_seconds: 5
+route_probe_attempts: 2

@@ -22,6 +22,13 @@ task_runner_token: ""
 task_runner_listen_addr: ""
 task_runner_port: 9100
 
+# Interactive browser sessions (see README "Browser sessions"). Off by default.
+# When true the env file gets RUNNER_SESSION_BIND (= task_runner_listen_addr, so
+# the session port is published on the tailnet address only) and
+# RUNNER_SESSION_PORT. The port must differ from task_runner_port.
+task_runner_session_enabled: false
+task_runner_session_port: 6080
+
 # Base image of the run image, pinned by digest (REQUIRED unless
 # task_runner_image_archive is set): "<registry>/<repository>@sha256:<64 hex>".
 # The README explains how to obtain the digest of a tag.

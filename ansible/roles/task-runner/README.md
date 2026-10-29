@@ -64,6 +64,8 @@ reaches the node. On a fresh host the steps that need the service user may fail 
 | `task_runner_token` | `""` | Required, vault. At least 24 characters, no whitespace, quotes, backslash, `$` or backtick. Never logged. |
 | `task_runner_listen_addr` | `""` | Required. The node's tailnet address (100.64.0.0/10, or IPv6 in fd7a:115c:a1e0::/48). Preflight checks `tailscale ip` on the node reports it. |
 | `task_runner_port` | `9100` | Bound on `task_runner_listen_addr` only. |
+| `task_runner_session_enabled` | `false` | Turns on interactive browser sessions: adds `RUNNER_SESSION_BIND` (= `task_runner_listen_addr`) and `RUNNER_SESSION_PORT` to the env file. See [Browser sessions](#browser-sessions). |
+| `task_runner_session_port` | `6080` | noVNC port published on the tailnet address; used only when sessions are enabled. 1-65535, must differ from `task_runner_port` (preflight). |
 | `task_runner_base_image` | `""` | Required unless `task_runner_image_archive` is set. `<image>@sha256:<64 hex>`, see [Base image digest](#base-image-digest). |
 | `task_runner_image_archive` | `""` | Optional control-host path to a `podman save` tarball; loaded instead of building. |
 | `task_runner_binary` | `""` | Optional control-host path to a prebuilt linux binary; otherwise built with the control host's `go`. |
@@ -109,7 +111,7 @@ Fixed layout (variables exist, change only with reason): user `task-runner`, sta
    with the same inputs does nothing. With `task_runner_image_archive` the tarball is copied, `podman load`ed (it must
    hold exactly one image) and tagged `localhost/task-runner:a-<sha256 of the archive>`.
 5. **Config**: the env file (`RUNNER_TOKEN`, `RUNNER_LISTEN`, `RUNNER_STATE_DIR`, `RUNNER_CONTAINER_BIN`, `RUNNER_IMAGE`,
-   `RUNNER_MEMORY`, `RUNNER_PIDS_LIMIT` only), a check that the image named there exists, handlers (daemon-reload,
+   `RUNNER_MEMORY`, `RUNNER_PIDS_LIMIT`, plus the two `RUNNER_SESSION_*` lines when `task_runner_session_enabled`), a check that the image named there exists, handlers (daemon-reload,
    guard reload, runner restart when the binary, unit or env file changed), enable and start. Then old image tags are
    untagged, keeping the current and the newest other one (`podman rmi` without force, failures ignored); the base
    image stays, a rebuild reuses it.
@@ -117,6 +119,40 @@ Fixed layout (variables exist, change only with reason): user `task-runner`, sta
 Every podman call of the role passes the global `--cgroup-manager=cgroupfs` and the service's `HOME` and
 `XDG_RUNTIME_DIR`: podman records the run root in its database and refuses a mismatch, so the role and the service
 must agree. The runner adds the flag to its own calls.
+
+## Browser sessions
+
+An admin can open an interactive browser on a node (noVNC in a container, started and stopped from node-control's
+Browser page). It is off by default. To enable it on a node:
+
+```yaml
+task_runner_session_enabled: true
+task_runner_session_port: 6080      # optional, the default
+```
+
+The env file then also carries `RUNNER_SESSION_BIND` (the node's tailnet address, always a specific IP) and
+`RUNNER_SESSION_PORT`. Preflight, only when enabled, checks the port is 1-65535 and differs from `task_runner_port`.
+Redeploy restarts the service, so do it when the runner is idle.
+
+- **Tag.** The node must carry the session tag (node-control's `SESSIONS_TAG`, for example `tag:browser-session`), in
+  addition to the runner tag; node-control never contacts a node without it. Tag it as described under Use.
+- **ACL.** The tailnet ACL must let the operator (the identity that opens the page's link) reach the session tag on the
+  session port (`task_runner_session_port`), besides node-control reaching the runner port. Nothing else needs to reach
+  that port. There is no per-session password: whoever the policy lets reach the port can use the browser while a
+  session runs, so keep that rule narrow.
+- **Guard.** No change to the nftables guard. Inbound replies on connections the runner accepted on its tailnet address
+  are covered by the existing `ct state established,related` accept, and enabling sessions does not change egress
+  policy: the session's browser runs as the same service user, so it reaches the public internet only, never the node,
+  the LAN or the tailnet.
+- **Image.** Sessions use the same run image as runs (it carries the session tools). Its tag is a content hash, so the
+  image is rebuilt automatically when the inputs change; the first rebuild after upgrading to a version with session
+  support is long (base pull and build, see First pull).
+- **Slot.** A session shares the single slot with runs: one at a time, `409` otherwise.
+
+Checks after the first deploy with sessions on: `grep RUNNER_SESSION /etc/task-runner/env` as root shows the tailnet
+address and the port; `ss -ltn` shows nothing listening on the session port while idle; start a session from the
+Browser page, then `ss -ltn` shows it bound to the tailnet address only (not `0.0.0.0` or `::`), and the link opens
+from an operator device the ACL allows and does not from one it does not.
 
 ## Facts from the spike
 

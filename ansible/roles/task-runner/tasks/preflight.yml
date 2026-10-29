@@ -68,6 +68,19 @@
       task_runner_port='{{ task_runner_port }}'.
     quiet: true
 
+- name: Check the browser session port
+  ansible.builtin.assert:
+    that:
+      - task_runner_session_port | string is regex('^[0-9]{1,5}\\Z')
+      - 1 <= (task_runner_session_port | int) <= 65535
+      - (task_runner_session_port | int) != (task_runner_port | int)
+    fail_msg: >-
+      task-runner: task_runner_session_port must be 1-65535 and differ from
+      task_runner_port. Got task_runner_session_port='{{ task_runner_session_port }}',
+      task_runner_port='{{ task_runner_port }}'.
+    quiet: true
+  when: task_runner_session_enabled | bool
+
 - name: Check the user name and the paths
   ansible.builtin.assert:
     that:

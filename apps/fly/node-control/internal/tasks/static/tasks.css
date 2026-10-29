@@ -68,3 +68,11 @@ table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
 th, td { border-bottom: 1px solid var(--border); padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; }
 th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 td.sha { font-family: ui-monospace, monospace; }
+.dot { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.running { background: var(--good); }
+.dot.idle { background: var(--accent); }
+.dot.unavailable { background: var(--bad); }
+.session-controls { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; margin-top: 0.75rem; }
+.session-controls select { font: inherit; font-size: 0.85rem; padding: 0.25rem 0.4rem; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+a.button { font-size: 0.85rem; padding: 0.3rem 0.7rem; border-radius: 6px; background: var(--accent); color: #fff; text-decoration: none; }
+a.button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

@@ -69,6 +69,10 @@ type runnerClient struct {
 // NewRunnerClient dials runners through tn on the given port. secrets are
 // values that must never appear in an error; the token is always included.
 func NewRunnerClient(tn core.Tailnet, port int, token string, secrets []string) Runner {
+	return newRunnerClient(tn, port, token, secrets)
+}
+
+func newRunnerClient(tn core.Tailnet, port int, token string, secrets []string) *runnerClient {
 	return &runnerClient{
 		hc: &http.Client{
 			Transport: &http.Transport{

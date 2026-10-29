@@ -469,7 +469,7 @@ an unreadable or invalid `ENROLL_CONFIG`) stops startup with a message naming th
 ## Navigation bar
 
 Every admin page shows a small top bar that lists the modules available in this deployment, with the current one
-highlighted. Today that is Nodes (`/`) and, when the module is on, Enrolment (`/enroll`, with `ENROLL_DB`), Policy (`/policy`) and Tasks (`/tasks`). The bar appears only
+highlighted. Today that is Nodes (`/`) and, when the module is on, Bridge (`/enroll`, with `ENROLL_DB`), Policy (`/policy`) and Tasks (`/tasks`). The bar appears only
 when at least two entries exist, so a deployment without enrolment looks exactly as before. It is never added to
 the public listener, to JSON, to non-200 responses or to any request other than GET and HEAD.
 

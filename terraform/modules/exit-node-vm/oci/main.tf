@@ -50,6 +50,20 @@ resource "oci_core_security_list" "this" {
     }
   }
 
+  dynamic "ingress_security_rules" {
+    for_each = toset(var.extra_tcp_ingress_ports)
+    content {
+      protocol    = "6" # TCP
+      source      = "0.0.0.0/0"
+      description = "Extra TCP ${ingress_security_rules.value}"
+
+      tcp_options {
+        min = ingress_security_rules.value
+        max = ingress_security_rules.value
+      }
+    }
+  }
+
   egress_security_rules {
     protocol    = "all"
     destination = "0.0.0.0/0"

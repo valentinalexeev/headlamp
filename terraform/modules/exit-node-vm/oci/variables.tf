@@ -42,3 +42,14 @@ variable "tailscale_authkey" {
   type      = string
   sensitive = true
 }
+
+variable "extra_tcp_ingress_ports" {
+  type        = list(number)
+  default     = []
+  description = "Extra TCP ports to open inbound from anywhere in the security list (for a node that also serves a public front). Empty keeps the default: only the Tailscale UDP port."
+
+  validation {
+    condition     = alltrue([for p in var.extra_tcp_ingress_ports : p >= 1 && p <= 65535 && p == floor(p) && p != 22])
+    error_message = "extra_tcp_ingress_ports: whole numbers 1-65535, and never 22 (admin access is over the tailnet only)."
+  }
+}

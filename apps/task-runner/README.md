@@ -72,7 +72,7 @@ using the endpoint. The runner generates it (`crypto/rand`, 32 hex chars), passe
 answer and in `GET /v1/sessions` while the session is running (never once it has ended), and never logs it. In the
 container it is only in the environment and a 0600 file under `/tmp`; websockify refuses a WebSocket that lacks
 `?token=`. The token appears in the operator's browser history and in the page's address bar while the session is
-open, so do not share the link; stopping the session invalidates it. Closing the last browser window ends the session (reported as `failed`). With sessions disabled
+open, so do not share the link; stopping the session invalidates it. Closing the last browser window reopens Chrome. With sessions disabled
 (`RUNNER_SESSION_BIND` empty) all three session endpoints answer `404`.
 
 ## Configuration (environment)
@@ -110,7 +110,7 @@ the size of its browser tab (there is no maximum size: the container memory limi
 costs memory); the network ACL gates the port and websockify only connects a WebSocket that carries the per-session
 `SESSION_TOKEN` (`?token=`, via a token file). The
 container exits 0 after `SESSION_IDLE_SECONDS` without a connected client (established connections to
-Xvnc's port, read from `/proc/net/tcp`; counted from start, and after each disconnect) and non-zero if any child process dies. The
+Xvnc's port, read from `/proc/net/tcp`; counted from start, and after each disconnect) and non-zero if Xvnc or websockify dies (openbox and Chrome are restarted when closed, and the session fails only if one of them exits again at once five times in a row). The
 browser profile lives in tmpfs under `/tmp` only. `sh image/session_test.sh` runs
 static checks on the script.
 

@@ -158,7 +158,7 @@ Redeploy restarts the service, so do it when the runner is idle.
 - **Link.** The Open link uses the node's tailnet name when it resolves on the operator's device (MagicDNS), else the
   tailnet IPv4. The published port follows `task_runner_listen_addr`; an IPv6-only listen address is not supported by
   the link. The link can show before noVNC is listening: a click in the first seconds may be refused, retry.
-  Closing the last browser window ends the session (reported as failed).
+  Closing the last browser window reopens Chrome; a session ends by Stop, its length, the idle timeout, or if its display or bridge dies.
 
 Checks after the first deploy with sessions on: `grep RUNNER_SESSION /etc/task-runner/env` as root shows the tailnet
 address and the port; `ss -ltn` shows nothing listening on the session port while idle; start a session from the

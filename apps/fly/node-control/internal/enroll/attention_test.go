@@ -156,3 +156,71 @@ func TestEnrollAttentionInactiveModuleReportsNothing(t *testing.T) {
 		t.Fatalf("%+v %+v %v", items, lines, err)
 	}
 }
+
+var (
+	_ core.ActivitySource = (*Module)(nil)
+	_ core.SearchSource   = (*Module)(nil)
+)
+
+func TestEnrollActivityMapsDeviceAndBridgeActions(t *testing.T) {
+	f := newRegFx(t, nil)
+	for _, e := range [][3]string{
+		{"alice@", "device.create", "phone, expires 2027-01-01"},
+		{"alice@", "node.stop", "exit-a: ok"}, // the nodes module's entry in the shared log
+		{"bob@", "bridge.approve", "ingress-1"},
+	} {
+		if err := f.store.Audit(e[0], e[1], e[2]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := attentionFor(f)
+	got, err := m.Activity(context.Background(), "alice@", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want the two device and bridge entries, got %+v", got)
+	}
+	for _, e := range got {
+		if e.Source != "Devices" || e.At.IsZero() || e.Actor == "" {
+			t.Errorf("%+v", e)
+		}
+	}
+	if got[0].Action != "bridge.approve" || got[1].Action != "device.create" || got[1].Detail != "phone, expires 2027-01-01" {
+		t.Errorf("newest first: %+v", got)
+	}
+	if one, _ := m.Activity(context.Background(), "alice@", 1); len(one) != 1 || one[0].Action != "bridge.approve" {
+		t.Errorf("limit: %+v", one)
+	}
+	if !m.HasActivity() {
+		t.Error("an active module has an activity log")
+	}
+}
+
+func TestEnrollWithoutStoreGivesNothing(t *testing.T) {
+	m := &Module{}
+	if got, err := m.Activity(context.Background(), "alice@", 10); got != nil || err != nil {
+		t.Errorf("%v %v", got, err)
+	}
+	if got, err := m.Search(context.Background(), "alice@"); got != nil || err != nil {
+		t.Errorf("%v %v", got, err)
+	}
+	if m.HasActivity() {
+		t.Error("an inactive module has no activity log")
+	}
+}
+
+func TestEnrollSearchListsDeviceNames(t *testing.T) {
+	f := newRegFx(t, nil)
+	f.store.CreateDevice("phone-1", "alice", "sing-box", adminFuture)
+	f.store.CreateDevice("tablet", "alice", "sing-box", adminFuture)
+	items, err := attentionFor(f).Search(context.Background(), "alice@")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("%v %+v", err, items)
+	}
+	for _, it := range items {
+		if it.Kind != "Device" || it.Path != "/enroll" || it.Label == "" {
+			t.Errorf("%+v", it)
+		}
+	}
+}

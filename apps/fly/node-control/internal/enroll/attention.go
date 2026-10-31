@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"example.com/node-control/internal/core"
@@ -133,4 +134,62 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		line.Summary += fmt.Sprintf(". %d bridge sync pending", outOfSync)
 	}
 	return items, []core.SystemLine{line}, nil
+}
+
+// activityPrefixes are the audit actions this module owns. The shared log also holds node actions, which the nodes
+// module reports.
+var activityPrefixes = []string{"device.", "bridge."}
+
+// auditRead is how many log entries Activity reads before filtering by prefix: the whole bounded log.
+const auditRead = 1000
+
+// HasActivity reports whether the module keeps an activity log, which is when enrolment is on.
+func (m *Module) HasActivity() bool { return m.store != nil }
+
+// Activity lists the device and bridge actions of the audit log, newest first, as "Devices". Inactive: nothing.
+// The log holds names and dates only, never a link, a UUID or a secret.
+func (m *Module) Activity(_ context.Context, _ string, limit int) ([]core.ActivityEntry, error) {
+	if m.store == nil {
+		return nil, nil
+	}
+	log, err := m.store.AuditLog(auditRead)
+	if err != nil {
+		return nil, fmt.Errorf("enrolment audit log: %w", err)
+	}
+	var out []core.ActivityEntry
+	for _, e := range log {
+		if !hasAnyPrefix(e.Action, activityPrefixes) {
+			continue
+		}
+		out = append(out, core.ActivityEntry{At: e.At, Actor: e.Actor, Source: "Devices", Action: e.Action, Detail: e.Detail})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// Search lists the device names, each opening the Devices page. Inactive: nothing.
+func (m *Module) Search(_ context.Context, _ string) ([]core.SearchItem, error) {
+	if m.store == nil {
+		return nil, nil
+	}
+	devs, err := m.store.ListDevices()
+	if err != nil {
+		return nil, fmt.Errorf("enrolment store: %w", err)
+	}
+	out := make([]core.SearchItem, 0, len(devs))
+	for _, d := range devs {
+		out = append(out, core.SearchItem{Label: d.Name, Kind: "Device", Path: "/enroll"})
+	}
+	return out, nil
 }

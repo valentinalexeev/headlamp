@@ -75,10 +75,12 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 // HasActivity reports whether the module keeps a change history, which is when the console is active.
 func (m *Module) HasActivity() bool { return m.store != nil }
 
-// Activity lists the change history, newest first: each change when it was applied (by whoever applied it), and each
-// change that ended reverted: at its deadline by "system" (change.reverted), or, when the deadline has not come, on
-// request by "operator" (change.reverted_on_request). The history records neither who confirmed a change nor when,
-// so confirmations are not listed. The policy text and the reason of a revert are not part of it. Only POLICY_ADMIN_USERS see it.
+// Activity lists the change history, newest first: each change when it was applied (by whoever applied it) and, from
+// the recorded outcomes, each confirmation and each revert with its actor and time: "system" for the automatic revert
+// at the deadline, the operator for a revert on request. A reverted change from before outcomes were recorded has
+// no record; it reads as a plain revert (change.reverted_earlier) by the actor of the change, at its deadline.
+// An old confirmation is not listed: nothing says when it happened. The policy text is never part of an entry.
+// Only POLICY_ADMIN_USERS see it.
 func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.ActivityEntry, error) {
 	if m.store == nil {
 		return nil, nil
@@ -86,11 +88,11 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 	if !authz.ParseAllowed(m.env.Getenv("POLICY_ADMIN_USERS")).Has(login) {
 		return nil, core.ErrNotVisible
 	}
-	now := time.Now
-	if m.svc != nil {
-		now = m.svc.clock
-	}
 	hist, err := m.store.History(limit)
+	if err != nil {
+		return nil, fmt.Errorf("policy store: %w", err)
+	}
+	recs, err := m.store.Records()
 	if err != nil {
 		return nil, fmt.Errorf("policy store: %w", err)
 	}
@@ -101,14 +103,15 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 			detail += ": " + r
 		}
 		out = append(out, core.ActivityEntry{At: e.At, Actor: e.Actor, Source: "Policy", Action: "change.applied", Detail: detail})
-		if e.State == OutcomeReverted {
-			// Before its deadline a change can only have been reverted on request: the operator's doing, timed now
-			// because the history does not keep the moment. At or after the deadline it was the automatic revert.
-			ent := core.ActivityEntry{At: e.Deadline, Actor: "system", Source: "Policy", Action: "change.reverted", Detail: fmt.Sprintf("%d", e.ID)}
-			if e.Deadline.After(now()) {
-				ent.At, ent.Actor, ent.Action = now(), "operator", "change.reverted_on_request"
+		id := fmt.Sprintf("%d", e.ID)
+		if r, ok := recs[e.ID]; ok {
+			action := map[string]string{RecordConfirmed: "change.confirmed", RecordReverted: "change.reverted",
+				RecordRevertedOnRequest: "change.reverted_on_request"}[r.Action]
+			if action != "" {
+				out = append(out, core.ActivityEntry{At: r.At, Actor: r.Actor, Source: "Policy", Action: action, Detail: id})
 			}
-			out = append(out, ent)
+		} else if e.State == OutcomeReverted {
+			out = append(out, core.ActivityEntry{At: e.Deadline, Actor: e.Actor, Source: "Policy", Action: "change.reverted_earlier", Detail: id})
 		}
 	}
 	return out, nil

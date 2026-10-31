@@ -129,69 +129,107 @@ var _ core.ActivitySource = (*Module)(nil)
 
 func TestPolicyActivity(t *testing.T) {
 	ctx := context.Background()
+	byAction := func(got []core.ActivityEntry, action string) []core.ActivityEntry {
+		var out []core.ActivityEntry
+		for _, e := range got {
+			if e.Action == action {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
 
-	t.Run("applied changes carry their actor and reason, a revert by the deadline is the system's", func(t *testing.T) {
+	t.Run("applied, confirmed and reverted changes carry the recorded actor and time", func(t *testing.T) {
 		m, svc, _, clk := attentionModule(t)
 		kept := applyOK(t, svc, "kept")
+		clk.Advance(time.Minute)
 		if err := svc.Confirm(ctx, "alice@", kept); err != nil {
 			t.Fatal(err)
 		}
+		confirmedAt := clk.Now()
 		clk.Advance(time.Minute)
 		lost := applyOK(t, svc, "lost")
 		clk.Advance(testRevert + time.Second)
 		svc.checkRevert(ctx)
+		revertedAt := clk.Now()
 
 		got, err := m.Activity(ctx, "alice@", 20)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var applied, reverted []core.ActivityEntry
 		for _, e := range got {
 			if e.Source != "Policy" || e.At.IsZero() || e.Actor == "" {
 				t.Errorf("%+v", e)
 			}
-			switch e.Action {
-			case "change.applied":
-				applied = append(applied, e)
-			case "change.reverted":
-				reverted = append(reverted, e)
-			default:
-				t.Errorf("unexpected action: %+v", e)
-			}
 		}
-		if len(applied) != 2 || len(reverted) != 1 {
-			t.Fatalf("applied %+v reverted %+v", applied, reverted)
+		applied := byAction(got, "change.applied")
+		if len(applied) != 2 || !strings.HasPrefix(applied[0].Detail, fmt.Sprint(lost)) || !strings.HasPrefix(applied[1].Detail, fmt.Sprint(kept)) {
+			t.Fatalf("applied, newest first: %+v", applied)
 		}
-		if !strings.HasPrefix(applied[0].Detail, fmt.Sprint(lost)) || !strings.HasPrefix(applied[1].Detail, fmt.Sprint(kept)) {
-			t.Errorf("newest first: %+v", applied)
+		if c := byAction(got, "change.confirmed"); len(c) != 1 || c[0].Actor != "alice@" || c[0].Detail != fmt.Sprint(kept) || !c[0].At.Equal(confirmedAt) {
+			t.Errorf("confirmed: %+v", c)
 		}
-		if r := reverted[0]; r.Actor != "system" || r.Detail != fmt.Sprint(lost) {
-			t.Errorf("%+v", r)
+		if r := byAction(got, "change.reverted"); len(r) != 1 || r[0].Actor != "system" || r[0].Detail != fmt.Sprint(lost) || !r[0].At.Equal(revertedAt) {
+			t.Errorf("reverted: %+v", r)
 		}
 		if strings.Contains(fmt.Sprint(got), "lost\n") {
 			t.Error("the policy text must not appear")
 		}
 	})
 
-	t.Run("a revert on request before the deadline is the operator's, not the system's", func(t *testing.T) {
+	t.Run("a revert on request stays the operator's after the deadline passes, at the same time", func(t *testing.T) {
 		m, svc, _, clk := attentionModule(t)
 		id := applyOK(t, svc, "new")
 		clk.Advance(10 * time.Second)
 		if err := svc.RevertPending(ctx, "alice@", id); err != nil {
 			t.Fatal(err)
 		}
-		got, err := m.Activity(ctx, "alice@", 20)
-		if err != nil {
-			t.Fatal(err)
+		at := clk.Now()
+		read := func() core.ActivityEntry {
+			got, err := m.Activity(ctx, "alice@", 20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := byAction(got, "change.reverted_on_request")
+			if len(r) != 1 || len(byAction(got, "change.reverted")) != 0 {
+				t.Fatalf("%+v", got)
+			}
+			return r[0]
 		}
-		var rev []core.ActivityEntry
-		for _, e := range got {
-			if strings.HasPrefix(e.Action, "change.reverted") {
-				rev = append(rev, e)
+		before := read()
+		clk.Advance(testRevert + time.Hour)
+		after := read()
+		for _, e := range []core.ActivityEntry{before, after} {
+			if e.Actor != "alice@" || e.Detail != fmt.Sprint(id) || !e.At.Equal(at) {
+				t.Errorf("%+v, want actor alice@ at %v", e, at)
 			}
 		}
-		if len(rev) != 1 || rev[0].Action != "change.reverted_on_request" || rev[0].Actor != "operator" || rev[0].Detail != fmt.Sprint(id) || !rev[0].At.Equal(clk.Now()) {
-			t.Fatalf("%+v", rev)
+	})
+
+	t.Run("a reverted change from before outcomes were recorded reads as a plain revert, never timed now", func(t *testing.T) {
+		m, svc, _, clk := attentionModule(t)
+		id := applyOK(t, svc, "old")
+		deadline := clk.Now().Add(testRevert)
+		clk.Advance(5 * time.Second)
+		if err := svc.RevertPending(ctx, "bob@", id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.store.db.Exec("DELETE FROM outcomes"); err != nil { // as if it ended before the table existed
+			t.Fatal(err)
+		}
+		for _, advance := range []time.Duration{0, 3 * time.Hour} {
+			clk.Advance(advance)
+			got, err := m.Activity(ctx, "alice@", 20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := byAction(got, "change.reverted_earlier")
+			if len(r) != 1 || r[0].Actor != "alice" || r[0].Detail != fmt.Sprint(id) || !r[0].At.Equal(deadline) {
+				t.Fatalf("%+v, want actor alice at %v", got, deadline)
+			}
+			if len(byAction(got, "change.confirmed")) != 0 {
+				t.Errorf("%+v", got)
+			}
 		}
 	})
 

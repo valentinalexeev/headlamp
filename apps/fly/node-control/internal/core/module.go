@@ -133,3 +133,16 @@ type SearchItem struct {
 type SearchSource interface {
 	Search(ctx context.Context, login string) ([]SearchItem, error)
 }
+
+// AuditEntry is one recorded operator action. Detail holds names and dates only, never a secret.
+type AuditEntry struct {
+	At                    time.Time
+	Actor, Action, Detail string
+}
+
+// AuditLog is the bounded record of operator actions. AuditLog returns the newest entries first.
+// A failing log must never fail the action it records.
+type AuditLog interface {
+	Audit(actor, action, detail string) error
+	AuditLog(limit int) ([]AuditEntry, error)
+}

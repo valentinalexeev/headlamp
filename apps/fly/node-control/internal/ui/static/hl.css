@@ -158,3 +158,5 @@ body:has(>nav.side[data-nc-nav]){padding-left:216px}
 .hl .tick{font-family:"IBM Plex Mono",monospace;font-size:15px;color:var(--warn)}
 .note.crit .tick{color:var(--crit)}
 .input.area{height:auto;min-height:320px;padding:10px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.55;resize:vertical}
+/* a compact select in a table row (Browser sessions) */
+.input.sm{height:30px;width:auto;font-size:13px}

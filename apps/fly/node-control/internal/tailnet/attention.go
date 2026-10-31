@@ -18,7 +18,7 @@ func (m *module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 	if m.expiry == nil {
 		return nil, nil, nil
 	}
-	at, err := m.expiry(ctx)
+	at, err := m.keyExpiry(ctx)
 	if err != nil || at.IsZero() {
 		return nil, nil, nil
 	}
@@ -39,6 +39,23 @@ func (m *module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		Detail: "The tailnet status line stops when it does. Rotate it with scripts/rotate-headscale-api-key.sh.",
 		Since:  at.Add(-keyWarn),
 	}}, nil, nil
+}
+
+// expiryTTL is how long a read expiry is reused: it changes once a year, and Overview polls.
+const expiryTTL = 10 * time.Minute
+
+func (m *module) keyExpiry(ctx context.Context) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.expOK && m.now().Sub(m.expAt) < expiryTTL {
+		return m.expV, nil
+	}
+	at, err := m.expiry(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	m.expAt, m.expOK, m.expV = m.now(), true, at
+	return at, nil
 }
 
 func plural(n int, one, many string) string {

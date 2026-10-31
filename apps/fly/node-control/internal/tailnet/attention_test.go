@@ -70,3 +70,26 @@ func TestTailnetAttentionAPIKeyExpiry(t *testing.T) {
 		})
 	}
 }
+
+func TestTailnetAttentionReadsTheExpiryOncePerInterval(t *testing.T) {
+	reads := 0
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		reads++
+		return now.Add(24 * time.Hour), nil
+	})).(*module)
+	m.now = func() time.Time { return now }
+	for i := 0; i < 5; i++ {
+		if items, _, _ := m.Attention(context.Background(), "alice@"); len(items) != 1 {
+			t.Fatalf("%+v", items)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("read %d times", reads)
+	}
+	now = now.Add(11 * time.Minute)
+	m.Attention(context.Background(), "alice@")
+	if reads != 2 {
+		t.Fatalf("read %d times after the interval", reads)
+	}
+}

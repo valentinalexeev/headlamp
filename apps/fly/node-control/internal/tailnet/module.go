@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"example.com/node-control/internal/core"
@@ -18,6 +19,11 @@ type module struct {
 	tracked func(context.Context) map[string]bool
 	expiry  func(context.Context) (time.Time, error)
 	now     func() time.Time
+
+	mu    sync.Mutex // guards the cached expiry
+	expAt time.Time  // when it was read
+	expOK bool
+	expV  time.Time
 }
 
 // Option configures the module.

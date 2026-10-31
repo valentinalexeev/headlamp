@@ -253,6 +253,16 @@ const key = (ctl, k) => { const ev = {}; ctl.input.fire('keydown', Object.assign
     assert.deepStrictEqual(labels(h.ctl), ['Enrol device']);
   }
 
+  // loadingEndsEvenIfRenderThrows
+  {
+    const bad = { get label() { throw new Error('boom'); }, kind: 'Node', path: '/nodes' };
+    const f = fixture({ search: { items: [bad] } });
+    f.ctl.open(); await flush(); await flush();
+    assert.strictEqual(f.ctl.state.loading, false);
+    // and the palette still works afterwards
+    assert.doesNotThrow(() => f.ctl.close());
+  }
+
   // the dialog is labelled and the field is a combobox
   {
     const f = fixture();

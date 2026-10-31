@@ -163,13 +163,18 @@
       var token = ++st.token;
       st.nav = []; st.search = []; st.navFailed = false; st.searchFailed = false; st.loading = true;
       var pending = 2;
-      function done() { pending -= 1; if (token === st.token && pending === 0) { st.loading = false; render(); } }
+      function done() {
+        pending -= 1;
+        if (token !== st.token || pending !== 0) { return; }
+        st.loading = false; // first, so a list that cannot be drawn never stays "Loading."
+        try { render(); } catch (e) { /* the list stays as it was */ }
+      }
       api('GET', NAV_URL).then(function (data) {
         if (token === st.token) { st.nav = arr(data); render(); }
-      }, function () { if (token === st.token) { st.navFailed = true; } }).then(done);
+      }, function () { if (token === st.token) { st.navFailed = true; } }).then(done, done);
       api('GET', SEARCH_URL).then(function (data) {
         if (token === st.token) { st.search = arr(data && data.items); render(); }
-      }, function () { if (token === st.token) { st.searchFailed = true; } }).then(done);
+      }, function () { if (token === st.token) { st.searchFailed = true; } }).then(done, done);
     }
 
     var ctl = {

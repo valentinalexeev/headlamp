@@ -53,3 +53,9 @@ variable "extra_tcp_ingress_ports" {
     error_message = "extra_tcp_ingress_ports: whole numbers 1-65535, and never 22 (admin access is over the tailnet only)."
   }
 }
+
+variable "ubuntu_version" {
+  type        = string
+  default     = "24.04"
+  description = "Canonical Ubuntu release for the boot image (the newest image of that release is picked at creation). An existing instance keeps its image: changing this does not replace it, use terraform -replace for a deliberate rebuild."
+}

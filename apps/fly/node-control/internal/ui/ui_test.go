@@ -70,7 +70,7 @@ func TestJSForbidsMarkupInjection(t *testing.T) {
 	}
 }
 
-func TestCSSHasNoInlineStyleDependency(t *testing.T) {
+func TestCSSHasFontFaces(t *testing.T) {
 	if !strings.Contains(string(hlCSS), "@font-face") {
 		t.Error("hl.css has no @font-face")
 	}
@@ -121,5 +121,15 @@ func TestIconPathsMatchScript(t *testing.T) {
 	}
 	if len(iconPaths) != len(iconNames) {
 		t.Errorf("%d paths for %d names", len(iconPaths), len(iconNames))
+	}
+}
+
+// A lowercase m after the first command is relative to the previous point and, after a
+// closed shape, draws outside the viewBox. Only the first command may be lowercase.
+func TestIconPathsUseAbsoluteMoves(t *testing.T) {
+	for name, d := range iconPaths {
+		if strings.Contains(d[1:], "m") {
+			t.Errorf("%s: relative move after the first command: %q", name, d)
+		}
 	}
 }

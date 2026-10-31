@@ -76,9 +76,9 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 func (m *Module) HasActivity() bool { return m.store != nil }
 
 // Activity lists the change history, newest first: each change when it was applied (by whoever applied it), and each
-// change that ended reverted, when its deadline passed (by "system"). The history records neither who confirmed a
-// change nor when, so confirmations are not listed. A change reverted on request shows the same entry. The policy
-// text and the reason of a revert are not part of it. Only POLICY_ADMIN_USERS see it.
+// change that ended reverted: at its deadline by "system" (change.reverted), or, when the deadline has not come, on
+// request by "operator" (change.reverted_on_request). The history records neither who confirmed a change nor when,
+// so confirmations are not listed. The policy text and the reason of a revert are not part of it. Only POLICY_ADMIN_USERS see it.
 func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.ActivityEntry, error) {
 	if m.store == nil {
 		return nil, nil
@@ -102,11 +102,13 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 		}
 		out = append(out, core.ActivityEntry{At: e.At, Actor: e.Actor, Source: "Policy", Action: "change.applied", Detail: detail})
 		if e.State == OutcomeReverted {
-			at := e.Deadline
-			if at.After(now()) {
-				at = now()
+			// Before its deadline a change can only have been reverted on request: the operator's doing, timed now
+			// because the history does not keep the moment. At or after the deadline it was the automatic revert.
+			ent := core.ActivityEntry{At: e.Deadline, Actor: "system", Source: "Policy", Action: "change.reverted", Detail: fmt.Sprintf("%d", e.ID)}
+			if e.Deadline.After(now()) {
+				ent.At, ent.Actor, ent.Action = now(), "operator", "change.reverted_on_request"
 			}
-			out = append(out, core.ActivityEntry{At: at, Actor: "system", Source: "Policy", Action: "change.reverted", Detail: fmt.Sprintf("%d", e.ID)})
+			out = append(out, ent)
 		}
 	}
 	return out, nil

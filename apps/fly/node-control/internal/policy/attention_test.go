@@ -173,6 +173,28 @@ func TestPolicyActivity(t *testing.T) {
 		}
 	})
 
+	t.Run("a revert on request before the deadline is the operator's, not the system's", func(t *testing.T) {
+		m, svc, _, clk := attentionModule(t)
+		id := applyOK(t, svc, "new")
+		clk.Advance(10 * time.Second)
+		if err := svc.RevertPending(ctx, "alice@", id); err != nil {
+			t.Fatal(err)
+		}
+		got, err := m.Activity(ctx, "alice@", 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rev []core.ActivityEntry
+		for _, e := range got {
+			if strings.HasPrefix(e.Action, "change.reverted") {
+				rev = append(rev, e)
+			}
+		}
+		if len(rev) != 1 || rev[0].Action != "change.reverted_on_request" || rev[0].Actor != "operator" || rev[0].Detail != fmt.Sprint(id) || !rev[0].At.Equal(clk.Now()) {
+			t.Fatalf("%+v", rev)
+		}
+	})
+
 	t.Run("a caller outside POLICY_ADMIN_USERS sees nothing", func(t *testing.T) {
 		m, svc, _, _ := attentionModule(t)
 		applyOK(t, svc, "new")

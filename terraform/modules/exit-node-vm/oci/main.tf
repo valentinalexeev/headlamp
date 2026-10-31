@@ -87,7 +87,7 @@ resource "oci_core_subnet" "this" {
 data "oci_core_images" "ubuntu" {
   compartment_id           = var.compartment_id
   operating_system         = "Canonical Ubuntu"
-  operating_system_version = "24.04"
+  operating_system_version = var.ubuntu_version
   shape                    = var.shape
   sort_by                  = "TIMECREATED"
   sort_order               = "DESC"
@@ -134,9 +134,11 @@ resource "oci_core_instance" "this" {
   }
 
   # cloud-init (the auth key, the hostname) only runs on the VM's FIRST boot, so editing it must not
-  # silently recreate a healthy instance. To redeploy on purpose (e.g. with a fresh key), run
+  # silently recreate a healthy instance; likewise a newer base image must not replace a running one
+  # (the "newest image" lookup moves on its own). To redeploy on purpose (e.g. with a fresh key or a
+  # new ubuntu_version), run
   #   terraform apply -replace='module.<name>.oci_core_instance.this'
   lifecycle {
-    ignore_changes = [metadata["user_data"]]
+    ignore_changes = [metadata["user_data"], source_details[0].source_id]
   }
 }

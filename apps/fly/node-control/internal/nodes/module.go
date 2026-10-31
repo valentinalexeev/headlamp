@@ -45,7 +45,7 @@ func (m *Module) Name() string                { return "nodes" }
 func (m *Module) Start(context.Context) error { return nil }
 
 func (m *Module) Register(r *core.Routes) error {
-	r.Admin.HandleFunc("GET /{$}", m.index)
+	r.Admin.HandleFunc("GET /nodes", m.index)
 	r.Admin.HandleFunc("GET /nodes.json", m.nodesJSON)
 	r.Admin.HandleFunc("GET /status", m.status)
 	r.Admin.HandleFunc("GET /nodes/{id}/status", m.nodeStatus)
@@ -227,5 +227,5 @@ func (m *Module) act(action string) http.HandlerFunc {
 
 // Nav puts the control page in the top bar.
 func (m *Module) Nav() []core.NavItem {
-	return []core.NavItem{{Label: "Nodes", Path: "/", Order: 10, Group: "operate", Icon: "nodes", Source: "nodes"}}
+	return []core.NavItem{{Label: "Nodes", Path: "/nodes", Order: 10, Group: "operate", Icon: "nodes", Source: "nodes"}}
 }

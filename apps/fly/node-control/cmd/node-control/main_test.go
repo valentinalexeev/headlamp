@@ -72,12 +72,12 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,funnel,tasks" {
+	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,funnel,tasks,overview" {
 		t.Fatalf("module order %s", got)
 	}
 	tn, _ := serve(t, env, mods)
 	base := "http://" + tn.AdminAddr()
-	for _, p := range []string{"/", "/nodes.json", "/status", "/tailnet/status", "/healthz"} {
+	for _, p := range []string{"/", "/nodes", "/nodes.json", "/status", "/tailnet/status", "/healthz"} {
 		if code, _ := fetch(t, base+p); code != 200 {
 			t.Errorf("GET %s = %d", p, code)
 		}
@@ -101,7 +101,7 @@ func TestBuildModulesIncludesTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := mods[len(mods)-1]; last.Name() != "tasks" || mods[len(mods)-2].Name() != "funnel" || mods[len(mods)-3].Name() != "policy" {
+	if last := mods[len(mods)-1]; last.Name() != "overview" || mods[len(mods)-2].Name() != "tasks" || mods[len(mods)-3].Name() != "funnel" || mods[len(mods)-4].Name() != "policy" {
 		t.Fatalf("module order %v", names(mods))
 	}
 	// Without its variables the module registers nothing and node-control serves as before.
@@ -254,11 +254,12 @@ func TestTopBarWiring(t *testing.T) {
 		if err := json.Unmarshal([]byte(nav), &items); err != nil {
 			t.Fatalf("%v: %s", err, nav)
 		}
-		if len(items) != 2 || items[0].Label != "Nodes" || items[0].Path != "/" || items[0].Order != 10 ||
-			items[1].Label != "Devices" || items[1].Path != "/enroll" || items[1].Order != 20 {
+		if len(items) != 3 || items[0].Label != "Overview" || items[0].Path != "/" || items[0].Order != 1 ||
+			items[1].Label != "Nodes" || items[1].Path != "/nodes" || items[1].Order != 10 ||
+			items[2].Label != "Devices" || items[2].Path != "/enroll" || items[2].Order != 20 {
 			t.Fatalf("entries %+v", items)
 		}
-		for path, active := range map[string]string{"/": `href="/" aria-current="page"`, "/enroll": `href="/enroll" aria-current="page"`} {
+		for path, active := range map[string]string{"/": `href="/" aria-current="page"`, "/nodes": `href="/nodes" aria-current="page"`, "/enroll": `href="/enroll" aria-current="page"`} {
 			code, body := getHost(t, admin, "admin.test", path)
 			if code != 200 || strings.Count(body, "<nav data-nc-nav") != 1 || !strings.Contains(body, active) {
 				t.Errorf("GET %s = %d, bar/active missing", path, code)
@@ -300,9 +301,10 @@ func TestTopBarWiring(t *testing.T) {
 		if err := json.Unmarshal([]byte(nav), &items); err != nil || len(items) != 1 || items[0].Label != "Nodes" {
 			t.Fatalf("entries %v: %s", err, nav)
 		}
+		// With one page the front page leads straight to it.
 		if code, body := getHost(t, admin, "admin.test", "/"); code != 200 || !strings.Contains(body, "data-nc-nav") ||
-			strings.Contains(body, "<nav") || strings.Contains(body, "Enrol device") {
-			t.Fatalf("compact header expected with one entry: %d", code)
+			strings.Contains(body, "<nav") || strings.Contains(body, "Enrol device") || !strings.Contains(body, "page-title") {
+			t.Fatalf("compact header and the Nodes page expected with one entry: %d", code)
 		}
 	})
 }

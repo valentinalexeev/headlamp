@@ -234,7 +234,7 @@ func TestIndexServesEmbeddedPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := do(newHandler(t, testConfig(t), nil, nil, 0), "GET", "/")
+	rec := do(newHandler(t, testConfig(t), nil, nil, 0), "GET", "/nodes")
 	if rec.Body.String() != string(want) {
 		t.Fatal("page differs")
 	}

@@ -96,3 +96,75 @@ func ageText(d time.Duration) string {
 	}
 	return fmt.Sprintf("%d d", s/86400)
 }
+
+// HasActivity reports whether the module keeps an activity log, which is when it is active.
+func (m *Module) HasActivity() bool { return m.st != nil && m.s != nil }
+
+// Activity lists the audit log (namespaces, keys, routes, blocks), newest first, as "Funnel". Only
+// FUNNEL_ADMIN_USERS see it. An inactive module reports nothing. The key mint detail holds the key's name, id and
+// lifetime, never the key.
+func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.ActivityEntry, error) {
+	if !m.HasActivity() {
+		return nil, nil
+	}
+	if !m.s.Admins.Has(login) {
+		return nil, core.ErrNotVisible
+	}
+	es, err := m.st.AuditLog(limit)
+	if err != nil {
+		return nil, fmt.Errorf("funnel store: %w", err)
+	}
+	out := make([]core.ActivityEntry, 0, len(es))
+	for _, e := range es {
+		out = append(out, core.ActivityEntry{At: e.At, Actor: e.Actor, Source: "Funnel", Action: e.Action, Detail: e.Detail})
+	}
+	return out, nil
+}
+
+// Search lists the namespaces (opening the namespaces page) and the services, those the ingress reports and the
+// manual ones (opening the services page). Only FUNNEL_ADMIN_USERS see them.
+func (m *Module) Search(_ context.Context, login string) ([]core.SearchItem, error) {
+	if !m.HasActivity() {
+		return nil, nil
+	}
+	if !m.s.Admins.Has(login) {
+		return nil, core.ErrNotVisible
+	}
+	nss, err := m.st.Namespaces()
+	if err != nil {
+		return nil, fmt.Errorf("funnel store: %w", err)
+	}
+	var out []core.SearchItem
+	for _, n := range nss {
+		out = append(out, core.SearchItem{Label: n.Name, Kind: "Namespace", Path: "/funnel/config"})
+	}
+	seen := map[string]bool{}
+	service := func(ns, svc string) {
+		if ns == "" || svc == "" || seen[ns+"/"+svc] {
+			return
+		}
+		seen[ns+"/"+svc] = true
+		out = append(out, core.SearchItem{Label: svc + "." + ns, Kind: "Service", Path: "/funnel"})
+	}
+	routes, err := m.st.ManualRoutes()
+	if err != nil {
+		return nil, fmt.Errorf("funnel store: %w", err)
+	}
+	for _, r := range routes {
+		service(r.NS, r.Service)
+	}
+	if body, _, ok, err := m.st.LatestState(); err == nil && ok {
+		var rep struct {
+			Routes []struct {
+				NS      string `json:"ns"`
+				Service string `json:"service"`
+			} `json:"routes"`
+		}
+		if json.Unmarshal(body, &rep) == nil {
+			for _, r := range rep.Routes {
+				service(r.NS, r.Service)
+			}
+		}
+	}
+	return out, nil
+}

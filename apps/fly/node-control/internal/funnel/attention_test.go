@@ -147,3 +147,81 @@ func TestFunnelAttention(t *testing.T) {
 		}
 	})
 }
+
+var (
+	_ core.ActivitySource = (*Module)(nil)
+	_ core.SearchSource   = (*Module)(nil)
+)
+
+func TestFunnelActivityMapsTheAuditLog(t *testing.T) {
+	ctx := context.Background()
+	m := attentionModule(t)
+	m.audit1("alice@", "namespace.create", "demo ports 9000-9010")
+	m.audit1("alice@", "key.mint", "lab id 14 ephemeral=false reusable=true ttl=24h")
+	got, err := m.Activity(ctx, "alice@", 10)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if e := got[0]; e.Source != "Funnel" || e.Action != "key.mint" || e.Actor != "alice@" || e.At.IsZero() ||
+		e.Detail != "lab id 14 ephemeral=false reusable=true ttl=24h" {
+		t.Errorf("newest first: %+v", e)
+	}
+	if got[1].Action != "namespace.create" {
+		t.Errorf("%+v", got)
+	}
+	if one, _ := m.Activity(ctx, "alice@", 1); len(one) != 1 {
+		t.Errorf("limit: %+v", one)
+	}
+}
+
+func TestFunnelActivityAndSearchRespectVisibility(t *testing.T) {
+	ctx := context.Background()
+	m := attentionModule(t)
+	m.audit1("alice@", "namespace.create", "demo")
+	if got, err := m.Activity(ctx, "bob@", 10); !errors.Is(err, core.ErrNotVisible) || len(got) != 0 {
+		t.Errorf("activity: %+v %v", got, err)
+	}
+	if got, err := m.Search(ctx, "bob@"); !errors.Is(err, core.ErrNotVisible) || len(got) != 0 {
+		t.Errorf("search: %+v %v", got, err)
+	}
+	if got, err := m.Activity(ctx, "", 10); !errors.Is(err, core.ErrNotVisible) || len(got) != 0 {
+		t.Errorf("an unknown caller: %+v %v", got, err)
+	}
+	off := &Module{}
+	if got, err := off.Activity(ctx, "alice@", 10); got != nil || err != nil || off.HasActivity() {
+		t.Errorf("an inactive module: %+v %v", got, err)
+	}
+	if got, err := off.Search(ctx, "alice@"); got != nil || err != nil {
+		t.Errorf("an inactive module: %+v %v", got, err)
+	}
+}
+
+func TestFunnelSearchListsNamespacesAndServices(t *testing.T) {
+	m := attentionModule(t)
+	if err := m.st.CreateNamespace("demo", []Range{{Lo: 8080, Hi: 8080}}, "", 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.st.PutManual(ManualRoute{NS: "demo", Service: "wiki", Target: "100.64.0.5", Port: 80}); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"routes":[{"ns":"demo","service":"wiki"},{"ns":"demo","service":"grafana"}]}`
+	if err := m.st.SaveState("100.64.0.9", []byte(body), attentionNow); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Search(context.Background(), "alice@")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"demo": "Namespace", "wiki.demo": "Service", "grafana.demo": "Service"}
+	if len(got) != len(want) {
+		t.Fatalf("a service in both lists appears once: %+v", got)
+	}
+	for _, it := range got {
+		if want[it.Label] != it.Kind {
+			t.Errorf("%+v", it)
+		}
+		if it.Kind == "Namespace" && it.Path != "/funnel/config" || it.Kind == "Service" && it.Path != "/funnel" {
+			t.Errorf("%+v", it)
+		}
+	}
+}

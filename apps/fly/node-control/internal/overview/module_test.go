@@ -147,3 +147,115 @@ func TestOverviewSelfTest(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// logged is a module that keeps an activity log, with a page of its own.
+type logged struct {
+	stub
+	gate *bool // nil: the module cannot say; else what HasActivity answers
+}
+
+func (l logged) Activity(context.Context, string, int) ([]core.ActivityEntry, error) { return nil, nil }
+
+type gatedLogged struct{ logged }
+
+func (g gatedLogged) HasActivity() bool { return *g.gate }
+
+func pagesWith(extra ...core.Module) []core.Module {
+	return append([]core.Module{
+		stub{"nodes", []core.NavItem{{Label: "Nodes", Path: "/nodes", Order: 10}}},
+		stub{"tasks", []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40}}},
+	}, extra...)
+}
+
+func TestActivityHiddenWhenNoSource(t *testing.T) {
+	rec, m := serve(t, twoPages(), "/activity")
+	nav := m.(core.Navigator).Nav()
+	if len(nav) != 1 || nav[0].Label != "Overview" {
+		t.Fatalf("no module keeps a log, so there is no Activity entry: %+v", nav)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("/activity = %d", rec.Code)
+	}
+
+	// a source that says it has no log (nodes without the shared audit log) does not count
+	off := false
+	rec, m = serve(t, pagesWith(gatedLogged{logged{stub{"nodes2", nil}, &off}}), "/activity")
+	if len(m.(core.Navigator).Nav()) != 1 || rec.Code != http.StatusNotFound {
+		t.Fatalf("a source without a log: %d %+v", rec.Code, m.(core.Navigator).Nav())
+	}
+	on := true
+	rec, m = serve(t, pagesWith(gatedLogged{logged{stub{"nodes2", nil}, &on}}), "/activity")
+	if len(m.(core.Navigator).Nav()) != 2 || rec.Code != http.StatusOK {
+		t.Fatalf("a source with a log: %d %+v", rec.Code, m.(core.Navigator).Nav())
+	}
+}
+
+func TestActivityNavEntry(t *testing.T) {
+	rec, m := serve(t, pagesWith(logged{stub{"enroll", []core.NavItem{{Label: "Devices", Path: "/enroll", Order: 20}}}, nil}), "/activity")
+	nav := m.(core.Navigator).Nav()
+	if len(nav) != 2 || nav[1].Label != "Activity" || nav[1].Path != "/activity" || nav[1].Order != 900 || nav[1].Group != "" || nav[1].Icon != "activity" {
+		t.Fatalf("%+v", nav)
+	}
+	for _, n := range nav {
+		if err := core.ValidateNavItem(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") || rec.Header().Get("Content-Security-Policy") != ui.PageCSP {
+		t.Fatalf("%d %v", rec.Code, rec.Header())
+	}
+	js, _ := serve(t, pagesWith(logged{stub{"enroll", nil}, nil}), "/activity/activity.js")
+	if js.Code != 200 || !strings.HasPrefix(js.Header().Get("Content-Type"), "text/javascript") {
+		t.Fatalf("%d", js.Code)
+	}
+}
+
+// With one other page the console has no sidebar and "/" opens that page, so Activity must not appear: it would
+// make a second entry and a sidebar the compact console is meant not to have.
+func TestActivityDoesNotBreakTheSinglePageConsole(t *testing.T) {
+	one := []core.Module{logged{stub{"enroll", []core.NavItem{{Label: "Devices", Path: "/enroll", Order: 20}}}, nil}}
+	rec, m := serve(t, one, "/")
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/enroll" {
+		t.Fatalf("%d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if nav := m.(core.Navigator).Nav(); len(nav) != 0 {
+		t.Fatalf("the single-page console has no entries of its own: %+v", nav)
+	}
+	if rec, _ := serve(t, one, "/activity"); rec.Code != http.StatusNotFound {
+		t.Fatalf("/activity = %d", rec.Code)
+	}
+}
+
+func TestActivityPageHasNoInlineScriptOrExternalRefs(t *testing.T) {
+	html := string(activityHTML)
+	for _, m := range regexp.MustCompile(`(?i)<script\b[^>]*>`).FindAllString(html, -1) {
+		if !strings.Contains(m, ` src="/`) || !strings.Contains(m, "defer") {
+			t.Errorf("script tag %q must be a same-origin deferred file", m)
+		}
+	}
+	for _, bad := range []string{"<style", " style=", "javascript:", "http://", "https://", " onclick="} {
+		if strings.Contains(strings.ToLower(html), bad) {
+			t.Errorf("page contains %q", bad)
+		}
+	}
+	js := string(activityJS)
+	for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "XMLHttpRequest"} {
+		if strings.Contains(js, bad) {
+			t.Errorf("script contains %q", bad)
+		}
+	}
+}
+
+func TestActivitySelfTest(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	out, err := exec.Command(node, "testdata/activity_selftest.js", "../ui/static/hl.js", "static/activity.js").CombinedOutput()
+	if err != nil {
+		t.Fatalf("self-test failed: %v\n%s", err, out)
+	}
+	if out, err := exec.Command(node, "--check", "static/activity.js").CombinedOutput(); err != nil {
+		t.Fatalf("node --check: %v\n%s", err, out)
+	}
+}

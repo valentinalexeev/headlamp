@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Activity</title>
+</head>
+<body>
+<div class="hl" id="activity-page">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>Activity</h1>
+        <p class="t2">Who changed what, across all modules</p>
+      </div>
+      <div class="chips" role="group" aria-label="Filter by source" id="chips"></div>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note plain" id="notice" role="status" hidden></div>
+
+    <div class="note plain" id="empty" hidden>
+      <h2 id="emptyhead"></h2>
+      <p class="t2" id="emptytext"></p>
+    </div>
+
+    <div class="tw" id="table" hidden>
+      <table>
+        <thead><tr><th>When</th><th>Who</th><th>Source</th><th>What</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script src="/activity/activity.js" defer></script>
+</body>
+</html>

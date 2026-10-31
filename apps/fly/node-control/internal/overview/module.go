@@ -18,6 +18,12 @@ var pageHTML []byte
 //go:embed static/overview.js
 var pageJS []byte
 
+//go:embed static/activity.html
+var activityHTML []byte
+
+//go:embed static/activity.js
+var activityJS []byte
+
 // Module is the Overview page. It owns no data of its own.
 type Module struct {
 	others func() []core.Module
@@ -43,19 +49,61 @@ func (m *Module) pages() []core.NavItem {
 	return items
 }
 
+// hasActivity reports whether some other module keeps an activity log: it implements ActivitySource and, when it
+// can say so, is active and has a log to read.
+func (m *Module) hasActivity() bool {
+	if m.others == nil {
+		return false
+	}
+	for _, o := range m.others() {
+		if _, ok := o.(core.ActivitySource); !ok {
+			continue
+		}
+		if g, ok := o.(core.ActivityGate); !ok || g.HasActivity() {
+			return true
+		}
+	}
+	return false
+}
+
+// activityNav is the Activity entry, or false when the page does not exist. Like Overview it needs at least two
+// other pages: with fewer the console is the compact one-page console, which has no sidebar, so there is nothing to
+// hold the entry (and "/" redirects to the one page).
+func (m *Module) activityNav() (core.NavItem, bool) {
+	if len(m.pages()) < 2 || !m.hasActivity() {
+		return core.NavItem{}, false
+	}
+	return core.NavItem{Label: "Activity", Path: "/activity", Order: 900, Icon: "activity"}, true
+}
+
 // Nav lists Overview first, with no group, but only when there are at least two other pages: with one
-// the console opens straight on that page, and with none there is nothing to overview.
+// the console opens straight on that page, and with none there is nothing to overview. Activity comes last, with
+// no group, when some module keeps an activity log.
 func (m *Module) Nav() []core.NavItem {
 	if len(m.pages()) < 2 {
 		return nil
 	}
-	return []core.NavItem{{Label: "Overview", Path: "/", Order: 1, Icon: "overview"}}
+	items := []core.NavItem{{Label: "Overview", Path: "/", Order: 1, Icon: "overview"}}
+	if a, ok := m.activityNav(); ok {
+		items = append(items, a)
+	}
+	return items
 }
 
 func (m *Module) Register(r *core.Routes) error {
 	r.Admin.HandleFunc("GET /{$}", m.page)
 	r.Admin.HandleFunc("GET /overview/overview.js", asset("text/javascript; charset=utf-8", pageJS))
+	r.Admin.HandleFunc("GET /activity", m.activityPage)
+	r.Admin.HandleFunc("GET /activity/activity.js", asset("text/javascript; charset=utf-8", activityJS))
 	return nil
+}
+
+func (m *Module) activityPage(w http.ResponseWriter, r *http.Request) {
+	if _, ok := m.activityNav(); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	asset("text/html; charset=utf-8", activityHTML)(w, r)
 }
 
 func (m *Module) page(w http.ResponseWriter, r *http.Request) {

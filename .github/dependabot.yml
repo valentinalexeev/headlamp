@@ -1,0 +1,70 @@
+# Dependabot version updates.
+# Only manifests that live in this repository are covered; a site's private
+# repo that vendors this one maintains its own configuration.
+version: 2
+
+updates:
+  # --- Go services ---------------------------------------------------------
+  - package-ecosystem: gomod
+    directories:
+      - /apps/fly/node-control
+      - /apps/fly/funnel-ingress
+      - /apps/task-runner
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # --- Python service ------------------------------------------------------
+  - package-ecosystem: pip
+    directory: /apps/ingress-agent
+    schedule:
+      interval: weekly
+    groups:
+      pip-minor-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # --- Container base images (Dockerfile*) ---------------------------------
+  - package-ecosystem: docker
+    directories:
+      - /apps/fly/headscale
+      - /apps/fly/exit-ams
+      - /apps/fly/node-control
+      - /apps/fly/funnel-ingress
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    # The headscale image tag is pinned on purpose (newer tags may lack a
+    # shell); review such bumps by hand rather than merging blindly.
+
+  # --- docker compose files ------------------------------------------------
+  - package-ecosystem: docker-compose
+    directory: /apps/tailguard
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  # --- Terraform provider constraints in the VM exit-node modules ----------
+  - package-ecosystem: terraform
+    directories:
+      - /terraform/modules/exit-node-vm/*
+      - /examples/private-repo/terraform
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  # --- GitHub Actions (kept current once workflows are added) --------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(ci)"

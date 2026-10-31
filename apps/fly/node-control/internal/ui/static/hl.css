@@ -126,6 +126,7 @@ td.act{text-align:right;width:1%}
 /* shell injected by the core: fixed sidebar, header bar and the timed strip */
 .hl.shellbar{min-height:0}
 .hl.shellbar .top{padding-top:8px;padding-bottom:8px}
+nav.hl.side[data-nc-nav]{min-height:0}
 nav.side[data-nc-nav]{position:fixed;top:0;left:0;bottom:0;width:216px;z-index:1000;overflow-y:auto;border-right:1px solid var(--line)}
 body:has(>nav.side[data-nc-nav]){padding-left:216px}
 .brand .iconbtn{margin-left:auto}

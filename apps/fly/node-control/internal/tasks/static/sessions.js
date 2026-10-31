@@ -1,37 +1,34 @@
+// headlamp console: the Browser sessions page. Needs /_ui/hl.js first (the shell loads it). Node names come from
+// the tailnet and are never markup. A session link carries a token: it goes into the Open link's href and nowhere
+// else (not the page URL, not a message, not an attribute other than that href).
 (function () {
   'use strict';
+  var hl = window.hl;
+  if (!hl) { return; }
 
   var POLL_MS = 5000;
+  var COLUMNS = 4;
+  var DEFAULT_TTL = 3600;
+  var TTL_CHOICES = [[3600, '1 hour'], [1800, '30 minutes'], [14400, '4 hours']];
+  var ORDER = { running: 0, idle: 1, unavailable: 2 };
 
-  // ---- pure helpers (also exported for the node self-test) ----------------------------------
+  function arr(v) { return Array.isArray(v) ? v : []; }
+  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+  function label(v, n) { return hl.plain(v, n || 100); }
+  function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
 
-  // "m:ss" or "h:mm:ss" left until iso; "expired" once it has passed, '' when unknown.
-  function countdown(iso, nowMs) {
+  // Time left until iso, in words: "1 h 5 min", "42 min", "45 s". "Ending now" once it has passed, '' when unknown.
+  function timeLeft(iso, nowMs) {
     if (!iso) { return ''; }
     var t = Date.parse(iso);
     if (isNaN(t)) { return ''; }
     var s = Math.round((t - nowMs) / 1000);
-    if (s <= 0) { return 'expired'; }
-    var h = Math.floor(s / 3600);
-    var m = Math.floor((s % 3600) / 60);
-    var sec = s % 60;
-    var two = function (n) { return (n < 10 ? '0' : '') + n; };
-    return h > 0 ? h + ':' + two(m) + ':' + two(sec) : m + ':' + two(sec);
-  }
-
-  // The API answers {"error": ...}; helpers shared with other modules answer {"detail": ...}.
-  function errorMessage(status, data) {
-    if (data && typeof data === 'object') {
-      if (typeof data.error === 'string' && data.error) { return data.error; }
-      if (typeof data.detail === 'string' && data.detail) { return data.detail; }
-    }
-    return 'request failed (HTTP ' + status + ')';
-  }
-
-  // One of 'running', 'idle', 'unavailable' (the dot and the words next to it).
-  function stateOf(n) {
-    if (!n.available) { return 'unavailable'; }
-    return n.session && n.session.state === 'running' ? 'running' : 'idle';
+    if (s <= 0) { return 'Ending now'; }
+    if (s < 60) { return s + ' s'; }
+    var m = Math.floor(s / 60);
+    if (m < 60) { return m + ' min'; }
+    return Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
   }
 
   // Only a plain http link is ever put in an href.
@@ -39,235 +36,258 @@
     return typeof u === 'string' && /^http:\/\//.test(u) ? u : '';
   }
 
-  if (typeof document === 'undefined') {
-    if (typeof module !== 'undefined' && module.exports) {
-      module.exports = { countdown: countdown, errorMessage: errorMessage, stateOf: stateOf, safeUrl: safeUrl };
-    }
-    return;
-  }
-
-  // ---- DOM helpers (textContent only: node names come from headscale and are never markup) --
-
-  function el(tag, cls, text) {
-    var e = document.createElement(tag);
-    if (cls) { e.className = cls; }
-    if (text !== undefined && text !== null) { e.textContent = text; }
-    return e;
-  }
-
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
-
-  var $ = function (id) { return document.getElementById(id); };
-  var rows = Object.create(null); // node id -> row parts
-  var counter = 0;
-  var placeholder = null;
-  var haveData = false;
-  var inflight = false;
-  var again = false;
-  var timer = null;
-  var ticker = null;
-
-  var TTL_CHOICES = [[1800, '30 min'], [3600, '1 h'], [14400, '4 h']];
-
-  function setStatus(text, isError) {
-    var s = $('status');
-    s.textContent = text || '';
-    s.className = 'status' + (isError ? ' error' : '');
-  }
-
-  function setBanner(text) {
-    var b = $('banner');
-    b.textContent = text || '';
-    b.hidden = !text;
-  }
-
-  // Resolves to {status, data}; a network failure resolves to {status: 0, data: null}.
-  function call(method, path, body) {
-    var opts = { method: method, headers: {}, credentials: 'same-origin' };
-    if (method === 'POST') {
-      opts.headers['Content-Type'] = 'application/json';
-      opts.body = JSON.stringify(body || {});
-    }
-    return fetch(path, opts).then(function (r) {
-      if (r.status === 204) { return { status: 204, data: null }; }
-      return r.json().catch(function () { return null; }).then(function (d) {
-        return { status: r.status, data: d };
+  // sessionRows: one display row per node, running first, then idle, then unavailable, each by name.
+  function sessionRows(nodes) {
+    var rows = [];
+    arr(nodes).forEach(function (n) {
+      n = obj(n);
+      if (typeof n.id !== 'string' || !n.id) { return; }
+      var s = obj(n.session);
+      var kind = !n.available ? 'unavailable' : (s.state === 'running' ? 'running' : 'idle');
+      var level = kind === 'running' ? 'ok' : 'off';
+      var word = kind === 'running' ? 'Running' : kind === 'unavailable' ? 'Unavailable' : 'No session';
+      if (kind === 'idle' && s.state === 'ended') { word = 'Ended' + (s.reason ? ' (' + label(s.reason, 40) + ')' : ''); }
+      rows.push({
+        id: n.id, name: label(n.id, 100), kind: kind, level: level, word: word,
+        href: kind === 'running' ? safeUrl(n.url) : '', expires: kind === 'running' ? String(s.expires_at || '') : ''
       });
-    }, function () { return { status: 0, data: null }; });
-  }
-
-  function bannerFor(res) {
-    if (res.status === 0) { return 'Cannot reach the server: showing the last data.'; }
-    return 'Could not refresh (' + errorMessage(res.status, res.data) + '): showing the last data.';
-  }
-
-  // ---- rows ----------------------------------------------------------------------------------
-
-  function makeRow(id) {
-    var root = el('section', 'task');
-    var hid = 'n-' + (counter++);
-    root.setAttribute('aria-labelledby', hid);
-    var head = el('div', 'head');
-    var dot = el('span', 'dot');
-    dot.setAttribute('aria-hidden', 'true');
-    var title = el('h2', null, id);
-    title.id = hid;
-    var state = el('span', 'badge');
-    head.appendChild(dot); head.appendChild(title); head.appendChild(state);
-    var controls = el('div', 'session-controls');
-    var ttl = el('select');
-    ttl.setAttribute('aria-label', 'Session length for ' + id);
-    TTL_CHOICES.forEach(function (c) {
-      var o = el('option', null, c[1]);
-      o.value = String(c[0]);
-      if (c[0] === 3600) { o.selected = true; }
-      ttl.appendChild(o);
     });
-    var start = el('button', 'primary', 'Start');
-    start.type = 'button';
-    var stop = el('button', null, 'Stop');
-    stop.type = 'button';
-    var open = el('a', 'button', 'Open');
-    open.target = '_blank';
-    open.rel = 'noopener noreferrer';
-    open.hidden = true;
-    var left = el('span', 'muted');
-    controls.appendChild(ttl); controls.appendChild(start); controls.appendChild(stop);
-    controls.appendChild(open); controls.appendChild(left);
-    root.appendChild(head); root.appendChild(controls);
-    var row = { id: id, root: root, dot: dot, state: state, ttl: ttl, start: start, stop: stop,
-      open: open, left: left, busy: false, data: null };
-    start.addEventListener('click', function () { act(row, 'start'); });
-    stop.addEventListener('click', function () { act(row, 'stop'); });
-    return row;
+    rows.sort(function (a, b) { return (ORDER[a.kind] - ORDER[b.kind]) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
+    return rows;
   }
 
-  function paint(row) {
-    var n = row.data;
-    var st = stateOf(n);
-    row.dot.className = 'dot ' + st;
-    var running = st === 'running';
-    row.state.className = 'badge ' + (running ? 'running' : st === 'idle' ? 'ok' : 'failing');
-    var text = running ? 'running' : st === 'idle' ? 'no session' : 'unavailable';
-    if (st === 'idle' && n.session && n.session.state === 'ended') {
-      text = 'ended' + (n.session.reason ? ' (' + n.session.reason + ')' : '');
+  function button(text, iconName, cls, onClick) {
+    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
+    b.setAttribute('type', 'button');
+    var ic = iconName ? hl.icon(iconName) : null;
+    if (ic) { b.appendChild(ic); }
+    b.appendChild(hl.el('span', null, text));
+    if (onClick) { b.addEventListener('click', onClick); }
+    return b;
+  }
+
+  function focusKey(box) {
+    var ae = typeof document !== 'undefined' ? document.activeElement : null;
+    for (var n = ae; n; n = n.parentNode) {
+      if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
     }
-    row.state.textContent = text;
-    row.start.disabled = row.busy || st !== 'idle';
-    row.stop.disabled = row.busy || !running;
-    row.ttl.disabled = row.busy || st !== 'idle';
-    var href = running ? safeUrl(n.url) : '';
-    if (href) { row.open.href = href; } else { row.open.removeAttribute('href'); }
-    row.open.hidden = !href;
-    var cd = running ? countdown(n.session.expires_at, Date.now()) : '';
-    row.left.textContent = cd ? (cd === 'expired' ? 'expired' : cd + ' left') : '';
-    if (running && n.session.expires_at) { row.left.title = n.session.expires_at; }
+    return null;
   }
-
-  function setPlaceholder(text) {
-    var host = $('nodes');
-    if (!text) {
-      if (placeholder && placeholder.parentNode === host) { host.removeChild(placeholder); }
-      placeholder = null;
-      return;
+  function refocus(box, key) {
+    if (!key) { return; }
+    var stack = [box];
+    while (stack.length) {
+      var n = stack.pop();
+      if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
+      (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
     }
-    if (!placeholder || placeholder.parentNode !== host) {
-      clear(host);
-      placeholder = el('p', 'muted');
-      host.appendChild(placeholder);
+  }
+
+  // mount wires the page's elements to the data. deps (all optional): now() for the clock.
+  function mount(els, deps) {
+    deps = deps || {};
+    var now = deps.now || function () { return Date.now(); };
+    var st = { loaded: false, failed: '', rows: [], busy: false, open: null, ttl: {}, cells: {}, tableSig: null };
+    var ctrl = {};
+
+    function setError(text) { els.error.textContent = text; els.error.hidden = !text; }
+    function setNotice(text) { els.notice.textContent = text; els.notice.hidden = !text; }
+
+    function summary() {
+      if (!st.loaded) { return st.failed ? 'Could not load the sessions. Retrying.' : ''; }
+      var n = st.rows.filter(function (r) { return r.kind === 'running'; }).length;
+      var text = (n === 0 ? 'None running' : n + ' running') + '. Sessions end by themselves when their time runs out.';
+      if (st.failed) { text += ' The data may be out of date.'; }
+      return text;
     }
-    placeholder.textContent = text;
-  }
 
-  function render(list) {
-    var host = $('nodes');
-    host.setAttribute('aria-busy', 'false');
-    var seen = {};
-    var prev = null;
-    list.forEach(function (n) {
-      if (!n || typeof n.id !== 'string') { return; }
-      seen[n.id] = true;
-      var row = rows[n.id];
-      if (!row) { row = rows[n.id] = makeRow(n.id); }
-      row.data = n;
-      paint(row);
-      if (placeholder) { setPlaceholder(''); }
-      var want = prev ? prev.root.nextSibling : host.firstChild;
-      if (want !== row.root) { host.insertBefore(row.root, want); }
-      prev = row;
-    });
-    Object.keys(rows).forEach(function (id) {
-      if (!seen[id]) {
-        if (rows[id].root.parentNode) { rows[id].root.parentNode.removeChild(rows[id].root); }
-        delete rows[id];
+    // The time left moves with the clock: only these cells change between refreshes, so the rows stay put.
+    function paintTimes(at) {
+      st.rows.forEach(function (r) {
+        var td = st.cells[r.id];
+        if (!td) { return; }
+        var text = r.kind === 'running' ? timeLeft(r.expires, at) : '';
+        td.textContent = text || 'n/a';
+        td.className = text ? 'mono t2' : 't3';
+        if (text && r.expires) { td.setAttribute('title', label(r.expires, 40)); } else { td.removeAttribute('title'); }
+      });
+    }
+
+    // ----- actions
+
+    function closeOpen() { st.open = null; render(true); }
+
+    function run(r, what, fn, okText, failWord) {
+      if (st.busy) { return; }
+      st.busy = true;
+      setError('');
+      setNotice('');
+      st.open = null;
+      render(true);
+      return fn().then(function () {
+        st.busy = false;
+        setNotice(okText);
+        return ctrl.reload();
+      }, function (err) {
+        st.busy = false;
+        setError(failWord + ' failed on ' + r.name + ': ' + label(err && err.message, 200));
+        render(true);
+      });
+    }
+
+    function doStart(r) {
+      var ttl = st.ttl[r.id] || DEFAULT_TTL;
+      run(r, 'start', function () { return hl.api('POST', '/sessions/' + encodeURIComponent(r.id) + '/start', { ttl_seconds: ttl }); },
+        'Started a session on ' + r.name + '.', 'Start');
+    }
+    function doStop(r) {
+      run(r, 'stop', function () { return hl.api('POST', '/sessions/' + encodeURIComponent(r.id) + '/stop', {}); },
+        'Stopped the session on ' + r.name + '.', 'Stop');
+    }
+
+    function openStop(r) {
+      if (st.busy || (st.open && st.open.key === r.id)) { return; }
+      st.open = { key: r.id, el: null, cell: null };
+      render(true);
+      if (st.open && st.open.cell) {
+        st.open.el = hl.confirmPanel({
+          title: 'Stop the session on ' + r.name + '?', object: r.name,
+          consequence: 'The browser session on ' + r.name + ' ends now and anyone using it is disconnected. Start a new one to continue.',
+          confirmLabel: 'Stop session on ' + r.name, cancelLabel: 'Keep it running', icon: 'stop', into: st.open.cell,
+          onConfirm: function () { doStop(r); }, onCancel: closeOpen
+        });
       }
-    });
-    setPlaceholder(list.length ? '' : 'No nodes offer browser sessions.');
-    $('updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
-  }
+    }
 
-  // ---- actions -------------------------------------------------------------------------------
+    // ----- the table
 
-  function act(row, what) {
-    row.busy = true;
-    paint(row);
-    var body = what === 'start' ? { ttl_seconds: parseInt(row.ttl.value, 10) } : {};
-    call('POST', '/sessions/' + encodeURIComponent(row.id) + '/' + what, body).then(function (res) {
-      row.busy = false;
-      if (res.status === 201 || res.status === 204) {
-        setStatus((what === 'start' ? 'Started a session on ' : 'Stopped the session on ') + row.id + '.', false);
-      } else if (res.status === 0) {
-        setStatus('Cannot reach the server.', true);
-      } else {
-        setStatus((what === 'start' ? 'Start' : 'Stop') + ' failed on ' + row.id + ': ' + errorMessage(res.status, res.data), true);
+    function actionsOf(r, box) {
+      if (r.kind === 'running') {
+        if (r.href) {
+          var a = hl.el('a', 'btn sm');
+          var ic = hl.icon('external');
+          if (ic) { a.appendChild(ic); }
+          a.appendChild(hl.el('span', null, 'Open'));
+          a.setAttribute('href', r.href);
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener noreferrer');
+          a.setAttribute('aria-label', 'Open the session on ' + r.name);
+          box.appendChild(keyed(a, 'open:' + r.id));
+        }
+        var stop = keyed(button('Stop', 'stop', 'sm quiet', function () { openStop(r); }), 'stop:' + r.id);
+        stop.setAttribute('aria-label', 'Stop the session on ' + r.name);
+        stop.disabled = st.busy;
+        box.appendChild(stop);
+      } else if (r.kind === 'idle') {
+        var sel = keyed(hl.el('select', 'input sm'), 'ttl:' + r.id);
+        sel.setAttribute('aria-label', 'Session length for ' + r.name);
+        TTL_CHOICES.forEach(function (c) {
+          var o = hl.el('option', null, c[1]);
+          o.setAttribute('value', String(c[0]));
+          sel.appendChild(o);
+        });
+        sel.value = String(st.ttl[r.id] || DEFAULT_TTL);
+        sel.disabled = st.busy;
+        sel.addEventListener('change', function () { st.ttl[r.id] = parseInt(sel.value, 10) || DEFAULT_TTL; });
+        box.appendChild(sel);
+        var start = keyed(button('Start', 'play', 'sm', function () { doStart(r); }), 'start:' + r.id);
+        start.setAttribute('aria-label', 'Start a session on ' + r.name);
+        start.disabled = st.busy;
+        box.appendChild(start);
       }
-      if (rows[row.id] === row) { paint(row); }
-      refresh();
+    }
+
+    function renderTable(force) {
+      var rows = st.rows;
+      if (st.open && !rows.some(function (r) { return r.id === st.open.key && r.kind === 'running'; })) { st.open = null; }
+      var sig = JSON.stringify([rows.map(function (r) { return [r.id, r.kind, r.word, r.href]; }), st.open && st.open.key, st.busy, st.ttl]);
+      if (!force && st.open && st.open.el) { return; }
+      if (!force && sig === st.tableSig) { return; }
+      st.tableSig = sig;
+      var fk = focusKey(els.rows);
+      clear(els.rows);
+      st.cells = {};
+      if (st.open) { st.open.cell = null; }
+      rows.forEach(function (r) {
+        var tr = hl.el('tr', st.open && st.open.key === r.id ? 'sel' : '');
+        tr.appendChild(hl.el('td', 'mono name', r.name));
+        var state = hl.el('td');
+        state.appendChild(hl.status(r.level, r.word));
+        tr.appendChild(state);
+        var left = hl.el('td', 't3', 'n/a');
+        st.cells[r.id] = left;
+        tr.appendChild(left);
+        var act = hl.el('td', 'act');
+        if (r.kind === 'unavailable') {
+          act.className = 'act t3 small';
+          act.textContent = 'No runner on this node';
+        } else {
+          var box = hl.el('div', 'rowbtns');
+          actionsOf(r, box);
+          act.appendChild(box);
+        }
+        tr.appendChild(act);
+        els.rows.appendChild(tr);
+        if (st.open && st.open.key === r.id) {
+          var dr = hl.el('tr');
+          var cell = hl.el('td', 'detail');
+          cell.setAttribute('colspan', String(COLUMNS));
+          dr.appendChild(cell);
+          els.rows.appendChild(dr);
+          st.open.cell = cell;
+        }
+      });
+      refocus(els.rows, fk);
+    }
+
+    function render(force) {
+      els.sub.textContent = summary();
+      els.stale.textContent = st.failed ? 'Could not refresh (' + st.failed + '). Showing the last data.' : '';
+      els.stale.hidden = !st.failed || !st.loaded;
+      var empty = st.loaded && st.rows.length === 0;
+      els.empty.hidden = !empty;
+      if (empty) { els.emptytext.textContent = 'A node offers browser sessions when it carries the sessions tag and runs the task runner.'; }
+      els.tablewrap.hidden = st.rows.length === 0;
+      renderTable(force);
+      paintTimes(now());
+    }
+
+    // ----- control surface
+
+    ctrl.update = function (d) {
+      st.rows = sessionRows(obj(d).nodes);
+      st.loaded = true;
+      render();
+    };
+    ctrl.tick = function (at) { paintTimes(typeof at === 'number' ? at : now()); };
+    ctrl.reload = function () {
+      return hl.api('GET', '/sessions.json').then(function (j) {
+        if (!Array.isArray(obj(j).nodes)) { throw new Error('unexpected answer'); }
+        st.failed = '';
+        ctrl.update(j);
+      }).catch(function (err) {
+        st.failed = label(err && err.message, 120) || 'request failed';
+        render();
+      });
+    };
+    ctrl.state = st;
+    render();
+    return ctrl;
+  }
+
+  function init() {
+    var root = document.getElementById('sessions');
+    if (!root) { return; }
+    var $ = function (id) { return document.getElementById(id); };
+    var ctrl = mount({
+      sub: $('sub'), error: $('error'), notice: $('notice'), stale: $('stale'), empty: $('empty'), emptytext: $('emptytext'),
+      tablewrap: $('tablewrap'), rows: $('rows')
     });
+    var poller = hl.poll(ctrl.reload, POLL_MS);
+    setInterval(function () { if (!document.hidden) { ctrl.tick(); } }, 1000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { poller.now(); } });
   }
 
-  // ---- refresh loop --------------------------------------------------------------------------
-
-  function refresh() {
-    if (inflight) { again = true; return Promise.resolve(); }
-    inflight = true;
-    return call('GET', '/sessions.json').then(function (res) {
-      if (res.status === 200 && res.data && Array.isArray(res.data.nodes)) {
-        haveData = true;
-        setBanner('');
-        render(res.data.nodes);
-        return;
-      }
-      setBanner(bannerFor(res));
-      if (!haveData) {
-        $('nodes').setAttribute('aria-busy', 'false');
-        setPlaceholder('No data yet.');
-      }
-    }).catch(function () {
-      setBanner('Could not refresh: showing the last data.');
-    }).then(function () {
-      inflight = false;
-      if (again) { again = false; return refresh(); }
-    });
-  }
-
-  function visible() { return document.visibilityState !== 'hidden'; }
-
-  function tick() {
-    Object.keys(rows).forEach(function (id) { if (rows[id].data) { paint(rows[id]); } });
-  }
-
-  function schedule() {
-    clearTimeout(timer);
-    timer = null;
-    if (!visible()) { return; }
-    timer = setTimeout(function () { refresh().then(schedule); }, POLL_MS);
-  }
-
-  placeholder = $('nodes').querySelector('p');
-  ticker = setInterval(function () { if (visible()) { tick(); } }, 1000);
-  document.addEventListener('visibilitychange', function () {
-    if (visible()) { refresh().then(schedule); } else { clearTimeout(timer); timer = null; }
-  });
-  if (visible()) { refresh().then(schedule); }
-}());
+  hl.sessions = { timeLeft: timeLeft, safeUrl: safeUrl, sessionRows: sessionRows, mount: mount, init: init };
+  init();
+})();

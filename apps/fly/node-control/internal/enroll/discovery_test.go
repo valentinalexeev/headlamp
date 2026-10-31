@@ -1444,3 +1444,30 @@ func TestPinnedNodeIsNotAlsoACandidateUnderItsNewName(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoveredNodeOfAConfiguredBridgeIsOneRow(t *testing.T) {
+	old := infoTimeout
+	infoTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { infoTimeout = old })
+	f := newRegFx(t, func(rc *RegistryConfig) {
+		rc.Cfg.Ingresses[0].AgentURL = "http://100.64.0.15:9000"
+	})
+	f.nodes.set(renamedNode("rus2", 7, "100.64.0.15"), renamedNode("other", 8, "100.64.0.99"))
+	f.store.CreateDevice("n", "o", "sing-box", adminFuture)
+
+	cur := f.reg.Current(context.Background(), true)
+	var names []string
+	for _, v := range cur.Views {
+		names = append(names, v.Name)
+	}
+	if got := strings.Join(names, ","); got != "ingress-1,other" {
+		t.Fatalf("the node of ingress-1 must be one row with it, another node stays: %s", got)
+	}
+	v := cur.Views[0]
+	if len(v.Aliases) != 1 || v.Aliases[0] != "rus2" || v.Online == nil || !*v.Online {
+		t.Fatalf("%+v", v)
+	}
+	if len(cur.Pending) != 1 || cur.Pending[0] != "other" {
+		t.Fatalf("pending %v", cur.Pending)
+	}
+}

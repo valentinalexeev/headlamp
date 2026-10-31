@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,6 +95,7 @@ type IngressView struct {
 	Online         *bool         `json:"online"`
 	Sync           *SyncSnapshot `json:"sync"`
 	Detail         string        `json:"detail,omitempty"`
+	Aliases        []string      `json:"aliases,omitempty"` // other names of the same machine: its discovered node
 }
 
 // DiscoveryStatus says whether discovery runs and, when it does not, why.
@@ -829,6 +831,15 @@ func (r *Registry) buildLocked() Current {
 		}
 	}
 	for k, v := range views {
+		if v.Approval != stApproved && !v.Approved {
+			if i := r.configuredOnMachineLocked(v.Address); i >= 0 {
+				cur.Views[i].Aliases = append(cur.Views[i].Aliases, v.Name)
+				if cur.Views[i].Online == nil {
+					cur.Views[i].Online = v.Online
+				}
+				continue
+			}
+		}
 		if v.Approval == stApproved {
 			v.Active = true
 			p := r.probes[v.Name]
@@ -844,6 +855,24 @@ func (r *Registry) buildLocked() Current {
 	}
 	cur.SyncTargets = append(append([]SyncTarget(nil), cur.Targets...), extra...)
 	return cur
+}
+
+// configuredOnMachineLocked is the index of the configured ingress that a discovered node is the same
+// machine as: the node's tailnet address (from headscale, not self-reported) is the host of the
+// configured agent_url. The node then shows as another name of that row instead of a second one. -1: none.
+func (r *Registry) configuredOnMachineLocked(address string) int {
+	if ip := net.ParseIP(address); ip == nil || ip.IsLoopback() {
+		return -1 // not a tailnet address (tests and local setups point agents at loopback)
+	}
+	for i, t := range r.configured {
+		if t.Ingress.AgentURL == "" {
+			continue
+		}
+		if u, err := url.Parse(t.Ingress.AgentURL); err == nil && u.Hostname() == address {
+			return i
+		}
+	}
+	return -1
 }
 
 // unverifiedLocked reports whether an approved discovered ingress has no reading of its parameters

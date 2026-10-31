@@ -246,7 +246,11 @@
       return Promise.all([attention, activity]).then(render);
     }
 
-    hl.poll(refresh, POLL_MS);
+    // A page opened in a background tab still loads once; the poll pauses while hidden and resumes at once
+    // when the tab is shown.
+    var poller = hl.poll(refresh, POLL_MS);
+    if (document.hidden) { refresh(); }
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { poller.now(); } });
     setInterval(function () {
       if (document.hidden) { return; }
       var now = Date.now();

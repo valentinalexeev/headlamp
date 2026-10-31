@@ -96,6 +96,11 @@ type IngressView struct {
 	Sync           *SyncSnapshot `json:"sync"`
 	Detail         string        `json:"detail,omitempty"`
 	Aliases        []string      `json:"aliases,omitempty"` // other names of the same machine: its discovered node
+	// What the stored approval pinned, for a discovered bridge that has one. The store keeps these three only
+	// (not the key or short id), so a review of a changed identity can compare these and no more.
+	ApprovedFingerprint    string `json:"approved_fingerprint,omitempty"`
+	ApprovedNodeID         uint64 `json:"approved_node_id,omitempty"`
+	ApprovedMachineKeyPref string `json:"approved_machine_key_prefix,omitempty"`
 }
 
 // DiscoveryStatus says whether discovery runs and, when it does not, why.
@@ -745,6 +750,9 @@ func (r *Registry) buildLocked() Current {
 		p := r.probes[name]
 		row, approved := approvals[name]
 		v.Approved = approved
+		if approved {
+			v.ApprovedFingerprint, v.ApprovedNodeID, v.ApprovedMachineKeyPref = row.Fingerprint, row.NodeID, keyPrefix(row.MachineKey)
+		}
 		switch {
 		case approved && row.NodeID != 0:
 			v.Online = r.onlineByIDLocked(row.NodeID) // the pinned node, not whoever carries the name

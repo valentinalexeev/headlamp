@@ -93,3 +93,45 @@ func TestTailnetAttentionReadsTheExpiryOncePerInterval(t *testing.T) {
 		t.Fatalf("read %d times after the interval", reads)
 	}
 }
+
+func TestTailnetAttentionCachesAFailedReadBriefly(t *testing.T) {
+	reads := 0
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		reads++
+		return time.Time{}, errors.New("headscale is down")
+	})).(*module)
+	m.now = func() time.Time { return now }
+	for i := 0; i < 5; i++ {
+		m.Attention(context.Background(), "alice@")
+	}
+	if reads != 1 {
+		t.Fatalf("a failed read was repeated: %d", reads)
+	}
+	now = now.Add(61 * time.Second)
+	m.Attention(context.Background(), "alice@")
+	if reads != 2 {
+		t.Fatalf("a failed read must be retried after a minute: %d", reads)
+	}
+}
+
+func TestTailnetAttentionDoesNotHoldTheLockDuringTheRead(t *testing.T) {
+	inRead, release := make(chan struct{}), make(chan struct{})
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		close(inRead)
+		<-release
+		return time.Time{}, nil
+	})).(*module)
+	done := make(chan struct{})
+	go func() { m.Attention(context.Background(), "alice@"); close(done) }()
+	<-inRead
+	locked := make(chan struct{})
+	go func() { m.mu.Lock(); m.mu.Unlock(); close(locked) }()
+	select {
+	case <-locked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the mutex is held across the network call")
+	}
+	close(release)
+	<-done
+}

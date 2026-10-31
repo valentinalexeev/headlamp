@@ -41,21 +41,31 @@ func (m *module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 	}}, nil, nil
 }
 
-// expiryTTL is how long a read expiry is reused: it changes once a year, and Overview polls.
-const expiryTTL = 10 * time.Minute
+// expiryTTL is how long a read expiry is reused: it changes once a year, and Overview polls. A failed read is
+// reused for failedTTL, so a headscale that is down is not asked on every poll either.
+const (
+	expiryTTL = 10 * time.Minute
+	failedTTL = time.Minute
+)
 
 func (m *module) keyExpiry(ctx context.Context) (time.Time, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.expOK && m.now().Sub(m.expAt) < expiryTTL {
-		return m.expV, nil
+	ttl := expiryTTL
+	if m.expErr != nil {
+		ttl = failedTTL
 	}
-	at, err := m.expiry(ctx)
-	if err != nil {
-		return time.Time{}, err
+	if m.expSet && m.now().Sub(m.expAt) < ttl {
+		at, err := m.expV, m.expErr
+		m.mu.Unlock()
+		return at, err
 	}
-	m.expAt, m.expOK, m.expV = m.now(), true, at
-	return at, nil
+	m.mu.Unlock()
+
+	at, err := m.expiry(ctx) // the network call runs without the lock
+	m.mu.Lock()
+	m.expAt, m.expSet, m.expV, m.expErr = m.now(), true, at, err
+	m.mu.Unlock()
+	return at, err
 }
 
 func plural(n int, one, many string) string {

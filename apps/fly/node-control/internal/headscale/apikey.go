@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -48,14 +50,40 @@ func (c *Client) APIKeyExpiry(ctx context.Context) (time.Time, error) {
 	if want == "" {
 		return time.Time{}, errors.New(op + ": the configured key has no prefix to look for")
 	}
-	for _, k := range out.Keys {
-		if keyToken(k.Prefix) != want {
-			continue
+	// An exact match on the prefix first; then a looser one, for a listing that shows a longer or shorter
+	// prefix than the key's own (a listed prefix of at least six characters that begins the key, or the reverse).
+	found := func(loose bool) (time.Time, bool) {
+		for _, k := range out.Keys {
+			p := keyToken(k.Prefix)
+			match := p == want
+			if loose && len(p) >= minLoosePrefix && len(want) >= minLoosePrefix {
+				match = strings.HasPrefix(c.APIKey, k.Prefix) || strings.HasPrefix(want, p) || strings.HasPrefix(p, want)
+			}
+			if match {
+				if k.Expiration == nil {
+					return time.Time{}, true
+				}
+				return *k.Expiration, true
+			}
 		}
-		if k.Expiration == nil {
-			return time.Time{}, nil
-		}
-		return *k.Expiration, nil
+		return time.Time{}, false
+	}
+	if at, ok := found(false); ok {
+		return at, nil
+	}
+	if at, ok := found(true); ok {
+		return at, nil
+	}
+	if notListedWarned.CompareAndSwap(false, true) {
+		// No key material: the log says only that the key is missing from the list.
+		slog.Warn("headscale: the configured API key matches none of the listed keys, so its expiry cannot be warned about",
+			"listed_keys", len(out.Keys))
 	}
 	return time.Time{}, fmt.Errorf("%s: the configured key is not in the list", op)
 }
+
+// minLoosePrefix is the shortest prefix the looser match accepts, so a short listed prefix cannot match by chance.
+const minLoosePrefix = 6
+
+// notListedWarned makes the missing-key warning appear once per process, not on every poll.
+var notListedWarned atomic.Bool

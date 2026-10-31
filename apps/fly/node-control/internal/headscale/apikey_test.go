@@ -1,7 +1,9 @@
 package headscale
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -59,5 +61,37 @@ func TestAPIKeyExpiryErrors(t *testing.T) {
 	}
 	if _, err := (&Client{}).APIKeyExpiry(context.Background()); err != ErrNotConfigured {
 		t.Fatalf("want ErrNotConfigured, got %v", err)
+	}
+}
+
+func TestAPIKeyExpiryLooseMatchOnALongerListedPrefix(t *testing.T) {
+	c, _ := recorder(t, 200, `{"apiKeys":[{"id":"1","prefix":"abcd1234xyz","expiration":"2027-03-04T05:06:07Z"}]}`)
+	c.APIKey = "abcd1234.SEC"
+	at, err := c.APIKeyExpiry(context.Background())
+	if err != nil || !at.Equal(time.Date(2027, 3, 4, 5, 6, 7, 0, time.UTC)) {
+		t.Fatalf("%v %v", at, err)
+	}
+}
+
+func TestAPIKeyExpiryWarnsOnceWithoutKeyMaterial(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	notListedWarned.Store(false)
+
+	c, _ := recorder(t, 200, apiKeyList)
+	c.APIKey = "nomatch.SEC"
+	for i := 0; i < 3; i++ {
+		if _, err := c.APIKeyExpiry(context.Background()); err == nil {
+			t.Fatal("want an error")
+		}
+	}
+	out := buf.String()
+	if strings.Count(out, "matches none of the listed keys") != 1 {
+		t.Fatalf("want one warning, got %q", out)
+	}
+	if strings.Contains(out, "nomatch") || strings.Contains(out, "SEC") {
+		t.Fatalf("the warning carries key material: %q", out)
 	}
 }

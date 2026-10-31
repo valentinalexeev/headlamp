@@ -177,3 +177,52 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 	}
 	return items, []core.SystemLine{line}, nil
 }
+
+// auditRead is how many entries of the shared log Activity reads before it keeps the node actions: the log is
+// bounded, and the node actions are only some of it.
+const auditRead = 1000
+
+func (m *Module) auditLog() core.AuditLog {
+	if m.audit == nil {
+		return nil
+	}
+	return m.audit()
+}
+
+// HasActivity reports whether node actions are kept anywhere that can be read back. Without the shared audit log
+// (no enrolment store) they only go to the process log, so the console has no activity to show.
+func (m *Module) HasActivity() bool { return m.auditLog() != nil }
+
+// Activity lists the node actions ("node." prefix) of the shared audit log, newest first, as "Nodes". Without the
+// log it is empty. The detail names the node and the outcome, never a provider's error text.
+func (m *Module) Activity(_ context.Context, _ string, limit int) ([]core.ActivityEntry, error) {
+	al := m.auditLog()
+	if al == nil {
+		return nil, nil
+	}
+	log, err := al.AuditLog(auditRead)
+	if err != nil {
+		return nil, fmt.Errorf("audit log: %w", err)
+	}
+	var out []core.ActivityEntry
+	for _, e := range log {
+		if !strings.HasPrefix(e.Action, "node.") {
+			continue
+		}
+		out = append(out, core.ActivityEntry{At: e.At, Actor: e.Actor, Source: "Nodes", Action: e.Action, Detail: e.Detail})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// Search lists the node ids, each opening the Nodes page on that node.
+func (m *Module) Search(ctx context.Context, _ string) ([]core.SearchItem, error) {
+	ts := m.Targets(ctx)
+	out := make([]core.SearchItem, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, core.SearchItem{Label: t.ID, Kind: "Node", Path: "/nodes?sel=" + url.QueryEscape(t.ID)})
+	}
+	return out, nil
+}

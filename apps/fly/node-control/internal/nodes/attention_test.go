@@ -159,3 +159,69 @@ func TestNodesAttentionCachesProviderCalls(t *testing.T) {
 		t.Fatalf("after the cache expired: %d calls, want 6", got)
 	}
 }
+
+var (
+	_ core.ActivitySource = (*Module)(nil)
+	_ core.SearchSource   = (*Module)(nil)
+)
+
+func TestNodesActivityReadsOnlyNodeActions(t *testing.T) {
+	lg := &recLog{entries: []core.AuditEntry{
+		{At: time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC), Actor: "alice@", Action: "node.stop", Detail: "exit-c: ok"},
+		{At: time.Date(2026, 10, 31, 11, 0, 0, 0, time.UTC), Actor: "alice@", Action: "device.revoke", Detail: "phone"},
+		{At: time.Date(2026, 10, 31, 10, 0, 0, 0, time.UTC), Actor: "bob@", Action: "node.start", Detail: "exit-a: failed (timeout)"},
+	}}
+	m := New(attentionConfig(t), nil, nil, WithAudit(func() core.AuditLog { return lg })).(*Module)
+	got, err := m.Activity(context.Background(), "alice@", 10)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got[0].Source != "Nodes" || got[0].Action != "node.stop" || got[0].Detail != "exit-c: ok" || got[0].Actor != "alice@" || got[1].Action != "node.start" {
+		t.Errorf("%+v", got)
+	}
+	if one, _ := m.Activity(context.Background(), "alice@", 1); len(one) != 1 {
+		t.Errorf("limit: %+v", one)
+	}
+	if !m.HasActivity() {
+		t.Error("a module with an audit log has activity")
+	}
+}
+
+func TestNodesActivityWithoutALogIsEmpty(t *testing.T) {
+	for name, opts := range map[string][]Option{
+		"no function":        nil,
+		"function gives nil": {WithAudit(func() core.AuditLog { return nil })},
+	} {
+		m := New(attentionConfig(t), nil, nil, opts...).(*Module)
+		if got, err := m.Activity(context.Background(), "alice@", 10); got != nil || err != nil {
+			t.Errorf("%s: %v %v", name, got, err)
+		}
+		if m.HasActivity() {
+			t.Errorf("%s: nodes alone keep no activity", name)
+		}
+	}
+}
+
+func TestNodesActivityReportsAnUnreadableLog(t *testing.T) {
+	m := New(attentionConfig(t), nil, nil, WithAudit(func() core.AuditLog { return &brokenLog{} })).(*Module)
+	if _, err := m.Activity(context.Background(), "alice@", 10); err == nil {
+		t.Error("an unreadable log is an error, not an empty list")
+	}
+}
+
+type brokenLog struct{ recLog }
+
+func (*brokenLog) AuditLog(int) ([]core.AuditEntry, error) { return nil, errors.New("down") }
+
+func TestNodesSearchListsNodeIDs(t *testing.T) {
+	m := New(attentionConfig(t), nil, nil).(*Module)
+	items, err := m.Search(context.Background(), "alice@")
+	if err != nil || len(items) != 3 {
+		t.Fatalf("%+v %v", items, err)
+	}
+	for _, it := range items {
+		if it.Kind != "Node" || it.Path != "/nodes?sel="+it.Label {
+			t.Errorf("%+v", it)
+		}
+	}
+}

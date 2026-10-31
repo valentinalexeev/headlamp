@@ -178,9 +178,16 @@ function ago(t) {
   if (s < 129600) return Math.round(s / 3600) + " h ago";
   return Math.round(s / 86400) + " days ago";
 }
+function fmtBytes(n) {
+  if (!(n >= 1024)) return Math.round(n || 0) + " B";
+  const units = ["KB", "MB", "GB", "TB", "PB"];
+  let i = -1;
+  do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+  return (n >= 100 ? n.toFixed(0) : n.toFixed(1)) + " " + units[i];
+}
 function fmtTraffic(t) {
   if (!t) return "-";
-  return Object.entries(t).map(([k, v]) => k + " " + v).join(", ");
+  return Object.entries(t).map(([k, v]) => k + " " + fmtBytes(v)).join(", ");
 }
 async function load() {
   const r = await fetch("/enroll/devices");

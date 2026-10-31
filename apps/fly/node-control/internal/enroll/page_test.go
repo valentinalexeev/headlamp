@@ -51,3 +51,15 @@ func TestPageHasTheIngressTable(t *testing.T) {
 		}
 	})
 }
+
+func TestPageDrawsTheLinkAsQR(t *testing.T) {
+	page := string(enrollHTML)
+	for _, want := range []string{`id="outqr"`, `src="/enroll/qrcode.js"`, "qr(text)", "q.isDark("} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+	if len(qrcodeJS) == 0 || !strings.Contains(string(qrcodeJS), "Kazuhiko Arase") {
+		t.Error("the embedded QR encoder (with its licence header) is missing")
+	}
+}

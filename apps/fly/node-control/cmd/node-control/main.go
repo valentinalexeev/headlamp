@@ -49,7 +49,15 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		"selectel": nodes.NewSelectel(env, hc),
 		"fly":      nodes.NewFly(env, hc),
 	}
-	nm, ok := nodes.New(cfg, src, providers).(interface {
+	// The audit log lives in the enrolment store, which opens at Register, after nodes.New: hence a function.
+	enr := enroll.New(env, enroll.WithNodeSource(src))
+	audit := func() core.AuditLog {
+		if p, ok := enr.(interface{ AuditLog() core.AuditLog }); ok {
+			return p.AuditLog()
+		}
+		return nil
+	}
+	nm, ok := nodes.New(cfg, src, providers, nodes.WithAudit(audit)).(interface {
 		core.Module
 		Targets(context.Context) []nodes.Target
 	})
@@ -71,7 +79,7 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	mods := []core.Module{
 		tailnet.New(src, tracked, tailnet.WithKeyExpiry(hsClient.APIKeyExpiry)),
 		nm,
-		enroll.New(env, enroll.WithNodeSource(src)),
+		enr,
 		pol,
 		funnel.New(env, hsClient, func() funnel.PolicyService {
 			// Only an active console has a service; a typed nil must not become a non-nil interface.

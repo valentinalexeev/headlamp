@@ -425,3 +425,47 @@ func TestEnrolmentInRedisIsWiredEndToEnd(t *testing.T) {
 		t.Fatal("the device is not in Redis")
 	}
 }
+
+// A node action is recorded in the audit log that the enrolment store keeps; the nodes module reaches it through a
+// function because the store opens only at Register.
+func TestNodeActionsReachTheEnrolmentAuditLog(t *testing.T) {
+	m := map[string]string{}
+	base := navEnv(t, true)
+	for _, k := range []string{"ENROLL_DB", "ENROLL_CONFIG", "ENROLL_SECRET_KEY", "AGENT_URL", "AGENT_TOKEN", "ENROLL_ALLOWED_HOSTS"} {
+		m[k] = base.Getenv(k)
+	}
+	nodesFile := filepath.Join(t.TempDir(), "nodes.json")
+	if err := os.WriteFile(nodesFile, []byte(`{"title":"t","nodes":{"plain":{"provider":"yandex"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m["NODES_CONFIG"] = nodesFile
+	env := core.MapEnv(m)
+	mods, err := buildModules(env, http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn, _ := serve(t, env, mods)
+	req, _ := http.NewRequest("POST", "http://"+tn.AdminAddr()+"/nodes/plain/stop", nil)
+	req.Host = "admin.test"
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 503 {
+		t.Fatalf("stop = %d", resp.StatusCode)
+	}
+	var log core.AuditLog
+	for _, mod := range mods {
+		if p, ok := mod.(interface{ AuditLog() core.AuditLog }); ok {
+			log = p.AuditLog()
+		}
+	}
+	if log == nil {
+		t.Fatal("the enrolment module has no audit log")
+	}
+	got, err := log.AuditLog(10)
+	if err != nil || len(got) != 1 || got[0].Action != "node.stop" || got[0].Detail != "plain: failed (not_configured)" || got[0].Actor != "local" {
+		t.Fatalf("audit log = %+v, %v", got, err)
+	}
+}

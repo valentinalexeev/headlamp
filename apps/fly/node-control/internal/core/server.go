@@ -151,6 +151,7 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 		return err
 	}
 	navActions := CollectActions(mods)
+	registerAttention(admin, mods, navItems, tn)
 
 	// Modules start before any listener exists, so no request can reach a
 	// module that has not started. A failed Start leaves nothing open.

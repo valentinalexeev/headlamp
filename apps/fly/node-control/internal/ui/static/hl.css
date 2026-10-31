@@ -143,3 +143,8 @@ body:has(>nav.side[data-nc-nav]){padding-left:216px}
   .iconbtn{display:flex}
   .side.open .navgroup.collapsible{display:flex}
 }
+/* the enrolment drawer sits over the whole window, shell included */
+.hl .scrim,.hl .drawer{position:fixed}
+.hl .scrim{z-index:1001}
+.hl .drawer{z-index:1002}
+.page.narrow{max-width:860px}

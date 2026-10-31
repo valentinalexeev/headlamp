@@ -26,6 +26,10 @@ type Module struct {
 	providers map[string]Provider
 	timeout   time.Duration
 
+	now     func() time.Time // nil means time.Now (tests)
+	stMu    sync.Mutex       // guards stCache
+	stCache map[string]cachedStatus
+
 	mu       sync.Mutex
 	lastGood []headscale.Node // last node list headscale returned successfully
 	haveGood bool

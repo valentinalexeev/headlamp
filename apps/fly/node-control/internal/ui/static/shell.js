@@ -77,9 +77,11 @@
 
   // needsReload: the page was rendered before this change was applied, so it cannot prove the
   // operator can still reach the console through the new rules. Seconds on both sides.
+  // Unknown times also count as needing a reload.
   function needsReload(item, loadedSec) {
     var t = Date.parse(item && item.applied_at);
-    if (isNaN(t) || !isFinite(loadedSec)) { return false; }
+    // Fail closed: without both times the page cannot prove it is newer than the change.
+    if (isNaN(t) || typeof loadedSec !== 'number' || !isFinite(loadedSec)) { return true; }
     return loadedSec < Math.floor(t / 1000);
   }
 

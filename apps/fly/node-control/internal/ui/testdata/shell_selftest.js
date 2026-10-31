@@ -112,6 +112,19 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
       const names = buttons(p.strip);
       assert.deepStrictEqual(names, [want, 'Revert now'], 'loaded ' + (loaded - appliedSec));
     }
+    // Fail closed: missing or unparseable times offer Reload to confirm, never Confirm.
+    const cases = [
+      ['no data-hl-loaded', null, item],
+      ['bad data-hl-loaded', 'soon', item],
+      ['no applied_at', String(appliedSec), Object.assign({}, item, { applied_at: undefined })],
+      ['bad applied_at', String(appliedSec), Object.assign({}, item, { applied_at: 'yesterday' })],
+    ];
+    for (const [name, loaded, it] of cases) {
+      const p = parts();
+      if (loaded !== null) { p.strip.setAttribute('data-hl-loaded', loaded); }
+      await ctl(p, async () => ({ items: [it] })).poll();
+      assert.deepStrictEqual(buttons(p.strip), ['Reload to confirm', 'Revert now'], name);
+    }
     // Confirm and Revert now post the change id; Reload to confirm only reloads.
     const calls = [];
     let reloads = 0;

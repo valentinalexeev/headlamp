@@ -467,6 +467,9 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusConflict, "the device is revoked or expired; a link would not work")
 		return
 	}
+	if uses > math.MaxInt32 { // already limited to 100 above; the explicit bound keeps the int conversion provably safe
+		uses = math.MaxInt32
+	}
 	tok, err := a.store.NewLink(id, time.Duration(ttl)*time.Second, int(uses))
 	if err != nil {
 		a.internal(w, err)

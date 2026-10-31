@@ -117,6 +117,15 @@ func TestNodesAttention(t *testing.T) {
 		}
 	})
 
+	t.Run("no headscale configured is not a failure", func(t *testing.T) {
+		var calls atomic.Int32
+		m := attentionModule(t, nil, map[string]string{"exit-a": "RUNNING", "exit-b": "RUNNING", "exit-c": "STOPPED"}, &calls)
+		items, lines, err := m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 0 || len(lines) != 1 || lines[0].State == "unknown" {
+			t.Fatalf("%+v %+v %v", items, lines, err)
+		}
+	})
+
 	t.Run("a provider that cannot answer makes the line unknown without an item", func(t *testing.T) {
 		var calls atomic.Int32
 		m := attentionModule(t, healthy, map[string]string{"exit-a": "RUNNING", "exit-c": "STOPPED"}, &calls)

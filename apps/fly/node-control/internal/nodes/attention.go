@@ -114,7 +114,7 @@ func tailnetNode(ns []headscale.Node, name string) *headscale.Node {
 func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem, []core.SystemLine, error) {
 	ts := m.Targets(ctx)
 	var hs []headscale.Node
-	hsErr := fmt.Errorf("no headscale node source")
+	var hsErr error // a node source that was never configured is not a failure
 	if m.src != nil {
 		hs, hsErr = m.src.Nodes(ctx)
 	}
@@ -167,6 +167,8 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		line.State, line.Summary = "unknown", fmt.Sprintf("%d could not be checked", unchecked)
 	case managed == 0:
 		line.Summary = "No managed nodes"
+	case m.src == nil:
+		line.Summary = fmt.Sprintf("%d managed", managed)
 	default:
 		line.Summary = fmt.Sprintf("All %d reachable", managed)
 	}

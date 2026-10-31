@@ -1,0 +1,149 @@
+package overview
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"regexp"
+	"strings"
+	"testing"
+
+	"example.com/node-control/internal/core"
+	"example.com/node-control/internal/ui"
+)
+
+// stub is a module with navigation entries.
+type stub struct {
+	name  string
+	items []core.NavItem
+}
+
+func (s stub) Name() string                { return s.name }
+func (s stub) Start(context.Context) error { return nil }
+func (s stub) Register(*core.Routes) error { return nil }
+func (s stub) Nav() []core.NavItem         { return s.items }
+
+func twoPages() []core.Module {
+	return []core.Module{
+		stub{"nodes", []core.NavItem{{Label: "Nodes", Path: "/nodes", Order: 10}}},
+		stub{"tasks", []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40}}},
+	}
+}
+
+func serve(t *testing.T, others []core.Module, path string) (*httptest.ResponseRecorder, core.Module) {
+	t.Helper()
+	m := New(func() []core.Module { return others })
+	mux := http.NewServeMux()
+	if err := m.Register(&core.Routes{Admin: mux}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	return rec, m
+}
+
+func TestOverviewPageSecurityHeaders(t *testing.T) {
+	for _, p := range []string{"/", "/overview/overview.js"} {
+		rec, _ := serve(t, twoPages(), p)
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d", p, rec.Code)
+		}
+		h := rec.Header()
+		if h.Get("Content-Security-Policy") != ui.PageCSP {
+			t.Errorf("%s CSP: %q", p, h.Get("Content-Security-Policy"))
+		}
+		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("X-Frame-Options") != "DENY" || h.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s headers: %v", p, h)
+		}
+	}
+	rec, _ := serve(t, twoPages(), "/")
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("content type %q", ct)
+	}
+}
+
+func TestOverviewNav(t *testing.T) {
+	m := New(func() []core.Module { return twoPages() })
+	nav := m.(core.Navigator).Nav()
+	if len(nav) != 1 || nav[0].Label != "Overview" || nav[0].Path != "/" || nav[0].Order != 1 || nav[0].Group != "" || nav[0].Icon == "" {
+		t.Fatalf("%+v", nav)
+	}
+	if err := core.ValidateNavItem(nav[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := core.CollectNav(append(twoPages(), m)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOverviewOneModuleRedirects(t *testing.T) {
+	one := []core.Module{stub{"nodes", []core.NavItem{{Label: "Nodes", Path: "/nodes", Order: 10}}}}
+	rec, m := serve(t, one, "/")
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/nodes" {
+		t.Fatalf("%d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if nav := m.(core.Navigator).Nav(); len(nav) != 0 {
+		t.Fatalf("Nav() must be empty with one other page: %+v", nav)
+	}
+}
+
+func TestOverviewNoPagesIsNotFound(t *testing.T) {
+	rec, m := serve(t, []core.Module{stub{"quiet", nil}}, "/")
+	if rec.Code != http.StatusNotFound || len(m.(core.Navigator).Nav()) != 0 {
+		t.Fatalf("%d", rec.Code)
+	}
+}
+
+func TestOverviewDoesNotShadowOtherPaths(t *testing.T) {
+	rec, _ := serve(t, twoPages(), "/nodes")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("%d", rec.Code)
+	}
+}
+
+func TestOverviewNoInlineScriptOrExternalRefs(t *testing.T) {
+	html := string(pageHTML)
+	for _, m := range regexp.MustCompile(`(?i)<script\b[^>]*>`).FindAllString(html, -1) {
+		if !strings.Contains(m, ` src="/`) || !strings.Contains(m, "defer") {
+			t.Errorf("script tag %q must be a same-origin deferred file", m)
+		}
+	}
+	for _, bad := range []string{"<style", " style=", "javascript:", "http://", "https://", "//cdn", " onclick=", " onload=", " onerror="} {
+		if strings.Contains(strings.ToLower(html), bad) {
+			t.Errorf("page contains %q", bad)
+		}
+	}
+	for _, m := range regexp.MustCompile(`(?i)\s(?:src|href)="([^"]*)"`).FindAllStringSubmatch(html, -1) {
+		if !strings.HasPrefix(m[1], "/") || strings.HasPrefix(m[1], "//") {
+			t.Errorf("reference %q is not a local path", m[1])
+		}
+	}
+	js := string(pageJS)
+	for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"} {
+		if strings.Contains(js, bad) {
+			t.Errorf("script contains %q", bad)
+		}
+	}
+	if strings.Contains(js, "XMLHttpRequest") || regexp.MustCompile(`https?://`).MatchString(js) {
+		t.Error("script reaches outside the origin")
+	}
+}
+
+func TestOverviewSelfTest(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	out, err := exec.Command(node, "testdata/overview_selftest.js", "../ui/static/hl.js", "static/overview.js").CombinedOutput()
+	if err != nil {
+		t.Fatalf("self-test failed: %v\n%s", err, out)
+	}
+	if out, err := exec.Command(node, "--check", "static/overview.js").CombinedOutput(); err != nil {
+		t.Fatalf("node --check: %v\n%s", err, out)
+	}
+	if _, err := os.Stat("../ui/static/hl.js"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -55,7 +55,6 @@ func (m *Module) registerHuman(mux *http.ServeMux, gate func(http.Handler) http.
 	write := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(authz.RequireJSON(h))) }
 	get("GET /funnel", asset("text/html; charset=utf-8", pageHTML))
 	get("GET /funnel/static/funnel.js", asset("text/javascript; charset=utf-8", pageJS))
-	get("GET /funnel/static/funnel.css", asset("text/css; charset=utf-8", pageCSS))
 	get("GET /funnel/state", m.state)
 	get("GET /funnel/audit", m.audit)
 	write("POST /funnel/namespaces", m.createNamespace)

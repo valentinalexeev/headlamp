@@ -714,7 +714,7 @@ func TestChecklistContainsWildcardCNAMEAndAcmeHint(t *testing.T) {
 func TestEveryRoute403ForNonAdminTaggedAndWhoIsError(t *testing.T) {
 	r := newRig(t, nil)
 	routes := []struct{ method, path string }{
-		{"GET", "/funnel"}, {"GET", "/funnel/static/funnel.js"}, {"GET", "/funnel/static/funnel.css"}, {"GET", "/funnel/state"}, {"GET", "/funnel/audit"},
+		{"GET", "/funnel"}, {"GET", "/funnel/static/funnel.js"}, {"GET", "/funnel/state"}, {"GET", "/funnel/audit"},
 		{"POST", "/funnel/namespaces"}, {"PATCH", "/funnel/namespaces/pdl"}, {"DELETE", "/funnel/namespaces/pdl"},
 		{"POST", "/funnel/namespaces/pdl/keys"}, {"GET", "/funnel/namespaces/pdl/keys"}, {"DELETE", "/funnel/keys/1"},
 		{"POST", "/funnel/routes"}, {"DELETE", "/funnel/routes/pdl/x"}, {"POST", "/funnel/blocks"}, {"DELETE", "/funnel/blocks/pdl/x"},

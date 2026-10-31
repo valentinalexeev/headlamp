@@ -251,7 +251,7 @@ const cellText = (tr, i) => tr.children[i].textContent;
     const els2 = funnelEls();
     funnel.mount(els2, { now: () => NOW }).update(baseState());
     assert.strictEqual(els2.reportnote.hidden, true);
-    assert.ok(/4 public routes\. Ingress reported 12 s ago with no errors\./.test(els2.sub.textContent) || /3 public routes\. Ingress reported 12 s ago with no errors\./.test(els2.sub.textContent), els2.sub.textContent);
+    assert.ok(/^3 public routes\. Ingress reported 12 s ago with no errors\.$/.test(els2.sub.textContent), els2.sub.textContent);
   }
 
   // reportTextIsInert: names, targets and errors from the report are text
@@ -590,6 +590,56 @@ const cellText = (tr, i) => tr.children[i].textContent;
     const ctrl3 = cfg.mount(els3, {});
     assert.strictEqual(ctrl3.state.sel, '');
     setSearch('');
+  }
+
+  // subtitle, failed polls, and a key whose namespace moves on
+  {
+    const SUB = 'Changing a namespace edits the access policy and needs confirming.';
+    const els = configEls();
+    const ctrl = cfg.mount(els, {});
+    ctrl.setFailed(true);
+    assert.strictEqual(els.sub.textContent, 'Could not load the namespaces. Retrying.');
+    ctrl.update(cfgState());
+    ctrl.setFailed(false);
+    assert.strictEqual(els.sub.textContent, SUB, 'the default subtitle is back after a success');
+    ctrl.setFailed(true);
+    assert.strictEqual(els.sub.textContent, SUB + ' The data may be out of date.');
+    ctrl.setFailed(false);
+    assert.strictEqual(els.sub.textContent, SUB);
+
+    const KEY = 'example-key-shown-once-abcdef';
+    fetchReply = (url, opts) => {
+      const m = (opts && opts.method) || 'GET';
+      if (m === 'POST' && url === '/funnel/namespaces/lab/keys') { return json({ id: 9, key: KEY }); }
+      if (url.endsWith('/keys')) { return json({ keys: [] }); }
+      return json(cfgState());
+    };
+    // selection changes while the POST is in flight: the key is still shown, labelled with its namespace
+    const els2 = configEls();
+    const ctrl2 = cfg.mount(els2, {});
+    ctrl2.update(cfgState());
+    ctrl2.select('lab');
+    await flush();
+    buttonNamed(els2.keyaddslot, 'Mint key').click();
+    fire(els2.keyform.children[0], 'submit');
+    ctrl2.select('');
+    await flush();
+    assert.ok(els2.side.textContent.includes(KEY), 'the key is not lost');
+    assert.ok(/for lab/.test(els2.side.textContent), 'and it names its namespace');
+    // the namespace stops being active: the secret goes with it
+    ctrl2.update(cfgState({ namespaces: [ns('lab', { state: 'failed' })] }));
+    assert.ok(!els2.side.textContent.includes(KEY), 'gone when its namespace is no longer active');
+    assert.strictEqual(ctrl2.state.secret, null);
+    // and when the namespace is deleted from the list
+    ctrl2.update(cfgState());
+    ctrl2.select('lab');
+    await flush();
+    buttonNamed(els2.keyaddslot, 'Mint key').click();
+    fire(els2.keyform.children[0], 'submit');
+    await flush();
+    assert.ok(els2.side.textContent.includes(KEY));
+    ctrl2.update(cfgState({ namespaces: [ns('other')] }));
+    assert.ok(!els2.side.textContent.includes(KEY));
   }
 
   // namespacesEmptyState

@@ -11,6 +11,7 @@
   var POLL_MS = 15000;
   var COLUMNS = 6;
   var KEY_COLUMNS = 4;
+  var DEFAULT_SUB = 'Changing a namespace edits the access policy and needs confirming.';
   var NAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
   function arr(v) { return Array.isArray(v) ? v : []; }
@@ -549,7 +550,8 @@
           p.saving = false;
           var key = typeof obj(j).key === 'string' ? j.key : '';
           closeMintPanel();
-          if (st.sel === name && key) { showSecret(key, name); }
+          // Shown even when the selection moved on meanwhile: the panel names its namespace, and the key is not lost.
+          if (key) { showSecret(key, name); }
           return loadKeys();
         }, function (e) {
           p.saving = false;
@@ -595,7 +597,7 @@
       row.appendChild(button('Done', null, 'quiet', clearSecret));
       root.appendChild(row);
       els.side.appendChild(root);
-      st.secret = { root: root, box: box };
+      st.secret = { root: root, box: box, ns: ns };
       cp.focus();
     }
 
@@ -689,7 +691,12 @@
       var shown = st.loaded && list.length > 0;
       els.empty.hidden = !(st.loaded && list.length === 0);
       els.cols.hidden = !shown;
-      if (st.failed && !st.loaded) { els.sub.textContent = 'Could not load the namespaces. Retrying.'; }
+      els.sub.textContent = st.failed ? (st.loaded ? DEFAULT_SUB + ' The data may be out of date.' : 'Could not load the namespaces. Retrying.') : DEFAULT_SUB;
+      // A key whose namespace is no longer active is removed with it.
+      if (st.secret) {
+        var sn = findNS(st.secret.ns);
+        if (!sn || sn.state !== 'active') { clearSecret(); }
+      }
       renderAdd();
       renderWait();
       renderTable(force);

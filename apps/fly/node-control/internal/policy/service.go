@@ -131,6 +131,14 @@ func (s *Service) settleWriteError(id int64, before, after string, err error) er
 	return fmt.Errorf("%w: %w", ErrUncertain, err)
 }
 
+// record notes how a change ended for the activity list. A failing write is logged and never fails the action it
+// describes; the log names the change and the error class, never policy text.
+func (s *Service) record(id int64, action, actor string) {
+	if err := s.store.RecordOutcome(id, action, actor); err != nil {
+		slog.Error("policy outcome record failed", "id", id, "action", action, "cause", errCause(err))
+	}
+}
+
 func (s *Service) abort(id int64) {
 	if err := s.store.Abort(id); err != nil {
 		slog.Error("policy change abort failed", "id", id, "err", err)
@@ -222,6 +230,7 @@ func (s *Service) Confirm(ctx context.Context, actor string, id int64) error {
 	if err := s.store.Confirm(p.ID); err != nil {
 		return err
 	}
+	s.record(p.ID, RecordConfirmed, actor)
 	slog.Info("policy change confirmed", "actor", actor, "id", p.ID)
 	return nil
 }
@@ -251,6 +260,7 @@ func (s *Service) RevertPending(ctx context.Context, actor string, id int64) err
 	if err := s.store.MarkReverted(p.ID, true); err != nil {
 		return err
 	}
+	s.record(p.ID, RecordRevertedOnRequest, actor)
 	slog.Warn("policy change reverted on request", "id", p.ID, "actor", actor, "bytes", len(p.Before))
 	return nil
 }
@@ -315,5 +325,6 @@ func (s *Service) checkRevert(ctx context.Context) {
 		slog.Error("policy revert bookkeeping failed", "id", p.ID, "err", err)
 		return
 	}
+	s.record(p.ID, RecordReverted, "system")
 	slog.Warn("policy change reverted at deadline", "id", p.ID, "actor", p.Actor, "bytes", len(p.Before))
 }

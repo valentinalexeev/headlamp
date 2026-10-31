@@ -808,3 +808,72 @@ func TestRevertPendingFailureKeepsTheChangePendingWithItsRevertArmed(t *testing.
 		t.Fatalf("text = %q, outcome = %q", api.current(), svc.Outcome(id))
 	}
 }
+
+func recordsOf(t *testing.T, svc *Service) map[int64]Record {
+	t.Helper()
+	r, err := svc.store.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestOutcomesAreRecordedForEachWayAChangeEnds(t *testing.T) {
+	ctx := context.Background()
+	api := newFakeAPI("old")
+	svc, clk, _ := newTestService(t, api)
+
+	confirmed := applyOK(t, svc, "one")
+	clk.Advance(time.Second)
+	if err := svc.Confirm(ctx, "alice@", confirmed); err != nil {
+		t.Fatal(err)
+	}
+	onRequest := applyOK(t, svc, "two")
+	clk.Advance(time.Second)
+	if err := svc.RevertPending(ctx, "bob@", onRequest); err != nil {
+		t.Fatal(err)
+	}
+	auto := applyOK(t, svc, "three")
+	clk.Advance(testRevert + time.Second)
+	svc.checkRevert(ctx)
+
+	got := recordsOf(t, svc)
+	want := map[int64][2]string{confirmed: {RecordConfirmed, "alice@"}, onRequest: {RecordRevertedOnRequest, "bob@"}, auto: {RecordReverted, "system"}}
+	if len(got) != 3 {
+		t.Fatalf("%+v", got)
+	}
+	for id, w := range want {
+		if r := got[id]; r.Action != w[0] || r.Actor != w[1] || r.At.IsZero() {
+			t.Errorf("change %d: %+v, want %v", id, r, w)
+		}
+	}
+	// the time is the one recorded, so it does not move between reads or when the clock moves on
+	first := got[onRequest].At
+	clk.Advance(48 * time.Hour)
+	if again := recordsOf(t, svc)[onRequest]; !again.At.Equal(first) {
+		t.Errorf("%v then %v", first, again.At)
+	}
+}
+
+func TestAFailedOutcomeRecordNeverFailsTheAction(t *testing.T) {
+	ctx := context.Background()
+	api := newFakeAPI("old")
+	svc, clk, _ := newTestService(t, api)
+	if _, err := svc.store.db.Exec("DROP TABLE outcomes"); err != nil {
+		t.Fatal(err)
+	}
+	id := applyOK(t, svc, "one")
+	if err := svc.Confirm(ctx, "alice@", id); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	id = applyOK(t, svc, "two")
+	if err := svc.RevertPending(ctx, "alice@", id); err != nil {
+		t.Fatalf("revert on request: %v", err)
+	}
+	id = applyOK(t, svc, "three")
+	clk.Advance(testRevert + time.Second)
+	svc.checkRevert(ctx)
+	if svc.store.Outcome(id) != OutcomeReverted {
+		t.Fatalf("the automatic revert must still happen: %v", svc.store.Outcome(id))
+	}
+}

@@ -73,6 +73,12 @@ CREATE TABLE IF NOT EXISTS changes (
     attempts INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_pending ON changes(state) WHERE state = 'pending';
+CREATE TABLE IF NOT EXISTS outcomes (
+    change_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    ts INTEGER NOT NULL
+);
 `
 
 // Store is the SQLite change history. It uses one connection and no WAL to keep memory low.
@@ -229,4 +235,46 @@ func (s *Store) TextOf(id int64, which string) (string, error) {
 		return "", err
 	}
 	return text, nil
+}
+
+// How a pending change ended, as recorded in the outcomes table.
+const (
+	RecordConfirmed         = "confirmed"
+	RecordReverted          = "reverted"            // by the watcher, at the deadline
+	RecordRevertedOnRequest = "reverted_on_request" // by an operator, before the deadline
+)
+
+// Record is how and when a change ended and who did it. It carries no policy text.
+type Record struct {
+	ChangeID int64
+	Action   string
+	Actor    string
+	At       time.Time
+}
+
+// RecordOutcome notes how change id ended, at the store's clock. Changes that ended before the table existed have no
+// record.
+func (s *Store) RecordOutcome(id int64, action, actor string) error {
+	_, err := s.db.Exec("INSERT INTO outcomes (change_id, action, actor, ts) VALUES (?, ?, ?, ?)", id, action, actor, s.clock().Unix())
+	return err
+}
+
+// Records returns the recorded outcome of each change, by change id (the newest record when there are several).
+func (s *Store) Records() (map[int64]Record, error) {
+	rows, err := s.db.Query("SELECT change_id, action, actor, ts FROM outcomes ORDER BY rowid ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]Record{}
+	for rows.Next() {
+		var r Record
+		var ts int64
+		if err := rows.Scan(&r.ChangeID, &r.Action, &r.Actor, &ts); err != nil {
+			return nil, err
+		}
+		r.At = time.Unix(ts, 0)
+		out[r.ChangeID] = r
+	}
+	return out, rows.Err()
 }

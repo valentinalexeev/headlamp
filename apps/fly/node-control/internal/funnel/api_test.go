@@ -811,7 +811,16 @@ func TestRegisterRefusesIncompleteSetups(t *testing.T) {
 
 func TestNavOnlyWhenActive(t *testing.T) {
 	r := newRig(t, nil)
-	if nav := r.mod.Nav(); len(nav) != 1 || nav[0].Path != "/funnel" {
+	nav := r.mod.Nav()
+	if len(nav) != 2 || nav[0].Path != "/funnel" || nav[0].Group != "operate" || nav[1].Path != "/funnel/config" || nav[1].Group != "configure" {
 		t.Fatalf("nav = %v", nav)
+	}
+	for _, n := range nav {
+		if n.Allow == nil || n.Allow("mallory@example.net") {
+			t.Fatalf("%s is not limited to FUNNEL_ADMIN_USERS", n.Label)
+		}
+		if err := core.ValidateNavItem(n); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

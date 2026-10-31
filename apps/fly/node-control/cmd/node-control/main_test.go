@@ -254,8 +254,8 @@ func TestTopBarWiring(t *testing.T) {
 		if err := json.Unmarshal([]byte(nav), &items); err != nil {
 			t.Fatalf("%v: %s", err, nav)
 		}
-		want := []core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Bridge", Path: "/enroll", Order: 20}}
-		if len(items) != 2 || items[0] != want[0] || items[1] != want[1] {
+		if len(items) != 2 || items[0].Label != "Nodes" || items[0].Path != "/" || items[0].Order != 10 ||
+			items[1].Label != "Devices" || items[1].Path != "/enroll" || items[1].Order != 20 {
 			t.Fatalf("entries %+v", items)
 		}
 		for path, active := range map[string]string{"/": `href="/" aria-current="page"`, "/enroll": `href="/enroll" aria-current="page"`} {
@@ -287,7 +287,7 @@ func TestTopBarWiring(t *testing.T) {
 		}
 	})
 
-	t.Run("without ENROLL_DB only Nodes and no bar", func(t *testing.T) {
+	t.Run("without ENROLL_DB only Nodes and a compact header without sidebar", func(t *testing.T) {
 		env := navEnv(t, false)
 		mods, err := buildModules(env, http.DefaultClient)
 		if err != nil {
@@ -300,8 +300,9 @@ func TestTopBarWiring(t *testing.T) {
 		if err := json.Unmarshal([]byte(nav), &items); err != nil || len(items) != 1 || items[0].Label != "Nodes" {
 			t.Fatalf("entries %v: %s", err, nav)
 		}
-		if code, body := getHost(t, admin, "admin.test", "/"); code != 200 || strings.Contains(body, "data-nc-nav") {
-			t.Fatalf("bar shown with one entry: %d", code)
+		if code, body := getHost(t, admin, "admin.test", "/"); code != 200 || !strings.Contains(body, "data-nc-nav") ||
+			strings.Contains(body, "<nav") || strings.Contains(body, "Enrol device") {
+			t.Fatalf("compact header expected with one entry: %d", code)
 		}
 	})
 }

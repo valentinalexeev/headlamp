@@ -316,7 +316,7 @@ func TestSessionsNavAndPageWhenEnabled(t *testing.T) {
 	found := false
 	for _, n := range h.m.Nav() {
 		if n.Path == "/sessions" {
-			found = n.Label == "Browser" && n.Order == 45
+			found = n.Label == "Sessions" && n.Order == 45 && n.Group == "operate" && n.Allow != nil
 		}
 	}
 	if !found {

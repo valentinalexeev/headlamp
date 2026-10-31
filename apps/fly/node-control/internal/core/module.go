@@ -34,15 +34,31 @@ type Stopper interface {
 	Stop(ctx context.Context) error
 }
 
-// NavItem is one entry of the admin top bar. Path is an absolute local path.
+// NavItem is one entry of the console sidebar. Path is an absolute local path.
 type NavItem struct {
 	Label string `json:"label"`
 	Path  string `json:"path"`
 	Order int    `json:"order"`
+	Group string `json:"group,omitempty"` // "", "operate" or "configure"
+	Icon  string `json:"icon,omitempty"`  // a ui.Icon name
+	// Allow reports whether the caller may see the entry; nil means anyone who can reach the listener.
+	Allow func(login string) bool `json:"-"`
+	// Source is the attention source (usually the module name) whose items are counted beside the
+	// entry; empty means no count.
+	Source string `json:"-"`
 }
 
 // Navigator is an optional interface for modules that have an admin page. A module that is
 // disabled at run time returns no entries. Entries are collected once, after every Register.
 type Navigator interface {
 	Nav() []NavItem
+}
+
+// NavAction is a persistent top-bar action, such as "Enrol device".
+type NavAction struct{ Label, Path, Icon string }
+
+// ActionProvider is an optional interface for modules that add a top-bar action. A module that is
+// inactive returns none. Actions are collected once, after every Register.
+type ActionProvider interface {
+	Actions() []NavAction
 }

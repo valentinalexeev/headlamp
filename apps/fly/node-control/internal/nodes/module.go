@@ -223,5 +223,5 @@ func (m *Module) act(action string) http.HandlerFunc {
 
 // Nav puts the control page in the top bar.
 func (m *Module) Nav() []core.NavItem {
-	return []core.NavItem{{Label: "Nodes", Path: "/", Order: 10}}
+	return []core.NavItem{{Label: "Nodes", Path: "/", Order: 10, Group: "operate", Icon: "nodes", Source: "nodes"}}
 }

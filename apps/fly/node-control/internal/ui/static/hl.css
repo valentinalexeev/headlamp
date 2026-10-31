@@ -123,3 +123,19 @@ td.act{text-align:right;width:1%}
 /* inline confirmation (hl.confirmPanel) */
 .confirm{display:flex;flex-direction:column;gap:10px}
 .confirm .rowbtns{justify-content:flex-start;flex-wrap:wrap}
+/* shell injected by the core: fixed sidebar, header bar and the timed strip */
+.hl.shellbar{min-height:0}
+.hl.shellbar .top{padding-top:8px;padding-bottom:8px}
+nav.side[data-nc-nav]{position:fixed;top:0;left:0;bottom:0;width:216px;z-index:1000;overflow-y:auto;border-right:1px solid var(--line)}
+body:has(>nav.side[data-nc-nav]){padding-left:216px}
+.brand .iconbtn{margin-left:auto}
+.iconbtn{display:none;align-items:center;justify-content:center;width:44px;height:44px;border:1px solid var(--line2);border-radius:6px;background:transparent;color:var(--text);cursor:pointer}
+.seg button{display:flex;align-items:center;justify-content:center}
+.top .brand{padding-left:0}
+.top .seg{min-width:112px}
+@media (max-width:760px){
+  nav.side[data-nc-nav]{position:static;width:auto;bottom:auto;border-right:0;border-bottom:1px solid var(--line)}
+  body:has(>nav.side[data-nc-nav]){padding-left:0}
+  .iconbtn{display:flex}
+  .side.open .navgroup.collapsible{display:flex}
+}

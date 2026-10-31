@@ -1,4 +1,4 @@
-// Package ui holds the shared console assets: one stylesheet, one script (window.hl), the
+// Package ui holds the shared console assets: one stylesheet, the script (window.hl), the shell and theme scripts, the
 // fonts and the icon set. Every admin page links them under /_ui/ and uses PageCSP.
 // The package imports nothing from the rest of the app, so any package may import it.
 package ui
@@ -19,6 +19,12 @@ var hlCSS []byte
 
 //go:embed static/hl.js
 var hlJS []byte
+
+//go:embed static/theme.js
+var themeJS []byte
+
+//go:embed static/shell.js
+var shellJS []byte
 
 //go:embed static/fonts
 var fontFS embed.FS
@@ -62,6 +68,10 @@ func lookup(p string) ([]byte, string) {
 		return hlCSS, "text/css; charset=utf-8"
 	case "hl.js":
 		return hlJS, "text/javascript; charset=utf-8"
+	case "theme.js":
+		return themeJS, "text/javascript; charset=utf-8"
+	case "shell.js":
+		return shellJS, "text/javascript; charset=utf-8"
 	}
 	file, ok := strings.CutPrefix(name, "fonts/")
 	if !ok || strings.Contains(file, "/") {

@@ -99,9 +99,10 @@ func (m *Module) Nav() []core.NavItem {
 	if !m.on {
 		return nil
 	}
-	items := []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40}}
+	admins := authz.ParseAllowed(m.env.Getenv("TASKS_ADMIN_USERS"))
+	items := []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40, Group: "operate", Icon: "tasks", Source: "tasks", Allow: admins.Has}}
 	if m.sessionsTag != "" {
-		items = append(items, core.NavItem{Label: "Browser", Path: "/sessions", Order: 45})
+		items = append(items, core.NavItem{Label: "Sessions", Path: "/sessions", Order: 45, Group: "operate", Icon: "sessions", Allow: admins.Has})
 	}
 	return items
 }

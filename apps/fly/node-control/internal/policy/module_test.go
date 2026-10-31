@@ -792,8 +792,12 @@ func TestNavEntryWhenActive(t *testing.T) {
 		t.Fatal("the policy module does not implement core.Navigator")
 	}
 	items := nav.Nav()
-	if len(items) != 1 || items[0] != (core.NavItem{Label: "Policy", Path: "/policy", Order: 30}) {
+	if len(items) != 1 || items[0].Label != "Policy" || items[0].Path != "/policy" || items[0].Order != 50 ||
+		items[0].Group != "configure" || items[0].Icon != "policy" || items[0].Source != "policy" || items[0].Allow == nil {
 		t.Fatalf("nav %+v", items)
+	}
+	if !items[0].Allow("alice") || items[0].Allow("mallory@example.net") {
+		t.Fatal("the entry is not limited to POLICY_ADMIN_USERS")
 	}
 	if err := core.ValidateNavItem(items[0]); err != nil {
 		t.Fatal(err)
@@ -812,11 +816,11 @@ func TestNoNavEntryWhenInactive(t *testing.T) {
 	}
 }
 
-// The core inserts its top bar (an inline style block) into admin pages: the page must still render it,
-// while scripts stay restricted to same-origin files.
+// The core inserts its shell (same-origin script and stylesheet links) into admin pages: the page's
+// policy must still let it load, while scripts stay restricted to same-origin files.
 func TestPageWithTopBarKeepsScriptsStrict(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
-	bar := core.NavMiddleware([]core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Policy", Path: "/policy", Order: 30}}, h.mux)
+	bar := core.NavMiddleware([]core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Policy", Path: "/policy", Order: 50}}, nil, nil, h.mux)
 	req := httptest.NewRequest("GET", "/policy", nil)
 	req.RemoteAddr = adminAddr
 	rec := httptest.NewRecorder()

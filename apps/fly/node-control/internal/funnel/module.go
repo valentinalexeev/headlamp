@@ -62,7 +62,14 @@ func (m *Module) Nav() []core.NavItem {
 	if m.st == nil {
 		return nil
 	}
-	return []core.NavItem{{Label: "Funnel", Path: "/funnel", Order: 40}}
+	var allow func(string) bool
+	if m.s != nil {
+		allow = m.s.Admins.Has
+	}
+	return []core.NavItem{
+		{Label: "Funnel", Path: "/funnel", Order: 30, Group: "operate", Icon: "funnel", Source: "funnel", Allow: allow},
+		{Label: "Namespaces & keys", Path: "/funnel/config", Order: 60, Group: "configure", Icon: "key", Allow: allow},
+	}
 }
 
 func (m *Module) Register(r *core.Routes) error {

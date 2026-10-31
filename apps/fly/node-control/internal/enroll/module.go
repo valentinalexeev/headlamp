@@ -201,5 +201,13 @@ func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {
 		return nil
 	}
-	return []core.NavItem{{Label: "Bridge", Path: "/enroll", Order: 20}}
+	return []core.NavItem{{Label: "Devices", Path: "/enroll", Order: 20, Group: "operate", Icon: "devices", Source: "enroll"}}
+}
+
+// Actions puts "Enrol device" in the top bar, but only when the module registered.
+func (m *Module) Actions() []core.NavAction {
+	if m.store == nil {
+		return nil
+	}
+	return []core.NavAction{{Label: "Enrol device", Path: "/enroll?enrol=1", Icon: "plus"}}
 }

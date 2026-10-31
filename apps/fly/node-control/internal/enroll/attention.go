@@ -9,6 +9,10 @@ import (
 	"example.com/node-control/internal/core"
 )
 
+// bridgeSource is the attention source of bridge items: bridges are nodes, so the sidebar counts them under
+// Nodes. The enrolment module still emits them, since it owns the sync and approval state.
+const bridgeSource = "nodes"
+
 const (
 	// expiringWithin is how far ahead a device's expiry raises an item.
 	expiringWithin = 7 * 24 * time.Hour
@@ -52,7 +56,7 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 			reason = "The last sync did not succeed."
 		}
 		it := core.AttentionItem{
-			ID: "bridge-sync-" + row.Name, Source: "enroll", Level: core.LevelCritical,
+			ID: "bridge-sync-" + row.Name, Source: bridgeSource, Level: core.LevelCritical,
 			Title:       row.Name + " is out of sync",
 			Detail:      "Revocations and extensions are not in effect there. " + reason,
 			ActionLabel: "Open bridge", ActionPath: "/nodes?sel=" + url.QueryEscape(row.Name),
@@ -70,7 +74,7 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		switch v.Approval {
 		case stChanged:
 			items = append(items, core.AttentionItem{
-				ID: "bridge-approval-" + v.Name, Source: "enroll", Level: core.LevelCritical,
+				ID: "bridge-approval-" + v.Name, Source: bridgeSource, Level: core.LevelCritical,
 				Title:       v.Name + " changed its host identity",
 				Detail:      "Its identity differs from what you approved, so it gets no credentials. Compare them before you decide.",
 				ActionLabel: "Compare and decide", ActionPath: approve,
@@ -78,7 +82,7 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 			critical = true
 		case stPending:
 			items = append(items, core.AttentionItem{
-				ID: "bridge-approval-" + v.Name, Source: "enroll", Level: core.LevelWaiting,
+				ID: "bridge-approval-" + v.Name, Source: bridgeSource, Level: core.LevelWaiting,
 				Title:       v.Name + " is waiting for approval",
 				Detail:      "Discovered on the tailnet. It gets no credentials until you compare and approve it.",
 				ActionLabel: "Compare and approve", ActionPath: approve,

@@ -53,7 +53,7 @@ func TestEnrollAttentionBridgeOutOfSync(t *testing.T) {
 	if it == nil || len(items) != 1 {
 		t.Fatalf("%+v", items)
 	}
-	if it.Level != core.LevelCritical || it.Source != "enroll" || !strings.Contains(it.Title, "ingress-1") ||
+	if it.Level != core.LevelCritical || it.Source != "nodes" || !strings.Contains(it.Title, "ingress-1") ||
 		!strings.Contains(it.Detail, "Revocations and extensions are not in effect there") ||
 		it.ActionPath != "/nodes?sel=ingress-1" || it.Since.IsZero() {
 		t.Errorf("%+v", *it)
@@ -91,7 +91,7 @@ func TestEnrollAttentionApproval(t *testing.T) {
 	if it == nil || len(items) != 1 {
 		t.Fatalf("pending: %+v", items)
 	}
-	if it.Level != core.LevelWaiting || it.ActionPath != "/enroll/approve?name=ingress-3" || !strings.Contains(it.Title, "ingress-3") {
+	if it.Source != "nodes" || it.Level != core.LevelWaiting || it.ActionPath != "/enroll/approve?name=ingress-3" || !strings.Contains(it.Title, "ingress-3") {
 		t.Errorf("%+v", *it)
 	}
 	if line.State != "waiting" {
@@ -112,7 +112,7 @@ func TestEnrollAttentionApproval(t *testing.T) {
 	if it == nil || len(items) != 1 {
 		t.Fatalf("changed: %+v", items)
 	}
-	if it.Level != core.LevelCritical || it.ActionPath != "/enroll/approve?name=ingress-3" || !strings.Contains(it.Detail, "identity") {
+	if it.Source != "nodes" || it.Level != core.LevelCritical || it.ActionPath != "/enroll/approve?name=ingress-3" || !strings.Contains(it.Detail, "identity") {
 		t.Errorf("%+v", *it)
 	}
 	if line.State != "critical" {
@@ -135,7 +135,7 @@ func TestEnrollAttentionExpiringDevices(t *testing.T) {
 		t.Fatalf("want one item, got %+v", items)
 	}
 	it := items[0]
-	if it.Level != core.LevelWaiting || it.ActionPath != "/enroll?filter=expiring" || !strings.HasPrefix(it.Title, "2 devices expire within 7 days") ||
+	if it.Source != "enroll" || it.Level != core.LevelWaiting || it.ActionPath != "/enroll?filter=expiring" || !strings.HasPrefix(it.Title, "2 devices expire within 7 days") ||
 		!it.Deadline.Equal(time.Unix(adminNow+4*day, 0)) {
 		t.Errorf("%+v", it)
 	}

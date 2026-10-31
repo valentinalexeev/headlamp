@@ -133,13 +133,24 @@ const fieldValue = (els, label) => {
     assert.ok(/does not match/.test(els.error.textContent));
     assert.deepStrictEqual(went, []);
     assert.strictEqual(fieldValue(els, 'Fingerprint'), 'bbbb2222', 'the review shows what is there now');
+    // a reload that fails after a refusal does not replace the refusal
+    const els3 = approveEls();
+    const ctrl3 = approve.mount(els3, { go() {} });
+    fetchReply = () => json({ ingresses: [bridge()] });
+    await ctrl3.load('bridge-3');
+    fetchReply = (url, opts) => (opts && opts.method === 'POST' ? json({ detail: 'the node that publishes this bridge is not the one that was reviewed' }, 409) : json({ detail: 'down' }, 502));
+    buttonNamed(els3.actions, 'Approve bridge-3').click();
+    await flush();
+    assert.ok(/not the one that was reviewed/.test(els3.error.textContent), els3.error.textContent);
+    assert.ok(!/Could not read/.test(els3.error.textContent));
+    assert.strictEqual(fieldValue(els3, 'Node'), '21', 'the review keeps what it had');
   }
 
   // changedIdentityShowsCritical
   {
     fetches.length = 0;
     const went = [];
-    fetchReply = (url, opts) => (opts && opts.method === 'POST' ? json({ ok: true }) : json({ ingresses: [bridge({ approval: 'changed', approved: true, detail: 'another node publishes these parameters' })] }));
+    fetchReply = (url, opts) => (opts && opts.method === 'POST' ? json({ ok: true }) : json({ ingresses: [bridge({ approval: 'changed', approved: true, detail: 'another node publishes these parameters', approved_fingerprint: '1111aaaa', approved_node_id: 18, approved_machine_key_prefix: 'mkey:4f1a9c02e7' })] }));
     const els = approveEls();
     const ctrl = approve.mount(els, { go: (u) => went.push(u) });
     await ctrl.load('bridge-3');
@@ -147,6 +158,11 @@ const fieldValue = (els, label) => {
     assert.ok(/changed its host identity/.test(els.changed.textContent));
     assert.ok(/treat it as compromised/.test(els.changed.textContent));
     assert.ok(/another node publishes/.test(els.changed.textContent));
+    assert.ok(/changed values are listed next to the approved ones/.test(els.changed.textContent));
+    assert.ok(/Approved: 1111aaaa/.test(els.changed.textContent) && /Now: 7e3b91c40fa2d86e15b7c3409a1d62ef/.test(els.changed.textContent), 'fingerprints side by side');
+    assert.ok(/Approved: 18/.test(els.changed.textContent) && /Now: 21/.test(els.changed.textContent), 'node ids side by side');
+    assert.ok(!/Machine key/.test(els.changed.textContent.replace(/An approval keeps[^]*$/, '')), 'a value that did not change is not listed');
+    assert.ok(/public key and short id are shown only as they are now/.test(els.changed.textContent));
     assert.ok(findAll(els.changed, (n) => hasClass(n, 'crit')).length > 0, 'critical glyph');
     const go = buttonNamed(els.actions, 'Approve bridge-3 anyway');
     assert.ok(go && hasClass(go, 'danger'), 'the button is not the primary action');
@@ -543,6 +559,57 @@ const fieldValue = (els, label) => {
     fire(findAll(z.els.drawer, (n) => hasClass(n, 'scrim'))[0], 'click');
     assert.ok(!drawerNode(z.els));
     assert.strictEqual(polls[0].stopped, true, 'closing the panel stops the poll');
+  }
+
+  // the panel cannot be closed while the device is being made; an exception on the success path shows an error
+  {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    global.fetch = (url, opts) => {
+      fetches.push({ url, method: (opts && opts.method) || 'GET', body: opts && opts.body });
+      const respond = (r) => ({ ok: r.ok, status: r.status, text: () => Promise.resolve(r.body) });
+      if (url === '/enroll/devices' && opts.method === 'POST') { return gate.then(() => respond(json({ id: 11, subscription_url: 'https://e.example.net/sub/K', sync: null, ingresses: [] }))); }
+      return Promise.resolve(respond(json({ url: 'https://e.example.net/e/KL' })));
+    };
+    const { els, ctrl } = setup({ search: '?enrol=1' });
+    update(ctrl, []);
+    const aside = drawerNode(els);
+    const ins = findAll(aside, (n) => n.tag === 'input');
+    ins[0].value = 'x'; ins[1].value = 'y';
+    fire(findAll(aside, (n) => n.tag === 'form')[0], 'submit');
+    fire(aside, 'keydown', { key: 'Escape' });
+    fire(findAll(els.drawer, (n) => hasClass(n, 'scrim'))[0], 'click');
+    findAll(aside, (n) => n.tag === 'button' && n.getAttribute('aria-label') === 'Close')[0].click();
+    assert.ok(drawerNode(els), 'Esc, scrim and Close are ignored while creating');
+    release();
+    await flush();
+    assert.ok(/Copy link/.test(aside.textContent), 'the link arrived in the panel');
+    fire(aside, 'keydown', { key: 'Escape' });
+    assert.ok(!drawerNode(els), 'closing works again afterwards');
+
+    // an exception after the device was made: an error, and no second device from the form
+    global.fetch = (url, opts) => {
+      fetches.push({ url, method: (opts && opts.method) || 'GET', body: opts && opts.body });
+      const r = url === '/enroll/devices' && opts.method === 'POST' ? json({ id: 12, subscription_url: 'https://e.example.net/sub/K2', sync: null, ingresses: [] }) : json({ url: 'https://e.example.net/e/K2L' });
+      return Promise.resolve({ ok: r.ok, status: r.status, text: () => Promise.resolve(r.body) });
+    };
+    const y = setup({ search: '?enrol=1' });
+    y.ctrl.loadDevices = () => { throw new Error('boom'); };
+    const aside2 = drawerNode(y.els);
+    const ins2 = findAll(aside2, (n) => n.tag === 'input');
+    ins2[0].value = 'x'; ins2[1].value = 'y';
+    fire(findAll(aside2, (n) => n.tag === 'form')[0], 'submit');
+    await flush();
+    assert.ok(/The device was created, but this panel could not show its link: boom/.test(aside2.textContent), aside2.textContent);
+    assert.strictEqual(buttonNamed(aside2, 'Created').disabled, true, 'the form cannot make a second device');
+    fire(aside2, 'keydown', { key: 'Escape' });
+    assert.ok(!drawerNode(y.els), 'the panel can be closed after the failure');
+    global.fetch = (url, opts) => {
+      fetches.push({ url, method: (opts && opts.method) || 'GET', body: opts && opts.body });
+      const r = fetchReply(url, opts);
+      if (r instanceof Error) { return Promise.reject(r); }
+      return Promise.resolve({ ok: r.ok, status: r.status, text: () => Promise.resolve(r.body) });
+    };
   }
 
   // New link opens the panel for an existing device, with no subscription URL

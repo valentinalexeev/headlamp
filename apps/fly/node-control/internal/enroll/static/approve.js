@@ -44,6 +44,19 @@
     ];
   }
 
+  // differences: the approved value and the current one, for each value the stored approval keeps that no longer
+  // matches. Absent approved values (an older response) are left out rather than shown as a change.
+  function differences(v) {
+    var out = [];
+    function add(label, approved, now) {
+      if (approved && approved !== now) { out.push([label, approved, now || 'not reported']); }
+    }
+    add('Fingerprint', hl.plain(v.approved_fingerprint, 128), hl.plain(v.fingerprint, 128));
+    add('Node', v.approved_node_id ? String(v.approved_node_id) : '', v.node_id ? String(v.node_id) : '');
+    add('Machine key', more(v.approved_machine_key_prefix), more(v.machine_key_prefix));
+    return out;
+  }
+
   // mount wires the page's elements. deps.go(url) leaves the page after an approval.
   function mount(els, deps) {
     deps = deps || {};
@@ -55,10 +68,6 @@
       st.error = text;
       els.error.textContent = text;
       els.error.hidden = !text;
-    }
-
-    function syncNote(sync) {
-      return sync && sync.pending ? ' It is not yet on every bridge; the sync is retried.' : '';
     }
 
     function post(path, body, done) {
@@ -80,10 +89,7 @@
 
     function approve() {
       var v = st.view;
-      post('/approve', { fingerprint: v.fingerprint, node_id: v.node_id }, function (res) {
-        els.sub.textContent = hl.plain(v.name, 63) + ' is approved.' + syncNote(res && res.sync);
-        go('/nodes');
-      });
+      post('/approve', { fingerprint: v.fingerprint, node_id: v.node_id }, function () { go('/nodes'); });
     }
 
     function unapprove() {
@@ -129,7 +135,20 @@
         if (changed) {
           var head = hl.status('crit', name + ' changed its host identity');
           els.changed.appendChild(head);
-          els.changed.appendChild(hl.el('p', 't2 small', name + ' was approved with a different identity. If you did not rebuild this host, treat it as compromised and do not approve. The approved values are not kept in a form this page can show: compare the values below with your own records of the host.'));
+          els.changed.appendChild(hl.el('p', 't2 small', name + ' was approved with a different fingerprint. If you did not rebuild this host, treat it as compromised and do not approve. The changed values are listed next to the approved ones.'));
+          var diffs = differences(v);
+          if (diffs.length) {
+            var dl = hl.el('dl', 'kv');
+            diffs.forEach(function (d) {
+              dl.appendChild(hl.el('dt', null, d[0]));
+              var dd = hl.el('dd', 'stack');
+              dd.appendChild(hl.el('span', 'mono', 'Approved: ' + d[1]));
+              dd.appendChild(hl.el('span', 'mono', 'Now: ' + d[2]));
+              dl.appendChild(dd);
+            });
+            els.changed.appendChild(dl);
+          }
+          els.changed.appendChild(hl.el('p', 't3 small', 'An approval keeps the fingerprint, the node and a machine key prefix, so those are the values that can be compared. The public key and short id are shown only as they are now.'));
           if (v.detail) { els.changed.appendChild(hl.el('p', 't2 small', hl.plain(v.detail, 200))); }
           els.changed.hidden = false;
         } else if (v.detail) {
@@ -190,8 +209,9 @@
         render();
       }, function (err) {
         st.loaded = true;
-        st.view = null;
-        setError('Could not read the bridge: ' + hl.plain(err && err.message, 200));
+        if (!keepError) { st.view = null; }
+        // after a refusal the refusal stays on screen; the review just keeps what it had
+        if (!keepError) { setError('Could not read the bridge: ' + hl.plain(err && err.message, 200)); }
         render();
       });
     };

@@ -568,7 +568,8 @@
 
     function closeDrawer() {
       var dr = st.drawer;
-      if (!dr) { return; }
+      // While the device is being made the panel stays: closing now would lose the link it is about to show.
+      if (!dr || dr.creating) { return; }
       if (dr.poller) { dr.poller.stop(); dr.poller = null; }
       dr.root.remove();
       st.drawer = null;
@@ -809,9 +810,9 @@
         submit.disabled = true;
         submit.textContent = 'Creating…';
         dr.formError.hidden = true;
+        var made = null;
         hl.api('POST', '/enroll/devices', { name: n, owner: o, client: c, expires_at: sec }).then(function (j) {
-          var made = obj(j);
-          dr.creating = false;
+          made = obj(j);
           dr.device = { id: made.id, name: hl.plain(n, 100), owner: hl.plain(o, 100), expires_at: sec };
           dr.subscription = typeof made.subscription_url === 'string' ? made.subscription_url : '';
           dr.link = '';
@@ -823,14 +824,30 @@
             dr.link = String(obj(l).url || '');
           }, function (e) {
             dr.linkError = hl.plain(e && e.message, 200);
-          }).then(function () {
-            if (st.drawer === dr) { buildLink(dr); }
           });
-        }, function (e) {
+        }).then(function () {
           dr.creating = false;
-          submit.disabled = false;
-          submit.textContent = 'Create and get link';
-          dr.formError.textContent = hl.plain(e && e.message, 200);
+          if (st.drawer === dr) { buildLink(dr); }
+        }).catch(function (e) {
+          dr.creating = false;
+          var msg = hl.plain(e && e.message, 200);
+          if (made) {
+            // The device exists: the form stays shut so a second one is not made by mistake.
+            var text = 'The device was created, but this panel could not show its link' + (msg ? ': ' + msg : '') + '. Find it in the table and use New link.';
+            if (dr.step === 'link') {
+              dr.body.appendChild(hl.el('div', 'note crit', text));
+            } else {
+              dr.formError.textContent = text;
+              dr.formError.hidden = false;
+              submit.textContent = 'Created';
+            }
+            try { if (ctrl.loadDevices) { ctrl.loadDevices(); } } catch (e2) { /* the next poll reads it */ }
+            return;
+          } else {
+            submit.disabled = false;
+            submit.textContent = 'Create and get link';
+            dr.formError.textContent = msg;
+          }
           dr.formError.hidden = false;
         });
       });

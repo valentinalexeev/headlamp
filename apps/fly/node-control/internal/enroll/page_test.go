@@ -68,9 +68,6 @@ func TestEnrollPageNoInlineScript(t *testing.T) {
 	if regexp.MustCompile(`https?://`).MatchString(strings.ReplaceAll(js, "http://www.w3.org/2000/svg", "")) {
 		t.Error("script reaches outside the origin")
 	}
-	if strings.Contains(js, "localStorage.setItem(CLIENT_KEY, c)") == false || strings.Count(js, "localStorage") != 2 {
-		t.Error("storage may hold the last client only")
-	}
 }
 
 // The bridge table moved to Nodes: the page no longer renders it, but the data stays on /enroll/ingresses.

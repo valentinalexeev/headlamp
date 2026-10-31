@@ -148,3 +148,8 @@ body:has(>nav.side[data-nc-nav]){padding-left:216px}
 .hl .scrim{z-index:1001}
 .hl .drawer{z-index:1002}
 .page.narrow{max-width:860px}
+/* an open row detail inside a table: wraps, and is not held to the row height */
+.hl td.detail{white-space:normal;height:auto;padding:12px 14px}
+/* beside a fixed-size block (a QR code): takes the rest of the row, wraps under it when narrow */
+.beside{flex:1 1 160px;min-width:0}
+.rowbtns.start{justify-content:flex-start;flex-wrap:wrap}

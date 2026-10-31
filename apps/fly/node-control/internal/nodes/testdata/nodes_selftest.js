@@ -18,7 +18,7 @@ class FakeNode {
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
-  focus() {}
+  focus() { this.focused = true; global.document.activeElement = this; }
   set innerHTML(v) { throw new Error('innerHTML must not be used'); }
   set outerHTML(v) { throw new Error('outerHTML must not be used'); }
   click() { if (this.disabled) { return; } (this.listeners.click || []).forEach((f) => f({ preventDefault() {} })); }
@@ -285,6 +285,118 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     await flush();
     assert.strictEqual(ctrl.busyOf('exit-a'), 'start');
     assert.ok(!els.error.hidden && /provider refused/.test(els.error.textContent));
+    fetchReply = () => ({ ok: true, status: 200, body: '{}' });
+    global.window.location.search = '';
+  }
+
+
+  // busy rows read Starting or Stopping in the table and the panel header
+  {
+    global.window.location.search = '?sel=exit-a';
+    fetchReply = () => ({ ok: true, status: 200, body: '{}' });
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    ctrl.update(sample());
+    buttonNamed(els.panel, 'Stop').click();
+    buttonNamed(els.panel, 'Stop exit-a').click();
+    await flush();
+    const tr = findAll(els.rows, (n) => n.tag === 'tr' && n.textContent.startsWith('exit-a'))[0];
+    assert.ok(/Stopping/.test(tr.textContent), tr.textContent);
+    assert.ok(/Stopping/.test(findAll(els.panel, (n) => hasClass(n, 'panelhead'))[0].textContent));
+    global.window.location.search = '';
+  }
+
+  // a pending Stop confirmation and focus survive a poll whose text changed
+  {
+    global.window.location.search = '?sel=exit-a';
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    const withTime = (min) => Object.assign(sample(), { now: NOW + min * 60000, tailnet: { 'exit-a': tn('exit-a', true, { available_route_count: 2 + min }), 'exit-b': tn('exit-b', false) } });
+    ctrl.update(withTime(0));
+    buttonNamed(els.panel, 'Stop').click();
+    const keep = buttonNamed(els.panel, 'Keep running');
+    ctrl.update(withTime(5));
+    assert.strictEqual(buttonNamed(els.panel, 'Keep running'), keep, 'the confirmation is not rebuilt');
+    keep.click();
+    // focus: the focused name link is focused again on its replacement
+    ctrl.update(withTime(10));
+    const link = findAll(els.rows, (n) => n.tag === 'a' && n.attrs['data-fk'] === 'name:exit-b')[0];
+    link.focus();
+    ctrl.update(withTime(70));
+    const again = findAll(els.rows, (n) => n.tag === 'a' && n.attrs['data-fk'] === 'name:exit-b')[0];
+    assert.notStrictEqual(again, link, 'the row was rebuilt');
+    assert.strictEqual(again.focused, true, 'focus came back');
+    global.window.location.search = '';
+  }
+
+  // the row Start button starts a stopped node under the busy rule; Open and Compare only select
+  {
+    fetches.length = 0;
+    fetchReply = () => ({ ok: true, status: 200, body: '{}' });
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    const d = sample();
+    d.nodes['exit-c'] = cfg(); d.status['exit-c'] = { status: 'STOPPED' }; d.tailnet['exit-c'] = tn('exit-c', false);
+    ctrl.update(d);
+    const startBtn = buttonNamed(els.rows, 'Start');
+    startBtn.click();
+    assert.deepStrictEqual(fetches.filter((f) => f.method === 'POST'), [{ url: '/nodes/exit-c/start', method: 'POST' }]);
+    assert.strictEqual(ctrl.busyOf('exit-c'), 'start');
+    assert.ok(buttonNamed(els.rows, 'Start').disabled, 'off while busy');
+    await flush();
+    fetches.length = 0;
+    buttonNamed(els.rows, 'Compare').click();
+    assert.strictEqual(fetches.filter((f) => f.method === 'POST').length, 0);
+    assert.ok(/bridge-3/.test(els.panel.textContent));
+    ctrl.update(Object.assign(d, { status: Object.assign({}, d.status, { 'exit-c': { status: 'RUNNING' } }) }));
+    assert.strictEqual(ctrl.busyOf('exit-c'), null);
+  }
+
+  // Start and Stop are offered only where they make sense
+  {
+    for (const [status, want] of [['RUNNING', ['Stop']], ['STOPPED', ['Start']], ['STOPPING', []], ['error', []], ['unknown', []]]) {
+      global.window.location.search = '?sel=x';
+      const els = mkEls();
+      nodes.mount(els).update({ nodes: { x: cfg() }, status: { x: { status } }, tailnet: null, ingresses: null, sessions: null, statusFresh: true });
+      const got = findAll(els.panel, (n) => n.tag === 'button').map((b) => b.textContent);
+      assert.deepStrictEqual(got, want, status);
+    }
+    global.window.location.search = '';
+  }
+
+  // row ids are unique when a bridge or runner shares an id with a node
+  {
+    const rows = merge({ 'bridge-1': cfg() }, { 'bridge-1': { status: 'RUNNING' } }, null, [ing('other', { given_name: 'zzz' }), ing('bridge-1', { given_name: 'nope' })], null);
+    const solo = merge({ a: cfg({ tailnetName: 'real' }) }, { a: { status: 'RUNNING' } }, null, [ing('a')], [{ id: 'a', name: 'a', available: true }]);
+    for (const rs of [rows, solo]) {
+      assert.strictEqual(new Set(rs.map((r) => r.id)).size, rs.length, JSON.stringify(rs.map((r) => r.id)));
+    }
+    assert.ok(solo.length === 2 || solo.length === 3);
+  }
+
+  // an action error clears when a poll resolves that node; Refresh drops a stuck wait
+  {
+    global.window.location.search = '?sel=exit-a';
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    const data = (status) => Object.assign(sample(), { status: { 'exit-a': { status }, 'exit-b': { status: 'RUNNING' } } });
+    ctrl.update(data('RUNNING'));
+    fetchReply = () => ({ ok: false, status: 502, body: '{"detail":"nope"}' });
+    buttonNamed(els.panel, 'Stop').click();
+    buttonNamed(els.panel, 'Stop exit-a').click();
+    await flush();
+    assert.ok(!els.error.hidden);
+    ctrl.update(data('RUNNING'));
+    assert.ok(!els.error.hidden, 'not resolved yet');
+    ctrl.update(data('STOPPED'));
+    assert.ok(els.error.hidden, 'resolved: the error goes');
+    // stuck: failed start, node stays stopped
+    buttonNamed(els.panel, 'Start').click();
+    await flush();
+    assert.strictEqual(ctrl.busyOf('exit-a'), 'start');
+    ctrl.refresh();
+    assert.strictEqual(ctrl.busyOf('exit-a'), null);
+    assert.ok(els.error.hidden);
     fetchReply = () => ({ ok: true, status: 200, body: '{}' });
     global.window.location.search = '';
   }

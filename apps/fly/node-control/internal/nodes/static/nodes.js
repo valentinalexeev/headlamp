@@ -203,6 +203,15 @@
     var runs = arr(sessions).filter(function (r) { return r && typeof r === 'object'; });
     var usedIng = [], usedRun = [];
     var rows = [];
+    var taken = {};
+    Object.keys(nodes).forEach(function (id) { taken[id] = true; });
+    // uniq: a bridge or runner that shares an id with a node gets its own, so every row id is unique.
+    function uniq(id, suffix) {
+      var u = id;
+      while (has(taken, u)) { u = u + ' (' + suffix + ')'; }
+      taken[u] = true;
+      return u;
+    }
 
     Object.keys(nodes).forEach(function (id) {
       var cfg = obj(nodes[id]);
@@ -217,11 +226,11 @@
       rows.push(buildRow({ id: id, cfg: cfg, st: pick(status, id) || {}, tn: usable ? pick(tailnet, tname) : null, ing: ing, run: run }, now));
     });
     ings.forEach(function (ing, i) {
-      if (!usedIng[i] && str(ing.name)) { rows.push(buildRow({ id: ing.name, cfg: null, st: null, tn: null, ing: ing, run: null }, now)); }
+      if (!usedIng[i] && str(ing.name)) { rows.push(buildRow({ id: uniq(ing.name, 'bridge'), cfg: null, st: null, tn: null, ing: ing, run: null }, now)); }
     });
     runs.forEach(function (run, j) {
       var id = str(run.id) || str(run.name);
-      if (!usedRun[j] && id) { rows.push(buildRow({ id: id, cfg: null, st: null, tn: null, ing: null, run: run }, now)); }
+      if (!usedRun[j] && id) { rows.push(buildRow({ id: uniq(id, 'runner'), cfg: null, st: null, tn: null, ing: null, run: run }, now)); }
     });
     return rows.sort(byName);
   }
@@ -270,6 +279,32 @@
       tableSig: null, panelSig: null, chipSig: null, chips: {}
     };
     var ctrl = { onAction: null };
+    st.errorId = null;
+    st.confirmEl = null;
+
+    // focusKey names the focused control inside box by its data-fk, so a rebuild can give focus back.
+    function focusKey(box) {
+      var ae = typeof document !== 'undefined' ? document.activeElement : null;
+      for (var n = ae; n; n = n.parentNode) {
+        if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
+      }
+      return null;
+    }
+    function refocus(box, key) {
+      if (!key) { return; }
+      var stack = [box];
+      while (stack.length) {
+        var n = stack.pop();
+        if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
+        (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
+      }
+    }
+    function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
+    // view: the row as shown. While a start or stop is unresolved the state reads Starting or Stopping.
+    function view(r) {
+      var b = st.busy[r.id];
+      return b ? Object.assign({}, r, { level: 'ok', state: b === 'start' ? 'Starting…' : 'Stopping…' }) : r;
+    }
 
     function effRole() {
       return st.role !== 'All' && st.rows.some(function (r) { return r.role === st.role; }) ? st.role : 'All';
@@ -282,6 +317,7 @@
     function select(id) {
       st.sel = id;
       st.confirming = null;
+      st.confirmEl = null;
       hl.setQueryParam('sel', id);
       render();
     }
@@ -294,6 +330,7 @@
 
     function setError(text) {
       st.error = text;
+      if (!text) { st.errorId = null; }
       els.error.textContent = text;
       els.error.hidden = !text;
     }
@@ -308,6 +345,7 @@
       }, function (err) {
         // busy stays set on purpose: see the comment on mount.
         setError(hl.plain(id, 60) + ' ' + action + ' failed: ' + hl.plain(err && err.message, 200));
+        st.errorId = id;
       }).then(function () {
         if (typeof ctrl.onAction === 'function') { ctrl.onAction(); }
       });
@@ -336,19 +374,19 @@
       });
     }
 
-    function busyWord(id) { return st.busy[id] === 'start' ? 'Starting…' : 'Stopping…'; }
-
     function renderTable() {
       var cur = effRole();
       var shown = st.rows.filter(function (r) { return cur === 'All' || r.role === cur; });
-      var sig = JSON.stringify([shown, st.sel, st.busy]);
+      var sig = JSON.stringify([shown.map(view), st.sel, st.busy]);
       if (sig === st.tableSig) { return; }
       st.tableSig = sig;
+      var fk = focusKey(els.rows);
       clear(els.rows);
-      shown.forEach(function (r) {
+      shown.forEach(function (raw) {
+        var r = view(raw);
         var tr = hl.el('tr', r.id === st.sel ? 'sel' : '');
         var name = hl.el('td', 'name');
-        var a = hl.el('a', null, r.label);
+        var a = keyed(hl.el('a', null, r.label), 'name:' + r.id);
         a.setAttribute('href', '/nodes?sel=' + encodeURIComponent(r.id));
         a.addEventListener('click', function (ev) { if (ev && ev.preventDefault) { ev.preventDefault(); } select(r.id); });
         name.appendChild(a);
@@ -357,21 +395,33 @@
         var state = hl.el('td');
         state.appendChild(hl.status(r.level, r.state));
         tr.appendChild(state);
-        tr.appendChild(hl.el('td', 't2', st.busy[r.id] ? busyWord(r.id) : r.detail));
+        tr.appendChild(hl.el('td', 't2', r.detail));
         tr.appendChild(hl.el('td', 'mono t3', r.provider));
         var actCell = hl.el('td', 'act');
-        if (r.action) { actCell.appendChild(button(r.action, null, 'sm', function () { select(r.id); })); }
+        if (raw.action) {
+          // Start starts the node (it is not destructive) under the same busy rule; Open and Compare select.
+          var starts = raw.action === 'Start';
+          var ab = keyed(button(raw.action, null, 'sm', function () { if (starts) { act(raw.id, 'start'); } else { select(raw.id); } }), 'act:' + r.id);
+          ab.disabled = starts && !!st.busy[raw.id];
+          actCell.appendChild(ab);
+        }
         tr.appendChild(actCell);
         els.rows.appendChild(tr);
       });
+      refocus(els.rows, fk);
     }
 
     function renderPanel(force) {
-      var row = st.sel ? find(st.sel) : null;
+      var raw = st.sel ? find(st.sel) : null;
+      // A confirmation that is open stays as it is until it is answered.
+      if (!force && st.confirmEl && st.confirming === st.sel && raw) { return; }
+      var row = raw ? view(raw) : null;
       var sig = JSON.stringify([row, st.busy[st.sel], st.confirming === st.sel]);
       if (!force && sig === st.panelSig) { return; }
       st.panelSig = sig;
       var panel = els.panel;
+      var fk = focusKey(panel);
+      st.confirmEl = null;
       clear(panel);
       if (!row) {
         panel.appendChild(hl.el('p', 't2', 'Select a node to see its detail.'));
@@ -399,27 +449,28 @@
         var box = hl.el('div', 'stack');
         panel.appendChild(box);
         if (st.confirming === row.id && !busy) {
-          hl.confirmPanel({
+          st.confirmEl = hl.confirmPanel({
             title: 'Stop ' + row.label + '?',
             consequence: CONSEQUENCE[row.role] || CONSEQUENCE.Exit,
             confirmLabel: 'Stop ' + row.label, cancelLabel: 'Keep running', icon: 'stop', into: box,
-            onConfirm: function () { st.confirming = null; act(row.id, 'stop'); },
-            onCancel: function () { st.confirming = null; renderPanel(true); }
+            onConfirm: function () { st.confirming = null; st.confirmEl = null; act(row.id, 'stop'); },
+            onCancel: function () { st.confirming = null; st.confirmEl = null; renderPanel(true); }
           });
         } else {
           var btns = hl.el('div', 'rowbtns');
-          if (row.kind !== 'running') {
-            var start = button('Start', 'play', 'primary', function () { act(row.id, 'start'); });
+          // Only what makes sense: Start for a stopped node, Stop for a running one, neither while the
+          // provider's state is unknown, in error or changing.
+          if (row.kind === 'stopped') {
+            var start = keyed(button('Start', 'play', 'primary', function () { act(row.id, 'start'); }), 'panel:start');
             start.disabled = !!busy;
             btns.appendChild(start);
           }
-          if (row.kind !== 'stopped') {
-            var stop = button('Stop', 'stop', '', function () { st.confirming = row.id; renderPanel(true); });
+          if (row.kind === 'running') {
+            var stop = keyed(button('Stop', 'stop', '', function () { st.confirming = row.id; renderPanel(true); }), 'panel:stop');
             stop.disabled = !!busy;
             btns.appendChild(stop);
           }
           box.appendChild(btns);
-          if (busy) { box.appendChild(hl.el('p', 't2 small', busyWord(row.id))); }
         }
       }
       if (row.approve) {
@@ -430,6 +481,7 @@
         wrap.appendChild(link);
         panel.appendChild(wrap);
       }
+      refocus(panel, fk);
     }
 
     function render() {
@@ -447,18 +499,29 @@
     // update takes one round of reads. A status that failed (statusFresh false) never settles busy.
     ctrl.update = function (d) {
       st.loaded = true;
-      st.rows = mergeNodes(d.nodes, d.status, d.tailnet, d.ingresses, d.sessions);
+      st.rows = mergeNodes(d.nodes, d.status, d.tailnet, d.ingresses, d.sessions, typeof d.now === 'number' ? { now: d.now } : undefined);
       if (d.statusFresh) {
         Object.keys(st.busy).forEach(function (id) {
           var row = find(id);
-          if (!row || row.reached[st.busy[id]]) { delete st.busy[id]; }
+          if (!row || row.reached[st.busy[id]]) {
+            delete st.busy[id];
+            if (st.errorId === id) { setError(''); }
+          }
         });
       }
+      if (st.confirming && !find(st.confirming)) { st.confirming = null; st.confirmEl = null; }
       render();
     };
     ctrl.setFailed = function (f) { st.failed = !!f; render(); };
     ctrl.busyOf = function (id) { return st.busy[id] || null; };
     ctrl.isBusy = function () { return Object.keys(st.busy).length > 0; };
+    // refresh is the way out of a busy state that never resolves: it forgets the waits and reads again.
+    ctrl.refresh = function () {
+      st.busy = {};
+      setError('');
+      render();
+      if (typeof ctrl.onAction === 'function') { ctrl.onAction(); }
+    };
     ctrl.select = select;
     ctrl.setRole = setRole;
     render();
@@ -472,6 +535,8 @@
     var ctrl = mount({
       sub: $('sub'), chips: $('chips'), error: $('error'), empty: $('empty'), cols: $('cols'), rows: $('rows'), panel: $('panel')
     });
+    var refreshBtn = $('refresh');
+    if (refreshBtn) { refreshBtn.addEventListener('click', function () { ctrl.refresh(); }); }
     var last = { nodes: null, status: {}, tailnet: null, ingresses: null, sessions: null };
 
     // gone: enrolment off (404) or not allowed (403) means no rows of that kind; any other failure keeps

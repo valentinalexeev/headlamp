@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"example.com/node-control/internal/funnel"
 	"example.com/node-control/internal/headscale"
 	"example.com/node-control/internal/nodes"
+	"example.com/node-control/internal/overview"
 	"example.com/node-control/internal/policy"
 	"example.com/node-control/internal/tailnet"
 	"example.com/node-control/internal/tasks"
@@ -189,10 +191,12 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 	}
 	tracked := func(ctx context.Context) map[string]bool { return nodes.TailnetNames(cfg, nm.Targets(ctx)) }
 	if w.sc.nodesOnly {
-		return []core.Module{tailnet.New(src, tracked), nm}, env, nil
+		mods := []core.Module{tailnet.New(src, tracked), nm}
+		others := slices.Clone(mods)
+		return append(mods, overview.New(func() []core.Module { return others })), env, nil
 	}
 	pol := policy.New(env, client)
-	return []core.Module{
+	mods := []core.Module{
 		tailnet.New(src, tracked),
 		nm,
 		enroll.New(env, enroll.WithNodeSource(src)),
@@ -206,7 +210,9 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			return nil
 		}),
 		tasks.New(env, src),
-	}, env, nil
+	}
+	others := slices.Clone(mods)
+	return append(mods, overview.New(func() []core.Module { return others })), env, nil
 }
 
 // enrollConfig lists two configured bridges; a third is discovered from the node list.
@@ -484,7 +490,7 @@ func call(ctx context.Context, hc *http.Client, base, method, path string, body 
 }
 
 // seed fills the modules through their own public APIs, the way an operator would.
-func (w *world) seed(ctx context.Context, admin string) error {
+func (w *world) seed(ctx context.Context, admin string, asIngress func(bool)) error {
 	if w.sc.nodesOnly {
 		return nil
 	}
@@ -510,6 +516,7 @@ func (w *world) seed(ctx context.Context, admin string) error {
 	keep(w.seedBridges(must))
 	keep(w.seedPolicy(must))
 	keep(w.seedTasks(ctx, hc, admin, must))
+	keep(w.seedFunnelReport(ctx, hc, admin, asIngress))
 	return firstErr
 }
 
@@ -666,4 +673,43 @@ func waitFor(ctx context.Context, d time.Duration, ok func() bool) error {
 		}
 	}
 	return errors.New("timed out")
+}
+
+// seedFunnelReport posts the ingress's state report once and then every 30 s, as the real ingress does, so
+// the funnel reads as fresh for as long as the demo runs.
+func (w *world) seedFunnelReport(ctx context.Context, hc *http.Client, admin string, asIngress func(bool)) error {
+	routes := make([]map[string]any, 9)
+	for i := range routes {
+		routes[i] = map[string]any{"name": fmt.Sprintf("app-%d", i+1)}
+	}
+	post := func() error {
+		asIngress(true)
+		defer asIngress(false)
+		code, _, err := call(ctx, hc, admin, "POST", "/ingress/v1/state", map[string]any{
+			"applied_version": "demo", "sent_at": time.Now().UTC().Format(time.RFC3339), "snapshot_loaded": true,
+			"peer_count": 3, "routes": routes, "errors": []string{}})
+		if err != nil {
+			return err
+		}
+		if code != http.StatusNoContent {
+			return fmt.Errorf("posting the ingress report: status %d", code)
+		}
+		return nil
+	}
+	if err := post(); err != nil {
+		return err
+	}
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				_ = post()
+			}
+		}
+	}()
+	return nil
 }

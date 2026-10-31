@@ -97,7 +97,7 @@ func serve(ctx context.Context, o options, ready func(admin string)) error {
 	select {
 	case admin := <-tn.adminUp:
 		go func() {
-			if err := world.seed(ctx, admin); err != nil {
+			if err := world.seed(ctx, admin, tn.asIngress); err != nil {
 				fmt.Fprintln(os.Stderr, "console-demo: seeding stopped early:", err)
 			}
 			tn.login.Store(sc.login)
@@ -119,6 +119,7 @@ type demoTailnet struct {
 	world   *world
 	login   atomic.Value // string: who WhoIs reports
 	adminUp chan string
+	ingress atomic.Bool // the next callers are the funnel ingress node
 
 	mu     sync.Mutex
 	public net.Listener
@@ -155,7 +156,13 @@ func (t *demoTailnet) Dial(ctx context.Context, network, addr string) (net.Conn,
 	return d.DialContext(ctx, network, target)
 }
 
+// asIngress makes WhoIs answer as the funnel ingress node while the seeding posts its report.
+func (t *demoTailnet) asIngress(on bool) { t.ingress.Store(on) }
+
 func (t *demoTailnet) WhoIs(context.Context, string) (string, []string, error) {
+	if t.ingress.Load() {
+		return "", []string{"tag:funnel-ingress"}, nil
+	}
 	l, _ := t.login.Load().(string)
 	return l, nil, nil
 }

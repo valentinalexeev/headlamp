@@ -43,6 +43,8 @@
     return e;
   }
 
+  // icon returns an SVG element, or null for a name that is not in ICONS. Every caller tests the result and
+  // simply leaves the icon out, so an unknown name never breaks a page.
   function icon(name) {
     var d = Object.prototype.hasOwnProperty.call(ICONS, name) ? ICONS[name] : null;
     if (d === null) { return null; }

@@ -147,7 +147,8 @@ button.search:hover{border-color:var(--line2);color:var(--t2)}
   nav.side[data-nc-nav]{position:static;width:auto;bottom:auto;border-right:0;border-bottom:1px solid var(--line)}
   body:has(>nav.side[data-nc-nav]){padding-left:0}
   .iconbtn{display:flex}
-  .side.open .navgroup.collapsible{display:flex}
+  .sidefoot{display:none}
+  .side.open .navgroup.collapsible,.side.open .sidefoot{display:flex}
 }
 /* the enrolment drawer sits over the whole window, shell included */
 .hl .scrim,.hl .drawer{position:fixed}

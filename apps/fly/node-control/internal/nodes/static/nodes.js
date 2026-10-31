@@ -456,7 +456,7 @@
             consequence: CONSEQUENCE[row.role] || CONSEQUENCE.Exit,
             confirmLabel: 'Stop ' + row.label, cancelLabel: 'Keep running', icon: 'stop', into: box,
             onConfirm: function () { st.confirming = null; st.confirmEl = null; act(row.id, 'stop'); },
-            onCancel: function () { st.confirming = null; st.confirmEl = null; renderPanel(true); }
+            onCancel: function () { st.confirming = null; st.confirmEl = null; renderPanel(true); refocus(els.panel, 'panel:stop'); }
           });
         } else {
           var btns = hl.el('div', 'rowbtns');

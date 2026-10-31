@@ -254,12 +254,12 @@ func TestTopBarWiring(t *testing.T) {
 		if err := json.Unmarshal([]byte(nav), &items); err != nil {
 			t.Fatalf("%v: %s", err, nav)
 		}
-		if len(items) != 3 || items[0].Label != "Overview" || items[0].Path != "/" || items[0].Order != 1 ||
+		if len(items) != 4 || items[3].Label != "Activity" || items[3].Path != "/activity" || items[3].Order != 900 || items[0].Label != "Overview" || items[0].Path != "/" || items[0].Order != 1 ||
 			items[1].Label != "Nodes" || items[1].Path != "/nodes" || items[1].Order != 10 ||
 			items[2].Label != "Devices" || items[2].Path != "/enroll" || items[2].Order != 20 {
 			t.Fatalf("entries %+v", items)
 		}
-		for path, active := range map[string]string{"/": `href="/" aria-current="page"`, "/nodes": `href="/nodes" aria-current="page"`, "/enroll": `href="/enroll" aria-current="page"`} {
+		for path, active := range map[string]string{"/": `href="/" aria-current="page"`, "/nodes": `href="/nodes" aria-current="page"`, "/enroll": `href="/enroll" aria-current="page"`, "/activity": `href="/activity" aria-current="page"`} {
 			code, body := getHost(t, admin, "admin.test", path)
 			if code != 200 || strings.Count(body, "<nav data-nc-nav") != 1 || !strings.Contains(body, active) {
 				t.Errorf("GET %s = %d, bar/active missing", path, code)

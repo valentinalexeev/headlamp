@@ -76,8 +76,8 @@ func TestDemoServesEveryScenario(t *testing.T) {
 					t.Fatalf("minimal: want one item, got %v", labels)
 				}
 			case "partial":
-				if len(labels) != 3 {
-					t.Fatalf("partial: want Overview, Nodes and Devices, got %v", labels)
+				if len(labels) != 4 {
+					t.Fatalf("partial: want Overview, Nodes, Devices and Activity, got %v", labels)
 				}
 			default:
 				if len(labels) < 6 {

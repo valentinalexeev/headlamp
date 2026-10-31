@@ -33,6 +33,8 @@
   .pill { font-size:.75rem; padding:.1rem .45rem; border:1px solid var(--border); border-radius:99px; }
   #out textarea { width:100%; height:5rem; }
   #outsub { display:none; margin-top:.6rem; }
+  #outqr { display:none; margin:.6rem 0; }
+  #outqr svg { width:14rem; height:14rem; max-width:100%; display:block; border-radius:.3rem; }
 </style>
 </head>
 <body>
@@ -55,6 +57,7 @@
     <div id="outlabel" class="muted"></div>
     <textarea id="outtext" readonly></textarea>
     <button class="ghost" id="copy" type="button">Copy</button>
+    <div id="outqr" title="Scan with the phone to open the enrolment screen"></div>
     <details id="outsub">
       <summary class="muted">Manual setup: subscription URL (paste it into the app if the link above does not open)</summary>
       <textarea id="outsubtext" readonly></textarea>
@@ -76,6 +79,7 @@
     </table>
   </div>
 </main>
+<script src="/enroll/qrcode.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const post = (url, body) => fetch(url, {
@@ -98,6 +102,25 @@ const endOfDay = (d) => Math.floor(new Date(d + "T23:59:59").getTime() / 1000);
 function show(label, text, subUrl) {
   $("#out").style.display = "block"; $("#outlabel").textContent = label; $("#outtext").value = text;
   $("#outsub").style.display = subUrl ? "block" : "none"; $("#outsubtext").value = subUrl || "";
+  qr(text);
+}
+// The link as a QR code, drawn in the browser (the link never goes to another server), so that a second phone can
+// open the enrolment screen straight from this page. Without the library or for an oversized link the code is just absent.
+function qr(text) {
+  const box = $("#outqr"); box.textContent = ""; box.style.display = "none";
+  try {
+    const q = qrcode(0, "M"); q.addData(text); q.make();
+    const n = q.getModuleCount(), m = 4, NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + (n + 2 * m) + " " + (n + 2 * m)); svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "QR code of the enrolment link"); svg.setAttribute("shape-rendering", "crispEdges");
+    const bg = document.createElementNS(NS, "rect"); bg.setAttribute("width", "100%"); bg.setAttribute("height", "100%"); bg.setAttribute("fill", "#fff");
+    const path = document.createElementNS(NS, "path"); let d = "";
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) d += "M" + (c + m) + "," + (r + m) + "h1v1h-1z";
+    path.setAttribute("d", d); path.setAttribute("fill", "#000");
+    svg.append(bg, path); box.appendChild(svg);
+    box.style.display = "block";
+  } catch (e) { /* no QR; the link above still works */ }
 }
 const copyFrom = (sel) => () => { $(sel).select(); navigator.clipboard && navigator.clipboard.writeText($(sel).value); };
 $("#copy").onclick = copyFrom("#outtext");

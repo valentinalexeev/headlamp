@@ -38,6 +38,12 @@ import (
 //go:embed static/enroll.html
 var enrollHTML []byte
 
+// qrcodeJS is the QR encoder the page draws the enrolment link with (qrcode-generator 2.0.4, MIT, Kazuhiko Arase;
+// the licence header stays in the file).
+//
+//go:embed static/qrcode.js
+var qrcodeJS []byte
+
 // Clients are the accepted DeviceIn.client values.
 var Clients = []string{"sing-box", "karing", "clash"}
 
@@ -73,6 +79,7 @@ func (a *Admin) State() *SyncState { return a.reg.First().State }
 // Register adds the admin routes to mux.
 func (a *Admin) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /enroll", a.page)
+	mux.HandleFunc("GET /enroll/qrcode.js", a.qrScript)
 	mux.HandleFunc("GET /enroll/devices", a.listDevices)
 	mux.HandleFunc("POST /enroll/devices", a.jsonOnly(a.createDevice))
 	mux.HandleFunc("DELETE /enroll/devices/{id}", a.jsonOnly(a.deleteDevice))
@@ -233,6 +240,11 @@ func (v *validator) integer(obj map[string]json.RawMessage, field string, min, m
 func (a *Admin) page(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(enrollHTML)
+}
+
+func (a *Admin) qrScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Write(qrcodeJS)
 }
 
 type deviceRow struct {

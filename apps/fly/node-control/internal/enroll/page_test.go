@@ -9,58 +9,87 @@ import (
 	"example.com/node-control/internal/ui"
 )
 
-func TestPageHasTheIngressTable(t *testing.T) {
+func TestEnrollPageHeaders(t *testing.T) {
+	f := newAdminFx(t)
+	for path, ctype := range map[string]string{"/enroll": "text/html", "/enroll/static/enroll.js": "text/javascript", "/enroll/qrcode.js": "text/javascript"} {
+		rec := f.do("GET", path, "", "")
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d", path, rec.Code)
+		}
+		h := rec.Header()
+		if h.Get("Content-Security-Policy") != ui.PageCSP {
+			t.Errorf("%s CSP: %q", path, h.Get("Content-Security-Policy"))
+		}
+		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("X-Frame-Options") != "DENY" || h.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s headers: %v", path, h)
+		}
+		if !strings.HasPrefix(h.Get("Content-Type"), ctype) {
+			t.Errorf("%s content type %q", path, h.Get("Content-Type"))
+		}
+	}
+	if rec := f.do("GET", "/enroll?enrol=1&filter=expiring", "", ""); rec.Code != 200 {
+		t.Errorf("page with parameters: %d", rec.Code)
+	}
+}
+
+// The page and its scripts carry no inline code and no markup built from strings, and the enrolment link is
+// never an anchor or a confirm()/prompt() dialog.
+func TestEnrollPageNoInlineScript(t *testing.T) {
+	html := string(enrollHTML)
+	scripts := regexp.MustCompile(`(?i)<script\b[^>]*>`).FindAllString(html, -1)
+	if len(scripts) != 2 {
+		t.Errorf("want the QR library and the page script, got %v", scripts)
+	}
+	for _, m := range scripts {
+		if !strings.Contains(m, ` src="/`) || !strings.Contains(m, "defer") {
+			t.Errorf("script tag %q must be a same-origin deferred file", m)
+		}
+	}
+	if !strings.Contains(html, `src="/enroll/qrcode.js"`) || !strings.Contains(html, `src="/enroll/static/enroll.js"`) {
+		t.Error("page lacks its scripts")
+	}
+	for _, bad := range []string{"<style", " style=", "javascript:", "http://", "https://", " onclick=", " onload=", " onsubmit=", "<template"} {
+		if strings.Contains(strings.ToLower(html), bad) {
+			t.Errorf("page contains %q", bad)
+		}
+	}
+	for _, m := range regexp.MustCompile(`(?i)\s(?:src|href)="([^"]*)"`).FindAllStringSubmatch(html, -1) {
+		if !strings.HasPrefix(m[1], "/") || strings.HasPrefix(m[1], "//") {
+			t.Errorf("reference %q is not a local path", m[1])
+		}
+	}
+	js := string(enrollJS)
+	for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "confirm(", "prompt(", "XMLHttpRequest", "alert("} {
+		if strings.Contains(js, bad) {
+			t.Errorf("script contains %q", bad)
+		}
+	}
+	// the SVG namespace is an identifier, not a request
+	if regexp.MustCompile(`https?://`).MatchString(strings.ReplaceAll(js, "http://www.w3.org/2000/svg", "")) {
+		t.Error("script reaches outside the origin")
+	}
+	if strings.Contains(js, "localStorage.setItem(CLIENT_KEY, c)") == false || strings.Count(js, "localStorage") != 2 {
+		t.Error("storage may hold the last client only")
+	}
+}
+
+// The bridge table moved to Nodes: the page no longer renders it, but the data stays on /enroll/ingresses.
+func TestEnrollPageHasNoBridgeTable(t *testing.T) {
 	page := string(enrollHTML)
-	t.Run("container, columns and buttons", func(t *testing.T) {
-		for _, want := range []string{
-			`id="ingresses"`, `id="ingrows"`, "<th>Bridge</th>", "<th>Online</th>", "<th>Sync</th>", "<th>Since</th>", "<th>Approval</th>",
-			`"Approve"`, `"Remove approval"`, "/approve", "/unapprove", "fingerprint: v.fingerprint, node_id: v.node_id", "headscale nodes list", "v.address", "plain(v.hostname)", "plain(v.given_name)", "machine_key_prefix", "v.fingerprint.slice(0, 12)", "Fingerprint \" + v.fingerprint", "/enroll/ingresses",
-		} {
-			if !strings.Contains(page, want) {
-				t.Errorf("page lacks %q", want)
-			}
+	for _, gone := range []string{`id="ingresses"`, "<th>Bridge</th>", "Approve", "headscale nodes list"} {
+		if strings.Contains(page, gone) || strings.Contains(string(enrollJS), gone) {
+			t.Errorf("the Devices page still holds %q", gone)
 		}
-	})
-	t.Run("hidden unless there is something to show", func(t *testing.T) {
-		if !regexp.MustCompile(`#ingresses\s*\{\s*display:none;`).MatchString(page) {
-			t.Error("the table must be hidden by default")
-		}
-		if !strings.Contains(page, "(j.ingresses || []).length > 1 || (j.pending_ingresses || []).length > 0") {
-			t.Error("the table rule (several ingresses, or one pending) is missing")
-		}
-	})
-	t.Run("banner names every lagging ingress, single case unchanged", func(t *testing.T) {
-		for _, want := range []string{"behind.map((r) => r.name)", "out of sync since", "bridge host out of sync since"} {
-			if !strings.Contains(page, want) {
-				t.Errorf("page lacks %q", want)
-			}
-		}
-	})
-	t.Run("partial traffic marker", func(t *testing.T) {
-		for _, want := range []string{`id="trafficth"`, `j.stats_partial ? "Traffic*" : "Traffic"`, "th.title"} {
-			if !strings.Contains(page, want) {
-				t.Errorf("page lacks %q", want)
-			}
-		}
-	})
-	t.Run("server values are only ever set as text", func(t *testing.T) {
-		if strings.Contains(page, "innerHTML") {
-			t.Error("innerHTML would let a published value inject markup")
-		}
-	})
-	t.Run("dark only", func(t *testing.T) {
-		if strings.Contains(page, "prefers-color-scheme: light") {
-			t.Error("the page is dark-only")
-		}
-	})
+	}
+	f := newAdminFx(t)
+	if rec := f.do("GET", "/enroll/ingresses", "", ""); rec.Code != 200 {
+		t.Errorf("GET /enroll/ingresses = %d", rec.Code)
+	}
 }
 
 func TestPageDrawsTheLinkAsQR(t *testing.T) {
-	page := string(enrollHTML)
-	for _, want := range []string{`id="outqr"`, `src="/enroll/qrcode.js"`, "qr(text)", "q.isDark("} {
-		if !strings.Contains(page, want) {
-			t.Errorf("page lacks %q", want)
-		}
+	if !strings.Contains(string(enrollJS), "q.isDark(") || !strings.Contains(string(enrollHTML), `src="/enroll/qrcode.js"`) {
+		t.Error("the page does not draw the link with the QR encoder")
 	}
 	if len(qrcodeJS) == 0 || !strings.Contains(string(qrcodeJS), "Kazuhiko Arase") {
 		t.Error("the embedded QR encoder (with its licence header) is missing")
@@ -116,11 +145,11 @@ func TestEnrollPagesSelfTest(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not installed")
 	}
-	args := []string{"testdata/enroll_selftest.js", "../ui/static/hl.js", "static/approve.js"}
+	args := []string{"testdata/enroll_selftest.js", "../ui/static/hl.js", "static/approve.js", "static/enroll.js"}
 	if out, err := exec.Command(node, args...).CombinedOutput(); err != nil {
 		t.Fatalf("self-test failed: %v\n%s", err, out)
 	}
-	for _, f := range []string{"static/approve.js"} {
+	for _, f := range []string{"static/approve.js", "static/enroll.js"} {
 		if out, err := exec.Command(node, "--check", f).CombinedOutput(); err != nil {
 			t.Fatalf("node --check %s: %v\n%s", f, err, out)
 		}

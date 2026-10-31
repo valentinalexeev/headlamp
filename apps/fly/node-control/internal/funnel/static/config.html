@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Namespaces and keys</title>
+</head>
+<body>
+<div class="hl" id="funnelconfig">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>Namespaces &amp; keys</h1>
+        <p class="t2" id="sub" aria-live="polite">Changing a namespace edits the access policy and needs confirming.</p>
+      </div>
+      <div class="rowbtns">
+        <a class="btn" href="/funnel">Funnel</a>
+        <span id="addslot"></span>
+      </div>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note plain" id="notice" role="status" hidden></div>
+    <section class="note" id="waitnote" role="status" hidden></section>
+    <div id="panel"></div>
+
+    <div class="note plain" id="empty" hidden>
+      <h2>No namespaces yet</h2>
+      <p class="t2">A namespace groups public names and the ports they may use. Add one, confirm the policy change, then add DNS and a certificate for it.</p>
+    </div>
+
+    <div class="cols" id="cols" hidden>
+      <section class="colmain">
+        <div class="tw" id="tablewrap">
+          <table>
+            <thead><tr><th>Namespace</th><th>State</th><th>Ports</th><th>Routes</th><th>DNS and certificate</th><th><span class="sr">Actions</span></th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <div id="keys" hidden>
+          <div class="seclabel"><h2 id="keystitle"></h2><span id="keyaddslot"></span></div>
+          <div id="keyform"></div>
+          <div class="note crit" id="keyerror" role="alert" hidden></div>
+          <div class="tw">
+            <table>
+              <thead><tr><th>Key</th><th>Expires</th><th>Flags</th><th><span class="sr">Actions</span></th></tr></thead>
+              <tbody id="keyrows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <aside class="colside" id="side" aria-label="New key"></aside>
+    </div>
+  </div>
+</div>
+<script src="/funnel/static/config.js" defer></script>
+</body>
+</html>

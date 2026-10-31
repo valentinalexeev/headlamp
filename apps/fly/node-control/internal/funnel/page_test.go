@@ -9,12 +9,13 @@ import (
 	"example.com/node-control/internal/ui"
 )
 
-// pages lists every page of the module with its script and the id of its root.
+// pages lists every page of the module with its script.
 var pages = []struct {
 	name, path, js string
 	html, script   []byte
 }{
 	{"funnel", "/funnel", "/funnel/static/funnel.js", pageHTML, pageJS},
+	{"config", "/funnel/config", "/funnel/static/config.js", configHTML, configJS},
 }
 
 func TestPagesServedToAdminWithSecurityHeaders(t *testing.T) {
@@ -85,13 +86,28 @@ func TestFunnelPagesSelfTest(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not installed")
 	}
-	args := []string{"testdata/funnel_selftest.js", "../ui/static/hl.js", "static/funnel.js"}
+	args := []string{"testdata/funnel_selftest.js", "../ui/static/hl.js", "static/funnel.js", "static/config.js"}
 	if out, err := exec.Command(node, args...).CombinedOutput(); err != nil {
 		t.Fatalf("self-test failed: %v\n%s", err, out)
 	}
 	for _, f := range args[2:] {
 		if out, err := exec.Command(node, "--check", f).CombinedOutput(); err != nil {
 			t.Fatalf("node --check %s: %v\n%s", f, err, out)
+		}
+	}
+}
+
+func TestFunnelConfigPage403ForNonAdmin(t *testing.T) {
+	r := newRig(t, nil)
+	for _, path := range []string{"/funnel/config", "/funnel/static/config.js"} {
+		for name, ip := range map[string]string{"other user": bobIP, "ingress node": taggedIP, "no login": nobodyIP} {
+			if res := r.do("GET", path, ip, nil); res.code != 403 || res.body != "" {
+				t.Errorf("%s %s: %d %q", name, path, res.code, res.body)
+			}
+		}
+		res := r.admin("GET", path, nil)
+		if res.code != 200 || res.hdr.Get("Content-Security-Policy") != ui.PageCSP {
+			t.Errorf("%s as admin: %d CSP %q", path, res.code, res.hdr.Get("Content-Security-Policy"))
 		}
 	}
 }

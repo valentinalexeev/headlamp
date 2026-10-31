@@ -64,7 +64,8 @@ const json = (v, status) => ({ ok: (status || 200) < 400, status: status || 200,
 const empty = (status) => ({ ok: true, status: status || 204, body: '' });
 const flush = async () => { for (let i = 0; i < 8; i++) { await new Promise((r) => setImmediate(r)); } };
 const sent = (method, urlPart) => fetches.filter((f) => f.method === method && f.url.includes(urlPart));
-const setSearch = (s) => { global.window.location.search = s; };
+let pagePath = '/funnel';
+const setSearch = (s) => { global.window.location.search = s; global.window.location.href = 'http://localhost' + pagePath + s; };
 
 require(path.resolve(process.argv[2]));
 require(path.resolve(process.argv[3]));
@@ -324,6 +325,282 @@ const cellText = (tr, i) => tr.children[i].textContent;
     assert.strictEqual(els.panel.children.length, 1, 'the panel stays open on a refusal');
   }
 
-  // CONFIG-TESTS
+
+  // ===== Namespaces & keys =====
+  pagePath = '/funnel/config';
+  setSearch('');
+  const cfg = global.window.hl.funnelConfig;
+  assert.ok(cfg, 'hl.funnelConfig is defined');
+
+  const configEls = () => {
+    const mk = (tag) => { const n = new FakeNode(tag); n.isRoot = true; return n; };
+    const els = { sub: mk('p'), error: mk('div'), notice: mk('div'), waitnote: mk('section'), addslot: mk('span'), panel: mk('div'), empty: mk('div'),
+      cols: mk('div'), rows: mk('tbody'), keys: mk('div'), keystitle: mk('h2'), keyaddslot: mk('span'), keyform: mk('div'), keyerror: mk('div'),
+      keyrows: mk('tbody'), side: mk('aside') };
+    els.error.hidden = els.notice.hidden = els.waitnote.hidden = els.empty.hidden = els.cols.hidden = els.keys.hidden = els.keyerror.hidden = true;
+    return els;
+  };
+  const checklist = { records: [{ type: 'CNAME', name: '*.demo.funnel.example.net.', value: 'ingress.example.net.' }], commands: ['fly certs add "*.demo.funnel.example.net" -a ingress'], notes: ['A wildcard does not cover the bare name.'] };
+  const ns = (name, extra) => Object.assign({ name, state: 'active', ports: [{ lo: 9000, hi: 9010 }], pending_ports: [], note: '', change_id: 1, checklist }, extra);
+  const cfgState = (extra) => Object.assign({
+    public_domain: 'funnel.example.net',
+    namespaces: [ns('demo', { state: 'pending', change_outcome: 'pending' }), ns('lab', { ports: [{ lo: 9100, hi: 9110 }] }), ns('old-test', { state: 'failed', ports: [{ lo: 9200, hi: 9200 }] })],
+    routes: [man('lab', 'grafana')],
+    blocks: [],
+    ingress: report([reg('lab', 'api'), reg('lab', 'grafana'), reg('lab', 'grafana')]),
+  }, extra);
+  const nsRows = (els) => els.rows.children.filter((tr) => !tr.children.some((td) => hasClass(td, 'detail')));
+  const nsRow = (els, name) => nsRows(els).find((tr) => tr.children[0].textContent === name);
+
+  // namespaceWaitingShowsPolicyLink
+  {
+    const els = configEls();
+    const ctrl = cfg.mount(els, {});
+    ctrl.update(cfgState());
+    const demo = nsRow(els, 'demo');
+    assert.ok(/Waiting for policy confirm/.test(demo.children[1].textContent), demo.children[1].textContent);
+    assert.ok(findAll(demo, (n) => hasClass(n, 'st') && hasClass(n, 'warn')).length === 1, 'amber, with a shape');
+    assert.ok(linkTo(demo, '/policy'), 'a link to the policy page in the row');
+    assert.ok(!linkTo(nsRow(els, 'lab'), '/policy'), 'an active namespace has none');
+    assert.strictEqual(els.waitnote.hidden, false);
+    assert.ok(linkTo(els.waitnote, '/policy'));
+    assert.ok(/1 namespace change waits for policy confirm/.test(els.waitnote.textContent));
+    // a ports change on an active namespace waits too
+    ctrl.update(cfgState({ namespaces: [ns('lab', { ports: [{ lo: 9100, hi: 9110 }], pending_ports: [{ lo: 9100, hi: 9120 }] })] }));
+    const lab = nsRow(els, 'lab');
+    assert.ok(/Ports change waiting for policy confirm/.test(lab.textContent));
+    assert.strictEqual(lab.children[2].textContent, '9100-9110 -> 9100-9120');
+    assert.ok(linkTo(lab, '/policy'));
+    assert.ok(!buttonNamed(lab, 'Ports'), 'no second ports change while one waits');
+    // and nothing waits when all is active; the page never calls the policy API itself
+    ctrl.update(cfgState({ namespaces: [ns('lab')] }));
+    assert.strictEqual(els.waitnote.hidden, true);
+    assert.ok(!fetches.some((f) => f.url.startsWith('/policy')), 'the policy API is not called from this page');
+  }
+
+  // failedNamespaceIsWaiting: a reverted namespace is amber attention, not red and not a green or plain state
+  {
+    const els = configEls();
+    const ctrl = cfg.mount(els, {});
+    ctrl.update(cfgState());
+    const old = nsRow(els, 'old-test');
+    const st = findAll(old, (n) => hasClass(n, 'st'))[0];
+    assert.ok(hasClass(st, 'warn') && !hasClass(st, 'crit'));
+    assert.strictEqual(st.textContent, 'Reverted');
+    assert.ok(/Not confirmed in time/.test(old.textContent));
+    assert.ok(!linkTo(old, '/policy'), 'a reverted change has nothing left to confirm');
+    assert.strictEqual(old.children[4].textContent, 'Not checked');
+    assert.ok(!buttonNamed(old, 'Keys') && !buttonNamed(old, 'Ports'), 'a reverted namespace only offers Delete');
+    assert.ok(buttonNamed(old, 'Delete'));
+    assert.strictEqual(nsRow(els, 'lab').children[3].textContent, '2', 'routes counted once per public name');
+    assert.strictEqual(cfg.routeCount(cfgState(), 'old-test'), 0);
+  }
+
+  // the DNS and certificate steps open in the row, as text
+  {
+    const els = configEls();
+    const ctrl = cfg.mount(els, {});
+    const st = cfgState();
+    st.namespaces[1].checklist = { records: [{ type: 'CNAME', name: '<b>x</b>', value: 'y' }], commands: ['<script>alert(1)</script>'], notes: [] };
+    ctrl.update(st);
+    buttonNamed(nsRow(els, 'lab'), 'Show steps').click();
+    const detail = els.rows.children.find((tr) => tr.children.some((td) => hasClass(td, 'detail')));
+    assert.ok(detail, 'a detail row');
+    assert.ok(/DNS and certificate for lab/.test(detail.textContent));
+    assert.ok(detail.textContent.includes('<script>alert(1)</script>'));
+    assert.ok(!walk(detail).some((n) => n.tag === 'script' || n.tag === 'b'));
+    buttonNamed(detail, 'Close').click();
+    assert.ok(!els.rows.children.some((tr) => tr.children.some((td) => hasClass(td, 'detail'))));
+  }
+
+  // adding a namespace, changing ports, deleting
+  {
+    fetches.length = 0;
+    fetchReply = (url, opts) => ((opts && opts.method && opts.method !== 'GET') ? json({ change_id: 5 }, 202) : json(cfgState()));
+    const els = configEls();
+    const ctrl = cfg.mount(els, {});
+    ctrl.update(cfgState());
+    buttonNamed(els.addslot, 'Add namespace').click();
+    const form = els.panel.children[0];
+    const [name, ports, note] = findAll(form, (n) => n.tag === 'input');
+    name.value = 'Bad Name'; ports.value = '9300';
+    fire(form, 'submit');
+    assert.strictEqual(sent('POST', '/funnel/namespaces').length, 0);
+    assert.ok(/Name must be/.test(form.textContent));
+    name.value = 'extra'; ports.value = '9300-9299';
+    fire(form, 'submit');
+    assert.strictEqual(sent('POST', '/funnel/namespaces').length, 0);
+    ports.value = '9300-9310, 9400'; note.value = 'scratch';
+    fire(form, 'submit');
+    await flush();
+    const post = sent('POST', '/funnel/namespaces');
+    assert.strictEqual(post.length, 1);
+    assert.deepStrictEqual(JSON.parse(post[0].body), { name: 'extra', ports: [{ lo: 9300, hi: 9310 }, { lo: 9400, hi: 9400 }], note: 'scratch' });
+    assert.strictEqual(els.panel.children.length, 0);
+    assert.ok(/Namespace extra submitted/.test(els.notice.textContent) && linkTo(els.notice, '/policy'), 'the waiting state links to the policy page');
+
+    // ports
+    buttonNamed(nsRow(els, 'lab'), 'Ports').click();
+    const pform = findAll(els.rows, (n) => n.tag === 'form')[0];
+    const pin = findAll(pform, (n) => n.tag === 'input')[0];
+    assert.strictEqual(pin.value, '9100-9110');
+    pin.value = 'x';
+    fire(pform, 'submit');
+    assert.strictEqual(sent('PATCH', '/funnel/namespaces/lab').length, 0);
+    pin.value = '9100-9120';
+    fire(pform, 'submit');
+    await flush();
+    const patch = sent('PATCH', '/funnel/namespaces/lab');
+    assert.strictEqual(patch.length, 1);
+    assert.deepStrictEqual(JSON.parse(patch[0].body), { ports: [{ lo: 9100, hi: 9120 }] });
+
+    // delete: confirmed first, and the unexpired-keys warning shows
+    fetchReply = (url, opts) => ((opts && opts.method === 'DELETE') ? json({ unexpired_keys: 2 }) : json(cfgState()));
+    buttonNamed(nsRow(els, 'old-test'), 'Delete').click();
+    assert.strictEqual(sent('DELETE', '/funnel/namespaces').length, 0, 'not before the answer');
+    buttonNamed(findAll(els.rows, (n) => hasClass(n, 'confirm'))[0], 'Delete old-test').click();
+    await flush();
+    assert.strictEqual(sent('DELETE', '/funnel/namespaces/old-test').length, 1);
+    assert.ok(/2 publisher keys have not expired yet/.test(els.notice.textContent), els.notice.textContent);
+  }
+
+  // keys: shown once, then gone; never in a URL
+  {
+    const KEY = 'example-key-shown-once-0123456789';
+    fetches.length = 0;
+    replaced.length = 0;
+    setSearch('');
+    const keysList = [
+      { id: 14, expiration: '2026-11-30T00:00:00Z', expired: false, ephemeral: false, reusable: true, used: false },
+      { id: 11, expiration: '2026-01-02T00:00:00Z', expired: true, ephemeral: true, reusable: true, used: true },
+    ];
+    fetchReply = (url, opts) => {
+      const m = (opts && opts.method) || 'GET';
+      if (m === 'POST' && url === '/funnel/namespaces/lab/keys') { return json({ id: 15, key: KEY, expiration: '2026-12-01T00:00:00Z', ephemeral: false, reusable: true, tags: [] }); }
+      if (url === '/funnel/namespaces/lab/keys') { return json({ keys: keysList }); }
+      if (m === 'DELETE' && url === '/funnel/keys/14') { return empty(); }
+      return json(cfgState());
+    };
+    const els = configEls();
+    const copied = [];
+    const ctrl = cfg.mount(els, { copy: (t) => { copied.push(t); return Promise.resolve(true); }, later: (f) => f() });
+    ctrl.update(cfgState());
+    assert.strictEqual(els.keys.hidden, true, 'no keys before a namespace is chosen');
+    assert.ok(!buttonNamed(nsRow(els, 'demo'), 'Keys'), 'a waiting namespace has no keys yet');
+    buttonNamed(nsRow(els, 'lab'), 'Keys').click();
+    await flush();
+    assert.strictEqual(replaced[replaced.length - 1], '/funnel/config?ns=lab', 'the chosen namespace is in the URL, nothing else');
+    assert.strictEqual(els.keys.hidden, false);
+    assert.strictEqual(els.keystitle.textContent, 'Publisher keys for lab');
+    assert.strictEqual(els.keyrows.children.length, 2);
+    assert.ok(/Reusable, ephemeral, used, expired/.test(els.keyrows.children[1].textContent));
+    assert.ok(buttonNamed(els.keyrows.children[0], 'Expire') && !buttonNamed(els.keyrows.children[1], 'Expire'), 'an expired key offers nothing');
+
+    buttonNamed(els.keyaddslot, 'Mint key').click();
+    const form = els.keyform.children[0];
+    const ttl = findAll(form, (n) => n.tag === 'input' && n.getAttribute('type') === 'text')[0];
+    ttl.value = '99999';
+    fire(form, 'submit');
+    assert.strictEqual(sent('POST', '/keys').length, 0);
+    ttl.value = '48';
+    fire(form, 'submit');
+    await flush();
+    const mint = sent('POST', '/funnel/namespaces/lab/keys');
+    assert.strictEqual(mint.length, 1);
+    assert.deepStrictEqual(JSON.parse(mint[0].body), { ephemeral: false, reusable: true, ttl_hours: 48 });
+    assert.strictEqual(els.keyform.children.length, 0, 'the form closes');
+    assert.ok(els.side.textContent.includes(KEY), 'the key is shown in the side panel');
+    assert.ok(/shown once and is never stored/.test(els.side.textContent));
+
+    // keyNeverInURL: not in a request URL, a stored URL, a link, or the table
+    assert.ok(!fetches.some((f) => f.url.includes(KEY)), 'no request URL has the key');
+    assert.ok(!replaced.some((u) => u.includes(KEY)), 'no history URL has the key');
+    assert.ok(!global.window.location.href.includes(KEY));
+    assert.ok(!walk(els.side).some((n) => n.tag === 'a'), 'the key is not a link');
+    assert.ok(!els.keyrows.textContent.includes(KEY) && !els.rows.textContent.includes(KEY));
+    assert.ok(!els.notice.textContent.includes(KEY) && !els.sub.textContent.includes(KEY));
+
+    // a poll and a table rebuild keep it, and never copy it elsewhere
+    await ctrl.reload();
+    assert.ok(els.side.textContent.includes(KEY), 'the poll keeps the panel');
+    assert.ok(!els.keyrows.textContent.includes(KEY));
+
+    // copy
+    buttonNamed(els.side, 'Copy key').click();
+    await flush();
+    assert.deepStrictEqual(copied, [KEY]);
+    assert.ok(buttonNamed(els.side, 'Copy key'), 'the label comes back');
+
+    // keyShownOnceThenGone: Done removes it
+    buttonNamed(els.side, 'Done').click();
+    assert.strictEqual(els.side.children.length, 0);
+    assert.ok(!els.side.textContent.includes(KEY));
+    assert.strictEqual(ctrl.state.secret, null);
+    await ctrl.reload();
+    assert.ok(!walk(els.cols).some((n) => n.textContent.includes(KEY)), 'it does not come back');
+
+    // ... and so does leaving the page
+    buttonNamed(els.keyaddslot, 'Mint key').click();
+    fire(els.keyform.children[0], 'submit');
+    await flush();
+    assert.ok(els.side.textContent.includes(KEY));
+    assert.ok(pagehide.length >= 1, 'a pagehide handler is registered');
+    pagehide.forEach((f) => f());
+    assert.ok(!els.side.textContent.includes(KEY), 'gone on pagehide');
+
+    // ... and choosing another namespace
+    buttonNamed(els.keyaddslot, 'Mint key').click();
+    fire(els.keyform.children[0], 'submit');
+    await flush();
+    assert.ok(els.side.textContent.includes(KEY));
+    ctrl.select('');
+    assert.ok(!els.side.textContent.includes(KEY), 'gone when the selection changes');
+    assert.strictEqual(els.keys.hidden, true);
+
+    // expiring a key asks first
+    ctrl.select('lab');
+    await flush();
+    fetches.length = 0;
+    buttonNamed(els.keyrows.children[0], 'Expire').click();
+    assert.strictEqual(sent('DELETE', '/funnel/keys').length, 0);
+    const panel = findAll(els.keyrows, (n) => hasClass(n, 'confirm'))[0];
+    assert.ok(panel);
+    buttonNamed(panel, 'Expire key 14').click();
+    await flush();
+    assert.strictEqual(sent('DELETE', '/funnel/keys/14').length, 1);
+    assert.ok(/Expired key 14/.test(els.notice.textContent));
+  }
+
+  // the selection comes from the URL only for a plausible name, and only when it is an active namespace
+  {
+    setSearch('?ns=lab');
+    const els = configEls();
+    fetchReply = (url) => (url.endsWith('/keys') ? json({ keys: [] }) : json(cfgState()));
+    const ctrl = cfg.mount(els, {});
+    await ctrl.reload();
+    assert.strictEqual(els.keys.hidden, false);
+    assert.ok(/No keys yet/.test(els.keyrows.textContent));
+    setSearch('?ns=demo');
+    const els2 = configEls();
+    const ctrl2 = cfg.mount(els2, {});
+    await ctrl2.reload();
+    assert.strictEqual(els2.keys.hidden, true, 'a namespace that is not active has no keys');
+    setSearch('?ns=%3Cscript%3E');
+    const els3 = configEls();
+    const ctrl3 = cfg.mount(els3, {});
+    assert.strictEqual(ctrl3.state.sel, '');
+    setSearch('');
+  }
+
+  // namespacesEmptyState
+  {
+    const els = configEls();
+    const ctrl = cfg.mount(els, {});
+    ctrl.update({ public_domain: 'funnel.example.net', namespaces: [], routes: [], blocks: [], ingress: null });
+    assert.strictEqual(els.empty.hidden, false);
+    assert.strictEqual(els.cols.hidden, true);
+    assert.ok(buttonNamed(els.addslot, 'Add namespace'));
+  }
+
   console.log('funnel self-test: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

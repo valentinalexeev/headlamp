@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -120,6 +121,72 @@ func TestPolicyAttention(t *testing.T) {
 		svc.store.Close()
 		if _, _, err := m.Attention(ctx, "alice@"); err == nil {
 			t.Fatal("want an error")
+		}
+	})
+}
+
+var _ core.ActivitySource = (*Module)(nil)
+
+func TestPolicyActivity(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("applied changes carry their actor and reason, a revert by the deadline is the system's", func(t *testing.T) {
+		m, svc, _, clk := attentionModule(t)
+		kept := applyOK(t, svc, "kept")
+		if err := svc.Confirm(ctx, "alice@", kept); err != nil {
+			t.Fatal(err)
+		}
+		clk.Advance(time.Minute)
+		lost := applyOK(t, svc, "lost")
+		clk.Advance(testRevert + time.Second)
+		svc.checkRevert(ctx)
+
+		got, err := m.Activity(ctx, "alice@", 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var applied, reverted []core.ActivityEntry
+		for _, e := range got {
+			if e.Source != "Policy" || e.At.IsZero() || e.Actor == "" {
+				t.Errorf("%+v", e)
+			}
+			switch e.Action {
+			case "change.applied":
+				applied = append(applied, e)
+			case "change.reverted":
+				reverted = append(reverted, e)
+			default:
+				t.Errorf("unexpected action: %+v", e)
+			}
+		}
+		if len(applied) != 2 || len(reverted) != 1 {
+			t.Fatalf("applied %+v reverted %+v", applied, reverted)
+		}
+		if !strings.HasPrefix(applied[0].Detail, fmt.Sprint(lost)) || !strings.HasPrefix(applied[1].Detail, fmt.Sprint(kept)) {
+			t.Errorf("newest first: %+v", applied)
+		}
+		if r := reverted[0]; r.Actor != "system" || r.Detail != fmt.Sprint(lost) {
+			t.Errorf("%+v", r)
+		}
+		if strings.Contains(fmt.Sprint(got), "lost\n") {
+			t.Error("the policy text must not appear")
+		}
+	})
+
+	t.Run("a caller outside POLICY_ADMIN_USERS sees nothing", func(t *testing.T) {
+		m, svc, _, _ := attentionModule(t)
+		applyOK(t, svc, "new")
+		got, err := m.Activity(ctx, "bob@", 20)
+		if !errors.Is(err, core.ErrNotVisible) || len(got) != 0 {
+			t.Fatalf("%+v %v", got, err)
+		}
+	})
+
+	t.Run("an inactive module reports nothing", func(t *testing.T) {
+		off := &Module{env: core.MapEnv(nil)}
+		got, err := off.Activity(ctx, "alice@", 20)
+		if err != nil || got != nil || off.HasActivity() {
+			t.Fatalf("%+v %v", got, err)
 		}
 	})
 }

@@ -237,6 +237,26 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     global.window.location.search = '';
   }
 
+  // manageApprovalLinksToTheApprovalPage: only for an approved, discovered bridge
+  {
+    const appr = merge({}, {}, null, [ing('bridge-3', { source: 'discovered', approval: 'approved', approved: true })])[0];
+    assert.strictEqual(appr.manage, true);
+    assert.strictEqual(appr.approve, false);
+    for (const x of [ing('bridge-1'), ing('bridge-3', { source: 'discovered', approval: 'pending' }), ing('bridge-3', { source: 'discovered', approval: 'changed', approved: true })]) {
+      assert.strictEqual(merge({}, {}, null, [x])[0].manage, false);
+    }
+    global.window.location.search = '?sel=bridge-3';
+    const els = mkEls();
+    const d = sample();
+    d.ingresses = d.ingresses.map((i) => (i.name === 'bridge-3' ? Object.assign({}, i, { source: 'discovered', approval: 'approved', approved: true }) : i));
+    nodes.mount(els).update(d);
+    const link = findAll(els.panel, (n) => n.tag === 'a' && n.textContent === 'Manage approval')[0];
+    assert.ok(link, 'Manage approval is offered');
+    assert.strictEqual(link.attrs.href, '/enroll/approve?name=bridge-3');
+    assert.strictEqual(findAll(els.panel, (n) => n.tag === 'a' && n.textContent === 'Compare and approve').length, 0);
+    global.window.location.search = '';
+  }
+
   // stopNeedsConfirm
   {
     global.window.location.search = '?sel=exit-a';

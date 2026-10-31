@@ -103,6 +103,8 @@
     var sync = ing && ing.sync && typeof ing.sync === 'object' ? ing.sync : null;
     var appr = ing ? str(ing.approval) : '';
     var approve = appr === 'pending' || appr === 'changed';
+    // an approved discovered bridge: its approval can be reviewed or removed on the approval page
+    var manage = !!ing && str(ing.source) === 'discovered' && ing.approved === true && appr === 'approved';
     var routes = tn ? (Number(tn.available_route_count) || 0) : 0;
 
     function runningDetail() {
@@ -176,7 +178,7 @@
     return {
       id: s.id, label: hl.plain(s.id, 100), role: role, level: level, state: state, detail: detail,
       provider: managed ? hl.plain(cfg.provider, 60) : 'unmanaged',
-      canPower: canPower, approve: approve, action: action, kind: kind,
+      canPower: canPower, approve: approve, manage: manage, action: action, kind: kind,
       cloud: cloud, tailnet: tailnet, routes: tn && role === 'Exit' ? (Number(tn.approved_route_count) || 0) + ' of ' + routes + ' approved' : 'n/a',
       addr: hl.plain(addr, 60) || 'Not known', explain: explain,
       bridge: ing ? hl.plain(ing.name, 100) : '',
@@ -480,6 +482,14 @@
         var wrap = hl.el('div', 'rowbtns');
         wrap.appendChild(link);
         panel.appendChild(wrap);
+      }
+      if (row.manage) {
+        panel.appendChild(hl.el('hr', 'divider'));
+        var manageLink = hl.el('a', 'btn', 'Manage approval');
+        manageLink.setAttribute('href', '/enroll/approve?name=' + encodeURIComponent(row.bridge || row.id));
+        var mwrap = hl.el('div', 'rowbtns');
+        mwrap.appendChild(manageLink);
+        panel.appendChild(mwrap);
       }
       refocus(panel, fk);
     }

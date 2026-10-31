@@ -35,7 +35,7 @@ func (e *Engine) attempt(ctx context.Context, task, id string, n int, manual boo
 	if !ok {
 		return // removed by a config push since it became due
 	}
-	run := Run{ID: id, Task: task, Attempt: n, State: RunQueued, Started: e.d.Now()}
+	run := Run{ID: id, Task: task, Attempt: n, State: RunQueued, Started: e.d.Now(), Manual: manual}
 	e.setActive(run)
 	e.log.Info("run_started", "task", task, "run", id, "attempt", n)
 

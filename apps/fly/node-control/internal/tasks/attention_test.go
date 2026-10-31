@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -177,5 +178,90 @@ func TestTasksAttentionCachesSessionCalls(t *testing.T) {
 	h.m.Attention(context.Background(), "alice@")
 	if n := len(h.fake.callList()); n != 2 {
 		t.Fatalf("after the cache expired: %d calls, want 2", n)
+	}
+}
+
+var (
+	_ core.ActivitySource = (*Module)(nil)
+	_ core.SearchSource   = (*Module)(nil)
+)
+
+func TestTasksActivity(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	run := func(id string, state RunState, ended time.Duration, manual bool, reason string) Run {
+		return Run{ID: id, Task: "job", State: state, Started: now.Add(ended - time.Second), Ended: now.Add(ended), Manual: manual, Reason: reason,
+			Result: map[string]any{"balance": 12.5}}
+	}
+
+	t.Run("manual and failed runs are listed, passing scheduled runs are not, results never", func(t *testing.T) {
+		h, s := attentionHarness(t)
+		for _, r := range []Run{
+			run("r1", RunSucceeded, -5*time.Minute, false, ""), // scheduled and passing: left out
+			run("r2", RunFailed, -4*time.Minute, false, "login rejected"),
+			run("r3", RunSucceeded, -3*time.Minute, true, ""),
+			run("r4", RunCancelled, -2*time.Minute, false, ""),
+			run("r5", RunFailed, -time.Minute, false, reasonShutdown), // a deploy, not a failure
+			{ID: "r6", Task: "job", State: RunRunning, Started: now},  // not finished
+		} {
+			if err := s.AppendRun(r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := h.m.Activity(ctx, "alice@", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("%+v", got)
+		}
+		want := []struct{ actor, action, detail string }{
+			{"operator", "task.run", "job: cancelled"},
+			{"operator", "task.manual", "job: succeeded"},
+			{"system", "task.run", "job: failed"},
+		}
+		for i, w := range want {
+			e := got[i]
+			if e.Source != "Tasks" || e.Actor != w.actor || e.Action != w.action || e.Detail != w.detail || e.At.IsZero() {
+				t.Errorf("%d: %+v", i, e)
+			}
+		}
+		if strings.Contains(fmt.Sprint(got), "12.5") || strings.Contains(fmt.Sprint(got), "login rejected") {
+			t.Errorf("a result or a reason leaked: %+v", got)
+		}
+		if one, _ := h.m.Activity(ctx, "alice@", 1); len(one) != 1 {
+			t.Errorf("limit: %+v", one)
+		}
+	})
+
+	t.Run("a caller outside TASKS_ADMIN_USERS sees nothing", func(t *testing.T) {
+		h, _ := attentionHarness(t)
+		if got, err := h.m.Activity(ctx, "bob@", 10); !errors.Is(err, core.ErrNotVisible) || len(got) != 0 {
+			t.Fatalf("%+v %v", got, err)
+		}
+		if got, err := h.m.Search(ctx, "bob@"); !errors.Is(err, core.ErrNotVisible) || len(got) != 0 {
+			t.Fatalf("%+v %v", got, err)
+		}
+	})
+
+	t.Run("an inactive module reports nothing", func(t *testing.T) {
+		off := &Module{}
+		if got, err := off.Activity(ctx, "alice@", 10); got != nil || err != nil || off.HasActivity() {
+			t.Fatalf("%+v %v", got, err)
+		}
+		if got, err := off.Search(ctx, "alice@"); got != nil || err != nil {
+			t.Fatalf("%+v %v", got, err)
+		}
+	})
+}
+
+func TestTasksSearchListsTaskIDs(t *testing.T) {
+	h, _ := attentionHarness(t)
+	got, err := h.m.Search(context.Background(), "alice@")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if it := got[0]; it.Label != "job" || it.Kind != "Task" || it.Path != "/tasks?sel=job" {
+		t.Errorf("%+v", it)
 	}
 }

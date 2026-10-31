@@ -170,3 +170,73 @@ func timeLeft(end, now time.Time) string {
 	}
 	return fmt.Sprintf("%d h %d min left", int(d/time.Hour), int(d%time.Hour/time.Minute))
 }
+
+// HasActivity reports whether the module keeps run history, which is when it is active.
+func (m *Module) HasActivity() bool { return m.on }
+
+// Activity lists finished runs, newest first, as "Tasks": every run an operator started by hand (as "operator"),
+// every run an operator cancelled, and the scheduled runs that failed (as "system"). Scheduled runs that passed are
+// left out: they would bury everything else. The detail is the task id and the end state; the run's result and
+// reason are never part of it. Only TASKS_ADMIN_USERS see it. An inactive module reports nothing.
+func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.ActivityEntry, error) {
+	if !m.on {
+		return nil, nil
+	}
+	if !authz.ParseAllowed(m.env.Getenv("TASKS_ADMIN_USERS")).Has(login) {
+		return nil, core.ErrNotVisible
+	}
+	st, _ := m.current()
+	if st == nil {
+		return nil, fmt.Errorf("the task store is not available")
+	}
+	cfg := st.Config()
+	if cfg == nil {
+		return nil, nil
+	}
+	var out []core.ActivityEntry
+	for _, id := range sortedTasks(cfg) {
+		kept := 0
+		for _, r := range st.Runs(id) { // newest first
+			if r.Ended.IsZero() || kept >= limit {
+				continue
+			}
+			e := core.ActivityEntry{At: r.Ended, Source: "Tasks", Action: "task.run", Detail: id + ": " + string(r.State)}
+			switch {
+			case r.Manual:
+				e.Actor, e.Action = "operator", "task.manual"
+			case r.State == RunCancelled:
+				e.Actor = "operator"
+			case realFailure(r):
+				e.Actor = "system"
+			default:
+				continue
+			}
+			out = append(out, e)
+			kept++
+		}
+	}
+	return out, nil
+}
+
+// Search lists the task ids, each opening the Tasks page on that task. Only TASKS_ADMIN_USERS see them.
+func (m *Module) Search(_ context.Context, login string) ([]core.SearchItem, error) {
+	if !m.on {
+		return nil, nil
+	}
+	if !authz.ParseAllowed(m.env.Getenv("TASKS_ADMIN_USERS")).Has(login) {
+		return nil, core.ErrNotVisible
+	}
+	st, _ := m.current()
+	if st == nil {
+		return nil, nil
+	}
+	cfg := st.Config()
+	if cfg == nil {
+		return nil, nil
+	}
+	var out []core.SearchItem
+	for _, id := range sortedTasks(cfg) {
+		out = append(out, core.SearchItem{Label: id, Kind: "Task", Path: taskPath(id)})
+	}
+	return out, nil
+}

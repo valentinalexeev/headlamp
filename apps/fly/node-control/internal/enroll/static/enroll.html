@@ -32,6 +32,7 @@
   label.toggle { flex-direction:row; align-items:center; gap:.4rem; margin-bottom:.6rem; }
   .pill { font-size:.75rem; padding:.1rem .45rem; border:1px solid var(--border); border-radius:99px; }
   #out textarea { width:100%; height:5rem; }
+  #outsub { display:none; margin-top:.6rem; }
 </style>
 </head>
 <body>
@@ -54,6 +55,11 @@
     <div id="outlabel" class="muted"></div>
     <textarea id="outtext" readonly></textarea>
     <button class="ghost" id="copy" type="button">Copy</button>
+    <details id="outsub">
+      <summary class="muted">Manual setup: subscription URL (paste it into the app if the link above does not open)</summary>
+      <textarea id="outsubtext" readonly></textarea>
+      <button class="ghost" id="copysub" type="button">Copy</button>
+    </details>
   </div>
   <div class="panel tablewrap" id="ingresses">
     <div class="muted" id="ingnote"></div>
@@ -89,10 +95,13 @@ $("#showrevoked").onchange = (ev) => {
   load();
 };
 const endOfDay = (d) => Math.floor(new Date(d + "T23:59:59").getTime() / 1000);
-function show(label, text) {
+function show(label, text, subUrl) {
   $("#out").style.display = "block"; $("#outlabel").textContent = label; $("#outtext").value = text;
+  $("#outsub").style.display = subUrl ? "block" : "none"; $("#outsubtext").value = subUrl || "";
 }
-$("#copy").onclick = () => { $("#outtext").select(); navigator.clipboard && navigator.clipboard.writeText($("#outtext").value); };
+const copyFrom = (sel) => () => { $(sel).select(); navigator.clipboard && navigator.clipboard.writeText($(sel).value); };
+$("#copy").onclick = copyFrom("#outtext");
+$("#copysub").onclick = copyFrom("#outsubtext");
 
 const SYNC_HINT = {
   unreachable: "agent unreachable; retried every 5 minutes",
@@ -230,7 +239,14 @@ $("#create").onsubmit = async (ev) => {
   const f = new FormData(ev.target);
   try {
     const j = await post("/enroll/devices", {name: f.get("name"), owner: f.get("owner"), client: f.get("client"), expires_at: endOfDay(f.get("expires"))});
-    show("Subscription URL for the new device", j.subscription_url);
+    // The one-time link is what to send: it opens the client and adds the profile in one tap. It is deliberately not
+    // a clickable anchor here, since opening it on this machine would spend it. The subscription URL stays as the manual fallback.
+    try {
+      const l = await post("/enroll/devices/" + j.id + "/links", {ttl: 86400, max_uses: 1});
+      show("Enrolment link for the new device: send it to the owner, who opens it on the phone (works once, valid 24 h)", l.url, j.subscription_url);
+    } catch (e) {
+      show("Subscription URL for the new device (the one-time link could not be created: use New link in the table)", j.subscription_url);
+    }
     say(j.sync_pending ? "Created; not yet on the bridge host (" + j.sync.state + "), retried every 5 minutes." : "Created.");
     showSync(j.sync, j.ingresses);
     ev.target.reset(); load();

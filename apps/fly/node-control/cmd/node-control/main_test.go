@@ -303,7 +303,7 @@ func TestTopBarWiring(t *testing.T) {
 		}
 		// With one page the front page leads straight to it.
 		if code, body := getHost(t, admin, "admin.test", "/"); code != 200 || !strings.Contains(body, "data-nc-nav") ||
-			strings.Contains(body, "<nav") || strings.Contains(body, "Enrol device") || !strings.Contains(body, "page-title") {
+			strings.Contains(body, "<nav") || strings.Contains(body, "Enrol device") || !strings.Contains(body, `id="nodes"`) {
 			t.Fatalf("compact header and the Nodes page expected with one entry: %d", code)
 		}
 	})

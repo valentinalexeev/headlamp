@@ -19,7 +19,7 @@ func UIView(cfg *Config, ts []Target) map[string]any {
 		view := map[string]any{"tailnetName": t.TailnetName}
 		if t.Provider == "" {
 			view["provider"] = firstNonEmpty(entry.Label, statusOnlyLabel)
-			// The status of a status-only node is "unmanaged"; index.html disables a
+			// The status of a status-only node is "unmanaged"; the page disables a
 			// button whose target status equals the current one, so both go dark.
 			view["startStatus"], view["stopStatus"] = unmanagedStatus, unmanagedStatus
 			out[t.ID] = view

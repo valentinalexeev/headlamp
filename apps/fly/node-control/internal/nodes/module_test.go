@@ -230,7 +230,7 @@ func TestNodesJSONHasNoConnectionDetails(t *testing.T) {
 }
 
 func TestIndexServesEmbeddedPage(t *testing.T) {
-	want, err := os.ReadFile("static/index.html")
+	want, err := os.ReadFile("static/nodes.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,8 +241,8 @@ func TestIndexServesEmbeddedPage(t *testing.T) {
 	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
 		t.Fatal(rec.Header())
 	}
-	if !strings.Contains(rec.Body.String(), "page-title") {
-		t.Fatal("no page-title")
+	if !strings.Contains(rec.Body.String(), `id="nodes"`) {
+		t.Fatal("no nodes root")
 	}
 }
 

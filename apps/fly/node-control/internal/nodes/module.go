@@ -12,10 +12,14 @@ import (
 
 	"example.com/node-control/internal/core"
 	"example.com/node-control/internal/headscale"
+	"example.com/node-control/internal/ui"
 )
 
-//go:embed static/index.html
-var indexHTML []byte
+//go:embed static/nodes.html
+var pageHTML []byte
+
+//go:embed static/nodes.js
+var pageJS []byte
 
 const nodeTimeout = 10 * time.Second
 
@@ -45,7 +49,8 @@ func (m *Module) Name() string                { return "nodes" }
 func (m *Module) Start(context.Context) error { return nil }
 
 func (m *Module) Register(r *core.Routes) error {
-	r.Admin.HandleFunc("GET /nodes", m.index)
+	r.Admin.HandleFunc("GET /nodes", asset("text/html; charset=utf-8", pageHTML))
+	r.Admin.HandleFunc("GET /nodes/nodes.js", asset("text/javascript; charset=utf-8", pageJS))
 	r.Admin.HandleFunc("GET /nodes.json", m.nodesJSON)
 	r.Admin.HandleFunc("GET /status", m.status)
 	r.Admin.HandleFunc("GET /nodes/{id}/status", m.nodeStatus)
@@ -82,9 +87,18 @@ func detail(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"detail": msg})
 }
 
-func (m *Module) index(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(indexHTML)
+// asset serves an embedded file with headers that forbid framing, sniffing, caching and any script or
+// style that is not from this origin.
+func asset(contentType string, body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", contentType)
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Content-Security-Policy", ui.PageCSP)
+		_, _ = w.Write(body)
+	}
 }
 
 func (m *Module) nodesJSON(w http.ResponseWriter, req *http.Request) {

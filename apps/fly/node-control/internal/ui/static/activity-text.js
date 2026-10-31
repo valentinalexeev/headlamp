@@ -73,6 +73,14 @@
         m = /^(\d+)(?:: (.*))?$/.exec(detail);
         if (m) { return 'Change #' + m[1] + ' applied' + (m[2] ? ': ' + m[2] : ''); }
         break;
+      case 'change.confirmed':
+        m = /^(\d+)$/.exec(detail);
+        if (m) { return 'Change #' + m[1] + ' confirmed'; }
+        break;
+      case 'change.reverted_earlier':
+        m = /^(\d+)$/.exec(detail);
+        if (m) { return 'Change #' + m[1] + ' reverted'; }
+        break;
       case 'change.reverted':
         m = /^(\d+)$/.exec(detail);
         if (m) { return 'Change #' + m[1] + ' reverted by itself after no confirmation'; }

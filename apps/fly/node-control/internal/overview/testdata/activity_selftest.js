@@ -52,6 +52,8 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
     assert.strictEqual(d('change.applied', '48: add namespace demo'), 'Change #48 applied: add namespace demo');
     assert.strictEqual(d('change.applied', '48'), 'Change #48 applied');
     assert.strictEqual(d('change.reverted', '46'), 'Change #46 reverted by itself after no confirmation');
+    assert.strictEqual(d('change.confirmed', '47'), 'Change #47 confirmed');
+    assert.strictEqual(d('change.reverted_earlier', '45'), 'Change #45 reverted');
     assert.strictEqual(d('change.reverted_on_request', '46'), 'Change #46 reverted on request');
     assert.strictEqual(act.describe, global.window.hl.activityText.describe, 'one shared description, not a copy');
     assert.strictEqual(d('task.manual', 'login-check: succeeded'), 'login-check run by hand');

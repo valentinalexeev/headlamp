@@ -55,10 +55,15 @@ type Module struct {
 	// sessionsTag is SESSIONS_TAG; "" means no browser-session page or API.
 	sessionsTag string
 	sess        *sessionAPI // set with sessionsTag
-	port        int
-	ntfyURL     string
-	tn          core.Tailnet
-	log         *slog.Logger
+
+	sessMu    sync.Mutex // guards the cached session attention
+	sessAt    time.Time
+	sessItems []core.AttentionItem
+	sessLines []core.SystemLine
+	port      int
+	ntfyURL   string
+	tn        core.Tailnet
+	log       *slog.Logger
 
 	metricsAddr     string // TASKS_METRICS_ADDR; "" means no metrics listener
 	heartbeatSecret string // TASKS_HEARTBEAT_SECRET; "" means no heartbeat

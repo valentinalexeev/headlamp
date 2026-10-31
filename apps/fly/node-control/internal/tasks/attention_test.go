@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
 )
 
 var _ core.AttentionSource = (*Module)(nil)
@@ -53,6 +52,15 @@ func TestTasksAttention(t *testing.T) {
 		}
 	})
 
+	t.Run("a single failure still states the streak", func(t *testing.T) {
+		h, s := attentionHarness(t)
+		s.SaveState("job", TaskState{LastSuccess: now.Add(-time.Minute), Streak: 1, NextRun: now.Add(time.Hour)})
+		items, _, err := h.m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 1 || !strings.Contains(items[0].Title, "1 time in a row") {
+			t.Fatalf("%+v %v", items, err)
+		}
+	})
+
 	t.Run("a stale task is a waiting item", func(t *testing.T) {
 		h, s := attentionHarness(t)
 		s.SaveState("job", TaskState{LastSuccess: now.Add(-3 * time.Hour), NextRun: now.Add(time.Hour)})
@@ -93,8 +101,8 @@ func TestTasksAttentionStoreUnavailableIsUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].Level != core.LevelCritical || !strings.Contains(items[0].Title, "could not be checked") {
-		t.Errorf("items: %+v", items)
+	if len(items) != 0 {
+		t.Errorf("a closed store is unknown, not at risk: no item expected: %+v", items)
 	}
 	if len(lines) != 1 || lines[0].State != "unknown" {
 		t.Errorf("lines: %+v", lines)
@@ -152,4 +160,22 @@ func TestTasksAttentionNodeListFailureMakesSessionsUnknown(t *testing.T) {
 	t.Errorf("lines: %+v", lines)
 }
 
-var _ = headscale.Node{}
+func TestTasksAttentionCachesSessionCalls(t *testing.T) {
+	h := newSessHarness(t, true, sessNode("runner-1", "100.64.0.10", sessTag))
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	h.m.now = func() time.Time { return now }
+	h.fake.cur["100.64.0.10"] = &SessionInfo{ID: "s1", State: "running", Token: sessTok, Port: 6080, ExpiresAt: now.Add(time.Hour)}
+	for i := 0; i < 3; i++ {
+		if _, _, err := h.m.Attention(context.Background(), "alice@"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(h.fake.callList()); n != 1 {
+		t.Fatalf("three polls called the runner %d times, want 1", n)
+	}
+	now = now.Add(21 * time.Second)
+	h.m.Attention(context.Background(), "alice@")
+	if n := len(h.fake.callList()); n != 2 {
+		t.Fatalf("after the cache expired: %d calls, want 2", n)
+	}
+}

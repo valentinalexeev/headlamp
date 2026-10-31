@@ -34,11 +34,9 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 	line := core.SystemLine{Name: "Tasks", Path: "/tasks", State: "ok"}
 	st, eng := m.current()
 	if st == nil || eng == nil {
+		// Unknown, but nothing is known to be at risk: the line says it, no red item does.
 		line.State, line.Summary = "unknown", "The task store is not available"
-		return []core.AttentionItem{{
-			ID: "tasks-store", Source: "tasks", Level: core.LevelCritical, Title: "Tasks could not be checked",
-			Detail: "The task store is not available. Its status is unknown until it opens.", ActionLabel: "Open Tasks", ActionPath: "/tasks",
-		}}, []core.SystemLine{line}
+		return nil, []core.SystemLine{line}
 	}
 	cfg := st.Config()
 	if cfg == nil || len(cfg.Tasks) == 0 {
@@ -68,7 +66,7 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 		}
 		switch {
 		case v.Streak == 1:
-			it.Title = fmt.Sprintf("Task %s failed its last run", id)
+			it.Title = fmt.Sprintf("Task %s has failed 1 time in a row", id)
 		case v.Streak > 1:
 			it.Title = fmt.Sprintf("Task %s has failed %d times in a row", id, v.Streak)
 		default:
@@ -91,10 +89,25 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 	return items, []core.SystemLine{line}
 }
 
+// sessionTTL is how long Attention reuses what it learned from the runners, so polling Overview does not
+// multiply calls to them.
+const sessionTTL = 20 * time.Second
+
 func (m *Module) sessionAttention(ctx context.Context) ([]core.AttentionItem, []core.SystemLine) {
 	if m.sess == nil {
 		return nil, nil
 	}
+	m.sessMu.Lock()
+	defer m.sessMu.Unlock()
+	if now := m.now(); m.sessLines != nil && now.Sub(m.sessAt) < sessionTTL {
+		return m.sessItems, m.sessLines
+	}
+	items, lines := m.readSessions(ctx)
+	m.sessAt, m.sessItems, m.sessLines = m.now(), items, lines
+	return items, lines
+}
+
+func (m *Module) readSessions(ctx context.Context) ([]core.AttentionItem, []core.SystemLine) {
 	line := core.SystemLine{Name: "Sessions", Path: "/sessions", State: "ok"}
 	nodes, err := m.sess.tagged(ctx)
 	if err != nil {

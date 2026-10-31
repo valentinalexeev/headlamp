@@ -26,6 +26,9 @@ var themeJS []byte
 //go:embed static/shell.js
 var shellJS []byte
 
+//go:embed static/palette.js
+var paletteJS []byte
+
 //go:embed static/fonts
 var fontFS embed.FS
 
@@ -72,6 +75,8 @@ func lookup(p string) ([]byte, string) {
 		return themeJS, "text/javascript; charset=utf-8"
 	case "shell.js":
 		return shellJS, "text/javascript; charset=utf-8"
+	case "palette.js":
+		return paletteJS, "text/javascript; charset=utf-8"
 	}
 	file, ok := strings.CutPrefix(name, "fonts/")
 	if !ok || strings.Contains(file, "/") {

@@ -146,7 +146,7 @@ async function loadIngresses(j) {
     if (v.public_key_prefix && v.approval !== "approved") appr += " (key " + v.public_key_prefix + "\u2026, id " + (v.short_id_prefix || "") + "\u2026, fingerprint " + (v.fingerprint ? v.fingerprint.slice(0, 12) : "") + "\u2026)";
     if (v.node_id && v.approval !== "approved") appr += " [node " + v.node_id + ", key " + plain(v.machine_key_prefix, 12) + "\u2026, " + plain(v.address, 45) + ", hostname " + (plain(v.hostname) || "?") + ", name " + (plain(v.given_name) || "?") + "]";
     if (v.detail) appr += ": " + v.detail;
-    [v.name, v.host || "-", yesNo(v.online), sync, since, appr].forEach((t, i) => {
+    [[v.name].concat(v.aliases || []).join(" / "), v.host || "-", yesNo(v.online), sync, since, appr].forEach((t, i) => {
       const td = document.createElement("td"); td.textContent = t; if (i === 5) td.className = "wrap"; tr.appendChild(td);
     });
     const td = document.createElement("td"); const box = document.createElement("div"); box.className = "actions"; td.appendChild(box);

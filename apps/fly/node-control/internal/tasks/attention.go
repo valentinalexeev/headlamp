@@ -74,10 +74,13 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 		default:
 			it.Title = fmt.Sprintf("Task %s is overdue", id)
 		}
-		if v.Stale {
-			it.Detail = "It has not succeeded within twice its interval."
-		} else {
+		switch {
+		case v.Streak > 0 && v.Stale:
+			it.Detail = "The check is not passing and has not succeeded within twice its interval."
+		case v.Streak > 0:
 			it.Detail = "The check is not passing."
+		default:
+			it.Detail = "It has not succeeded within twice its interval."
 		}
 		items = append(items, it)
 	}

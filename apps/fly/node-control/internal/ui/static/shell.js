@@ -94,7 +94,7 @@
     return v ? Number(v) : NaN;
   }
 
-  // onPage: the page already shows this local path (the query is ignored), so a link to it is noise.
+  // onPage: this page is the given local path.
   function onPage(path) {
     var here = typeof window !== 'undefined' && window.location ? window.location.pathname : '';
     return typeof path === 'string' && !!here && path.split('?')[0] === here;
@@ -154,6 +154,9 @@
     function renderStrip() {
       var strip = parts.strip;
       if (!strip) { return; }
+      // The Policy page carries the same Confirm and Revert, and two button sets would go stale against each
+      // other: the strip stays empty there. The sidebar counts are unaffected.
+      if (onPage('/policy')) { st.sig = null; st.countEls = []; clear(strip); strip.hidden = true; return; }
       var items = timedItems(st.data);
       var loadedSec = loaded();
       // Rebuild only when what is shown changes, so focus and the live region survive a poll.
@@ -203,7 +206,7 @@
           revert.disabled = st.busy;
           strip.appendChild(primary);
           strip.appendChild(revert);
-        } else if (it.action_label && localPath(it.action_path) && !onPage(it.action_path)) {
+        } else if (it.action_label && localPath(it.action_path)) {
           var a = hl.el('a', 'btn primary sm', hl.plain(it.action_label, 60));
           a.setAttribute('href', it.action_path);
           strip.appendChild(a);

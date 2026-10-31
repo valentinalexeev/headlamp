@@ -237,16 +237,22 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     assert.ok(Number.isNaN(shell.loadedSeconds(p.strip)));
   }
 
-  // stripLinkHiddenOnItsOwnPage: no second link to the page the person is already on
+  // stripStaysEmptyOnPolicy: the page has its own Confirm and Revert; the sidebar counts still work
   {
-    const item = { level: 'timed', source: 'x', title: 'Waiting', action_label: 'Review', action_path: '/policy' };
-    const links = (path) => {
-      global.window.location = { pathname: path };
+    const item = { level: 'timed', source: 'policy', title: 'Policy change #48 is pending', change_id: 48, applied_at: iso(-60), deadline: iso(100) };
+    const run = async (pathname) => {
+      global.window.location = { pathname };
       const p = parts();
-      return ctl(p, async () => ({ items: [item] })).poll().then(() => find(p.strip, (x) => x.tag === 'a').length);
+      p.counts = [{ source: 'policy', el: node('span') }];
+      await ctl(p, async () => ({ items: [item] })).poll();
+      return p;
     };
-    assert.strictEqual(await links('/nodes'), 1);
-    assert.strictEqual(await links('/policy'), 0);
+    const off = await run('/nodes');
+    assert.ok(buttons(off.strip).includes('Revert now'));
+    const on = await run('/policy');
+    assert.strictEqual(on.strip.hidden, true);
+    assert.strictEqual(on.strip.children.length, 0);
+    assert.strictEqual(on.counts[0].el.textContent, '1');
     delete global.window.location;
   }
   console.log('shell self-test ok');

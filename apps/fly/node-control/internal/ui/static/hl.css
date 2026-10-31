@@ -153,3 +153,8 @@ body:has(>nav.side[data-nc-nav]){padding-left:216px}
 /* beside a fixed-size block (a QR code): takes the rest of the row, wraps under it when narrow */
 .beside{flex:1 1 160px;min-width:0}
 .rowbtns.start{justify-content:flex-start;flex-wrap:wrap}
+/* the Policy page: a note that holds a message and its buttons side by side, and the policy editor */
+.note.split{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding:16px 18px}
+.hl .tick{font-family:"IBM Plex Mono",monospace;font-size:15px;color:var(--warn)}
+.note.crit .tick{color:var(--crit)}
+.input.area{height:auto;min-height:320px;padding:10px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.55;resize:vertical}

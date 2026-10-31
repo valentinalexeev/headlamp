@@ -226,5 +226,28 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     assert.strictEqual(Object.keys(shell.countsBySource({ items: [{ source: '__proto__', level: 'waiting' }] })).length, 1);
     assert.strictEqual(({}).waiting, undefined);
   }
+
+  // loadedSecondsIsShared: pages read the same value the strip uses
+  {
+    const p = parts();
+    assert.ok(Number.isNaN(shell.loadedSeconds(p.strip)));
+    p.strip.setAttribute('data-hl-loaded', '1767268800');
+    assert.strictEqual(shell.loadedSeconds(p.strip), 1767268800);
+    p.strip.setAttribute('data-hl-loaded', 'soon');
+    assert.ok(Number.isNaN(shell.loadedSeconds(p.strip)));
+  }
+
+  // stripLinkHiddenOnItsOwnPage: no second link to the page the person is already on
+  {
+    const item = { level: 'timed', source: 'x', title: 'Waiting', action_label: 'Review', action_path: '/policy' };
+    const links = (path) => {
+      global.window.location = { pathname: path };
+      const p = parts();
+      return ctl(p, async () => ({ items: [item] })).poll().then(() => find(p.strip, (x) => x.tag === 'a').length);
+    };
+    assert.strictEqual(await links('/nodes'), 1);
+    assert.strictEqual(await links('/policy'), 0);
+    delete global.window.location;
+  }
   console.log('shell self-test ok');
 })().catch((e) => { console.error(e); process.exit(1); });

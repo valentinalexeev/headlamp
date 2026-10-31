@@ -86,6 +86,20 @@
     return loadedSec <= Math.floor(t / 1000);
   }
 
+  // loadedSeconds: when the server rendered this page, in unix seconds (NaN when unknown). It is the
+  // other half of needsReload; pages with their own Confirm button read it from here too.
+  function loadedSeconds(strip) {
+    strip = strip || document.querySelector('[role="status"][data-hl-loaded]');
+    var v = strip && strip.getAttribute('data-hl-loaded');
+    return v ? Number(v) : NaN;
+  }
+
+  // onPage: the page already shows this local path (the query is ignored), so a link to it is noise.
+  function onPage(path) {
+    var here = typeof window !== 'undefined' && window.location ? window.location.pathname : '';
+    return typeof path === 'string' && !!here && path.split('?')[0] === here;
+  }
+
   function countdown(deadlineIso, nowMs) {
     var t = Date.parse(deadlineIso);
     if (isNaN(t)) { return ''; }
@@ -121,10 +135,7 @@
     var reload = opts.reload || function () { window.location.reload(); };
     var st = { sig: null, data: null, lastOk: 0, fails: 0, error: '', busy: false, countEls: [], poller: null };
 
-    function loaded() {
-      var v = parts.strip && parts.strip.getAttribute('data-hl-loaded');
-      return v ? Number(v) : NaN;
-    }
+    function loaded() { return parts.strip ? loadedSeconds(parts.strip) : NaN; }
 
     function act(method, url, body) {
       st.busy = true;
@@ -192,7 +203,7 @@
           revert.disabled = st.busy;
           strip.appendChild(primary);
           strip.appendChild(revert);
-        } else if (it.action_label && localPath(it.action_path)) {
+        } else if (it.action_label && localPath(it.action_path) && !onPage(it.action_path)) {
           var a = hl.el('a', 'btn primary sm', hl.plain(it.action_label, 60));
           a.setAttribute('href', it.action_path);
           strip.appendChild(a);
@@ -302,7 +313,7 @@
   hl.shell = {
     pickTheme: pickTheme, applyTheme: applyTheme, currentTheme: currentTheme,
     syncThemeButtons: syncThemeButtons, timedItems: timedItems, countsBySource: countsBySource,
-    applyCounts: applyCounts, needsReload: needsReload, countdown: countdown, controller: controller,
+    applyCounts: applyCounts, needsReload: needsReload, loadedSeconds: loadedSeconds, countdown: countdown, controller: controller,
     init: init,
   };
   init();

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -134,7 +135,7 @@ func TestNavMiddlewareInjectsAfterBody(t *testing.T) {
 	if !strings.HasPrefix(body, open+`<script src="/_ui/theme.js"></script><link rel="stylesheet" href="/_ui/hl.css"><nav data-nc-nav `) {
 		t.Fatalf("shell not right after <body>: %s", body)
 	}
-	if !strings.HasSuffix(body, `<script src="/_ui/hl.js" defer></script><script src="/_ui/shell.js" defer></script><p>hi</p></BODY></html>`) {
+	if !strings.HasSuffix(body, `<script src="/_ui/hl.js" defer></script><script src="/_ui/shell.js" defer></script><script src="/_ui/palette.js" defer></script><p>hi</p></BODY></html>`) {
 		t.Fatalf("page content not right after the shell: %s", body)
 	}
 }
@@ -614,7 +615,7 @@ func TestShellInjectsSidebarTopBarAndAssets(t *testing.T) {
 	}
 	for _, want := range []string{
 		`class="hl side"`, `role="status"`, `data-hl-loaded="`, `data-source="tasks"`, `class="navlabel">Operate<`, `class="navlabel">Configure<`,
-		`<script src="/_ui/hl.js" defer></script><script src="/_ui/shell.js" defer></script><p>hi</p>`,
+		`<script src="/_ui/hl.js" defer></script><script src="/_ui/shell.js" defer></script><script src="/_ui/palette.js" defer></script><p>hi</p>`,
 		`href="/enroll?enrol=1"`, `Enrol device`, `data-theme="system"`, `data-theme="light"`, `data-theme="dark"`,
 		`href="/tasks" aria-current="page"`,
 	} {
@@ -731,7 +732,7 @@ func TestShellCarriesServerLoadTime(t *testing.T) {
 
 func TestUIAssetsServedOnAdminOnly(t *testing.T) {
 	h := NavMiddleware(richItems(), nil, nil, http.NotFoundHandler())
-	for _, p := range []string{"/_ui/hl.css", "/_ui/hl.js", "/_ui/theme.js", "/_ui/shell.js"} {
+	for _, p := range []string{"/_ui/hl.css", "/_ui/hl.js", "/_ui/theme.js", "/_ui/shell.js", "/_ui/palette.js"} {
 		if rec := do(h, "GET", p); rec.Code != 200 || rec.Body.Len() == 0 {
 			t.Errorf("%s = %d", p, rec.Code)
 		}
@@ -827,5 +828,50 @@ func TestShellAsksWhoIsOnlyWhenItInjects(t *testing.T) {
 	do(NavMiddleware(richItems(), nil, tn, http.NotFoundHandler()), "GET", "/_nav.json")
 	if tn.n.Load() != 1 {
 		t.Fatalf("/_nav.json asked %d times", tn.n.Load())
+	}
+}
+
+func TestShellHasTheSearchBoxExceptWhenCompact(t *testing.T) {
+	acts := []NavAction{{Label: "Enrol device", Path: "/enroll?enrol=1", Icon: "plus"}, {Label: `A "quoted" <one>`, Path: "/x"}}
+	out := string(renderShell(richItems(), acts, "alice", "/", time.Unix(1_800_000_123, 0)))
+	box := `<button type="button" class="search" data-palette aria-haspopup="dialog" data-actions="`
+	i := strings.Index(out, box)
+	if i < 0 {
+		t.Fatalf("no search box: %s", out)
+	}
+	for _, want := range []string{"Search or run a command", `<span class="kbd" data-palette-keys>⌘K</span>`, `<path d="M3 11a8 8 0 1 0 16 0`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if fresh := strings.Index(out, `<span class="fresh`); i > fresh || strings.Index(out, `data-top>`) > i {
+		t.Errorf("the search box goes in the top bar, before the freshness text")
+	}
+	// the actions travel as JSON in an escaped attribute, so a hostile label cannot leave it
+	start := i + len(box)
+	attr := out[start : start+strings.Index(out[start:], `"`+`>`)]
+	var got []struct{ Label, Path, Icon string }
+	if err := json.Unmarshal([]byte(html.UnescapeString(attr)), &got); err != nil || len(got) != 2 || got[0].Label != "Enrol device" || got[0].Icon != "plus" || got[1].Label != `A "quoted" <one>` {
+		t.Errorf("actions: %v %+v (%q)", err, got, attr)
+	}
+	if strings.Contains(attr, `<one>`) || strings.Contains(attr, `"quoted"`) {
+		t.Errorf("the attribute is not escaped: %q", attr)
+	}
+	// with no action the top bar is still there, for the search box
+	if none := string(renderShell(richItems(), nil, "alice", "/", time.Now())); strings.Contains(none, `data-top hidden`) || !strings.Contains(none, `data-actions="[]"`) {
+		t.Error("the top bar must stay visible without actions")
+	}
+}
+
+func TestCompactShellHasNoSearchBox(t *testing.T) {
+	one := []NavItem{{Label: "Nodes", Path: "/", Order: 10, Group: "operate", Icon: "nodes"}}
+	body := shellPage(t, one, []NavAction{{Label: "Enrol device", Path: "/enroll", Icon: "plus"}}, whoTailnet{login: "alice"}, "/")
+	for _, bad := range []string{"data-palette", "Search or run a command", "kbd"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("compact shell has %q", bad)
+		}
+	}
+	if !strings.Contains(body, `<script src="/_ui/palette.js" defer></script>`) {
+		t.Error("the palette script is part of every shell")
 	}
 }

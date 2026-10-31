@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 	"html"
 	"strconv"
 	"time"
@@ -40,6 +41,23 @@ func themeControl() string {
 		themeButton("light", "Light", "sun") +
 		themeButton("dark", "Dark", "moon") +
 		`</div>`
+}
+
+// searchBox is the top-bar button that opens the command palette. The top-bar actions travel in a data attribute, so
+// the palette offers them without a request; the pages come from /_nav.json when it opens.
+func searchBox(actions []NavAction) string {
+	type act struct {
+		Label string `json:"label"`
+		Path  string `json:"path"`
+		Icon  string `json:"icon,omitempty"`
+	}
+	list := make([]act, 0, len(actions))
+	for _, a := range actions {
+		list = append(list, act{a.Label, a.Path, a.Icon})
+	}
+	data, _ := json.Marshal(list)
+	return `<button type="button" class="search" data-palette aria-haspopup="dialog" data-actions="` + esc(string(data)) + `">` +
+		`<span class="row nowrap">` + ui.Icon("search") + `<span>Search or run a command</span></span><span class="kbd" data-palette-keys>⌘K</span></button>`
 }
 
 func navLink(b *bytes.Buffer, it NavItem, active bool) {
@@ -115,13 +133,11 @@ func renderShell(items []NavItem, actions []NavAction, login, reqPath string, no
 	}
 
 	b.WriteString(`<div role="status" class="strip" hidden data-hl-loaded="` + strconv.FormatInt(now.Unix(), 10) + `"></div>`)
-	b.WriteString(`<div class="top" data-top`)
-	if len(actions) == 0 && !compact {
-		b.WriteString(` hidden`)
-	}
-	b.WriteString(`>`)
+	b.WriteString(`<div class="top" data-top>`)
 	if compact {
 		b.WriteString(brand + `</div>`)
+	} else {
+		b.WriteString(searchBox(actions))
 	}
 	b.WriteString(`<span class="fresh mono" data-fresh></span>`)
 	for _, a := range actions {
@@ -131,6 +147,6 @@ func renderShell(items []NavItem, actions []NavAction, login, reqPath string, no
 		b.WriteString(themeControl())
 	}
 	b.WriteString(`</div></div>`)
-	b.WriteString(`<script src="/_ui/hl.js" defer></script><script src="/_ui/shell.js" defer></script>`)
+	b.WriteString(`<script src="/_ui/hl.js" defer></script><script src="/_ui/shell.js" defer></script><script src="/_ui/palette.js" defer></script>`)
 	return b.Bytes()
 }

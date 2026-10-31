@@ -307,6 +307,8 @@
     });
     var poller = hl.poll(function () { return ctl.poll(); }, POLL_MS);
     ctl.state.poller = poller;
+    // A page that just changed something the strip shows (a confirmed change) asks for a fresh read at once.
+    hl.shell.refresh = function () { poller.now(); };
     setInterval(function () { if (!document.hidden) { ctl.tick(); } }, 1000);
   }
 

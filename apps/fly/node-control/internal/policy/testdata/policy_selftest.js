@@ -194,7 +194,7 @@ const historyButtons = (els) => findAll(els.rows, (n) => n.tag === 'button');
     assert.strictEqual(fetches.length, 0, 'no apply request while pending');
     assert.strictEqual(els.diffbox.hidden, false);
     assert.strictEqual(els.difftitle.textContent, 'What changed in #48');
-    assert.ok(els.diffmeta.textContent.includes('by alice: Funnel: add namespace demo'));
+    assert.ok(els.diffmeta.textContent.includes('by alice, Funnel: add namespace demo'));
   }
 
   // countdownReachesZeroThenPolls
@@ -203,7 +203,7 @@ const historyButtons = (els) => findAll(els.rows, (n) => n.tag === 'button');
     let t = NOW;
     const { els, ctrl } = mountPage({ now: () => t });
     ctrl.update(stateOf({ pending: pend({ seconds_left: 3 }) }));
-    const count = () => findAll(els.pendtitle, (n) => hasClass(n, 'tick'))[0].textContent;
+    const count = () => { const n = findAll(els.pendtitle, (n) => hasClass(n, 'tick'))[0]; return n ? n.textContent : '00:00'; };
     assert.strictEqual(count(), '00:03');
     fetches.length = 0;
     t += 2000;
@@ -215,6 +215,7 @@ const historyButtons = (els) => findAll(els.rows, (n) => n.tag === 'button');
     ctrl.tick();
     assert.strictEqual(count(), '00:00');
     assert.ok(els.pendtitle.textContent.includes('is being reverted'));
+    assert.strictEqual(findAll(els.pendtitle, (n) => hasClass(n, 'tick')).length, 0, 'no timer once the deadline has passed');
     assert.strictEqual(sent('GET', '/policy/state').length, 1, 'polls at zero');
     await flush();
     t += 1000;
@@ -272,8 +273,109 @@ const historyButtons = (els) => findAll(els.rows, (n) => n.tag === 'button');
     assert.ok(els.notice.textContent.includes('Started change #49 to undo #47'));
     assert.strictEqual(els.pending.hidden, false);
     // history rows say the state with a shape and a word
-    const states = els.rows.children.map((tr) => tr.children[4].textContent);
+    const states = els.rows.children.map((tr) => findAll(tr.children[2], (n) => hasClass(n, 'st'))[0].textContent);
     assert.deepStrictEqual(states, ['Pending', 'Confirmed', 'Reverted']);
+    // three columns; who and why on a second line; the button is in the row
+    assert.ok(els.rows.children.every((tr) => tr.children.length === 3));
+    assert.ok(els.rows.children[1].children[0].textContent.includes('alice, edit'));
+    assert.strictEqual(findAll(els.rows.children[1], (n) => n.tag === 'button').length, 1);
+  }
+
+  // unparseableAppliedAtNeverOffersConfirm
+  {
+    loadedAt = appliedSec + 30;
+    const { els, ctrl } = mountPage();
+    ctrl.update(stateOf({ pending: pend({ applied_at: 'soon' }) }));
+    assert.deepStrictEqual(names(els.pendbtns), ['Reload to confirm', 'Revert now']);
+  }
+
+  // pastDeadlineWithoutFailedAttemptIsNotStuck: the watcher has not ticked yet
+  {
+    loadedAt = appliedSec + 30;
+    const { els, ctrl } = mountPage();
+    ctrl.update(stateOf({ pending: pend({ overdue: true, attempts: 0, seconds_left: 0 }) }));
+    assert.ok(els.pendtitle.textContent.includes('is being reverted'));
+    assert.ok(!els.pendtext.textContent.includes('failing'));
+    assert.ok(!hasClass(els.pending, 'crit'));
+    assert.strictEqual(findAll(els.pendtitle, (n) => hasClass(n, 'tick')).length, 0);
+    ctrl.update(stateOf({ pending: pend({ overdue: true, attempts: 1, seconds_left: 0 }) }));
+    assert.ok(els.pendtext.textContent.includes('failing (1 attempt)'));
+    assert.strictEqual(findAll(els.pendtitle, (n) => hasClass(n, 'tick')).length, 0, 'no timer when stuck');
+  }
+
+  // leadInNamesTheKeptVersion
+  {
+    const { els, ctrl } = mountPage();
+    ctrl.update(stateOf());
+    assert.strictEqual(els.sub.textContent, 'Version 47 confirmed. Change #48 is live but not yet kept.');
+  }
+
+  // pollKeepsPanelAndDiffNodes: a click or selection survives a poll of the same state
+  {
+    loadedAt = appliedSec + 30;
+    const { els, ctrl } = mountPage();
+    ctrl.update(stateOf());
+    const btns = els.pendbtns.children.slice();
+    const lines = els.diff.children.slice();
+    const confirmBtn = buttonNamed(els.pendbtns, 'Confirm change');
+    confirmBtn.focus();
+    ctrl.update(stateOf());
+    assert.ok(els.pendbtns.children.every((n, i) => n === btns[i]), 'buttons were rebuilt');
+    assert.ok(els.diff.children.every((n, i) => n === lines[i]), 'diff was redrawn');
+    assert.strictEqual(global.document.activeElement, confirmBtn);
+    ctrl.update(stateOf({ pending: pend({ attempts: 2 }) }));
+    assert.ok(els.pendtext.textContent.includes('failing'), 'a changed state does rebuild');
+    ctrl.update(stateOf({ pending: pend({ attempts: 2, diff: '+x\n' }) }));
+    assert.notStrictEqual(els.diff.children[0], lines[0]);
+  }
+
+  // slowPollCannotRestoreAConfirmedChange
+  {
+    loadedAt = appliedSec + 30;
+    const { els, ctrl } = mountPage();
+    ctrl.update(stateOf());
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    fetchReply = (url) => (url === '/policy/state' ? { gate: true } : empty());
+    const realFetch = global.fetch;
+    let first = true;
+    global.fetch = (url, opts) => {
+      if (url === '/policy/state' && first) {
+        first = false;
+        return gate.then(() => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(stateOf())) }));
+      }
+      fetchReply = (u) => (u === '/policy/confirm' ? empty() : json(quiet()));
+      return realFetch(url, opts);
+    };
+    const slow = ctrl.reload();
+    buttonNamed(els.pendbtns, 'Confirm change').click();
+    await flush();
+    assert.strictEqual(els.pending.hidden, true, 'confirmed');
+    release();
+    await slow;
+    await flush();
+    assert.strictEqual(els.pending.hidden, true, 'the late answer was dropped');
+    global.fetch = realFetch;
+  }
+
+  // refusalSurvivesALaterGoodPoll but a load error does not
+  {
+    loadedAt = appliedSec + 30;
+    const { els, ctrl } = mountPage();
+    ctrl.update(stateOf());
+    fetchReply = () => json({ detail: 'down' }, 500);
+    await ctrl.reload();
+    assert.ok(els.error.textContent.includes('Cannot load the policy'));
+    fetchReply = () => json(stateOf());
+    await ctrl.reload();
+    assert.strictEqual(els.error.hidden, true, 'a load error goes when a read works');
+    fetchReply = (url) => (url === '/policy/confirm' ? json({ detail: 'that change is not the pending one' }, 409) : json(stateOf()));
+    buttonNamed(els.pendbtns, 'Confirm change').click();
+    await flush();
+    assert.ok(els.error.textContent.includes('not the pending one'));
+    await ctrl.reload();
+    assert.ok(els.error.textContent.includes('not the pending one'), 'a good poll keeps the refusal');
+    assert.strictEqual(els.error.hidden, false);
   }
 
   // emptyHistory

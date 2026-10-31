@@ -26,35 +26,40 @@
       <div class="rowbtns start" id="pendbtns"></div>
     </section>
 
-    <section class="stack" id="diffbox" hidden>
-      <div class="seclabel"><h2 id="difftitle"></h2><span class="t3 small" id="diffmeta"></span></div>
-      <pre class="code" id="diff"></pre>
-    </section>
+    <div class="cols">
+      <div class="colmain">
+      <section class="stack" id="diffbox" hidden>
+        <div class="seclabel"><h2 id="difftitle"></h2><span class="t3 small" id="diffmeta"></span></div>
+        <pre class="code" id="diff"></pre>
+      </section>
 
-    <div class="rowbtns start" id="lockrow" hidden>
-      <button type="button" class="btn" id="editlock" disabled></button>
-      <span class="t3 small" id="lockhint"></span>
-    </div>
-
-    <section class="stack" id="editbox" hidden>
-      <div class="seclabel"><h2>Edit policy</h2><span class="t3 small" id="editmeta"></span></div>
-      <label class="sr" for="editor">Policy text</label>
-      <textarea class="input area" id="editor" spellcheck="false" autocomplete="off"></textarea>
-      <div class="rowbtns start" id="editbtns"></div>
-      <p class="t2" id="message" role="status"></p>
-      <pre class="code" id="prevdiff" hidden></pre>
-      <ul class="t2 small" id="warnings"></ul>
-    </section>
-
-    <section class="stack">
-      <div class="seclabel"><h2>History</h2></div>
-      <div class="tw">
-        <table>
-          <thead><tr><th>Change</th><th>When</th><th>By</th><th>Reason</th><th>State</th><th><span class="sr">Actions</span></th></tr></thead>
-          <tbody id="rows"></tbody>
-        </table>
+      <div class="rowbtns start" id="lockrow" hidden>
+        <button type="button" class="btn" id="editlock" disabled></button>
+        <span class="t3 small" id="lockhint"></span>
       </div>
-    </section>
+
+      <section class="stack" id="editbox" hidden>
+        <div class="seclabel"><h2>Edit policy</h2><span class="t3 small" id="editmeta"></span></div>
+        <label class="sr" for="editor">Policy text</label>
+        <textarea class="input area" id="editor" spellcheck="false" autocomplete="off"></textarea>
+        <div class="rowbtns start" id="editbtns"></div>
+        <p class="t2" id="message" role="status"></p>
+        <pre class="code" id="prevdiff" hidden></pre>
+        <ul class="t2 small" id="warnings"></ul>
+      </section>
+      </div>
+      <aside class="colside">
+      <div>
+        <div class="seclabel"><h2>History</h2></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Change</th><th>When</th><th>State</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+      </aside>
+    </div>
   </div>
 </div>
 <script src="/policy/static/policy.js" defer></script>

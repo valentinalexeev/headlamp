@@ -10,7 +10,7 @@
 
   var POLL_MS = 15000;
   var RELOAD_RETRY_MS = 3000;
-  var COLUMNS = 6;
+  var COLUMNS = 3;
 
   function arr(v) { return Array.isArray(v) ? v : []; }
   function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
@@ -81,11 +81,13 @@
     var st = {
       state: null, pending: null, history: [], loaded: false, failed: false, busy: false, receivedAt: 0,
       loadedText: null, base: '', baseSeen: '', lastPoll: 0, loading: false, loadErr: false,
-      pendSig: null, editSig: null, countEl: null
+      pendSig: null, editSig: null, countEl: null, diffText: null, gen: 0, loadSeq: 0, errKind: ''
     };
     var ctrl = {};
 
-    function setError(text) { els.error.textContent = text; els.error.hidden = !text; }
+    // kind says where the message came from: a failed read ('load') goes when a read works again, but the
+    // refusal of an action stays until the next action.
+    function setError(text, kind) { els.error.textContent = text; els.error.hidden = !text; st.errKind = text ? (kind || 'action') : ''; }
     function setNotice(text) { els.notice.textContent = text; els.notice.hidden = !text; }
     function setMessage(text) { els.message.textContent = text || ''; }
 
@@ -100,7 +102,7 @@
 
     function stuck() {
       var p = st.pending;
-      return !!p && (Number(p.attempts) > 0 || !!p.overdue);
+      return !!p && Number(p.attempts) > 0; // as attention.go: past the deadline with no failed attempt is just about to revert
     }
 
     function fresh() {
@@ -115,9 +117,9 @@
       if (!p) { st.pendSig = null; st.countEl = null; return; }
       var isFresh = fresh();
       var isStuck = stuck();
-      var reverting = !isStuck && secondsLeft() <= 0;
-      var sig = JSON.stringify([p.id, isFresh, isStuck, reverting, st.busy]);
-      if (sig === st.pendSig && st.countEl) { st.countEl.textContent = clock(secondsLeft()); return; }
+      var reverting = !isStuck && (secondsLeft() <= 0 || !!p.overdue);
+      var sig = JSON.stringify([p.id, isFresh, isStuck, Number(p.attempts), reverting, st.busy]);
+      if (sig === st.pendSig) { if (st.countEl) { st.countEl.textContent = clock(secondsLeft()); } return; }
       var fk = focusKey(els.pending);
       st.pendSig = sig;
       els.pending.className = isStuck ? 'note crit split' : 'note split';
@@ -126,12 +128,17 @@
       g.setAttribute('aria-hidden', 'true');
       els.pendtitle.appendChild(g);
       var id = Number(p.id);
-      var head = isStuck ? 'Change #' + id + ' is neither confirmed nor reverted '
-        : reverting ? 'Change #' + id + ' is being reverted '
+      // A timer only where it means something: not once the deadline has passed, and not when the revert is failing.
+      var counting = !isStuck && !reverting;
+      var head = isStuck ? 'Change #' + id + ' is neither confirmed nor reverted'
+        : reverting ? 'Change #' + id + ' is being reverted'
         : 'Change #' + id + ' reverts in ';
       var strong = hl.el('b', 'name', head);
-      st.countEl = hl.el('span', 'tick', clock(secondsLeft()));
-      strong.appendChild(st.countEl);
+      st.countEl = null;
+      if (counting) {
+        st.countEl = hl.el('span', 'tick', clock(secondsLeft()));
+        strong.appendChild(st.countEl);
+      }
       els.pendtitle.appendChild(strong);
 
       var text;
@@ -190,16 +197,20 @@
       if (p) {
         var id = Number(p.id);
         els.difftitle.textContent = 'What changed in #' + id;
-        var who = 'by ' + label(p.actor);
         var why = label(p.reason, 200);
-        els.diffmeta.textContent = why ? who + ': ' + why : who;
-        drawDiff(els.diff, p.diff || '(no differences)');
-        clear(els.editlock);
-        var ic = hl.icon('edit');
-        if (ic) { els.editlock.appendChild(ic); }
-        els.editlock.appendChild(hl.el('span', null, 'Edit policy'));
+        els.diffmeta.textContent = 'by ' + label(p.actor) + (why ? ', ' + why : '');
+        // Redrawn only when the text changes, so a selection in the diff survives a poll.
+        var dtext = p.diff || '(no differences)';
+        if (st.diffText !== dtext) { st.diffText = dtext; drawDiff(els.diff, dtext); }
+        if (!els.editlock.firstChild) {
+          var ic = hl.icon('edit');
+          if (ic) { els.editlock.appendChild(ic); }
+          els.editlock.appendChild(hl.el('span', null, 'Edit policy'));
+        }
         els.editlock.disabled = true;
         els.lockhint.textContent = 'Available after #' + id + ' is confirmed or reverted.';
+      } else {
+        st.diffText = null;
       }
       drawEditButtons();
     }
@@ -221,18 +232,19 @@
         e = obj(e);
         var id = Number(e.id);
         var tr = hl.el('tr');
-        tr.appendChild(hl.el('td', 'mono', '#' + id));
+        // Who and why sit on a second line, so the table stays three columns wide.
+        var first = hl.el('td', 'detail');
+        first.appendChild(hl.el('div', 'mono', '#' + id));
+        var why = label(e.reason, 120);
+        first.appendChild(hl.el('div', 't3 small', label(e.actor) + (why ? ', ' + why : '')));
+        tr.appendChild(first);
         var when = hl.el('td', 't2', hl.relTime(String(e.at || ''), now()));
         when.setAttribute('title', label(e.at, 40));
         tr.appendChild(when);
-        tr.appendChild(hl.el('td', 't2', label(e.actor)));
-        tr.appendChild(hl.el('td', 't2', label(e.reason, 120)));
-        var state = hl.el('td');
+        var state = hl.el('td', 'detail');
         var known = Object.prototype.hasOwnProperty.call(STATE_STATUS, e.state) ? STATE_STATUS[e.state] : ['warn', 'Outcome unknown'];
         state.appendChild(hl.status(known[0], known[1]));
-        tr.appendChild(state);
-        var act = hl.el('td', 'act');
-        var box = hl.el('div', 'rowbtns');
+        var box = hl.el('div', 'rowbtns start');
         var b = keyed(button('Revert change', 'undo', 'sm quiet', function () { ctrl.restore(id); }), 'restore:' + id);
         if (st.pending || st.busy) {
           // Undoing an older change is a new change, which cannot start while one is pending.
@@ -240,8 +252,8 @@
           if (st.pending) { b.setAttribute('title', 'Confirm or revert the pending change first'); }
         }
         box.appendChild(b);
-        act.appendChild(box);
-        tr.appendChild(act);
+        state.appendChild(box);
+        tr.appendChild(state);
         els.rows.appendChild(tr);
       });
       refocus(els.rows, fk);
@@ -250,7 +262,11 @@
     function summary() {
       if (!st.loaded) { return st.failed ? 'Could not load the policy. Retrying.' : ''; }
       var text;
-      if (st.pending) { text = 'Change #' + Number(st.pending.id) + ' is live but not yet kept.'; }
+      if (st.pending) {
+        var kept = null;
+        for (var k = 0; k < st.history.length; k++) { if (obj(st.history[k]).state === 'confirmed') { kept = obj(st.history[k]); break; } }
+        text = (kept ? 'Version ' + Number(kept.id) + ' confirmed. ' : '') + 'Change #' + Number(st.pending.id) + ' is live but not yet kept.';
+      }
       else {
         var last = st.history.length ? obj(st.history[0]) : null;
         text = last ? 'Last change #' + Number(last.id) + ' ' + label(last.state, 20) + ' ' + hl.relTime(String(last.at || ''), now()) + '.'
@@ -284,34 +300,38 @@
       st.loaded = true;
       if (force || !dirty()) {
         st.loadedText = String(d.policy || '');
-        els.editor.value = st.loadedText;
+        if (els.editor.value !== st.loadedText) { els.editor.value = st.loadedText; } // same text: keep caret and selection
         st.base = updated;
       } else if (updated !== st.baseSeen && updated !== st.base) {
         setMessage('The policy changed after you started editing. Apply will be refused; press Reload to discard your edit and load it.');
       }
       st.baseSeen = updated;
-      st.pendSig = null;
-      st.editSig = null;
       render();
     };
 
     ctrl.setFailed = function (f) { st.failed = !!f; render(); };
 
+    // load reads the state. An answer is dropped when an action began after the read started (that action reads
+    // again itself) or a newer read exists, so a slow poll cannot bring back a panel the person just closed.
     function load(force) {
+      var gen = st.gen;
+      var seq = ++st.loadSeq;
       st.loading = true;
       st.lastPoll = now();
+      var current = function () { return gen === st.gen && seq === st.loadSeq; };
       return hl.api('GET', '/policy/state').then(function (j) {
-        st.loading = false;
-        if (st.loadErr) { st.loadErr = false; setError(''); }
+        if (seq === st.loadSeq) { st.loading = false; }
+        if (!current()) { return; }
+        if (st.errKind === 'load') { setError(''); }
         ctrl.update(j, force);
         ctrl.setFailed(false);
       }, function (err) {
-        st.loading = false;
-        st.loadErr = true;
+        if (seq === st.loadSeq) { st.loading = false; }
+        if (!current()) { return; }
         if (err && err.status === 502) {
-          setError('Headscale is unreachable or failed. The policy shown may be out of date.');
+          setError('Headscale is unreachable or failed. The policy shown may be out of date.', 'load');
         } else {
-          setError('Cannot load the policy: ' + label(err && err.message, 200));
+          setError('Cannot load the policy: ' + label(err && err.message, 200), 'load');
         }
         ctrl.setFailed(true);
       });
@@ -351,6 +371,7 @@
     function run(fn, what, force) {
       if (st.busy) { return Promise.resolve(); }
       st.busy = true;
+      st.gen++;
       setError('');
       setNotice('');
       render();
@@ -411,6 +432,7 @@
       if (st.pending || st.busy) { return Promise.resolve(); }
       var text = els.editor.value;
       st.busy = true;
+      st.gen++;
       setError('');
       setNotice('');
       render();

@@ -153,6 +153,7 @@ func (m *Module) Register(r *core.Routes) error {
 	reg.SetStore(store)
 	m.store, m.reg = store, reg
 	m.admin = NewAdminFor(store, reg)
+	m.admin.SetTailnet(r.Tailnet)
 	m.admin.Register(r.Admin)
 	NewPublicFor(store, reg).Register(r.Public)
 	return nil
@@ -194,6 +195,14 @@ func (m *Module) Stop(ctx context.Context) error {
 		}
 	}
 	return m.store.Close()
+}
+
+// AuditLog is the log of device and node actions, or nil when enrolment is off.
+func (m *Module) AuditLog() core.AuditLog {
+	if m.store == nil {
+		return nil
+	}
+	return m.store
 }
 
 // Nav puts the enrolment page in the top bar, but only when the module registered (enrolment enabled).

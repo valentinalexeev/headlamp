@@ -1,9 +1,12 @@
 package enroll
 
 import (
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
+
+	"example.com/node-control/internal/ui"
 )
 
 func TestPageHasTheIngressTable(t *testing.T) {
@@ -61,5 +64,65 @@ func TestPageDrawsTheLinkAsQR(t *testing.T) {
 	}
 	if len(qrcodeJS) == 0 || !strings.Contains(string(qrcodeJS), "Kazuhiko Arase") {
 		t.Error("the embedded QR encoder (with its licence header) is missing")
+	}
+}
+
+func TestApprovePageHeaders(t *testing.T) {
+	f := newAdminFx(t)
+	for path, ctype := range map[string]string{"/enroll/approve": "text/html", "/enroll/static/approve.js": "text/javascript"} {
+		rec := f.do("GET", path, "", "")
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d", path, rec.Code)
+		}
+		h := rec.Header()
+		if h.Get("Content-Security-Policy") != ui.PageCSP {
+			t.Errorf("%s CSP: %q", path, h.Get("Content-Security-Policy"))
+		}
+		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("X-Frame-Options") != "DENY" || h.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s headers: %v", path, h)
+		}
+		if !strings.HasPrefix(h.Get("Content-Type"), ctype) {
+			t.Errorf("%s content type %q", path, h.Get("Content-Type"))
+		}
+	}
+	if rec := f.do("GET", "/enroll/approve?name=bridge-3", "", ""); rec.Code != 200 {
+		t.Errorf("approve with a name: %d", rec.Code)
+	}
+}
+
+func TestApprovePageHasNoInlineCodeOrInjection(t *testing.T) {
+	html := string(approveHTML)
+	for _, m := range regexp.MustCompile(`(?i)<script\b[^>]*>`).FindAllString(html, -1) {
+		if !strings.Contains(m, ` src="/`) || !strings.Contains(m, "defer") {
+			t.Errorf("script tag %q must be a same-origin deferred file", m)
+		}
+	}
+	for _, bad := range []string{"<style", " style=", "javascript:", "http://", "https://", " onclick=", " onload="} {
+		if strings.Contains(strings.ToLower(html), bad) {
+			t.Errorf("page contains %q", bad)
+		}
+	}
+	js := string(approveJS)
+	for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "confirm(", "prompt(", "XMLHttpRequest"} {
+		if strings.Contains(js, bad) {
+			t.Errorf("script contains %q", bad)
+		}
+	}
+}
+
+// The enrolment scripts run under node against a small DOM stand-in (skipped when node is missing).
+func TestEnrollPagesSelfTest(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	args := []string{"testdata/enroll_selftest.js", "../ui/static/hl.js", "static/approve.js"}
+	if out, err := exec.Command(node, args...).CombinedOutput(); err != nil {
+		t.Fatalf("self-test failed: %v\n%s", err, out)
+	}
+	for _, f := range []string{"static/approve.js"} {
+		if out, err := exec.Command(node, "--check", f).CombinedOutput(); err != nil {
+			t.Fatalf("node --check %s: %v\n%s", f, err, out)
+		}
 	}
 }

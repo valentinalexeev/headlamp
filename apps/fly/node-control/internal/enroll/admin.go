@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"example.com/node-control/internal/core"
+	"example.com/node-control/internal/ui"
 )
 
 // The operator API and page for enrolment. It is tailnet-only with no auth beyond the network. Every
@@ -45,6 +46,14 @@ var enrollHTML []byte
 //
 //go:embed static/qrcode.js
 var qrcodeJS []byte
+
+// The bridge approval review: a page and its script. Neither carries inline script or style.
+//
+//go:embed static/approve.html
+var approveHTML []byte
+
+//go:embed static/approve.js
+var approveJS []byte
 
 // Clients are the accepted DeviceIn.client values.
 var Clients = []string{"sing-box", "karing", "clash"}
@@ -86,6 +95,8 @@ func (a *Admin) State() *SyncState { return a.reg.First().State }
 func (a *Admin) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /enroll", a.page)
 	mux.HandleFunc("GET /enroll/qrcode.js", a.qrScript)
+	mux.HandleFunc("GET /enroll/approve", asset("text/html; charset=utf-8", approveHTML))
+	mux.HandleFunc("GET /enroll/static/approve.js", asset("text/javascript; charset=utf-8", approveJS))
 	mux.HandleFunc("GET /enroll/devices", a.listDevices)
 	mux.HandleFunc("POST /enroll/devices", a.jsonOnly(a.createDevice))
 	mux.HandleFunc("DELETE /enroll/devices/{id}", a.jsonOnly(a.deleteDevice))
@@ -272,6 +283,20 @@ func (v *validator) integer(obj map[string]json.RawMessage, field string, min, m
 		v.add("less_than_equal", field, fmt.Sprintf("Input should be less than or equal to %d", max))
 	}
 	return n
+}
+
+// asset serves an embedded file with headers that forbid framing, sniffing, caching and any script or style that
+// is not from this origin.
+func asset(contentType string, body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", contentType)
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Content-Security-Policy", ui.PageCSP)
+		_, _ = w.Write(body)
+	}
 }
 
 func (a *Admin) page(w http.ResponseWriter, r *http.Request) {

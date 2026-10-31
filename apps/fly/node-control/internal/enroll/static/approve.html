@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bridge approval</title>
+</head>
+<body>
+<div class="hl" id="approve">
+  <div class="page narrow">
+    <div>
+      <a class="small t2" href="/nodes">Nodes</a>
+      <h1 id="title">Bridge approval</h1>
+      <p class="t2" id="sub" aria-live="polite">Loading.</p>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <section class="note crit" id="changed" hidden></section>
+    <div class="note plain" id="info" hidden></div>
+
+    <section class="panel" id="review" hidden>
+      <h2>Compare these with the host</h2>
+      <p class="t2 small">Check them against your own source, not this page. Run this where you administer headscale:</p>
+      <pre class="code">headscale nodes list</pre>
+      <dl class="kv" id="fields"></dl>
+    </section>
+
+    <div class="stack" id="confirm"></div>
+    <div class="rowbtns" id="actions" hidden></div>
+  </div>
+</div>
+<script src="/enroll/static/approve.js" defer></script>
+</body>
+</html>

@@ -234,6 +234,8 @@ type fakeHeadscale struct {
 	nodes     []map[string]any
 	policy    string
 	updatedAt time.Time
+	nextKey   int
+	keys      []map[string]any // pre-auth keys, newest last
 }
 
 const basePolicy = `{"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}`
@@ -260,9 +262,10 @@ func newFakeHeadscale(sc scenario) *fakeHeadscale {
 		node(4, "bridge-1", true, "100.64.0.21", time.Minute, "tag:ingress"),
 		node(5, "bridge-2", true, "100.64.0.22", time.Minute, "tag:ingress"),
 		node(6, "bridge-3", true, "100.64.0.23", time.Minute, "tag:ingress"),
-		node(7, "runner-1", true, "100.64.0.31", time.Minute, "tag:task-runner", "tag:browser-session"),
+		// runner-1 also publishes into the two funnel namespaces, so manual routes can point at it.
+		node(7, "runner-1", true, "100.64.0.31", time.Minute, "tag:task-runner", "tag:browser-session", "tag:funnel", "tag:ns-demo", "tag:ns-lab"),
 	}
-	return &fakeHeadscale{nodes: ns, policy: basePolicy, updatedAt: now.Add(-24 * time.Hour)}
+	return &fakeHeadscale{nodes: ns, policy: basePolicy, updatedAt: now.Add(-24 * time.Hour), nextKey: 1}
 }
 
 func (f *fakeHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -291,9 +294,37 @@ func (f *fakeHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "POST /api/v1/policy/check":
 		reply(200, map[string]any{})
 	case "GET /api/v1/user":
-		reply(200, map[string]any{"users": []any{}})
+		reply(200, map[string]any{"users": []any{map[string]any{"id": "1", "name": "demo"}}})
 	case "GET /api/v1/preauthkey":
-		reply(200, map[string]any{"preAuthKeys": []any{}})
+		reply(200, map[string]any{"preAuthKeys": f.keys})
+	case "POST /api/v1/preauthkey":
+		var in struct {
+			Reusable   bool     `json:"reusable"`
+			Ephemeral  bool     `json:"ephemeral"`
+			Expiration string   `json:"expiration"`
+			ACLTags    []string `json:"aclTags"`
+		}
+		if json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in) != nil {
+			reply(400, map[string]any{"code": 3, "message": "invalid key request"})
+			return
+		}
+		k := map[string]any{"id": fmt.Sprint(f.nextKey), "key": fmt.Sprintf("demo-key-%04d-not-a-real-secret", f.nextKey),
+			"user": map[string]any{"id": "1", "name": "demo"}, "reusable": in.Reusable, "ephemeral": in.Ephemeral,
+			"used": false, "expiration": in.Expiration, "aclTags": in.ACLTags}
+		f.nextKey++
+		f.keys = append(f.keys, k)
+		reply(200, map[string]any{"preAuthKey": k})
+	case "POST /api/v1/preauthkey/expire":
+		var in struct {
+			ID string `json:"id"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in)
+		for _, k := range f.keys {
+			if k["id"] == in.ID {
+				k["expiration"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+			}
+		}
+		reply(200, map[string]any{})
 	default:
 		reply(404, map[string]any{"code": 5, "message": "not found"})
 	}
@@ -514,7 +545,7 @@ func (w *world) seed(ctx context.Context, admin string, asIngress func(bool)) er
 
 	keep(w.seedDevices(ctx, must))
 	keep(w.seedBridges(must))
-	keep(w.seedPolicy(must))
+	keep(w.seedFunnel(must))
 	keep(w.seedTasks(ctx, hc, admin, must))
 	keep(w.seedFunnelReport(ctx, hc, admin, asIngress))
 	return firstErr
@@ -579,22 +610,50 @@ func (w *world) seedBridges(must mustFn) error {
 	return errors.New("bridge-3 was not discovered")
 }
 
-// seedPolicy leaves one change applied and unconfirmed (it reverts by itself after 15 minutes).
-func (w *world) seedPolicy(must mustFn) error {
-	if !w.sc.problems {
-		return nil
-	}
-	data, err := must("reading the policy state", 200, "GET", "/policy/state", nil)
-	if err != nil {
+// seedFunnel creates the two namespaces through the funnel API, the way an operator would. In the clear scenario
+// the policy changes they cause are confirmed; in the attention scenario demo is left waiting for its confirm
+// (it reverts by itself after 15 minutes), which is also the pending policy change that scenario shows. It
+// then adds a manual route, a block and a few publisher keys.
+func (w *world) seedFunnel(must mustFn) error {
+	create := func(name string, lo, hi int, note string, confirm bool) error {
+		data, err := must("creating namespace "+name, 202, "POST", "/funnel/namespaces",
+			map[string]any{"name": name, "ports": []map[string]int{{"lo": lo, "hi": hi}}, "note": note})
+		if err != nil {
+			return err
+		}
+		if !confirm {
+			return nil
+		}
+		var out struct {
+			ChangeID int64 `json:"change_id"`
+		}
+		if json.Unmarshal(data, &out) != nil || out.ChangeID < 1 {
+			return errors.New("creating namespace " + name + ": no change id")
+		}
+		_, err = must("confirming the policy change for "+name, 204, "POST", "/policy/confirm", map[string]any{"change_id": out.ChangeID})
 		return err
 	}
-	var st struct {
-		UpdatedAt string `json:"updated_at"`
+	// The policy console allows one pending change at a time, so the namespace that stays waiting goes last.
+	if err := create("lab", 9200, 9210, "Experiments", true); err != nil {
+		return err
 	}
-	_ = json.Unmarshal(data, &st)
-	next := `{"tagOwners":{"tag:ns-demo":["alice@"]},"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}`
-	_, err = must("applying a policy change", 200, "POST", "/policy/apply", map[string]any{"policy": next, "base_updated_at": st.UpdatedAt})
-	return err
+	if err := create("demo", 9000, 9010, "Showcase", !w.sc.problems); err != nil {
+		return err
+	}
+	if _, err := must("adding a manual route", 204, "POST", "/funnel/routes",
+		map[string]any{"ns": "lab", "service": "grafana", "target": "runner-1", "port": 9202, "scheme": "http"}); err != nil {
+		return err
+	}
+	if _, err := must("blocking a name", 204, "POST", "/funnel/blocks",
+		map[string]any{"ns": "lab", "service": "test", "reason": "Under repair"}); err != nil {
+		return err
+	}
+	for _, k := range []map[string]any{{"reusable": true}, {"reusable": true, "ephemeral": true, "ttl_hours": 72}} {
+		if _, err := must("minting a publisher key", 200, "POST", "/funnel/namespaces/lab/keys", k); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (w *world) seedTasks(ctx context.Context, hc *http.Client, admin string, must mustFn) error {
@@ -678,9 +737,21 @@ func waitFor(ctx context.Context, d time.Duration, ok func() bool) error {
 // seedFunnelReport posts the ingress's state report once and then every 30 s, as the real ingress does, so
 // the funnel reads as fresh for as long as the demo runs.
 func (w *world) seedFunnelReport(ctx context.Context, hc *http.Client, admin string, asIngress func(bool)) error {
-	routes := make([]map[string]any, 9)
-	for i := range routes {
-		routes[i] = map[string]any{"name": fmt.Sprintf("app-%d", i+1)}
+	// What the ingress reports: registered services owned by a node, one manual route (no owner) and a blocked
+	// name. In the attention scenario one target is offline.
+	route := func(ns, service string, port int, owner string, online bool) map[string]any {
+		r := map[string]any{"ns": ns, "service": service, "target": "100.64.0.31", "port": port, "scheme": "http", "target_online": online}
+		if owner != "" {
+			r["owner_node_id"], r["owner_name"] = "7", owner
+		}
+		return r
+	}
+	routes := []map[string]any{
+		route("demo", "status", 9000, "runner-1", true),
+		route("demo", "docs", 9001, "runner-1", true),
+		route("lab", "api", 9200, "runner-1", !w.sc.problems),
+		route("lab", "grafana", 9202, "", true),
+		route("lab", "test", 9205, "runner-1", true),
 	}
 	post := func() error {
 		asIngress(true)

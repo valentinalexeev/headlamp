@@ -161,3 +161,77 @@ func TestDemoRefusesNonLoopback(t *testing.T) {
 		}
 	}
 }
+
+// Both full scenarios seed the funnel through its public API: namespaces demo and lab, a manual route, a block,
+// publisher keys and a report from the ingress with registered routes. Only attention leaves demo waiting.
+func TestFunnelSeededInBothFullScenarios(t *testing.T) {
+	for _, name := range []string{"attention", "clear"} {
+		t.Run(name, func(t *testing.T) {
+			addr := startDemo(t, name)
+			code, body := get(t, addr, "/funnel/state")
+			if code != 200 {
+				t.Fatalf("state: %d %s", code, body)
+			}
+			var st struct {
+				Namespaces []struct{ Name, State string } `json:"namespaces"`
+				Routes     []struct{ NS, Service string } `json:"routes"`
+				Blocks     []struct{ NS, Service string } `json:"blocks"`
+				Ingress    *struct {
+					Stale  bool `json:"stale"`
+					Report struct {
+						Routes []struct {
+							NS      string `json:"ns"`
+							Service string `json:"service"`
+							Owner   string `json:"owner_node_id"`
+							Online  bool   `json:"target_online"`
+						} `json:"routes"`
+					} `json:"report"`
+				} `json:"ingress"`
+			}
+			if err := json.Unmarshal(body, &st); err != nil {
+				t.Fatal(err)
+			}
+			states := map[string]string{}
+			for _, n := range st.Namespaces {
+				states[n.Name] = n.State
+			}
+			wantDemo := "active"
+			if name == "attention" {
+				wantDemo = "pending"
+			}
+			if states["lab"] != "active" || states["demo"] != wantDemo || len(states) != 2 {
+				t.Errorf("namespaces: %v", states)
+			}
+			if len(st.Routes) != 1 || st.Routes[0].Service != "grafana" || len(st.Blocks) != 1 || st.Blocks[0].Service != "test" {
+				t.Errorf("manual routes %v, blocks %v", st.Routes, st.Blocks)
+			}
+			if st.Ingress == nil || st.Ingress.Stale {
+				t.Fatalf("ingress: %+v", st.Ingress)
+			}
+			registered, offline := 0, 0
+			for _, r := range st.Ingress.Report.Routes {
+				if r.Owner != "" {
+					registered++
+				}
+				if !r.Online {
+					offline++
+				}
+			}
+			if registered < 3 || offline != map[string]int{"attention": 1, "clear": 0}[name] {
+				t.Errorf("report routes: %d registered, %d offline", registered, offline)
+			}
+			code, body = get(t, addr, "/funnel/namespaces/lab/keys")
+			var keys struct {
+				Keys []struct{ ID int } `json:"keys"`
+			}
+			if code != 200 || json.Unmarshal(body, &keys) != nil || len(keys.Keys) != 2 {
+				t.Errorf("keys: %d %s", code, body)
+			}
+			for _, p := range []string{"/funnel", "/funnel/config"} {
+				if code, _ := get(t, addr, p); code != 200 {
+					t.Errorf("%s: %d", p, code)
+				}
+			}
+		})
+	}
+}

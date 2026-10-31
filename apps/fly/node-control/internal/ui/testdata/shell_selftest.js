@@ -105,7 +105,7 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     const applied = '2026-01-01T12:00:00Z';
     const appliedSec = Date.parse(applied) / 1000;
     const item = { level: 'timed', source: 'policy', title: 'Policy change #48 is pending', change_id: 48, applied_at: applied, deadline: iso(100) };
-    for (const [loaded, want] of [[appliedSec - 1, 'Reload to confirm'], [appliedSec, 'Confirm'], [appliedSec + 30, 'Confirm']]) {
+    for (const [loaded, want] of [[appliedSec - 1, 'Reload to confirm'], [appliedSec, 'Reload to confirm'], [appliedSec + 1, 'Confirm'], [appliedSec + 30, 'Confirm']]) {
       const p = parts();
       p.strip.setAttribute('data-hl-loaded', String(loaded));
       await ctl(p, async () => ({ items: [item] })).poll();
@@ -116,8 +116,8 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     const cases = [
       ['no data-hl-loaded', null, item],
       ['bad data-hl-loaded', 'soon', item],
-      ['no applied_at', String(appliedSec), Object.assign({}, item, { applied_at: undefined })],
-      ['bad applied_at', String(appliedSec), Object.assign({}, item, { applied_at: 'yesterday' })],
+      ['no applied_at', String(appliedSec + 1), Object.assign({}, item, { applied_at: undefined })],
+      ['bad applied_at', String(appliedSec + 1), Object.assign({}, item, { applied_at: 'yesterday' })],
     ];
     for (const [name, loaded, it] of cases) {
       const p = parts();
@@ -129,7 +129,7 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     const calls = [];
     let reloads = 0;
     const p = parts();
-    p.strip.setAttribute('data-hl-loaded', String(appliedSec));
+    p.strip.setAttribute('data-hl-loaded', String(appliedSec + 1));
     const c = ctl(p, async (m, u, b) => { calls.push([m, u, b]); return u === '/_attention.json' ? { items: [item] } : null; }, { reload: () => { reloads++; } });
     await c.poll();
     find(p.strip, (x) => x.tag === 'button' && text(x).includes('Revert now'))[0].click();
@@ -143,7 +143,7 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     assert.strictEqual(reloads, 1);
     // A failed action shows its message in the strip and offers the buttons again.
     const r = parts();
-    r.strip.setAttribute('data-hl-loaded', String(appliedSec));
+    r.strip.setAttribute('data-hl-loaded', String(appliedSec + 1));
     const c3 = ctl(r, async (m, u) => { if (u === '/_attention.json') return { items: [item] }; throw err(409, 'the policy changed'); });
     await c3.poll();
     find(r.strip, (x) => x.tag === 'button' && text(x).trim() === 'Confirm')[0].click();
@@ -151,6 +151,30 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     assert.ok(text(r.strip).includes('the policy changed'));
     assert.deepStrictEqual(buttons(r.strip), ['Confirm', 'Revert now']);
     assert.ok(find(r.strip, (x) => x.tag === 'button').every((b) => !b.disabled));
+  }
+
+  // a poll with unchanged items keeps the strip's elements (focus, live region) and moves the countdown in place
+  {
+    const item = { level: 'timed', source: 'policy', title: 'Policy change #48 is pending', change_id: 48, applied_at: iso(-60), deadline: iso(100) };
+    const p = parts();
+    p.strip.setAttribute('data-hl-loaded', String(Date.parse(iso(0)) / 1000));
+    let now = NOW;
+    let deadline = iso(100);
+    const c = shell.controller(p, { api: async () => ({ items: [Object.assign({}, item, { deadline })] }), now: () => now, reload: () => {} });
+    await c.poll();
+    const before = p.strip.children.slice();
+    const btns = find(p.strip, (x) => x.tag === 'button');
+    now += 15000;
+    deadline = iso(100);
+    await c.poll();
+    assert.strictEqual(p.strip.children.length, before.length);
+    p.strip.children.forEach((n, i) => assert.strictEqual(n, before[i], 'child ' + i + ' was rebuilt'));
+    assert.deepStrictEqual(find(p.strip, (x) => x.tag === 'button'), btns);
+    assert.ok(text(p.strip).includes('01:25'), text(p.strip));
+    // A changed item does rebuild it.
+    item.title = 'Policy change #49 is pending';
+    await c.poll();
+    assert.ok(text(p.strip).includes('#49'));
   }
 
   // staleAfterFailedPoll

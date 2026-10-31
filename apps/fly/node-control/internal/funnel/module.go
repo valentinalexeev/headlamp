@@ -62,7 +62,7 @@ func (m *Module) Nav() []core.NavItem {
 	if m.st == nil {
 		return nil
 	}
-	var allow func(string) bool
+	allow := func(string) bool { return false } // not configured: show nothing
 	if m.s != nil {
 		allow = m.s.Admins.Has
 	}

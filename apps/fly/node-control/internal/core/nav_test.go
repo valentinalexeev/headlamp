@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -774,5 +775,57 @@ func TestValidateNavGroupAndIcon(t *testing.T) {
 		if ValidateNavItem(bad) == nil {
 			t.Errorf("%+v accepted", bad)
 		}
+	}
+}
+
+type countingTailnet struct {
+	Tailnet
+	n atomic.Int32
+}
+
+func (c *countingTailnet) WhoIs(context.Context, string) (string, []string, error) {
+	c.n.Add(1)
+	return "alice", nil, nil
+}
+
+func TestShellAsksWhoIsOnlyWhenItInjects(t *testing.T) {
+	mk := func(ct string, status int, body string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", ct)
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, body)
+		})
+	}
+	cases := []struct {
+		name, method string
+		h            http.Handler
+		want         int32
+	}{
+		{"POST", "POST", mk("text/html", 200, "<body></body>"), 0},
+		{"404", "GET", mk("text/html", 404, "<body></body>"), 0},
+		{"app JSON", "GET", mk("application/json", 200, "{}"), 0},
+		{"non-HTML", "GET", mk("text/plain", 200, "x"), 0},
+		{"asset", "GET", mk("text/html", 200, "<body></body>"), 0},
+		{"GET page", "GET", mk("text/html", 200, "<body></body>"), 1},
+		{"HEAD page", "HEAD", mk("text/html", 200, "<body></body>"), 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tn := &countingTailnet{}
+			path := "/"
+			if c.name == "asset" {
+				path = "/_ui/hl.css"
+			}
+			do(NavMiddleware(richItems(), nil, tn, c.h), c.method, path)
+			if got := tn.n.Load(); got != c.want {
+				t.Fatalf("WhoIs ran %d times, want %d", got, c.want)
+			}
+		})
+	}
+	// /_nav.json filters by caller, so it asks exactly once.
+	tn := &countingTailnet{}
+	do(NavMiddleware(richItems(), nil, tn, http.NotFoundHandler()), "GET", "/_nav.json")
+	if tn.n.Load() != 1 {
+		t.Fatalf("/_nav.json asked %d times", tn.n.Load())
 	}
 }

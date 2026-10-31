@@ -824,3 +824,18 @@ func TestNavOnlyWhenActive(t *testing.T) {
 		}
 	}
 }
+
+func TestNavDeniesAllWhenNotConfigured(t *testing.T) {
+	m := &Module{}
+	if nav := m.Nav(); nav != nil {
+		t.Fatalf("inactive module advertises %v", nav)
+	}
+	m.st = nil
+	r := newRig(t, nil)
+	r.mod.s = nil
+	for _, n := range r.mod.Nav() {
+		if n.Allow == nil || n.Allow("alice") {
+			t.Fatalf("%s visible without settings", n.Label)
+		}
+	}
+}

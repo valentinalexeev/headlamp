@@ -82,7 +82,8 @@
     var t = Date.parse(item && item.applied_at);
     // Fail closed: without both times the page cannot prove it is newer than the change.
     if (isNaN(t) || typeof loadedSec !== 'number' || !isFinite(loadedSec)) { return true; }
-    return loadedSec < Math.floor(t / 1000);
+    // Whole seconds on both sides: the same second cannot prove the page is newer.
+    return loadedSec <= Math.floor(t / 1000);
   }
 
   function countdown(deadlineIso, nowMs) {
@@ -118,7 +119,7 @@
     var api = opts.api || hl.api;
     var now = opts.now || function () { return Date.now(); };
     var reload = opts.reload || function () { window.location.reload(); };
-    var st = { data: null, lastOk: 0, fails: 0, error: '', busy: false, countEls: [], poller: null };
+    var st = { sig: null, data: null, lastOk: 0, fails: 0, error: '', busy: false, countEls: [], poller: null };
 
     function loaded() {
       var v = parts.strip && parts.strip.getAttribute('data-hl-loaded');
@@ -142,12 +143,26 @@
     function renderStrip() {
       var strip = parts.strip;
       if (!strip) { return; }
+      var items = timedItems(st.data);
+      var loadedSec = loaded();
+      // Rebuild only when what is shown changes, so focus and the live region survive a poll.
+      // The deadline is left out of the signature: the countdown is updated in place.
+      var sig = JSON.stringify([items.map(function (it) {
+        return [it.id, it.title, it.change_id, it.action_label, it.action_path, !!it.deadline, needsReload(it, loadedSec)];
+      }), st.busy, st.error]);
+      if (sig === st.sig) {
+        var withDeadline = items.filter(function (it) { return it.deadline; });
+        st.countEls.forEach(function (c, i) {
+          c.deadline = withDeadline[i].deadline;
+          c.el.textContent = countdown(c.deadline, now());
+        });
+        return;
+      }
+      st.sig = sig;
       clear(strip);
       st.countEls = [];
-      var items = timedItems(st.data);
       if (!items.length) { strip.hidden = true; return; }
       strip.hidden = false;
-      var loadedSec = loaded();
       items.forEach(function (it) {
         var g = hl.el('span', 'g warn');
         g.setAttribute('aria-hidden', 'true');

@@ -122,6 +122,13 @@ type ActivitySource interface {
 	Activity(ctx context.Context, login string, limit int) ([]ActivityEntry, error)
 }
 
+// ActivityGate is an optional interface for an ActivitySource that can tell, without being asked for entries,
+// whether it keeps an activity log at all (it is active, and where it reads from there is one). The console shows
+// its Activity page only when some source has one. A source without the method counts as having it.
+type ActivityGate interface {
+	HasActivity() bool
+}
+
 // SearchItem is one entry of the console search: a visible label, a kind and a local path.
 type SearchItem struct {
 	Label string `json:"label"`

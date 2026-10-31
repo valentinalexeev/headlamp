@@ -313,3 +313,31 @@ func TestEndpointsNoStoreJSON(t *testing.T) {
 		t.Fatal("POST allowed")
 	}
 }
+
+// gatedAct shows its entries to alice only, as the funnel, policy and tasks modules do.
+type gatedAct struct {
+	stubModule
+	entries []ActivityEntry
+}
+
+func (m *gatedAct) Activity(_ context.Context, login string, _ int) ([]ActivityEntry, error) {
+	if login != "alice" {
+		return nil, ErrNotVisible
+	}
+	return m.entries, nil
+}
+
+func TestActivityRespectsVisibility(t *testing.T) {
+	open := &actM{stubModule: named("open"), entries: []ActivityEntry{{At: time.Now(), Action: "node.stop", Source: "Nodes"}}}
+	gated := &gatedAct{stubModule: named("gated"), entries: []ActivityEntry{{At: time.Now(), Action: "key.mint", Source: "Funnel"}}}
+	var r actResp
+	getJSON(t, attHandler(alice, nil, open, gated), "/_activity.json", &r)
+	if len(r.Entries) != 2 || r.Hidden {
+		t.Fatalf("alice sees both: %+v", r)
+	}
+	r = actResp{}
+	getJSON(t, attHandler(whoTailnet{login: "bob"}, nil, open, gated), "/_activity.json", &r)
+	if len(r.Entries) != 1 || r.Entries[0].Action != "node.stop" || !r.Hidden || r.Partial {
+		t.Fatalf("bob sees the open source only, and is told something is hidden: %+v", r)
+	}
+}

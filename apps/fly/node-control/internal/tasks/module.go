@@ -54,6 +54,7 @@ type Module struct {
 	tag      string // TASKS_RUNNER_TAG
 	// sessionsTag is SESSIONS_TAG; "" means no browser-session page or API.
 	sessionsTag string
+	sess        *sessionAPI // set with sessionsTag
 	port        int
 	ntfyURL     string
 	tn          core.Tailnet
@@ -210,7 +211,8 @@ func (m *Module) Register(r *core.Routes) error {
 		} else {
 			sc = NewSessionClient(m.tn, m.port, m.token)
 		}
-		(&sessionAPI{m: m, c: sc}).register(r.Admin, gate)
+		m.sess = &sessionAPI{m: m, c: sc}
+		m.sess.register(r.Admin, gate)
 		m.log.Info("browser sessions enabled", "tag", sessTag)
 	}
 	return nil

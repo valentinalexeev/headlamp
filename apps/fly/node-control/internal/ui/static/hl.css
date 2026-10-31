@@ -88,6 +88,9 @@ td.act{text-align:right;width:1%}
 .colside{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:24px}
 .panel{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:18px;display:flex;flex-direction:column;gap:16px}
 .panelhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.panelhead h2{font-size:16px}
+.tw{position:relative}
+.panel .rowbtns{justify-content:flex-start}
 .kv{display:grid;grid-template-columns:minmax(96px,auto) minmax(0,1fr);gap:7px 14px;font-size:13.5px;margin:0}
 .kv dt{color:var(--t3)} .kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .divider{border:0;border-top:1px solid var(--line);margin:0}

@@ -25,11 +25,12 @@ func get(path string) *httptest.ResponseRecorder {
 
 func TestHandlerServesAssets(t *testing.T) {
 	for path, ctype := range map[string]string{
-		"/_ui/hl.css":     "text/css",
-		"/_ui/hl.js":      "text/javascript",
-		"/_ui/theme.js":   "text/javascript",
-		"/_ui/shell.js":   "text/javascript",
-		"/_ui/palette.js": "text/javascript",
+		"/_ui/hl.css":           "text/css",
+		"/_ui/hl.js":            "text/javascript",
+		"/_ui/theme.js":         "text/javascript",
+		"/_ui/shell.js":         "text/javascript",
+		"/_ui/palette.js":       "text/javascript",
+		"/_ui/activity-text.js": "text/javascript",
 		"/_ui/fonts/ibm-plex-sans-latin-400-normal.woff2": "font/woff2",
 		"/_ui/fonts/ibm-plex-mono-latin-500-normal.woff2": "font/woff2",
 	} {
@@ -58,7 +59,7 @@ func TestHandlerOnlyGetAndHead(t *testing.T) {
 
 func TestAssetsHaveNoExternalReferences(t *testing.T) {
 	ext := regexp.MustCompile(`(?i)(src|href|action)\s*=\s*["']?(https?:)?//|url\(\s*["']?(https?:)?//|@import|<iframe|<object|<embed`)
-	for name, body := range map[string][]byte{"css": hlCSS, "js": hlJS, "theme": themeJS, "shell": shellJS, "palette": paletteJS} {
+	for name, body := range map[string][]byte{"css": hlCSS, "js": hlJS, "theme": themeJS, "shell": shellJS, "palette": paletteJS, "activity-text": activityTextJS} {
 		if m := ext.Find(body); m != nil {
 			t.Errorf("%s references something external: %q", name, m)
 		}
@@ -66,7 +67,7 @@ func TestAssetsHaveNoExternalReferences(t *testing.T) {
 }
 
 func TestJSForbidsMarkupInjection(t *testing.T) {
-	for name, src := range map[string][]byte{"hl.js": hlJS, "theme.js": themeJS, "shell.js": shellJS, "palette.js": paletteJS} {
+	for name, src := range map[string][]byte{"hl.js": hlJS, "theme.js": themeJS, "shell.js": shellJS, "palette.js": paletteJS, "activity-text.js": activityTextJS} {
 		for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "setAttribute('style'", "setAttribute(\"style\""} {
 			if strings.Contains(string(src), bad) {
 				t.Errorf("%s uses %s", name, bad)
@@ -84,7 +85,7 @@ func TestShellSelfTest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("self-test failed: %v\n%s", err, out)
 	}
-	for _, f := range []string{"static/shell.js", "static/theme.js"} {
+	for _, f := range []string{"static/shell.js", "static/theme.js", "static/activity-text.js"} {
 		if out, err := exec.Command(node, "--check", f).CombinedOutput(); err != nil {
 			t.Fatalf("node --check %s: %v\n%s", f, err, out)
 		}

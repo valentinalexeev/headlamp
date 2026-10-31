@@ -9,6 +9,8 @@
   var POLL_MS = 30000;
   var LIMIT = 200;
   var SOURCES = ['All', 'Nodes', 'Devices', 'Funnel', 'Tasks', 'Policy'];
+  // The sentences are shared with the Overview page: /_ui/activity-text.js, loaded first.
+  var describe = hl.activityText ? hl.activityText.describe : function (e) { return hl.plain(e && e.action, 100); };
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   function arr(v) { return Array.isArray(v) ? v : []; }
@@ -33,90 +35,6 @@
     var date = MONTHS[t.getMonth()] + ' ' + t.getDate();
     if (t.getFullYear() !== now.getFullYear()) { date += ' ' + t.getFullYear(); }
     return date + ' ' + clock;
-  }
-
-  function head(s, sep) {
-    var i = s.indexOf(sep);
-    return i < 0 ? s : s.slice(0, i);
-  }
-
-  // describe turns an entry's action and detail into the sentence the table shows. The modules write fixed details
-  // (names, ids, dates), so the sentence is built from them; anything not recognised is shown as it is.
-  function describe(e) {
-    var action = hl.plain(e && e.action, 100);
-    var detail = hl.plain(e && e.detail, 500);
-    var m;
-    switch (action) {
-      case 'device.create':
-        return head(detail, ', expires ') + ' enrolled';
-      case 'device.link':
-        return 'Enrolment link made for ' + detail;
-      case 'device.revoke':
-        return detail + ' revoked';
-      case 'device.delete':
-        return detail + ' deleted';
-      case 'device.extend':
-        m = /^(.*), expires (\S+)$/.exec(detail);
-        return m ? m[1] + ' extended until ' + m[2] : detail + ' extended';
-      case 'device.rotate_secret':
-        return 'Secret of ' + detail + ' rotated';
-      case 'bridge.approve':
-        return 'Bridge ' + detail + ' approved';
-      case 'bridge.unapprove':
-        return 'Approval of bridge ' + detail + ' withdrawn';
-      case 'node.start':
-      case 'node.stop':
-        m = /^(.*): (ok|failed \(([^)]*)\))$/.exec(detail);
-        if (m) {
-          var stopped = action === 'node.stop';
-          if (m[2] === 'ok') { return m[1] + (stopped ? ' stopped' : ' started'); }
-          return (stopped ? 'Stopping ' : 'Starting ') + m[1] + ' failed (' + m[3] + ')';
-        }
-        break;
-      case 'namespace.create':
-        m = /^(\S+) ports (.+)$/.exec(detail);
-        return m ? 'Namespace ' + m[1] + ' created, ports ' + m[2] : 'Namespace ' + detail + ' created';
-      case 'namespace.ports':
-        m = /^(\S+) ports (.+)$/.exec(detail);
-        return m ? 'Namespace ' + m[1] + ' ports set to ' + m[2] : 'Namespace ' + detail + ' ports changed';
-      case 'namespace.delete':
-        return 'Namespace ' + detail + ' deleted';
-      case 'key.mint':
-        m = /^(.*) id (\d+)\b/.exec(detail);
-        return m ? 'Key ' + m[2] + ' minted for ' + m[1] : 'Key minted';
-      case 'key.expire':
-        m = /^id (\d+)$/.exec(detail);
-        return m ? 'Key ' + m[1] + ' expired' : 'Key expired';
-      case 'route.put':
-        m = /^([^/\s]+)\/(\S+) port (\d+)$/.exec(detail);
-        return m ? 'Route ' + m[2] + '.' + m[1] + ' set, port ' + m[3] : 'Route set';
-      case 'route.delete':
-        m = /^([^/\s]+)\/(\S+)$/.exec(detail);
-        return m ? 'Route ' + m[2] + '.' + m[1] + ' removed' : 'Route removed';
-      case 'block.put':
-        m = /^([^/\s]+)\/(\S+)$/.exec(detail);
-        return m ? m[2] + '.' + m[1] + ' blocked' : 'Service blocked';
-      case 'block.delete':
-        m = /^([^/\s]+)\/(\S+)$/.exec(detail);
-        return m ? m[2] + '.' + m[1] + ' unblocked' : 'Service unblocked';
-      case 'change.applied':
-        m = /^(\d+)(?:: (.*))?$/.exec(detail);
-        if (m) { return 'Change #' + m[1] + ' applied' + (m[2] ? ': ' + m[2] : ''); }
-        break;
-      case 'change.reverted':
-        m = /^(\d+)$/.exec(detail);
-        if (m) { return 'Change #' + m[1] + ' reverted'; }
-        break;
-      case 'task.manual':
-      case 'task.run':
-        m = /^(.*): (succeeded|failed|lost|cancelled)$/.exec(detail);
-        if (m) {
-          if (action === 'task.manual') { return m[1] + ' run by hand' + (m[2] === 'succeeded' ? '' : ', ' + m[2]); }
-          return m[1] + ' run ' + m[2];
-        }
-        break;
-    }
-    return action ? action + (detail ? ': ' + detail : '') : detail;
   }
 
   // notices: the sentences under the title. A source that did not answer or is hidden never makes the page look

@@ -1,4 +1,4 @@
-// Run with: node activity_selftest.js <path to hl.js> <path to activity.js>. Exits non-zero on a failed check.
+// Run with: node activity_selftest.js <path to hl.js> <path to activity.js> <path to activity-text.js>. Exits non-zero on a failed check.
 const assert = require('assert');
 const path = require('path');
 
@@ -20,6 +20,7 @@ global.document = { createElement: node, createElementNS: (ns, t) => node(t), ge
 global.window = { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } };
 global.setInterval = () => 0;
 require(path.resolve(process.argv[2]));
+require(path.resolve(process.argv[4])); // the shared sentences load first, as on the page
 require(path.resolve(process.argv[3]));
 const act = global.window.hl.activity;
 assert.ok(act, 'hl.activity is defined');
@@ -50,7 +51,9 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
     assert.strictEqual(d('block.put', 'demo/wiki'), 'wiki.demo blocked');
     assert.strictEqual(d('change.applied', '48: add namespace demo'), 'Change #48 applied: add namespace demo');
     assert.strictEqual(d('change.applied', '48'), 'Change #48 applied');
-    assert.strictEqual(d('change.reverted', '46'), 'Change #46 reverted');
+    assert.strictEqual(d('change.reverted', '46'), 'Change #46 reverted by itself after no confirmation');
+    assert.strictEqual(d('change.reverted_on_request', '46'), 'Change #46 reverted on request');
+    assert.strictEqual(act.describe, global.window.hl.activityText.describe, 'one shared description, not a copy');
     assert.strictEqual(d('task.manual', 'login-check: succeeded'), 'login-check run by hand');
     assert.strictEqual(d('task.run', 'login-check: failed'), 'login-check run failed');
     // not recognised: shown as it is, but cleaned

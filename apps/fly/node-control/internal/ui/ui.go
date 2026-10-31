@@ -26,6 +26,9 @@ var themeJS []byte
 //go:embed static/shell.js
 var shellJS []byte
 
+//go:embed static/activity-text.js
+var activityTextJS []byte
+
 //go:embed static/palette.js
 var paletteJS []byte
 
@@ -75,6 +78,8 @@ func lookup(p string) ([]byte, string) {
 		return themeJS, "text/javascript; charset=utf-8"
 	case "shell.js":
 		return shellJS, "text/javascript; charset=utf-8"
+	case "activity-text.js":
+		return activityTextJS, "text/javascript; charset=utf-8"
 	case "palette.js":
 		return paletteJS, "text/javascript; charset=utf-8"
 	}

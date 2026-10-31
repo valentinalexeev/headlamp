@@ -136,7 +136,7 @@ func TestOverviewSelfTest(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not installed")
 	}
-	out, err := exec.Command(node, "testdata/overview_selftest.js", "../ui/static/hl.js", "static/overview.js").CombinedOutput()
+	out, err := exec.Command(node, "testdata/overview_selftest.js", "../ui/static/hl.js", "static/overview.js", "../ui/static/activity-text.js").CombinedOutput()
 	if err != nil {
 		t.Fatalf("self-test failed: %v\n%s", err, out)
 	}
@@ -251,11 +251,22 @@ func TestActivitySelfTest(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not installed")
 	}
-	out, err := exec.Command(node, "testdata/activity_selftest.js", "../ui/static/hl.js", "static/activity.js").CombinedOutput()
+	out, err := exec.Command(node, "testdata/activity_selftest.js", "../ui/static/hl.js", "static/activity.js", "../ui/static/activity-text.js").CombinedOutput()
 	if err != nil {
 		t.Fatalf("self-test failed: %v\n%s", err, out)
 	}
 	if out, err := exec.Command(node, "--check", "static/activity.js").CombinedOutput(); err != nil {
 		t.Fatalf("node --check: %v\n%s", err, out)
+	}
+}
+
+// Both pages load the shared sentences before their own script.
+func TestPagesLoadTheSharedActivityText(t *testing.T) {
+	for name, html := range map[string]string{"overview": string(pageHTML), "activity": string(activityHTML)} {
+		shared := strings.Index(html, `<script src="/_ui/activity-text.js" defer></script>`)
+		own := strings.Index(html, `<script src="/`+map[string]string{"overview": "overview/overview.js", "activity": "activity/activity.js"}[name])
+		if shared < 0 || own < shared {
+			t.Errorf("%s: shared %d, own %d", name, shared, own)
+		}
 	}
 }

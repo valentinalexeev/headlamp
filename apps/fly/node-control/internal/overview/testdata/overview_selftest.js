@@ -1,4 +1,4 @@
-// Run with: node overview_selftest.js <path to hl.js> <path to overview.js>. Exits non-zero on a failed check.
+// Run with: node overview_selftest.js <path to hl.js> <path to overview.js> <path to activity-text.js>. Exits non-zero on a failed check.
 const assert = require('assert');
 const path = require('path');
 
@@ -6,9 +6,15 @@ global.document = { createElement: () => ({}), createElementNS: () => ({}), getE
 global.window = { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } };
 global.setInterval = () => 0;
 require(path.resolve(process.argv[2]));
+require(path.resolve(process.argv[4])); // the shared sentences load first, as on the page
 require(path.resolve(process.argv[3]));
 const ov = global.window.hl.overview;
 assert.ok(ov, 'hl.overview is defined');
+
+// the activity box says what the Activity page says
+assert.strictEqual(ov.describe({ action: 'device.revoke', detail: 'phone-3' }), 'phone-3 revoked');
+assert.strictEqual(ov.describe({ action: 'change.reverted_on_request', detail: '46' }), 'Change #46 reverted on request');
+assert.strictEqual(ov.describe, global.window.hl.activityText.describe, 'one shared description, not a copy');
 
 const NOW = Date.parse('2026-01-01T12:00:00Z');
 const item = (level, extra) => Object.assign({ id: 'i-' + Math.random(), source: 'x', level, title: 't', action_label: 'Open', action_path: '/x' }, extra);

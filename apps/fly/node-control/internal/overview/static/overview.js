@@ -17,6 +17,9 @@
     unknown: ['off', 'Unknown'], off: ['off', 'Off']
   };
 
+  // The same sentences as the Activity page (/_ui/activity-text.js, loaded first).
+  var describe = hl.activityText ? hl.activityText.describe : function (e) { return hl.plain(e && e.action, 100); };
+
   function arr(v) { return Array.isArray(v) ? v : []; }
 
   function localPath(p) {
@@ -207,9 +210,7 @@
       entries.forEach(function (e) {
         var tr = hl.el('tr');
         tr.appendChild(hl.el('td', 'mono t3', fmtWhen(e.at, now)));
-        var text = hl.plain(e.action, 100);
-        if (e.detail) { text += (text ? ': ' : '') + hl.plain(e.detail, 200); }
-        tr.appendChild(hl.el('td', null, text));
+        tr.appendChild(hl.el('td', null, describe(e)));
         els.rows.appendChild(tr);
       });
     }
@@ -258,6 +259,6 @@
     }, 1000);
   }
 
-  hl.overview = { model: model, rowModel: rowModel, ageText: ageText, fmtWhen: fmtWhen, countdown: countdown, init: init };
+  hl.overview = { describe: describe, model: model, rowModel: rowModel, ageText: ageText, fmtWhen: fmtWhen, countdown: countdown, init: init };
   init();
 })();

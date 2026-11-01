@@ -8,7 +8,7 @@ import (
 	"slices"
 	"sort"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // ErrNoEligibleNode is returned when no node can run the task right now; the

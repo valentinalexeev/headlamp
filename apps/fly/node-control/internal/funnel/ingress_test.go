@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
 )
 
 func testSettings() *Settings {

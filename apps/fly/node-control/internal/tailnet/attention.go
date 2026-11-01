@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // keyWarn is how long before the API key expires the module starts to ask for a rotation.

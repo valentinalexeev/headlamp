@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/ui"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/ui"
 )
 
 var pageAssets = []string{"/tasks/static/tasks.js"}

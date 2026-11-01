@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
 )
 
 func TestConditionOperators(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"example.com/node-control/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
 )
 
 const (

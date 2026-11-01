@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 const testRevert = 2 * time.Minute

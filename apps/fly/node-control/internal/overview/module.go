@@ -8,8 +8,8 @@ import (
 	_ "embed"
 	"net/http"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/ui"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/ui"
 )
 
 //go:embed static/overview.html

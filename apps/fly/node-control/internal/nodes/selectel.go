@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"example.com/node-control/internal/core"
-	scrubpkg "example.com/node-control/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	scrubpkg "github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
 )
 
 const (

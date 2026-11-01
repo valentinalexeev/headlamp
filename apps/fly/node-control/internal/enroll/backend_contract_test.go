@@ -11,7 +11,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 type contractEnv struct {

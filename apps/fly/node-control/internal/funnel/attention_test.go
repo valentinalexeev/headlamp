@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/authz"
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 var _ core.AttentionSource = (*Module)(nil)

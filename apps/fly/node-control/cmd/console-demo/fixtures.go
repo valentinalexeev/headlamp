@@ -20,15 +20,15 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/enroll"
-	"example.com/node-control/internal/funnel"
-	"example.com/node-control/internal/headscale"
-	"example.com/node-control/internal/nodes"
-	"example.com/node-control/internal/overview"
-	"example.com/node-control/internal/policy"
-	"example.com/node-control/internal/tailnet"
-	"example.com/node-control/internal/tasks"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/enroll"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/funnel"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/nodes"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/overview"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/policy"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/tailnet"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/tasks"
 )
 
 // scenario says which modules run, who the caller is and which problems are seeded.

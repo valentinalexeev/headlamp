@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 // Attention reports a stale or erroring ingress report and namespaces whose change was reverted. Only

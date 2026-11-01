@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 func goodEnv() map[string]string {

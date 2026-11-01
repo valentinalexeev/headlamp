@@ -18,8 +18,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/ui"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/ui"
 )
 
 // The operator API and page for enrolment. It is tailnet-only with no auth beyond the network. Every

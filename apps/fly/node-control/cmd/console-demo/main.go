@@ -22,7 +22,7 @@ import (
 	"syscall"
 	"time"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 const defaultAddr = "127.0.0.1:8099"

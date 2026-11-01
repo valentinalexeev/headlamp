@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"funnel-ingress/internal/auth"
-	"funnel-ingress/internal/routes"
-	"funnel-ingress/internal/tsnode"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/auth"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/tsnode"
 )
 
 // Reconciler compares the dynamic routes with the peer list of the proxy's node.

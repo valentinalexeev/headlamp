@@ -16,8 +16,8 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/enroll"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/enroll"
 )
 
 // serve runs the built modules on a plain-TCP tailnet and returns it with a stop func.

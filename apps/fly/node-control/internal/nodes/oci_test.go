@@ -18,7 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 const ociFP = "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"

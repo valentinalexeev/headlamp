@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 // dialTailnet connects every dial to the test server whatever address was

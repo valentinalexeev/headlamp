@@ -1,4 +1,4 @@
-module funnel-ingress
+module github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress
 
 go 1.26.5
 

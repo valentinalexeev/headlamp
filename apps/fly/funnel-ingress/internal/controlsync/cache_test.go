@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"funnel-ingress/internal/config"
-	"funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
 
 type memBlob struct {

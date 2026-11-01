@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
 )
 
 // Namespaces is the runtime-replaceable map from namespace to its allowed port ranges. Namespaces and ports

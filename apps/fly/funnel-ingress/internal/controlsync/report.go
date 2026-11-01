@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
 
 // RouteState is a route as reported: the route plus what the peer list says about its owner.

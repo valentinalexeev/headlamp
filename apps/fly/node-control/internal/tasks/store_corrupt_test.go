@@ -10,7 +10,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"tailscale.com/ipn"
 
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 // A stored value the store cannot use (bad JSON, a config a stricter parser

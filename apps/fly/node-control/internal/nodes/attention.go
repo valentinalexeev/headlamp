@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // statusTTL is how long a provider status is reused by Attention, so polling Overview does not multiply

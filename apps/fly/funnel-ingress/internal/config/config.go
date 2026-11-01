@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"funnel-ingress/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/statestore"
 )
 
 // PortRange is an inclusive range of TCP ports.

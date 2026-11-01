@@ -15,8 +15,8 @@ import (
 	"strconv"
 	"strings"
 
-	"funnel-ingress/internal/config"
-	"funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
 
 // ParseHost extracts namespace and service from a Host header value. The host must be exactly two labels

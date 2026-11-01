@@ -12,8 +12,8 @@ import (
 
 	"tailscale.com/ipn"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 // openState builds the encrypted Redis state store from the environment. It returns nil (and no error) when

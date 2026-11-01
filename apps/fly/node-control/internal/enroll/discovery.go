@@ -20,7 +20,7 @@ import (
 	"time"
 	"unicode"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 	"tailscale.com/util/dnsname"
 )
 

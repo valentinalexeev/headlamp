@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // rereadTimeout bounds the read that follows an ambiguous write failure.

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"example.com/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
 )
 
 // maxIngressBody caps what the ingress may post as its state report.

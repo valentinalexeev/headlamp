@@ -217,7 +217,7 @@ Set `ENROLL_DB` to turn on user enrolment for a REALITY bridge proxy. The binary
 
 | port | serves | reachable by |
 |---|---|---|
-| 80 | admin app, including the `/enroll` admin pages | operators on the tailnet |
+| 80 | admin app, with the `/enroll` admin pages | operators on the tailnet |
 | 8081 | public enrolment | the bridge proxy only (restrict it in the tailnet ACL) |
 
 Environment (secrets through Fly secrets, the rest in `fly.toml`):
@@ -228,7 +228,7 @@ Environment (secrets through Fly secrets, the rest in `fly.toml`):
 - `ENROLL_SECRET_KEY`: at least 16 bytes. It derives the subscription secrets and the per-bridge credentials. A change to it invalidates both (see "Credentials per bridge").
 - `AGENT_URL`, `AGENT_TOKEN`: the address and bearer token of the agent of the first bridge (the old single-host setup). Further bridges use `agent_url` in their entry (or node-control finds them through headscale) and `AGENT_TOKEN_<NAME>`.
 
-- `ENROLL_ALLOWED_HOSTS` is optional for the core. It is required, and must not be a bare `*`, when the policy or tasks module is on. It holds comma-separated Host header values that the admin app accepts, for example `node-control.<tailnet-domain>,<tailnet-ip>`. Any other Host gets `400`. These are the same rules as `TrustedHostMiddleware` of Starlette, applied to the whole admin app on port 80. Set it: it stops a malicious web page from access to the admin API through DNS rebinding in the browser of an operator. List every name and IP that you use to open the page.
+- `ENROLL_ALLOWED_HOSTS` is optional for the core. It is required, and must not be a bare `*`, when the policy or tasks module is on. It holds comma-separated Host header values that the admin app accepts, for example `node-control.<tailnet-domain>,<tailnet-ip>`. Any other Host gets `400`. These are the same rules as `TrustedHostMiddleware` of Starlette, applied to the whole admin app on port 80. Set it: it prevents access to the admin API by a malicious web page, through DNS rebinding in the browser of an operator. List every name and IP that you use to open the page.
 
 ### `enroll.json`
 
@@ -267,14 +267,14 @@ The file gives one or more bridge nodes. Each entry is a bridge host with its ow
   - `node`: the tailnet name of the machine that runs the bridge, a lowercase DNS name. It is necessary when it is different from `name`. Otherwise, the stopped check, the online flag and the Nodes page match the bridge by name.
   - `intermittent`: `true` or `false`. The default is `false`. See "Intermittent bridges".
 - `sni`, `short_id` and `public_key` must equal these values of the `reality-ingress` role: `reality_sni`, `reality_short_id` and the public half of `reality_private_key` (`xray x25519 -i <private>`). `port` must equal its `ingress_listen_port`.
-- `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>` and `/e/<token>`. Thus the name must resolve to a bridge whose front serves it and proxies to `:8081` of node-control, with a certificate for it. Prerequisite: before you enrol the first device, make DNS for `link_host` available, and a working certificate on the bridge that it points at. The front of every bridge must be able to serve it, so you can fail over if you move the name to another bridge.
+- `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>` and `/e/<token>`. Thus the name must resolve to a bridge whose front serves it and proxies to `:8081` of node-control, with a certificate for it. Prerequisite: before you enrol the first device, make DNS for `link_host` available, and a certificate that works on the bridge that it points at. The front of every bridge must be able to serve it, so you can fail over if you move the name to another bridge.
 - The old single-host file has `host`, `public_key`, `short_id`, `sni` and `port` at the top level, and no `ingresses`. It still loads as one bridge with the name `default` and `"uuids": "base"`, and uses `AGENT_TOKEN`. A file with both shapes is an error.
 
 ### Intermittent bridges
 
 `"intermittent": true` is for a bridge that you expect to come and go. While its agent is `unreachable`, Attention shows an info item in place of a critical one. Its row on the Nodes page has no At risk state, and the lamp does not count it. Every other sync failure (`unauthorized`, `rejected`, `conflict`, `error`) stays critical, because a reachable agent that refuses credentials is a real problem.
 
-> **WARNING:** Mark a bridge as intermittent only if you accept this risk for it. `unreachable` over the tailnet does not prove that the bridge stopped to serve clients. Its tailnet connection can be down while its front still accepts connections. Revocations and extensions that you make during that time are then not in effect on it. A revoked device can continue to work there until the agent answers again.
+> **WARNING:** Mark a bridge as intermittent only if you accept this risk for it. `unreachable` over the tailnet does not prove that the bridge no longer serves clients. Its tailnet connection can be down while its front still accepts connections. Revocations and extensions that you make during that time are then not in effect on it. A revoked device can continue to work there until the agent answers again.
 
 A bridge that you stopped at its provider does not need this setting. It serves nobody, and it is already an info item.
 
@@ -403,7 +403,7 @@ Phones get the new bridge when they refresh their subscription. For a profile im
   - **Set an explicit `agent_url` (the tailnet IP of the node, for example `http://100.64.0.12:9000`) on every configured bridge.** This removes the headscale lookup completely: the token goes only to that address, and no machine can change that address. (`AGENT_URL` does the same for the first entry.) The name lookup is only the fallback, and it is the weaker setting.
   - A CONFIGURED bridge without `agent_url` has this limit: the lookup accepts a tagged node only when its given name does not follow its hostname. Headscale gives the rule: the given name equals what headscale derives from the hostname, optionally with `-<number>` after it. The lookup also refuses hostnames that sanitise to nothing. Run `headscale nodes rename <id> <name>` on the bridge node first (the log says so when the app refuses a lookup). When several nodes share the name, the lookup fails and the app sends nothing to any of them.
   - The app identifies a DISCOVERED bridge by the node id AND the machine key of its approval, not by its name. The app finds the agent by that pair, and never sends its token or credentials to another node. The id alone is not sufficient, because ids can repeat after you rebuild or restore a headscale database. A node cannot choose its machine key. If the node list does not report machine keys, you cannot approve a bridge. Approvals made before the app pinned machine keys show `changed` ("approve again") until you approve them one more time. If that node goes away, the row becomes `invalid` ("the approved node is not present") and the app contacts nothing until you remove the approval. You can then review and approve a different node that now has the name.
-> **WARNING:** Do not set the variable `AGENT_TOKEN_<NAME>` before you expect the node. Before approval, the app already sends this token (as the bearer of `GET /v1/info`) to a tagged node whose given name matches it. A pin of the node id after approval decreases this exposure but cannot remove it. Anyone who can register a tagged node with that name (and, for a host with no rename, a matching hostname) receives that one token.
+> **WARNING:** Do not set the variable `AGENT_TOKEN_<NAME>` before you expect the node. Before approval, the app already sends this token (as the bearer of `GET /v1/info`) to a tagged node whose given name matches it. A pin of the node id after approval decreases this exposure but cannot remove it. Anyone who can register a tagged node with that name (and, for a host with no rename, a hostname that matches) receives that one token.
 
 - A create, revoke, extend or approval answers after at most 3 seconds. If an agent did not answer by then, its row reads `pending` with state `unknown` until the push ends. The app already recorded the change itself, and that change never fails.
 
@@ -532,13 +532,13 @@ func (m *Module) Nav() []core.NavItem {
 |---|---|
 | `Label` | 1 to 24 printable characters (no control, bidi or zero-width characters). |
 | `Path` | A local absolute path (`/x`, not `//x`, `http://x`, `javascript:x`; no `?`, `#`, colon, space, quotes or angle brackets). |
-| `Order` | Ascending. The label decides a tie. |
+| `Order` | From low to high. The label decides a tie. |
 | `Group` | `""` (top, ungrouped), `operate` or `configure`. |
 | `Icon` | A name from `internal/ui/icons.go` (16 px line icon), or empty. |
 | `Allow` | `func(login string) bool`. nil means anyone who can reach the listener. The app filters entries for each caller, in the sidebar and in `/_nav.json`. A caller that the app cannot identify (or a tagged node) sees only entries without `Allow`. |
 | `Source` | The attention source (usually the module name) whose item count shows next to the entry. Empty means no count. |
 
-The longest matching path is the current page. Entries that are not valid and duplicate paths stop the start with an error that names the module.
+The longest path that matches is the current page. Entries that are not valid and duplicate paths stop the start with an error that names the module.
 
 > **WARNING:** Do not use `Allow` as access control. `Allow` only decides what the page shows. The routes of the module must still check the caller.
 
@@ -558,7 +558,7 @@ The core leaves out a source that returns `core.ErrNotVisible` for this caller, 
 
 A person who looked at an item can acknowledge it: "I know, stop asking". The item goes from the queue, the sidebar counts and the lamp, and no longer blocks "All clear". It stays in a collapsed "Acknowledged (N)" section on Overview with an Undo. It stays in `/_attention.json` with `acknowledged: {by, at, until}`. The system line follows the items that are left, and adds "N acknowledged" to its summary.
 
-> **WARNING:** Do not acknowledge an item to correct a problem. **An acknowledgement fixes nothing and changes no behaviour.** A bridge that is out of sync stays out of sync, and revocations stay not in effect there. The page only stops to point at it, for everyone who can see the item (acknowledgements are shared, not per person). The Nodes page still shows the state of the row.
+> **WARNING:** Do not acknowledge an item to correct a problem. **An acknowledgement fixes nothing and changes no behaviour.** A bridge that is out of sync stays out of sync, and revocations stay not in effect there. The page only no longer points at it, for everyone who can see the item (acknowledgements are shared, not per person). The Nodes page still shows the state of the row.
 
 An acknowledgement ends by itself, and the item goes back in the queue, when one of these occurs:
 
@@ -803,7 +803,7 @@ A complete placeholder file is in [`examples/private-repo/fly/node-control/tasks
 | `alert.notify`, `on_failure.notify` | with the block | `topic` (a secret NAME: the ntfy topic is never in the config. `ntfy.sh` is a public service where the topic name is the only access control, so keep a long random topic as the secret), `priority` (`min`, `low`, `high`, `max`; any other value is the ntfy default), `title`, `message`. |
 | `on_failure.cooldown` | no | `24h`. It must be positive. |
 
-The module replaces `{name}` in a title or message. In an alert, it uses the scalar result field of that name. In a failure message, it uses `task` and `reason`. An unknown name stays as written, so a typing error is visible. `{task}` is also available in alert text. The module refuses a placeholder with a colon.
+The module replaces `{name}` in a title or message. In an alert, it uses the scalar result field of that name. In a failure message, it uses `task` and `reason`. An unknown name stays as written, so a mistake in the name is visible. `{task}` is also available in alert text. The module refuses a placeholder with a colon.
 
 A candidate node for a task has the runner tag and matches `target` (and is online when `online` is set). Its runner must answer its health check as reachable and idle. A candidate node must also have a tailnet IPv4 address. Among the candidates, the module prefers the node that last ran the task successfully, then the least busy node, then the lowest name. If none is eligible, the attempt fails with `no eligible node`. A runner that refuses the token (`401`) counts as unhealthy. node-control logs `runner rejected the token` with the name of the node, one time for each process start.
 
@@ -836,7 +836,7 @@ Answers are `Cache-Control: no-store`. Times are RFC 3339 UTC.
 | `GET /tasks` | The HTML page (static files at `/tasks/static/tasks.css` and `tasks.js`), served also while degraded. |
 | `GET /tasks.json` | A list of task views, sorted by id (`[]` before the first config). |
 | `GET /tasks/{id}` | One task view; `404 {"error":"unknown task"}`. |
-| `POST /tasks/{id}/run` | Start a run now: `202 {"run_id":"..."}`; `409` already running; `404` unknown task; `503` shutting down. |
+| `POST /tasks/{id}/run` | Start a run now: `202 {"run_id":"..."}`; `409` a run already executes; `404` unknown task; `503` the app is in shutdown. |
 | `GET /tasks/{id}/runs` | The newest 50 runs of the task, newest first, as run views; `404` unknown task. |
 | `GET /runs/{id}` | One run view, from the attempts that execute now and the history of every task; `404 {"error":"unknown run"}`. |
 | `DELETE /runs/{id}` | Cancel a run that executes: `204`; `409` when the run is recorded as running or queued but does not execute in this process; `404` unknown or finished. |
@@ -1029,46 +1029,41 @@ Git is the long-term store of config, scripts and encrypted secrets. node-contro
 
 ### Browser sessions (optional)
 
-With `SESSIONS_TAG` set, the admin listener serves a **Browser** page (`/sessions`) where an admin starts and stops a
-short-lived interactive browser on a tagged node and opens it from the tailnet. The node's `task-runner` does the work
-(see its README for `RUNNER_SESSION_BIND`); node-control only relays, over the same bearer token and port as task runs.
+With `SESSIONS_TAG` set, the admin listener serves a **Browser** page (`/sessions`). On this page, an admin starts and stops a short-lived interactive browser on a tagged node and opens it from the tailnet. The `task-runner` of the node does the work (see its README for `RUNNER_SESSION_BIND`). The app only relays, over the same bearer token and port as task runs.
 
 | Route | What |
 |---|---|
-| `GET /sessions` | the page: one row per tagged node with a status dot, a length choice (30 min, 1 h, 4 h), Start, Stop, a countdown and an Open link while running. Refreshes every 5 s |
-| `GET /sessions.json` | `{"nodes":[{"id","name","available","session":null or {"id","state","started_at","expires_at","port","reason"},"url"}]}`. A node whose runner cannot be reached shows `available: false`, never an error and never "no session" |
-| `POST /sessions/{node}/start` | JSON body `{"ttl_seconds":N,"idle_seconds":N}` (both optional; defaults 3600 and 900; the runner enforces 60 to 14400 and 60 to 3600). `201` with the node view, `409` busy, `422` settings refused, `503` unreachable or sessions disabled on that node, `404` for a node without the tag |
-| `POST /sessions/{node}/stop` | `204`, also when nothing is running; `404` for a node without the tag |
+| `GET /sessions` | The page: one row for each tagged node with a status dot, a length choice (30 min, 1 h, 4 h), Start, Stop, a countdown and an Open link while the session runs. It refreshes every 5 s. |
+| `GET /sessions.json` | `{"nodes":[{"id","name","available","session":null or {"id","state","started_at","expires_at","port","reason"},"url"}]}`. A node whose runner cannot be reached shows `available: false`, never an error and never "no session". |
+| `POST /sessions/{node}/start` | JSON body `{"ttl_seconds":N,"idle_seconds":N}` (both optional; defaults 3600 and 900; the runner enforces 60 to 14400 and 60 to 3600). `201` with the node view, `409` busy, `422` settings refused, `503` unreachable or sessions disabled on that node, `404` for a node without the tag. |
+| `POST /sessions/{node}/stop` | `204`, also when nothing runs; `404` for a node without the tag. |
 
-`{node}` is the node's headscale given name. A node without `SESSIONS_TAG` is never contacted and never receives the
-runner token. The Open link points at the node's given name (or, when that is not a plain host name, its tailnet IPv4)
-and the session port, over plain http inside the tailnet; no public address is ever used. Every start and stop is
-logged with the node and the admin's login (`session started`, `session stopped`); the runner token and the session token never are. The link carries the session's access token (`path=websockify%3Ftoken%3D...`); it is
-returned only to authorised admins, only for a running session, and scrubbed from error text.
+`{node}` is the headscale given name of the node. The app never contacts a node without `SESSIONS_TAG`, and that node never receives the runner token.
 
-Trust model: there is no stored browser profile. Reachability is gated by the ACL: allow the session port only to the
-people who should have it. The session token (random per session, carried in the link, dies with the session) stops
-other pages and users on allowed devices from using the endpoint. Starting and stopping is limited to the logins in `TASKS_ADMIN_USERS`. A session ends by
-itself when its length runs out or it sits idle, and nothing is kept afterwards.
+The Open link points at the given name of the node and the session port. When the given name is not a plain host name, the link uses the tailnet IPv4. The link uses plain http inside the tailnet. The link never uses a public address. The app logs every start and stop with the node and the login of the admin (`session started`, `session stopped`). It never logs the runner token or the session token.
 
-The token appears in the operator's browser history and in the page's address bar while the session is open, so do
-not share the link; stopping the session invalidates it.
+The link carries the access token of the session (`path=websockify%3Ftoken%3D...`). The app returns it only to authorised admins, only for a session that runs, and scrubs it from error text.
+
+Trust model:
+
+- There is no stored browser profile.
+- The ACL controls who can reach the session. Allow the session port only to the people who must have it.
+- The session token is random for each session, is in the link, and ends with the session. It prevents use of the endpoint by other pages and users on allowed devices.
+- Only the logins in `TASKS_ADMIN_USERS` can start and stop a session.
+- A session ends by itself when its length runs out or when it stays idle, and nothing is kept after that.
+
+> **WARNING:** Do not share the link. The token shows in the browser history of the operator and in the address bar of the page while the session is open. A stop of the session invalidates the link.
 
 Behaviour to know:
 
-- A running session makes the node report `busy`, so scheduled tasks pinned to that node fail with "node busy" or
-  "no eligible node" until the session ends (up to its length).
-- The Open link uses the node's tailnet name when it resolves on the operator's device (MagicDNS), else the tailnet
-  IPv4. The published port follows the runner role's `task_runner_listen_addr`; an IPv6-only listen address is not
-  supported by the link.
-- The link may show before noVNC is listening; a click in the first seconds can be refused, retry.
-- Closing the last browser window just reopens Chrome (a minimized window is listed in the desktop right-click menu,
-  which has no Exit entry). A session ends by Stop, its length, the idle timeout, or if its display or bridge dies.
+- A session that runs makes the node report `busy`. Scheduled tasks pinned to that node then fail with "node busy" or "no eligible node" until the session ends (up to its length).
+- The Open link uses the tailnet name of the node when it resolves on the device of the operator (MagicDNS). Otherwise, it uses the tailnet IPv4. The published port follows `task_runner_listen_addr` of the runner role. The link does not support an IPv6-only listen address.
+- The link can show before noVNC listens. A click in the first seconds can be refused: try again.
+- If you close the last browser window, Chrome only opens again. The desktop right-click menu lists a minimized window, and has no Exit entry. A session ends by Stop, its length, the idle timeout, or if its display or bridge stops.
 - A node whose runner has sessions disabled answers `404` to the status call and shows `available: false`.
-- The link uses `resize=remote&quality=9`: the remote desktop is resized to the size of your browser tab (1:1 pixels,
-  no scaling blur) and follows it when you resize the window. There is no maximum size (the container's memory limit
-  is the bound). noVNC works in CSS pixels, so on a HiDPI display the browser still upscales the image by the device
-  pixel ratio. Two tabs on one session with different sizes resize the shared desktop against each other.
+- The link uses `resize=remote&quality=9`. The remote desktop changes to the size of your browser tab (1:1 pixels, no blur from a change of scale). It follows the tab when you resize the window. There is no maximum size (the memory limit of the container is the limit).
+
+noVNC works in CSS pixels, so on a HiDPI display the browser still enlarges the image by the device pixel ratio. Two tabs on one session with different sizes resize the shared desktop against each other.
 
 ## Build and run
 
@@ -1077,10 +1072,7 @@ make build                 # bin/node-control, CGO off
 docker build -t node-control .
 ```
 
-The image is `alpine` (a shell stays available for `fly ssh console`) with the binary at
-`/usr/local/bin/node-control` and `app/` at `/srv/app`. `ARG TSVERSION` only documents the tailscale.com release and
-fails the build if `go.mod` pins another one. State lives on the volume mounted at `/var/lib/tailscale` (see `fly.toml`).
-Deploy with the overlay procedure from the repository `CLAUDE.md` (section 2.5).
+The image is `alpine` (so a shell is available for `fly ssh console`), with the binary at `/usr/local/bin/node-control` and `app/` at `/srv/app`. `ARG TSVERSION` only documents the tailscale.com release, and fails the build if `go.mod` pins another one. State is on the volume mounted at `/var/lib/tailscale` (see `fly.toml`). Deploy with the overlay procedure from the repository `CLAUDE.md` (section 2.5).
 
 ## Tests
 
@@ -1089,19 +1081,13 @@ go vet ./... && go test ./...
 go test -race ./...
 ```
 
-No cloud access is needed: providers and headscale are fake HTTP servers, and the core runs on plain TCP instead of
-tsnet.
+The tests need no cloud access: providers and headscale are fake HTTP servers, and the core runs on plain TCP, not on tsnet.
 
 ## Trial, cutover and canary helpers
 
-These scripts only read (`profile-canary.sh` is described under "Compromised bridge").
+These scripts only read (see "Compromised bridge" for `profile-canary.sh`).
 
-- `scripts/parity.sh <python-url> <go-url>` fetches `/nodes.json`, `/status`, `/tailnet/status` and `/enroll/devices` from
-  both apps, normalises JSON with `jq -S` and prints a unified diff; exit 1 on any difference. Needs `curl` and `jq`.
-- `scripts/measure-memory.sh <fly-app> [seconds=300] [status-url]` samples the process RSS and `MemAvailable` every 10 s
-  over `fly ssh console` while requesting `status-url`, then prints min `MemAvailable`, max RSS and PASS/FAIL against:
-  `MemAvailable` above 20% of `MemTotal` and RSS below 205 MB. Run it on the trial app before cutover.
+- `scripts/parity.sh <python-url> <go-url>` fetches `/nodes.json`, `/status`, `/tailnet/status` and `/enroll/devices` from both apps. It normalises JSON with `jq -S` and prints a unified diff. It exits with 1 on any difference. It needs `curl` and `jq`.
+- `scripts/measure-memory.sh <fly-app> [seconds=300] [status-url]` samples the process RSS and `MemAvailable` every 10 s over `fly ssh console` while it requests `status-url`. It then prints min `MemAvailable`, max RSS and PASS/FAIL against these limits: `MemAvailable` above 20% of `MemTotal` and RSS below 205 MB. Run it on the trial app before cutover.
 
-`measure-memory.sh` finds the process by its executable (`/usr/local/bin/node-control`, via `scripts/probe.sh`), requires
-exactly one match and prints the pid and `comm` in every sample. `sh scripts/test_measure_memory.sh` tests that logic
-and the argument checks without `fly`.
+`measure-memory.sh` finds the process by its executable (`/usr/local/bin/node-control`, through `scripts/probe.sh`). It requires exactly one match and prints the pid and `comm` in every sample. `sh scripts/test_measure_memory.sh` tests that logic and the argument checks without `fly`.

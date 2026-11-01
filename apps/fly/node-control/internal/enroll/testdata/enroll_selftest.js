@@ -508,9 +508,14 @@ const fieldValue = (els, label) => {
     assert.strictEqual(polls[0].stopped, true, 'the poll stops once enrolled');
     assert.ok(!findAll(aside, (n) => hasClass(n, 'secret')).some((n) => n.textContent === LINK && !n.parentNode.hidden), 'the used-up link is hidden');
     // another device can be enrolled from the same panel; the finished wait does not poll again
+    const held = ctrl.state.drawer;
+    assert.strictEqual(held.link, LINK);
+    assert.strictEqual(held.subscription, SUB);
     buttonNamed(aside, 'Enrol another device').click();
     assert.ok(findAll(aside, (n) => n.tag === 'form').length === 1 && findAll(aside, (n) => n.tag === 'input')[0].value === '', 'a blank form');
     assert.strictEqual(polls.length, 1);
+    assert.strictEqual(held.link, '', 'the blank form does not keep the last link');
+    assert.strictEqual(held.subscription, '', 'nor the last subscription URL');
     // Escape closes and removes the param
     fire(aside, 'keydown', { key: 'Escape' });
     assert.ok(!drawerNode(els));
@@ -558,9 +563,16 @@ const fieldValue = (els, label) => {
     fire(findAll(aside, (n) => n.tag === 'form')[0], 'submit');
     await flush();
     assert.strictEqual(polls.length, 1);
+    const closed = z.ctrl.state.drawer;
+    assert.strictEqual(findAll(closed.aside, (n) => hasClass(n, 'secret')).length, 2);
     fire(findAll(z.els.drawer, (n) => hasClass(n, 'scrim'))[0], 'click');
     assert.ok(!drawerNode(z.els));
     assert.strictEqual(polls[0].stopped, true, 'closing the panel stops the poll');
+    // closing the panel forgets what it showed
+    assert.strictEqual(closed.link, '', 'the link is gone from the closed panel');
+    assert.strictEqual(closed.subscription, '', 'the subscription URL too');
+    assert.strictEqual(closed.linkBox, null);
+    assert.strictEqual(findAll(closed.aside, (n) => hasClass(n, 'secret')).length, 0, 'no node keeps them');
   }
 
   // the panel cannot be closed while the device is being made; an exception on the success path shows an error
@@ -629,6 +641,9 @@ const fieldValue = (els, label) => {
     assert.deepStrictEqual(findAll(aside, (n) => hasClass(n, 'secret')).map((n) => n.textContent), ['https://e.example.net/e/NL']);
     assert.strictEqual(polls.length, 1);
     assert.ok(/enrol=1/.test(replaced[replaced.length - 1]));
+    const held = ctrl.state.drawer;
+    fire(aside, 'keydown', { key: 'Escape' });
+    assert.strictEqual(held.link, '', 'a link from New link is forgotten on close as well');
   }
 
   // extendOffers30And90, no prompt()

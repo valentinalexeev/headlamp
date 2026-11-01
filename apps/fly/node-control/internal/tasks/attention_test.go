@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -282,5 +283,108 @@ func TestTasksActivityNamesWhoStartedAManualRun(t *testing.T) {
 	got, err := h.m.Activity(context.Background(), "alice@", 10)
 	if err != nil || len(got) != 1 || got[0].Actor != "alice@" || got[0].Action != "task.manual" {
 		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+// slowSessions holds every Current call until release is closed or the call's context ends.
+type slowSessions struct {
+	*fakeSessions
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *slowSessions) Current(ctx context.Context, addr string) (*SessionInfo, error) {
+	s.entered <- struct{}{}
+	select {
+	case <-s.release:
+		return s.fakeSessions.Current(ctx, addr)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func slowSessionHarness(t *testing.T) (*sessHarness, *slowSessions) {
+	t.Helper()
+	h := newSessHarness(t, true, sessNode("runner-1", "100.64.0.10", sessTag))
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	h.m.now = func() time.Time { return now }
+	h.fake.cur["100.64.0.10"] = &SessionInfo{ID: "s1", State: "running", Token: sessTok, Port: 6080, ExpiresAt: now.Add(time.Hour)}
+	slow := &slowSessions{fakeSessions: h.fake, entered: make(chan struct{}, 16), release: make(chan struct{})}
+	h.m.sess.c = slow
+	return h, slow
+}
+
+func sessionItems(items []core.AttentionItem) int {
+	n := 0
+	for _, it := range items {
+		if it.ActionPath == "/sessions" {
+			n++
+		}
+	}
+	return n
+}
+
+// A poll that has given up must not wait for a read another poll started.
+func TestTasksAttentionDoesNotQueueBehindASlowSessionRead(t *testing.T) {
+	h, slow := slowSessionHarness(t)
+	go h.m.Attention(context.Background(), "alice@")
+	<-slow.entered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		h.m.Attention(ctx, "alice@")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("a cancelled poll queued behind the running read")
+	}
+	close(slow.release)
+}
+
+// A poll that goes away mid-read must not leave "None running" behind for the next poll.
+func TestTasksAttentionCancelledFirstReadIsNotCached(t *testing.T) {
+	h, slow := slowSessionHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		h.m.Attention(ctx, "alice@")
+		close(done)
+	}()
+	<-slow.entered
+	cancel()
+	<-done
+	close(slow.release)
+
+	items, _, err := h.m.Attention(context.Background(), "alice@")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionItems(items) != 1 {
+		t.Fatalf("the running session is missing after a cancelled read: %+v", items)
+	}
+}
+
+func TestTasksAttentionPollsShareOneSessionRead(t *testing.T) {
+	h, slow := slowSessionHarness(t)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if items, _, err := h.m.Attention(context.Background(), "alice@"); err != nil || sessionItems(items) != 1 {
+				t.Errorf("%+v %v", items, err)
+			}
+		}()
+	}
+	<-slow.entered
+	time.Sleep(50 * time.Millisecond) // let the others arrive
+	close(slow.release)
+	wg.Wait()
+	if n := len(h.fake.callList()); n != 1 {
+		t.Fatalf("concurrent polls called the runner %d times, want 1", n)
 	}
 }

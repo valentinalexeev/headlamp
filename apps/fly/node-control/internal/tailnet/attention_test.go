@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -221,6 +223,68 @@ func TestTailnetAttentionHidesTheKeyFromOtherViewers(t *testing.T) {
 	items, lines, err := m.Attention(context.Background(), "bob@")
 	if !errors.Is(err, core.ErrNotVisible) || len(items) != 0 || len(lines) != 0 {
 		t.Fatalf("anyone else must not: %+v %+v %v", items, lines, err)
+	}
+}
+
+func TestTailnetAttentionPollsShareOneExpiryRead(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	var calls atomic.Int32
+	entered, release := make(chan struct{}, 8), make(chan struct{})
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		calls.Add(1)
+		entered <- struct{}{}
+		<-release
+		return now.Add(24 * time.Hour), nil
+	})).(*module)
+	m.now = func() time.Time { return now }
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if items, _, err := m.Attention(context.Background(), "alice@"); err != nil || len(items) != 1 {
+				t.Errorf("%+v %v", items, err)
+			}
+		}()
+	}
+	<-entered
+	time.Sleep(50 * time.Millisecond) // let the others arrive
+	close(release)
+	wg.Wait()
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("concurrent polls read the expiry %d times, want 1", n)
+	}
+}
+
+// A poll that goes away mid-read says nothing about the key, so the next poll must not inherit it as a failure.
+func TestTailnetAttentionCancelledReadIsNotCached(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	entered, release := make(chan struct{}, 8), make(chan struct{})
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(ctx context.Context) (time.Time, error) {
+		entered <- struct{}{}
+		select {
+		case <-release:
+			return now.Add(24 * time.Hour), nil
+		case <-ctx.Done():
+			return time.Time{}, ctx.Err()
+		}
+	})).(*module)
+	m.now = func() time.Time { return now }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.Attention(ctx, "alice@")
+		close(done)
+	}()
+	<-entered
+	cancel()
+	<-done
+	close(release)
+
+	items, _, err := m.Attention(context.Background(), "alice@")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("the warning is missing after a cancelled read: %+v %v", items, err)
 	}
 }
 

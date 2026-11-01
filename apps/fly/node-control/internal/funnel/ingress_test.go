@@ -102,6 +102,45 @@ func TestPendingBecomesFailedWhenOutcomeReverted(t *testing.T) {
 	}
 }
 
+// writeCounter counts the state changes settle makes.
+type writeCounter struct {
+	Store
+	writes int
+}
+
+func (c *writeCounter) MarkActive(name string) error { c.writes++; return c.Store.MarkActive(name) }
+func (c *writeCounter) MarkFailed(name string) error { c.writes++; return c.Store.MarkFailed(name) }
+
+// settle runs on read paths that poll (Attention, the ingress's config pull), so it may write once for each change
+// that ended and never again for it.
+func TestSettleWritesOnceForEachEndedChange(t *testing.T) {
+	for _, tc := range []struct {
+		outcome string
+		ports   bool // a port change of an active namespace rather than a new namespace
+	}{{"confirmed", false}, {"reverted", false}, {"confirmed", true}, {"reverted", true}} {
+		st := &writeCounter{Store: openTestStore(t)}
+		mustNS(t, st, "pdl", []Range{{8080, 8080}}, 1)
+		if tc.ports {
+			if _, err := settle(st, outcomes{1: "confirmed"}.fn()); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.SetPendingPorts("pdl", []Range{{8081, 8081}}, 2); err != nil {
+				t.Fatal(err)
+			}
+			st.writes = 0
+		}
+		o := outcomes{1: tc.outcome, 2: tc.outcome}.fn()
+		for range 3 {
+			if _, err := settle(st, o); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if st.writes != 1 {
+			t.Errorf("%+v: %d writes over three polls, want 1", tc, st.writes)
+		}
+	}
+}
+
 func TestUnknownOutcomeLeavesPending(t *testing.T) {
 	st := openTestStore(t)
 	mustNS(t, st, "pdl", []Range{{8080, 8080}}, 1)

@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 type fakeNova struct {

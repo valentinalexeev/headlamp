@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 const (
@@ -37,6 +37,7 @@ type multiFx struct {
 	clk    *clock
 	r      *core.Routes
 	mod    *Module
+	tn     core.Tailnet // replaces the default tailnet when set before register
 }
 
 func multiCfgJSON(agent2 string) string {
@@ -71,6 +72,9 @@ func (f *multiFx) register() {
 	env := core.MapEnv(f.env)
 	f.mod = New(env, WithNodeSource(f.nodes), withClock(f.clk.now)).(*Module)
 	f.r = routesFor(env)
+	if f.tn != nil {
+		f.r.Tailnet = f.tn
+	}
 	if err := f.mod.Register(f.r); err != nil {
 		f.t.Fatal(err)
 	}
@@ -80,7 +84,7 @@ func (f *multiFx) register() {
 func (f *multiFx) do(method, path, body string) (int, map[string]any) {
 	f.t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	if method == "POST" {
+	if method == "POST" || method == "DELETE" {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	rec := httptest.NewRecorder()

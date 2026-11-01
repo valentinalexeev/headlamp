@@ -17,7 +17,7 @@ import (
 
 	"tailscale.com/ipn"
 
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 // The shared Redis is billed per command, so the store reads every field once
@@ -64,6 +64,10 @@ type Run struct {
 	Result         map[string]any
 	ScriptSHA      string
 	NotifyOutcome  string
+	// Manual is set on an attempt that belongs to a sequence an operator started with Trigger.
+	Manual bool `json:"manual,omitempty"`
+	// Actor is who started that sequence, when the trigger came with a login.
+	Actor string `json:"actor,omitempty"`
 	// Where the run lives on the node, so a restarted engine can cancel a
 	// run its predecessor left behind.
 	RunnerID   string `json:"runner_id,omitempty"`

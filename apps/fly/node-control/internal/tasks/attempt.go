@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"example.com/node-control/internal/headscale"
-	"example.com/node-control/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
 )
 
 // outcome is how one attempt ended, before scrubbing.
@@ -35,7 +35,10 @@ func (e *Engine) attempt(ctx context.Context, task, id string, n int, manual boo
 	if !ok {
 		return // removed by a config push since it became due
 	}
-	run := Run{ID: id, Task: task, Attempt: n, State: RunQueued, Started: e.d.Now()}
+	run := Run{ID: id, Task: task, Attempt: n, State: RunQueued, Started: e.d.Now(), Manual: manual}
+	if manual {
+		run.Actor = e.actorOf(task)
+	}
 	e.setActive(run)
 	e.log.Info("run_started", "task", task, "run", id, "attempt", n)
 

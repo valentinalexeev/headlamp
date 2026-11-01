@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 var (
@@ -121,6 +121,7 @@ type Engine struct {
 	active    map[string]*Run                    // task -> record of the attempt executing now
 	busy      map[string]int                     // node name -> attempts executing on it
 	manual    map[string]bool                    // task -> its current sequence was started by Trigger
+	actors    map[string]string                  // task -> who started its current manual sequence
 	stops     map[string]context.CancelCauseFunc // task -> cancels the executing attempt
 	notBefore map[string]time.Time               // task -> startup delay end
 	warned    map[string]bool                    // warnings already logged by this engine
@@ -148,7 +149,7 @@ func NewEngine(d Deps) *Engine {
 		d: d, log: log, wake: make(chan struct{}, 1),
 		startSpread: defaultStartSpread, shutdownWait: defaultShutdownWait, cancelBudget: defaultCancelBudget,
 		base: base, cancelBase: cancel,
-		active: map[string]*Run{}, busy: map[string]int{}, manual: map[string]bool{},
+		active: map[string]*Run{}, busy: map[string]int{}, manual: map[string]bool{}, actors: map[string]string{},
 		stops: map[string]context.CancelCauseFunc{}, notBefore: map[string]time.Time{},
 		warned: map[string]bool{},
 	}
@@ -241,7 +242,10 @@ func (e *Engine) Running(task string) (Run, bool) {
 
 // Trigger starts an attempt now. A pending retry is dropped and the sequence
 // restarts at attempt 1. NextRun is never touched by a manual sequence.
-func (e *Engine) Trigger(task string) (string, error) {
+func (e *Engine) Trigger(task string) (string, error) { return e.TriggerBy(task, "") }
+
+// TriggerBy is Trigger on behalf of actor, who is recorded on the runs of the sequence.
+func (e *Engine) TriggerBy(task, actor string) (string, error) {
 	cfg := e.d.Store.Config()
 	if cfg == nil {
 		return "", ErrUnknownTask
@@ -253,6 +257,9 @@ func (e *Engine) Trigger(task string) (string, error) {
 	if err := e.claim(task, id, true); err != nil {
 		return "", err
 	}
+	e.mu.Lock()
+	e.actors[task] = actor
+	e.mu.Unlock()
 	if st := e.d.Store.State(task); st.Attempt > 0 {
 		e.updateState(task, func(s *TaskState) { s.Attempt, s.AttemptAt = 0, time.Time{} })
 	}
@@ -363,14 +370,23 @@ func (e *Engine) continues(task string, attempt int) bool {
 	defer e.mu.Unlock()
 	if attempt == 0 {
 		delete(e.manual, task)
+		delete(e.actors, task)
 		return false
 	}
 	return e.manual[task]
 }
 
+// actorOf returns who started the current manual sequence of the task.
+func (e *Engine) actorOf(task string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.actors[task]
+}
+
 func (e *Engine) endSequence(task string) {
 	e.mu.Lock()
 	delete(e.manual, task)
+	delete(e.actors, task)
 	e.mu.Unlock()
 }
 

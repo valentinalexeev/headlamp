@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview</title>
+</head>
+<body>
+<div class="hl" id="overview">
+  <div class="page">
+    <div class="head">
+      <div>
+        <div class="st wrap"><span class="g good" id="glyph" aria-hidden="true" hidden></span><h1 id="heading">Overview</h1></div>
+        <p class="t2" id="sub" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <section aria-label="Attention queue" class="queue" id="queue" hidden></section>
+
+    <div class="cols">
+      <section class="colmain">
+        <div>
+          <div class="seclabel"><h2>Systems</h2></div>
+          <div class="tw">
+            <table>
+              <tbody id="systems"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <section class="colside" id="activity" hidden>
+        <div>
+          <div class="seclabel"><h2>Recent activity</h2><a class="small t2" href="/activity">All activity</a></div>
+          <div class="tw">
+            <table>
+              <tbody id="activity-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+<script src="/_ui/activity-text.js" defer></script>
+<script src="/overview/overview.js" defer></script>
+</body>
+</html>

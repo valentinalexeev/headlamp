@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"example.com/node-control/internal/authz"
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
-	"example.com/node-control/internal/policy"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/policy"
 )
 
 // Headscale is the part of the headscale client the module uses.
@@ -62,7 +62,14 @@ func (m *Module) Nav() []core.NavItem {
 	if m.st == nil {
 		return nil
 	}
-	return []core.NavItem{{Label: "Funnel", Path: "/funnel", Order: 40}}
+	allow := func(string) bool { return false } // not configured: show nothing
+	if m.s != nil {
+		allow = m.s.Admins.Has
+	}
+	return []core.NavItem{
+		{Label: "Funnel", Path: "/funnel", Order: 30, Group: "operate", Icon: "funnel", Source: "funnel", Allow: allow},
+		{Label: "Namespaces & keys", Path: "/funnel/config", Order: 60, Group: "configure", Icon: "key", Allow: allow},
+	}
 }
 
 func (m *Module) Register(r *core.Routes) error {

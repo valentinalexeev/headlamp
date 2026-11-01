@@ -12,13 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/ui"
 )
 
-var pageAssets = []string{"/tasks/static/tasks.css", "/tasks/static/tasks.js"}
+var pageAssets = []string{"/tasks/static/tasks.js"}
 
-const wantPageCSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; " +
-	"img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+// The pages use the shared console stylesheet and no images, so the shared page policy is all they need.
+const wantPageCSP = ui.PageCSP
 
 func TestTasksPageServedBehindGate(t *testing.T) {
 	h := newModHarness(t, nil)
@@ -46,7 +47,7 @@ func TestTasksPageServedBehindGate(t *testing.T) {
 func TestTasksPageAssetsServed(t *testing.T) {
 	h := newModHarness(t, nil)
 	h.waitOpen()
-	want := map[string]string{"/tasks/static/tasks.css": "text/css", "/tasks/static/tasks.js": "text/javascript"}
+	want := map[string]string{"/tasks/static/tasks.js": "text/javascript"}
 	for p, ct := range want {
 		rec := h.alice("GET", p, "")
 		if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), ct) {
@@ -71,23 +72,63 @@ func TestTasksPageHasNoInlineScriptOrDataInMarkup(t *testing.T) {
 	if before != after {
 		t.Fatal("the markup changes with the task state")
 	}
-	scriptTag := regexp.MustCompile(`(?is)<script\b([^>]*)>(.*?)</script>`)
-	for _, m := range scriptTag.FindAllStringSubmatch(after, -1) {
-		if !strings.Contains(m[1], "src=") || strings.TrimSpace(m[2]) != "" {
-			t.Errorf("inline script: %q", m[0])
+	if strings.Contains(after, "job") {
+		t.Error("task data in the markup")
+	}
+	if !strings.Contains(after, "/tasks/static/tasks.js") {
+		t.Error("script not linked")
+	}
+	if rec := h.alice("GET", "/tasks/static/tasks.css", ""); rec.Code == 200 {
+		t.Error("the old stylesheet is still served")
+	}
+}
+
+// Both pages are plain markup with one deferred same-origin script: no inline code, no styles of their own, no
+// outside references. The scripts never build markup from strings.
+func TestTasksAndSessionsPagesHaveNoInlineCodeOrExternalReferences(t *testing.T) {
+	for _, p := range []struct {
+		name         string
+		html, script []byte
+	}{{"tasks", pageHTML, pageJS}, {"sessions", sessionsHTML, sessionsJS}} {
+		html := string(p.html)
+		scripts := regexp.MustCompile(`(?i)<script\b[^>]*>`).FindAllString(html, -1)
+		if len(scripts) != 1 {
+			t.Errorf("%s: %d script tags", p.name, len(scripts))
+		}
+		for _, m := range scripts {
+			if !strings.Contains(m, ` src="/`) || !strings.Contains(m, "defer") {
+				t.Errorf("%s: script tag %q must be a same-origin deferred file", p.name, m)
+			}
+		}
+		for _, bad := range []string{"<style", " style=", "javascript:", "http://", "https://", " onclick=", " onload=", "<link", "<template"} {
+			if strings.Contains(strings.ToLower(html), bad) {
+				t.Errorf("%s: page contains %q", p.name, bad)
+			}
+		}
+		for _, m := range regexp.MustCompile(`(?i)\s(?:src|href)="([^"]*)"`).FindAllStringSubmatch(html, -1) {
+			if !strings.HasPrefix(m[1], "/") || strings.HasPrefix(m[1], "//") {
+				t.Errorf("%s: reference %q is not a local path", p.name, m[1])
+			}
+		}
+		js := string(p.script)
+		for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "confirm(", "prompt(", "alert(", "XMLHttpRequest", "localStorage", "sessionStorage"} {
+			if strings.Contains(js, bad) {
+				t.Errorf("%s: script contains %q", p.name, bad)
+			}
+		}
+		if regexp.MustCompile(`https?://`).MatchString(js) {
+			t.Errorf("%s: script reaches outside the origin", p.name)
 		}
 	}
-	if regexp.MustCompile(`(?i)\son[a-z]+\s*=`).MatchString(after) {
-		t.Error("inline event handler in the markup")
-	}
-	if regexp.MustCompile(`(?i)\sstyle\s*=`).MatchString(after) || strings.Contains(strings.ToLower(after), "<style") {
-		t.Error("inline style in the markup")
-	}
-	if strings.Contains(after, "<h1>Tasks</h1></body>") || strings.Contains(after, "job") {
-		t.Error("placeholder text or task data in the markup")
-	}
-	if !strings.Contains(after, "/tasks/static/tasks.js") || !strings.Contains(after, "/tasks/static/tasks.css") {
-		t.Error("assets not linked")
+}
+
+func TestSessionsPageServedWithPagePolicy(t *testing.T) {
+	h := newSessHarness(t, true, sessNode("a1", "100.64.0.10", sessTag))
+	for _, p := range []string{"/sessions", "/sessions/static/sessions.js"} {
+		rec := h.do("GET", p, aliceAddr, "")
+		if rec.Code != 200 || rec.Header().Get("Content-Security-Policy") != wantPageCSP || rec.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("%s: %d CSP %q", p, rec.Code, rec.Header().Get("Content-Security-Policy"))
+		}
 	}
 }
 
@@ -153,17 +194,19 @@ func TestTasksStaticRouteDoesNotShadowTaskRoutes(t *testing.T) {
 	_ = httptest.NewRecorder
 }
 
-// TestTasksPageScriptSelfTest checks the pure helpers of tasks.js with node, when node exists.
+// TestTasksPageScriptSelfTest checks both page scripts against a small DOM stand-in with node, when node exists.
 func TestTasksPageScriptSelfTest(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is not installed")
 	}
-	out, err := exec.Command(node, "testdata/tasks_page_selftest.js", "static/tasks.js").CombinedOutput()
+	out, err := exec.Command(node, "testdata/tasks_page_selftest.js", "../ui/static/hl.js", "static/tasks.js", "static/sessions.js").CombinedOutput()
 	if err != nil {
 		t.Fatalf("self-test failed: %v\n%s", err, out)
 	}
-	if out, err := exec.Command(node, "--check", "static/tasks.js").CombinedOutput(); err != nil {
-		t.Fatalf("node --check: %v\n%s", err, out)
+	for _, f := range []string{"static/tasks.js", "static/sessions.js"} {
+		if out, err := exec.Command(node, "--check", f).CombinedOutput(); err != nil {
+			t.Fatalf("node --check %s: %v\n%s", f, err, out)
+		}
 	}
 }

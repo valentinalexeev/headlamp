@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"example.com/node-control/internal/authz"
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 const (
@@ -49,7 +49,8 @@ func (m *Module) Nav() []core.NavItem {
 	if m.svc == nil {
 		return nil
 	}
-	return []core.NavItem{{Label: "Policy", Path: "/policy", Order: 30}}
+	admins := authz.ParseAllowed(m.env.Getenv("POLICY_ADMIN_USERS"))
+	return []core.NavItem{{Label: "Policy", Path: "/policy", Order: 50, Group: "configure", Icon: "policy", Source: "policy", Allow: admins.Has}}
 }
 
 // intEnv reads an integer variable with a default and an inclusive range.

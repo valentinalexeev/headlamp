@@ -1,4 +1,4 @@
-module example.com/node-control
+module github.com/valentinalexeev/headlamp/apps/fly/node-control
 
 go 1.26.5
 

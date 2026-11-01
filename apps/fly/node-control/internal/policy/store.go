@@ -48,6 +48,9 @@ type Pending struct {
 	After    string
 	Deadline time.Time
 	Attempts int // failed revert attempts so far
+	// AppliedAt is when the write attempt ended; zero when it was not recorded (a change begun
+	// before the record existed), which callers treat as unknown.
+	AppliedAt time.Time
 }
 
 // Entry is one history row. It carries no policy text.
@@ -73,6 +76,16 @@ CREATE TABLE IF NOT EXISTS changes (
     attempts INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_pending ON changes(state) WHERE state = 'pending';
+CREATE TABLE IF NOT EXISTS outcomes (
+    change_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    ts INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS applied (
+    change_id INTEGER PRIMARY KEY,
+    ts INTEGER NOT NULL
+);
 `
 
 // Store is the SQLite change history. It uses one connection and no WAL to keep memory low.
@@ -143,8 +156,10 @@ func (s *Store) Abort(id int64) error {
 func (s *Store) Pending() (Pending, bool, error) {
 	var p Pending
 	var dl int64
-	err := s.db.QueryRow(`SELECT id, actor, reason, before, after, deadline, attempts
-		FROM changes WHERE state = 'pending'`).Scan(&p.ID, &p.Actor, &p.Reason, &p.Before, &p.After, &dl, &p.Attempts)
+	var ap sql.NullInt64
+	err := s.db.QueryRow(`SELECT c.id, c.actor, c.reason, c.before, c.after, c.deadline, c.attempts, a.ts
+		FROM changes c LEFT JOIN applied a ON a.change_id = c.id WHERE c.state = 'pending'`).
+		Scan(&p.ID, &p.Actor, &p.Reason, &p.Before, &p.After, &dl, &p.Attempts, &ap)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Pending{}, false, nil
 	}
@@ -152,7 +167,17 @@ func (s *Store) Pending() (Pending, bool, error) {
 		return Pending{}, false, err
 	}
 	p.Deadline = time.Unix(dl, 0)
+	if ap.Valid {
+		p.AppliedAt = time.Unix(ap.Int64, 0)
+	}
 	return p, true, nil
+}
+
+// MarkApplied records, at the store's clock, that the write attempt for change id has ended. A
+// page loaded before this instant cannot show the console is reachable under the new rules.
+func (s *Store) MarkApplied(id int64) error {
+	_, err := s.db.Exec("INSERT OR REPLACE INTO applied (change_id, ts) VALUES (?, ?)", id, s.clock().Unix())
+	return err
 }
 
 func (s *Store) settle(id int64, state Outcome) error {
@@ -229,4 +254,46 @@ func (s *Store) TextOf(id int64, which string) (string, error) {
 		return "", err
 	}
 	return text, nil
+}
+
+// How a pending change ended, as recorded in the outcomes table.
+const (
+	RecordConfirmed         = "confirmed"
+	RecordReverted          = "reverted"            // by the watcher, at the deadline
+	RecordRevertedOnRequest = "reverted_on_request" // by an operator, before the deadline
+)
+
+// Record is how and when a change ended and who did it. It carries no policy text.
+type Record struct {
+	ChangeID int64
+	Action   string
+	Actor    string
+	At       time.Time
+}
+
+// RecordOutcome notes how change id ended, at the store's clock. Changes that ended before the table existed have no
+// record.
+func (s *Store) RecordOutcome(id int64, action, actor string) error {
+	_, err := s.db.Exec("INSERT INTO outcomes (change_id, action, actor, ts) VALUES (?, ?, ?, ?)", id, action, actor, s.clock().Unix())
+	return err
+}
+
+// Records returns the recorded outcome of each change, by change id (the newest record when there are several).
+func (s *Store) Records() (map[int64]Record, error) {
+	rows, err := s.db.Query("SELECT change_id, action, actor, ts FROM outcomes ORDER BY rowid ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]Record{}
+	for rows.Next() {
+		var r Record
+		var ts int64
+		if err := rows.Scan(&r.ChangeID, &r.Action, &r.Actor, &ts); err != nil {
+			return nil, err
+		}
+		r.At = time.Unix(ts, 0)
+		out[r.ChangeID] = r
+	}
+	return out, rows.Err()
 }

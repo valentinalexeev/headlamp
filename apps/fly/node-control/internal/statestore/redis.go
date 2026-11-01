@@ -25,7 +25,7 @@ import (
 	"github.com/redis/go-redis/v9/maintnotifications"
 	"tailscale.com/ipn"
 
-	"example.com/node-control/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
 )
 
 // opTimeout bounds the connection check and every single operation.

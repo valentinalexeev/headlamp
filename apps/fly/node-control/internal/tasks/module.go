@@ -15,11 +15,11 @@ import (
 
 	"tailscale.com/ipn"
 
-	"example.com/node-control/internal/authz"
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
-	"example.com/node-control/internal/scrub"
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 const (
@@ -54,10 +54,16 @@ type Module struct {
 	tag      string // TASKS_RUNNER_TAG
 	// sessionsTag is SESSIONS_TAG; "" means no browser-session page or API.
 	sessionsTag string
-	port        int
-	ntfyURL     string
-	tn          core.Tailnet
-	log         *slog.Logger
+	sess        *sessionAPI // set with sessionsTag
+
+	sessMu    sync.Mutex // guards the cached session attention
+	sessAt    time.Time
+	sessItems []core.AttentionItem
+	sessLines []core.SystemLine
+	port      int
+	ntfyURL   string
+	tn        core.Tailnet
+	log       *slog.Logger
 
 	metricsAddr     string // TASKS_METRICS_ADDR; "" means no metrics listener
 	heartbeatSecret string // TASKS_HEARTBEAT_SECRET; "" means no heartbeat
@@ -99,9 +105,10 @@ func (m *Module) Nav() []core.NavItem {
 	if !m.on {
 		return nil
 	}
-	items := []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40}}
+	admins := authz.ParseAllowed(m.env.Getenv("TASKS_ADMIN_USERS"))
+	items := []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40, Group: "operate", Icon: "tasks", Source: "tasks", Allow: admins.Has}}
 	if m.sessionsTag != "" {
-		items = append(items, core.NavItem{Label: "Browser", Path: "/sessions", Order: 45})
+		items = append(items, core.NavItem{Label: "Sessions", Path: "/sessions", Order: 45, Group: "operate", Icon: "sessions", Allow: admins.Has})
 	}
 	return items
 }
@@ -209,7 +216,8 @@ func (m *Module) Register(r *core.Routes) error {
 		} else {
 			sc = NewSessionClient(m.tn, m.port, m.token)
 		}
-		(&sessionAPI{m: m, c: sc}).register(r.Admin, gate)
+		m.sess = &sessionAPI{m: m, c: sc}
+		m.sess.register(r.Admin, gate)
 		m.log.Info("browser sessions enabled", "tag", sessTag)
 	}
 	return nil

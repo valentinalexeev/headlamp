@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 const cfgJSON = `{"host": "ingress.example.test", "public_key": "P", "short_id": "ab", "sni": "s.example.test"}`
@@ -255,7 +255,7 @@ func TestEndToEndThroughCore(t *testing.T) {
 	public := "http://" + tn.PublicAddr()
 
 	code, _, page := httpDo(t, "GET", admin+"/enroll", "", "")
-	if code != 200 || !strings.Contains(page, `id="syncbanner"`) {
+	if code != 200 || !strings.Contains(page, `id="syncnote"`) {
 		t.Fatalf("page %d", code)
 	}
 	body := `{"name":"Anna phone","owner":"anna","client":"karing","expires_at":` + "99999999999" + `}`

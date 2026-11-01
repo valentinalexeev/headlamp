@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // Module is the enrolment module: the operator API on the admin mux and the public handler on the
@@ -24,6 +24,8 @@ type Module struct {
 	store Backend
 	admin *Admin
 	reg   *Registry
+	// stopped names the machines stopped at their provider; nil when nothing can say.
+	stopped func(context.Context) map[string]bool
 
 	loopDone     chan struct{} // closed when the reconcile loop has returned; nil if never started
 	activityDone chan struct{} // the same for the activity loop
@@ -36,6 +38,12 @@ type Option func(*Module)
 // without an address, reports whether each ingress node is online and discovers new ingress nodes
 // (which are never used before the operator approves them).
 func WithNodeSource(src headscale.NodeSource) Option { return func(m *Module) { m.src = src } }
+
+// WithStoppedNodes gives the module a way to learn which machines are stopped at their provider: their tailnet names
+// in lower case. A stopped bridge serves nobody, so a sync waiting for it is not a risk.
+func WithStoppedNodes(fn func(context.Context) map[string]bool) Option {
+	return func(m *Module) { m.stopped = fn }
+}
 
 // withClock replaces the clock of the sync states and the discovery cache (tests).
 func withClock(now func() time.Time) Option { return func(m *Module) { m.now = now } }
@@ -153,6 +161,7 @@ func (m *Module) Register(r *core.Routes) error {
 	reg.SetStore(store)
 	m.store, m.reg = store, reg
 	m.admin = NewAdminFor(store, reg)
+	m.admin.SetTailnet(r.Tailnet)
 	m.admin.Register(r.Admin)
 	NewPublicFor(store, reg).Register(r.Public)
 	return nil
@@ -196,10 +205,26 @@ func (m *Module) Stop(ctx context.Context) error {
 	return m.store.Close()
 }
 
+// AuditLog is the log of device and node actions, or nil when enrolment is off.
+func (m *Module) AuditLog() core.AuditLog {
+	if m.store == nil {
+		return nil
+	}
+	return m.store
+}
+
 // Nav puts the enrolment page in the top bar, but only when the module registered (enrolment enabled).
 func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {
 		return nil
 	}
-	return []core.NavItem{{Label: "Bridge", Path: "/enroll", Order: 20}}
+	return []core.NavItem{{Label: "Devices", Path: "/enroll", Order: 20, Group: "operate", Icon: "devices", Source: "enroll"}}
+}
+
+// Actions puts "Enrol device" in the top bar, but only when the module registered.
+func (m *Module) Actions() []core.NavAction {
+	if m.store == nil {
+		return nil
+	}
+	return []core.NavAction{{Label: "Enrol device", Path: "/enroll?enrol=1", Icon: "plus"}}
 }

@@ -16,7 +16,7 @@ dst=$root/apps/fly/funnel-ingress
 by_hand="importer.go importer_test.go env_test.go redis.go"
 
 norm() {
-	sed -e 's#example.com/node-control/internal/scrub#funnel-ingress/internal/scrub#' \
+	sed -e 's#github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub#github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/scrub#' \
 	    -e 's/NODE_CONTROL_STATE_KEY/FUNNEL_STATE_KEY/g' \
 	    -e 's/_node-control-import/_funnel-ingress-import/' \
 	    -e 's/node-control:tsnet/funnel-ingress:tsnet/g' \

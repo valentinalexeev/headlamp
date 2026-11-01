@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS ingress_approvals (
     node_id INTEGER NOT NULL DEFAULT 0,
     machine_key TEXT NOT NULL DEFAULT ''
 );
-`
+` + auditSchema
 
 // Device is an enrolled device. It carries no secret material.
 type Device struct {

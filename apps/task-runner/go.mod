@@ -1,3 +1,3 @@
-module example.com/task-runner
+module github.com/valentinalexeev/headlamp/apps/task-runner
 
 go 1.26.5

@@ -18,9 +18,9 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"tailscale.com/ipn"
 
-	"example.com/node-control/internal/authz"
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 const (
@@ -1074,4 +1074,26 @@ func TestStopClosesRedisOnlyAfterEngineStopped(t *testing.T) {
 		t.Fatal("Redis never closed")
 	}
 	<-stopped
+}
+
+func TestTriggerRecordsTheCaller(t *testing.T) {
+	h := newModHarness(t, nil)
+	s := h.waitOpen()
+	h.pushSimple()
+	if rec := h.alice("POST", "/tasks/job/run", ""); rec.Code != 202 {
+		t.Fatalf("trigger: %d %s", rec.Code, rec.Body)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if rs := s.Runs("job"); len(rs) > 0 && rs[0].Actor != "" {
+			if !strings.HasPrefix(rs[0].Actor, "alice") {
+				t.Fatalf("actor = %q", rs[0].Actor)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no run with an actor: %+v", s.Runs("job"))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

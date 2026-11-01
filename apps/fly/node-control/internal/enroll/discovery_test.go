@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // All hosts, keys, short ids and tokens below are fake.
@@ -1469,5 +1469,36 @@ func TestDiscoveredNodeOfAConfiguredBridgeIsOneRow(t *testing.T) {
 	}
 	if len(cur.Pending) != 1 || cur.Pending[0] != "other" {
 		t.Fatalf("pending %v", cur.Pending)
+	}
+}
+
+// A bridge with a stored approval shows what was pinned, next to what it publishes now. Never a key.
+func TestApprovedValuesAreShownForAChangedIdentity(t *testing.T) {
+	a := newInfoAgent(t, "ingress-3")
+	usePort(t, a)
+	f := newRegFx(t, nil)
+	f.nodes.set(ingressNode("ingress-3", true))
+	if v := f.view("ingress-3"); v.ApprovedFingerprint != "" || v.ApprovedNodeID != 0 || v.ApprovedMachineKeyPref != "" {
+		t.Fatalf("nothing is approved yet: %+v", v)
+	}
+	fp := f.view("ingress-3").Fingerprint
+	if err := f.reg.Approve(context.Background(), "ingress-3", fp, 3); err != nil {
+		t.Fatal(err)
+	}
+	if v := f.view("ingress-3"); v.ApprovedFingerprint != fp || v.ApprovedNodeID != 3 {
+		t.Fatalf("approved values: %+v", v)
+	}
+	a.set("public_key", "ANOTHER-KEY-0123456789")
+	f.clk.advance(infoTTL + time.Second)
+	v := f.view("ingress-3")
+	if v.Approval != stChanged || v.ApprovedFingerprint != fp || v.Fingerprint == fp || v.ApprovedNodeID != 3 {
+		t.Fatalf("changed view: %+v", v)
+	}
+	if len(v.ApprovedMachineKeyPref) > 8 {
+		t.Fatalf("only a short machine key prefix may be shown: %q", v.ApprovedMachineKeyPref)
+	}
+	body, _ := json.Marshal(v)
+	if !strings.Contains(string(body), `"approved_fingerprint"`) {
+		t.Fatalf("json: %s", body)
 	}
 }

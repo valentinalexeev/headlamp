@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 const (
@@ -316,7 +316,7 @@ func TestSessionsNavAndPageWhenEnabled(t *testing.T) {
 	found := false
 	for _, n := range h.m.Nav() {
 		if n.Path == "/sessions" {
-			found = n.Label == "Browser" && n.Order == 45
+			found = n.Label == "Sessions" && n.Order == 45 && n.Group == "operate" && n.Allow != nil
 		}
 	}
 	if !found {
@@ -451,5 +451,14 @@ func TestSessionsJSONNoTokenWhenNoSession(t *testing.T) {
 	rec := h.do("GET", "/sessions.json", aliceAddr, "")
 	if rec.Code != 200 || strings.Contains(rec.Body.String(), sessTok) || strings.Contains(rec.Body.String(), "token") {
 		t.Fatalf("no running session must mean no token (%d): %s", rec.Code, rec.Body)
+	}
+}
+
+func TestSessionsJSONCanLeaveOutTheLinks(t *testing.T) {
+	h := newSessHarness(t, true, sessNode("a1", "100.64.0.10", sessTag))
+	h.fake.cur["100.64.0.10"] = &SessionInfo{ID: "s1", State: "running", Port: 6080, Token: sessTok, ExpiresAt: time.Now().Add(time.Hour)}
+	rec := h.do("GET", "/sessions.json?links=0", aliceAddr, "")
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), sessTok) || !strings.Contains(rec.Body.String(), `"running"`) {
+		t.Fatalf("the state stays, the token goes (%d): %s", rec.Code, rec.Body)
 	}
 }

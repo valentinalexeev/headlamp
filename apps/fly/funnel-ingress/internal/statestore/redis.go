@@ -25,7 +25,7 @@ import (
 	"github.com/redis/go-redis/v9/maintnotifications"
 	"tailscale.com/ipn"
 
-	"funnel-ingress/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/scrub"
 )
 
 // opTimeout bounds the connection check and every single operation.

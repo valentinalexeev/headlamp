@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"example.com/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
 )
 
 const (
@@ -48,7 +48,6 @@ func (a *api) register(mux *http.ServeMux, gate func(http.Handler) http.Handler)
 	plain := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(h)) }
 	body := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(authz.RequireJSON(h))) }
 	plain("GET /tasks", asset("text/html; charset=utf-8", pageHTML))
-	plain("GET /tasks/static/tasks.css", asset("text/css; charset=utf-8", pageCSS))
 	plain("GET /tasks/static/tasks.js", asset("text/javascript; charset=utf-8", pageJS))
 	plain("GET /tasks.json", a.list)
 	plain("GET /tasks/{id}", a.task)
@@ -178,7 +177,7 @@ func (a *api) trigger(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, err := e.Trigger(r.PathValue("id"))
+	id, err := e.TriggerBy(r.PathValue("id"), authz.LoginFrom(r.Context()))
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": id})

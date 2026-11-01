@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/enroll"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/enroll"
 )
 
 // enrollRedisFromEnv opens the Redis enrolment store the subcommands act on. ENROLL_REDIS is not required to be set:

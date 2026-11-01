@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"example.com/node-control/internal/core"
-	ocisign "example.com/node-control/internal/nodes/oci"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	ocisign "github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/nodes/oci"
 )
 
 const ociTimeout = 20 * time.Second

@@ -19,8 +19,8 @@ import (
 
 	"tailscale.com/tsnet"
 
-	"funnel-ingress/internal/config"
-	"funnel-ingress/internal/sidecar"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/sidecar"
 )
 
 const tailnetUpTimeout = 90 * time.Second

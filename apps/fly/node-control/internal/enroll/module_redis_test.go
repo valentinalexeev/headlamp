@@ -10,7 +10,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 func redisModEnv(t *testing.T, mr *miniredis.Miniredis) *modEnv {

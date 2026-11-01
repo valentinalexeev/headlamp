@@ -6,15 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"net"
 	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/ui"
 )
 
 const navMarker = "data-nc-nav"
@@ -42,6 +44,14 @@ func ValidateNavItem(it NavItem) error {
 		return fmt.Errorf("nav path %q must not contain a colon, backslash, space, ?, #, <, > or a quote", p)
 	case strings.IndexFunc(p, unicode.IsControl) >= 0:
 		return fmt.Errorf("nav path %q contains a control character", p)
+	}
+	switch it.Group {
+	case "", groupOperate, groupConfigure:
+	default:
+		return fmt.Errorf("nav group %q must be empty, %q or %q", it.Group, groupOperate, groupConfigure)
+	}
+	if it.Icon != "" && ui.Icon(it.Icon) == "" {
+		return fmt.Errorf("nav icon %q is not a known icon", it.Icon)
 	}
 	return nil
 }
@@ -76,16 +86,6 @@ func CollectNav(mods []Module) ([]NavItem, error) {
 	return items, nil
 }
 
-// The pages are dark-only and define --panel, --border, --text, --muted, --accent and --bg; the
-// bar uses them and falls back to the same dark palette for pages that define none.
-const navCSS = `[data-nc-nav]{position:fixed;top:0;left:0;right:0;z-index:1000;box-sizing:border-box;height:36px;margin:0;padding:0 12px;display:flex;align-items:center;background:var(--panel,#131824);border-bottom:1px solid var(--border,#232a3a);font:14px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}` +
-	`[data-nc-nav] ul{display:flex;gap:4px;margin:0;padding:0;list-style:none}` +
-	`[data-nc-nav] a{display:block;padding:7px 10px;border-radius:6px;color:var(--muted,#8b93a7);text-decoration:none}` +
-	`[data-nc-nav] a:hover{background:var(--bg,#0b0e14)}` +
-	`[data-nc-nav] a[aria-current]{background:var(--bg,#0b0e14);color:var(--text,#e6e9ef);font-weight:600;box-shadow:inset 0 -2px var(--accent,#4f8cff)}`
-
-const navSpacer = `<div data-nc-nav-spacer aria-hidden="true" style="height:36px"></div>`
-
 // navActive returns the index of the one current item: the longest path that equals the request
 // path or is a parent of it ("/" only matches exactly "/"). -1 when none.
 func navActive(items []NavItem, reqPath string) int {
@@ -104,20 +104,16 @@ func navActive(items []NavItem, reqPath string) int {
 	return best
 }
 
-func renderNav(items []NavItem, reqPath string) []byte {
-	var b bytes.Buffer
-	b.WriteString("<style>" + navCSS + "</style>")
-	b.WriteString(`<nav ` + navMarker + ` aria-label="Modules"><ul>`)
-	active := navActive(items, reqPath)
-	for i, it := range items {
-		b.WriteString(`<li><a href="` + html.EscapeString(it.Path) + `"`)
-		if i == active {
-			b.WriteString(` aria-current="page"`)
+// CollectActions gathers the top-bar actions of every module that implements ActionProvider.
+// Pass only modules whose Register succeeded.
+func CollectActions(mods []Module) []NavAction {
+	var out []NavAction
+	for _, m := range mods {
+		if p, ok := m.(ActionProvider); ok {
+			out = append(out, p.Actions()...)
 		}
-		b.WriteString(`>` + html.EscapeString(it.Label) + `</a></li>`)
 	}
-	b.WriteString(`</ul></nav>` + navSpacer)
-	return b.Bytes()
+	return out
 }
 
 var bodyTag = regexp.MustCompile(`^(?i)<body(?:\s(?:"[^"]*"|'[^']*'|[^>"'])*)?>`)
@@ -178,28 +174,54 @@ func findBodyTag(b []byte) int {
 	return -1
 }
 
-// NavMiddleware serves GET /_nav.json and inserts the bar into successful HTML responses to
-// GET and HEAD requests when there are at least two entries. Everything else passes untouched.
-func NavMiddleware(items []NavItem, next http.Handler) http.Handler {
+// NavMiddleware serves GET /_nav.json (the entries the caller may see) and the console assets under
+// /_ui/, and inserts the shell into successful HTML responses to GET and HEAD requests when any
+// module advertises a page. With fewer than two visible entries the shell is compact: a header with
+// the theme control and no sidebar. Everything else passes untouched. tn answers who is calling;
+// without it, or for a tagged caller, only entries with a nil Allow are shown.
+func NavMiddleware(items []NavItem, actions []NavAction, tn Tailnet, next http.Handler) http.Handler {
 	list := append([]NavItem{}, items...)
-	jsonBody, _ := json.Marshal(list)
+	acts := append([]NavAction{}, actions...)
+	assets := ui.Handler()
+	login := func(r *http.Request) string {
+		if tn == nil {
+			return ""
+		}
+		l, tags, err := tn.WhoIs(r.Context(), r.RemoteAddr)
+		if err != nil || len(tags) > 0 {
+			return ""
+		}
+		return l
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/_nav.json" {
+		get := r.Method == http.MethodGet || r.Method == http.MethodHead
+		if get && strings.HasPrefix(r.URL.Path, "/_ui/") {
+			assets.ServeHTTP(w, r)
+			return
+		}
+		if get && r.URL.Path == "/_nav.json" {
+			visible := visibleItems(list, login(r))
+			if visible == nil {
+				visible = []NavItem{}
+			}
+			jsonBody, _ := json.Marshal(visible)
 			h := w.Header()
 			h.Set("Content-Type", "application/json")
 			h.Set("Cache-Control", "no-store")
-			out := append(append([]byte{}, jsonBody...), '\n')
+			out := append(jsonBody, '\n')
 			h.Set("Content-Length", strconv.Itoa(len(out)))
 			if r.Method == http.MethodGet {
 				_, _ = w.Write(out)
 			}
 			return
 		}
-		if len(list) < 2 || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+		if len(list) == 0 || !get {
 			next.ServeHTTP(w, r)
 			return
 		}
-		nw := &navWriter{ResponseWriter: w, bar: func() []byte { return renderNav(list, r.URL.Path) }}
+		nw := &navWriter{ResponseWriter: w, bar: func() []byte {
+			return renderShell(list, acts, login(r), r.URL.Path, time.Now())
+		}}
 		next.ServeHTTP(nw, r)
 		nw.finish()
 	})

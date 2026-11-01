@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
 
 // Service is one published service: it listens on the tailnet at TailnetPort and forwards to Target.

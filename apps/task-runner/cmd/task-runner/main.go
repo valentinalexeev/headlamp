@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"example.com/task-runner/internal/runner"
+	"github.com/valentinalexeev/headlamp/apps/task-runner/internal/runner"
 )
 
 func env(name, def string) string {

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // --- fakes -------------------------------------------------------------------
@@ -1317,5 +1317,36 @@ func TestShutdownDefaultsFitCoreStopContext(t *testing.T) {
 	e := NewEngine(Deps{})
 	if e.shutdownWait != defaultShutdownWait || e.cancelBudget != defaultCancelBudget {
 		t.Fatalf("engine uses %s / %s", e.shutdownWait, e.cancelBudget)
+	}
+}
+
+func TestEngineRecordsWhoStartedAManualRun(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	f.runner.status = func(context.Context, string, int) (RunStatus, error) {
+		return RunStatus{State: "succeeded", Result: map[string]any{}}, nil
+	}
+	if _, err := f.e.TriggerBy("job", "alice@"); err != nil {
+		t.Fatal(err)
+	}
+	f.e.wait()
+	rs := f.runs("job")
+	if len(rs) != 1 || rs[0].Actor != "alice@" || !rs[0].Manual {
+		t.Fatalf("runs = %+v", rs)
+	}
+}
+
+func TestEngineMarksAManualRunAsManual(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	f.runner.status = func(context.Context, string, int) (RunStatus, error) {
+		return RunStatus{State: "succeeded", Result: map[string]any{}}, nil
+	}
+	id, err := f.e.Trigger("job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.e.wait()
+	rs := f.runs("job")
+	if len(rs) != 1 || rs[0].ID != id || !rs[0].Manual {
+		t.Fatalf("runs = %+v", rs)
 	}
 }

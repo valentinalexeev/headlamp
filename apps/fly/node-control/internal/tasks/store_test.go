@@ -15,7 +15,7 @@ import (
 	"github.com/alicebob/miniredis/v2/server"
 	"tailscale.com/ipn"
 
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 const storeScope = "node-control:tasks"

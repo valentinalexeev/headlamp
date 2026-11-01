@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // Preview is the dry-run result for a proposed policy.

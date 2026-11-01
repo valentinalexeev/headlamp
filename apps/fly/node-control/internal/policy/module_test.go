@@ -9,15 +9,17 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/authz"
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/ui"
 )
 
 const (
@@ -27,7 +29,7 @@ const (
 	errAddr    = "100.64.0.4:5555"
 )
 
-const wantCSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+const wantCSP = ui.PageCSP
 
 func fakeTailnet() *authz.FakeTailnet {
 	return authz.NewFakeTailnet(map[string]authz.Who{
@@ -133,7 +135,6 @@ func (h *harness) apply(t *testing.T, policy string) *httptest.ResponseRecorder 
 var allRoutes = []struct{ method, path string }{
 	{"GET", "/policy"},
 	{"GET", "/policy/static/policy.js"},
-	{"GET", "/policy/static/policy.css"},
 	{"GET", "/policy/state"},
 	{"POST", "/policy/preview"},
 	{"POST", "/policy/apply"},
@@ -583,7 +584,7 @@ func TestStateShowsPendingSecondsLeft(t *testing.T) {
 
 func TestPageAndAssetsHaveSecurityHeaders(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
-	for _, p := range []string{"/policy", "/policy/static/policy.js", "/policy/static/policy.css"} {
+	for _, p := range []string{"/policy", "/policy/static/policy.js"} {
 		rec := h.do("GET", p, adminAddr, "", false)
 		if rec.Code != 200 || rec.Body.Len() == 0 {
 			t.Fatalf("%s: %d", p, rec.Code)
@@ -603,14 +604,14 @@ func TestPageAndAssetsHaveSecurityHeaders(t *testing.T) {
 	if ct := h.do("GET", "/policy/static/policy.js", adminAddr, "", false).Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
 		t.Errorf("js content type %q", ct)
 	}
-	if ct := h.do("GET", "/policy/static/policy.css", adminAddr, "", false).Header().Get("Content-Type"); !strings.Contains(ct, "css") {
-		t.Errorf("css content type %q", ct)
+	if rec := h.do("GET", "/policy/static/policy.css", adminAddr, "", false); rec.Code == 200 {
+		t.Error("the old stylesheet is still served")
 	}
 }
 
 func TestPageHasNoInlineScriptOrExternalReferences(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
-	for _, p := range []string{"/policy", "/policy/static/policy.js", "/policy/static/policy.css"} {
+	for _, p := range []string{"/policy", "/policy/static/policy.js"} {
 		body := strings.ToLower(h.do("GET", p, adminAddr, "", false).Body.String())
 		for _, bad := range []string{"http://", "https://", "style=", "<style", "innerhtml"} {
 			if strings.Contains(body, bad) {
@@ -620,8 +621,13 @@ func TestPageHasNoInlineScriptOrExternalReferences(t *testing.T) {
 		if p == "/policy" {
 			for _, part := range strings.Split(body, "<script")[1:] {
 				tag, _, _ := strings.Cut(part, ">")
-				if !strings.Contains(tag, "src=") {
-					t.Errorf("inline script tag: <script%s>", tag)
+				if !strings.Contains(tag, "src=") || !strings.Contains(tag, "defer") {
+					t.Errorf("script tag must be a deferred file: <script%s>", tag)
+				}
+			}
+			for _, bad := range []string{"<link", "<template"} {
+				if strings.Contains(body, bad) {
+					t.Errorf("page contains %q", bad)
 				}
 			}
 		}
@@ -792,8 +798,12 @@ func TestNavEntryWhenActive(t *testing.T) {
 		t.Fatal("the policy module does not implement core.Navigator")
 	}
 	items := nav.Nav()
-	if len(items) != 1 || items[0] != (core.NavItem{Label: "Policy", Path: "/policy", Order: 30}) {
+	if len(items) != 1 || items[0].Label != "Policy" || items[0].Path != "/policy" || items[0].Order != 50 ||
+		items[0].Group != "configure" || items[0].Icon != "policy" || items[0].Source != "policy" || items[0].Allow == nil {
 		t.Fatalf("nav %+v", items)
+	}
+	if !items[0].Allow("alice") || items[0].Allow("mallory@example.net") {
+		t.Fatal("the entry is not limited to POLICY_ADMIN_USERS")
 	}
 	if err := core.ValidateNavItem(items[0]); err != nil {
 		t.Fatal(err)
@@ -812,11 +822,11 @@ func TestNoNavEntryWhenInactive(t *testing.T) {
 	}
 }
 
-// The core inserts its top bar (an inline style block) into admin pages: the page must still render it,
-// while scripts stay restricted to same-origin files.
+// The core inserts its shell (same-origin script and stylesheet links) into admin pages: the page's
+// policy must still let it load (the shell uses no inline style), while scripts stay restricted to same-origin files.
 func TestPageWithTopBarKeepsScriptsStrict(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
-	bar := core.NavMiddleware([]core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Policy", Path: "/policy", Order: 30}}, h.mux)
+	bar := core.NavMiddleware([]core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Policy", Path: "/policy", Order: 50}}, nil, nil, h.mux)
 	req := httptest.NewRequest("GET", "/policy", nil)
 	req.RemoteAddr = adminAddr
 	rec := httptest.NewRecorder()
@@ -825,8 +835,8 @@ func TestPageWithTopBarKeepsScriptsStrict(t *testing.T) {
 		t.Fatalf("top bar missing: %d", rec.Code)
 	}
 	csp := rec.Header().Get("Content-Security-Policy")
-	if !strings.Contains(csp, "style-src 'self' 'unsafe-inline'") {
-		t.Errorf("inline style of the bar would be blocked: %q", csp)
+	if csp != ui.PageCSP || strings.Contains(csp, "unsafe-inline") {
+		t.Errorf("the shell needs the page policy with no inline style: %q", csp)
 	}
 	if !strings.Contains(csp, "script-src 'self';") || strings.Contains(csp, "script-src 'self' 'unsafe") {
 		t.Errorf("script-src must stay same-origin only: %q", csp)
@@ -893,14 +903,94 @@ func TestBusyMessageTellsWhatToDo(t *testing.T) {
 	}
 }
 
-func TestPageOffersRevertNowAndDisablesHistoryRevertWhilePending(t *testing.T) {
-	if !strings.Contains(string(pageHTML), `id="revert-now"`) {
-		t.Error("the pending banner has no Revert now button")
-	}
+func TestPageOffersConfirmAndRevertNow(t *testing.T) {
 	js := string(pageJS)
-	for _, want := range []string{"/policy/revert-now", "b.disabled = true"} {
+	for _, want := range []string{"/policy/confirm", "/policy/revert-now", "/policy/revert/", "/policy/state", "base_updated_at"} {
 		if !strings.Contains(js, want) {
 			t.Errorf("policy.js lacks %q", want)
 		}
+	}
+	for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "confirm(", "prompt(", "alert(", "localStorage"} {
+		if strings.Contains(js, bad) {
+			t.Errorf("policy.js contains %q", bad)
+		}
+	}
+}
+
+func TestStatePendingCarriesAppliedAt(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	before := time.Now().Add(-time.Second)
+	h.apply(t, "second")
+	p := h.state(t)["pending"].(map[string]any)
+	at, err := time.Parse(time.RFC3339, p["applied_at"].(string))
+	if err != nil {
+		t.Fatalf("applied_at %v: %v", p["applied_at"], err)
+	}
+	if at.Before(before.Truncate(time.Second)) || at.After(time.Now().Add(time.Second)) {
+		t.Errorf("applied_at %v is not the apply time", at)
+	}
+}
+
+// A page loaded while the write was in flight must not count as fresh: applied_at is the end of the write
+// attempt, not the start recorded in the history.
+func TestStateAppliedAtIsTheEndOfTheWrite(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.apply(t, "second")
+	m := h.mod.(*Module)
+	p, _, err := m.store.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hist := h.state(t)["history"].([]any)[0].(map[string]any)
+	begun, _ := time.Parse(time.RFC3339, hist["at"].(string))
+	end := begun.Add(20 * time.Second)
+	if _, err := m.store.db.Exec("UPDATE applied SET ts = ? WHERE change_id = ?", end.Unix(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	got := h.state(t)["pending"].(map[string]any)["applied_at"]
+	if got != end.UTC().Format(time.RFC3339) {
+		t.Errorf("applied_at %v, want the end of the write %v (begin %v)", got, end.UTC().Format(time.RFC3339), hist["at"])
+	}
+}
+
+func TestStateOmitsAppliedAtWhenNotRecorded(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.apply(t, "second")
+	m := h.mod.(*Module)
+	if _, err := m.store.db.Exec("DELETE FROM applied"); err != nil {
+		t.Fatal(err)
+	}
+	p := h.state(t)["pending"].(map[string]any)
+	if _, ok := p["applied_at"]; ok {
+		t.Errorf("applied_at present without a record: %v", p)
+	}
+}
+
+func TestStatePendingCarriesTheChangeDiff(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.apply(t, `{"acls":[],"groups":{}}`)
+	p := h.state(t)["pending"].(map[string]any)
+	d, _ := p["diff"].(string)
+	if !strings.Contains(d, "+") || !strings.Contains(d, "groups") {
+		t.Errorf("pending diff %q", d)
+	}
+	h.confirm(t)
+	if h.state(t)["pending"] != nil {
+		t.Error("still pending")
+	}
+}
+
+// The page script runs under node against a small DOM stand-in (skipped when node is missing).
+func TestPolicyPageSelfTest(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	args := []string{"testdata/policy_selftest.js", "../ui/static/hl.js", "../ui/static/shell.js", "static/policy.js"}
+	if out, err := exec.Command(node, args...).CombinedOutput(); err != nil {
+		t.Fatalf("self-test failed: %v\n%s", err, out)
+	}
+	if out, err := exec.Command(node, "--check", "static/policy.js").CombinedOutput(); err != nil {
+		t.Fatalf("node --check: %v\n%s", err, out)
 	}
 }

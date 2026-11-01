@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	scrubpkg "example.com/node-control/internal/scrub"
+	scrubpkg "github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
 )
 
 const (

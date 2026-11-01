@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/authz"
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
-	"example.com/node-control/internal/policy"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/policy"
 )
 
 const (
@@ -714,7 +714,7 @@ func TestChecklistContainsWildcardCNAMEAndAcmeHint(t *testing.T) {
 func TestEveryRoute403ForNonAdminTaggedAndWhoIsError(t *testing.T) {
 	r := newRig(t, nil)
 	routes := []struct{ method, path string }{
-		{"GET", "/funnel"}, {"GET", "/funnel/static/funnel.js"}, {"GET", "/funnel/static/funnel.css"}, {"GET", "/funnel/state"}, {"GET", "/funnel/audit"},
+		{"GET", "/funnel"}, {"GET", "/funnel/static/funnel.js"}, {"GET", "/funnel/config"}, {"GET", "/funnel/static/config.js"}, {"GET", "/funnel/state"}, {"GET", "/funnel/audit"},
 		{"POST", "/funnel/namespaces"}, {"PATCH", "/funnel/namespaces/pdl"}, {"DELETE", "/funnel/namespaces/pdl"},
 		{"POST", "/funnel/namespaces/pdl/keys"}, {"GET", "/funnel/namespaces/pdl/keys"}, {"DELETE", "/funnel/keys/1"},
 		{"POST", "/funnel/routes"}, {"DELETE", "/funnel/routes/pdl/x"}, {"POST", "/funnel/blocks"}, {"DELETE", "/funnel/blocks/pdl/x"},
@@ -811,7 +811,31 @@ func TestRegisterRefusesIncompleteSetups(t *testing.T) {
 
 func TestNavOnlyWhenActive(t *testing.T) {
 	r := newRig(t, nil)
-	if nav := r.mod.Nav(); len(nav) != 1 || nav[0].Path != "/funnel" {
+	nav := r.mod.Nav()
+	if len(nav) != 2 || nav[0].Path != "/funnel" || nav[0].Group != "operate" || nav[1].Path != "/funnel/config" || nav[1].Group != "configure" {
 		t.Fatalf("nav = %v", nav)
+	}
+	for _, n := range nav {
+		if n.Allow == nil || n.Allow("mallory@example.net") {
+			t.Fatalf("%s is not limited to FUNNEL_ADMIN_USERS", n.Label)
+		}
+		if err := core.ValidateNavItem(n); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestNavDeniesAllWhenNotConfigured(t *testing.T) {
+	m := &Module{}
+	if nav := m.Nav(); nav != nil {
+		t.Fatalf("inactive module advertises %v", nav)
+	}
+	m.st = nil
+	r := newRig(t, nil)
+	r.mod.s = nil
+	for _, n := range r.mod.Nav() {
+		if n.Allow == nil || n.Allow("alice") {
+			t.Fatalf("%s visible without settings", n.Label)
+		}
 	}
 }

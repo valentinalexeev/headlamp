@@ -15,8 +15,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"example.com/node-control/internal/scrub"
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 // RedisStore keeps the enrolment state in a shared Redis, under one key prefix ("<app>:<name>"), without any

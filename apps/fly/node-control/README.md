@@ -184,7 +184,7 @@ The file is optional. Existing Python-era files keep working. Start from
 
 ## API
 
-`GET /` (page) · `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` ·
+`GET /` (Overview) · `GET /nodes` (page) · `GET /activity` (page) · `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` ·
 `POST /nodes/{id}/stop` · `GET /tailnet/status` · `GET /healthz`. With `ENROLL_DB` also the `/enroll` admin pages and
 API on `:80` and the public `/e/<token>` and `/sub/<secret>` on `:8081`. Start and stop are idempotent; a provider failure
 shows up as `error` on that node only.
@@ -360,6 +360,12 @@ Adding a bridge, step by step:
 5. Approval pushes the credential set at once; the row shows its sync state. Phones pick the new bridge up when they
    refresh their subscription; a profile imported by a one-time link needs the person to refresh it.
 
+- `GET /enroll/ingresses` returns one row per bridge (`name`, `host`, `source`, `approval`, `active`, `approved`,
+  `fingerprint`, the key, short id and machine key prefixes, `node_id`, `address`, `hostname`, `given_name`, `online`,
+  `sync`, `detail`, `aliases`) and, for a discovered bridge that has an approval, what that approval pinned:
+  `approved_fingerprint`, `approved_node_id` and `approved_machine_key_prefix`. The review page (`/enroll/approve`)
+  compares these with the values the bridge publishes now, so a `changed` bridge shows exactly what differs before it
+  is approved again. The store keeps only these three, so nothing else can be compared.
 - A `changed` bridge (its parameters differ, or another node id publishes them) is frozen: it is out of profiles
   and no longer synced, so it keeps its old credential set until it is approved again or un-approved. A revocation
   does not reach it meanwhile.
@@ -466,29 +472,113 @@ Differences from the Python app this replaced: the agent is dialled through the 
 database is closed only after both listeners have drained on shutdown. A misconfigured enrolment (a missing variable,
 an unreadable or invalid `ENROLL_CONFIG`) stops startup with a message naming the problem, never a secret.
 
-## Navigation bar
+## Console shell
 
-Every admin page shows a small top bar that lists the modules available in this deployment, with the current one
-highlighted. Today that is Nodes (`/`) and, when the module is on, Bridge (`/enroll`, with `ENROLL_DB`), Policy (`/policy`) and Tasks (`/tasks`). The bar appears only
-when at least two entries exist, so a deployment without enrolment looks exactly as before. It is never added to
-the public listener, to JSON, to non-200 responses or to any request other than GET and HEAD.
+Every admin page is wrapped in one shell: a sidebar of the pages available in this deployment, a top bar with a
+search button, the top-bar actions and a freshness note, and a strip for changes that run against a deadline. The
+shell is added to the HTML responses of the admin listener, inside the Host guard. It is never added to the public
+listener, to JSON, to non-200 responses or to any request other than GET and HEAD. Its files (`hl.css`, `hl.js`,
+`shell.js`, `palette.js`, `theme.js`, the fonts) are served under `/_ui/` and nothing is loaded from another origin.
+With fewer than two visible entries the shell is compact: a header with the theme control and no sidebar. On a phone
+the sidebar becomes a menu; the theme control (System, Light, Dark) sits inside it.
 
-The core inserts the bar into HTML responses of the admin listener, inside the Host guard. `GET /_nav.json` returns
-the same list as `[{"label":"Nodes","path":"/","order":10},...]` with `Cache-Control: no-store`.
+`/` is Overview: what needs the operator now and the health of each system. The node list moved to `/nodes`; `/`
+shows Overview only when at least two other pages exist (with fewer, `/` goes straight to the one page). Activity is
+`/activity`. The enrolment page is listed as Devices (`/enroll`).
 
-A module with an admin page adds an entry by implementing the optional `core.Navigator` interface. The core
-collects entries after every module registered, so a module that is switched off (return `nil`) or failed to
-register never appears:
+`GET /_nav.json` returns the entries the caller may see as `[{"label","path","order","group","icon"},...]` with
+`Cache-Control: no-store`.
+
+### Sidebar entries: `Navigator`, `NavItem`, `Allow`
+
+A module with an admin page adds entries by implementing `core.Navigator`. The core collects them after every module
+registered, so a module that is switched off (return `nil`) or failed to register never appears:
 
 ```go
 func (m *Module) Nav() []core.NavItem {
-	return []core.NavItem{{Label: "Reports", Path: "/reports", Order: 30}}
+	return []core.NavItem{{Label: "Reports", Path: "/reports", Order: 30, Group: "operate", Icon: "tasks",
+		Source: "reports", Allow: admins.Has}}
 }
 ```
 
-A label is 1 to 24 printable characters (no control, bidi or zero-width characters); a path is a local absolute
-path (`/x`, not `//x`, `http://x`, `javascript:x`, and without `?`, `#`, quotes or angle brackets). The bar is fixed
-at the top and uses the page's own colour variables; the longest matching path is the current one. Invalid entries and duplicate paths stop the start-up with an error naming the module.
+| `NavItem` field | meaning |
+|---|---|
+| `Label` | 1 to 24 printable characters (no control, bidi or zero-width characters) |
+| `Path` | a local absolute path (`/x`, not `//x`, `http://x`, `javascript:x`; no `?`, `#`, colon, space, quotes or angle brackets) |
+| `Order` | ascending; ties by label |
+| `Group` | `""` (top, ungrouped), `operate` or `configure` |
+| `Icon` | a name from `internal/ui/icons.go` (16 px line icon), or empty |
+| `Allow` | `func(login string) bool`; nil means anyone who can reach the listener. Entries are filtered per caller, both in the sidebar and in `/_nav.json`. A caller that cannot be identified (or a tagged node) sees only entries without `Allow` |
+| `Source` | the attention source (usually the module name) whose item count is shown beside the entry; empty means no count |
+
+The longest matching path is the current page. Invalid entries and duplicate paths stop the start-up with an error
+naming the module. `Allow` only decides what is shown: the module's own routes still check the caller.
+
+### Top-bar actions: `ActionProvider`
+
+A module implements `core.ActionProvider` (`Actions() []core.NavAction`, each `{Label, Path, Icon}`) to add a button to
+the top bar, such as "Enrol device" (`/enroll?enrol=1`). An inactive module returns none. The actions also appear in
+the command palette.
+
+### Attention: `AttentionSource`
+
+`core.AttentionSource` is `Attention(ctx, login) ([]AttentionItem, []SystemLine, error)`. Items are things that need
+the operator; a system line is the one-line health of the module (`ok`, `waiting`, `critical`, `unknown`, `off`). Levels
+are `timed` (has a `Deadline`), `critical`, `waiting` and `info`, most urgent first. Hue is used for attention only:
+amber for waiting, red for at risk. `GET /_attention.json` merges all sources, sorts by level then age and returns
+`{"items","systems","hidden_systems","updated_at"}`. All text is scrubbed and limited by the core, action paths must be
+local, and no secret belongs in an item. A source that returns `core.ErrNotVisible` for this caller is left out and
+`hidden_systems` is set. A source that fails or does not answer in time becomes a critical "could not be checked"
+item, never its error text. Overview, the sidebar counts and the timed strip all read this one endpoint.
+
+### Activity: `ActivitySource`, `ActivityGate`
+
+`core.ActivitySource` is `Activity(ctx, login, limit) ([]ActivityEntry, error)`; an entry is `{at, actor, source,
+action, detail}`. `GET /_activity.json?limit=N&source=NAME` merges the sources newest first (default and maximum limits
+are set in the core; `partial` is true when a source failed). The Activity page at `/activity` and the recent-activity
+panel on Overview show it, with sentences from the one shared `activity-text.js`.
+
+A source can also implement `core.ActivityGate` (`HasActivity() bool`) to say, without being asked for entries,
+whether it keeps a log at all (it is active and has somewhere to read from). The Activity page and its sidebar entry
+exist only when some source has a log; a source without the method counts as having one. Without the enrolment
+backend, for example, node actions are not kept anywhere that can be read back, so the nodes module reports none.
+
+Recorded actions come from: the enrolment audit log (device and bridge actions, node start and stop), the policy
+`outcomes` table, the funnel audit log and the task run history.
+
+### Search: `SearchSource`
+
+`core.SearchSource` is `Search(ctx, login) ([]SearchItem, error)`; an item is `{label, kind, path}` (a device name, a
+node id, a task id, a namespace). `GET /_search.json` merges them. A failing or hidden source contributes nothing, and
+items with an empty label or a non-local path are dropped. The command palette (`Ctrl/Cmd+K`, or the search button)
+filters the pages from `/_nav.json`, the top-bar actions and these items in the browser. No secret is ever a search
+item.
+
+### The enrolment audit log
+
+With enrolment on, device and node actions (`device.create`, `device.link`, `device.revoke`, `device.delete`, `device.extend`, `device.rotate_secret`, `bridge.approve`, `bridge.unapprove`, and node start and stop) are recorded
+as `core.AuditEntry` (`at`, `actor`, `action`, `detail`) in the enrolment backend: the `audit` table in SQLite, or the
+list `<prefix>:audit` in Redis. It is capped at **1000** entries, newest first; older ones are dropped as new ones are
+written. The detail holds names and dates only, never a link, key or subscription URL, and each field is cut to a fixed
+length. A failure to write an entry is logged and never fails the action. The log is not part of `enroll-export`,
+`enroll-import` or the backup script: **restoring a backup does not bring the audit log back**, and a restored
+database starts with an empty one.
+
+### Policy outcomes
+
+The policy console records how each applied change ended in the `outcomes` table of its SQLite database: `confirmed`,
+`reverted` (by the watcher at the deadline) or `reverted_on_request` (by an operator before it), with the actor
+(`system` for the automatic revert) and the time. It holds no policy text. Activity and Overview read it. A change that
+ended before the table existed has no record and is shown without an actor or time.
+
+### Demo
+
+`make demo SCENARIO=attention|clear|partial|minimal` (from this directory) runs `cmd/console-demo`: the whole console
+on `127.0.0.1:8099` with invented data and local fakes for headscale, the enrolment agent, the task runner, a provider
+and Redis. It listens on loopback only, refuses other addresses and is not part of the image. `attention` seeds one of
+every kind of problem, `clear` seeds none, `partial` is `clear` seen by a caller who is in none of the `*_ADMIN_USERS`
+lists (so the policy, tasks and funnel entries and systems are hidden), and `minimal` switches on the nodes module
+only, so the console is the compact one.
 
 ## Policy console (optional)
 
@@ -501,8 +591,8 @@ the core's Host guard is what protects the console from DNS rebinding. Confirm n
 only while headscale still serves that change's policy. "Revert now" in the pending banner undoes the pending change at once instead of
 waiting for its deadline (the history "Revert" buttons restore an older policy as a new change, so they are disabled while one is pending). If the automatic revert keeps failing, the page shows a warning;
 Confirm is then the way out, keeping the change.
-The console adds a "Policy" entry to the top bar. Its Content-Security-Policy allows inline styles (the bar is one) but scripts only from the
-page's own files.
+The console adds a "Policy" entry to the sidebar. Its Content-Security-Policy (`ui.PageCSP`, like every admin page) allows
+scripts and styles only from the page's own files: no inline script and no style attributes.
 
 ## Funnel module (optional)
 

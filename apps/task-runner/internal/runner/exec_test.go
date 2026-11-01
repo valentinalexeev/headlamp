@@ -45,8 +45,13 @@ func TestChildEnvDropsRunnerVars(t *testing.T) {
 	t.Setenv("HOME", "/h")
 	env := childEnv("S", "P")
 	joined := strings.Join(env, "\n")
-	if strings.Contains(joined, "leakme") || strings.Contains(joined, "RUNNER_") {
-		t.Error("runner vars must not reach the child")
+	if strings.Contains(joined, "leakme") {
+		t.Error("the runner token must not reach the child")
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "RUNNER_") { // a name that only contains it, as ACTIONS_RUNNER_DEBUG does, is not ours
+			t.Errorf("runner var reached the child: %s", kv)
+		}
 	}
 	if !strings.Contains(joined, "HOME=/h") || !strings.Contains(joined, "TASK_SECRETS_JSON=S") || !strings.Contains(joined, "TASK_PARAMS_JSON=P") {
 		t.Errorf("env missing entries: %v", env)

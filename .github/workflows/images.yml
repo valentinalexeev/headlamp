@@ -1,0 +1,187 @@
+# Builds, tests and publishes the images in .github/components.json. Only a component whose source changed is rebuilt:
+# each image carries a src-<hash> tag naming what it was built from, and a tag that already exists is reused. A release
+# therefore points at the same image main published, with no rebuild. See VERSIONING.md.
+name: images
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      rebuild_all:
+        description: Rebuild every image even if its source has not changed
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  gate:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Check the release rules
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: scripts/check-release.sh "$TAG" origin/main
+
+  detect:
+    needs: gate
+    if: always() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      all: ${{ steps.components.outputs.all }}
+      build: ${{ steps.components.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Find what needs building
+        id: components
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT: ${{ github.event_name }}
+          REBUILD_ALL: ${{ inputs.rebuild_all }}
+        run: |
+          all=$(scripts/ci-components.sh list)
+          if [ "$EVENT" = pull_request ]; then
+            build=$(scripts/ci-components.sh changed "$BASE_SHA" HEAD)
+          elif [ "$REBUILD_ALL" = true ]; then
+            build=$all
+          else
+            build='[]'
+            prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+            while IFS= read -r c; do
+              ref="$prefix/$(jq -r .image <<<"$c"):src-$(jq -r .hash <<<"$c")"
+              if docker manifest inspect "$ref" >/dev/null 2>&1; then
+                echo "reusing $ref"
+              else
+                echo "building $ref"
+                build=$(jq -c --argjson c "$c" '. + [$c]' <<<"$build")
+              fi
+            done < <(jq -c '.[]' <<<"$all")
+          fi
+          echo "all=$all" >>"$GITHUB_OUTPUT"
+          echo "build=$build" >>"$GITHUB_OUTPUT"
+
+  build:
+    needs: detect
+    if: always() && needs.detect.result == 'success' && needs.detect.outputs.build != '[]'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        c: ${{ fromJSON(needs.detect.outputs.build) }}
+    name: build (${{ matrix.c.image }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.c.go
+        with:
+          go-version-file: ${{ matrix.c.context }}/go.mod
+          cache-dependency-path: ${{ matrix.c.context }}/go.sum
+      - name: Test
+        if: matrix.c.test != ''
+        env:
+          TEST: ${{ matrix.c.test }}
+        run: bash -c "$TEST"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Name the image
+        id: name
+        env:
+          IMAGE: ${{ matrix.c.image }}
+          HASH: ${{ matrix.c.hash }}
+        run: echo "ref=ghcr.io/${GITHUB_REPOSITORY,,}/$IMAGE:src-$HASH" >>"$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.c.context }}
+          file: ${{ matrix.c.context }}/${{ matrix.c.dockerfile }}
+          build-args: ${{ matrix.c.build_args }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.name.outputs.ref }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+          provenance: true
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.c.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.c.image }}
+
+  publish:
+    needs: [detect, build]
+    if: >-
+      always() && github.event_name != 'pull_request' && needs.detect.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # the GitHub release of a tag
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Tag every image for this ref
+        env:
+          ALL: ${{ needs.detect.outputs.all }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            mapfile -t tags < <(scripts/ci-image-tags.sh tag "$REF_NAME")
+          else
+            mapfile -t tags < <(scripts/ci-image-tags.sh branch "$GITHUB_SHA")
+          fi
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          while IFS= read -r c; do
+            name="$prefix/$(jq -r .image <<<"$c")"
+            args=()
+            for t in "${tags[@]}"; do args+=(-t "$name:$t"); done
+            docker buildx imagetools create "${args[@]}" "$name:src-$(jq -r .hash <<<"$c")"
+          done < <(jq -c '.[]' <<<"$ALL")
+      - name: Create the GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flag=()
+          case "$TAG" in *-*) flag=(--prerelease) ;; esac
+          gh release create "$TAG" --verify-tag --generate-notes "${flag[@]}"

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nodes</title>
+</head>
+<body>
+<div class="hl" id="nodes">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>Nodes</h1>
+        <p class="t2" id="sub" aria-live="polite"></p>
+      </div>
+      <div class="row">
+        <div class="chips" id="chips" role="group" aria-label="Filter by role" hidden></div>
+        <button type="button" class="btn sm" id="refresh">Refresh</button>
+      </div>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+
+    <div class="note plain" id="empty" hidden>
+      <h2>No nodes yet</h2>
+      <p class="t2">Nodes show up here once they are in the nodes config, tagged on the tailnet or discovered as bridges.</p>
+    </div>
+
+    <div class="cols" id="cols" hidden>
+      <section class="colmain">
+        <div class="tw">
+          <table>
+            <thead><tr><th>Name</th><th>Role</th><th>State</th><th>Detail</th><th>Provider</th><th><span class="sr">Action</span></th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+      <aside class="colside" aria-label="Node detail">
+        <div class="panel" id="panel"></div>
+      </aside>
+    </div>
+  </div>
+</div>
+<script src="/nodes/nodes.js" defer></script>
+</body>
+</html>

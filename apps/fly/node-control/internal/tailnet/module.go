@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"example.com/node-control/internal/core"
@@ -16,12 +17,34 @@ import (
 type module struct {
 	src     headscale.NodeSource
 	tracked func(context.Context) map[string]bool
+	expiry  func(context.Context) (time.Time, error)
+	now     func() time.Time
+
+	mu      sync.Mutex // guards the cached read; never held across the read itself
+	expAt   time.Time  // when it was read
+	expSet  bool
+	expV    time.Time
+	expErr  error
+	lastKey time.Time // the last expiry read successfully (zero: none, or the key never expires)
+}
+
+// Option configures the module.
+type Option func(*module)
+
+// WithKeyExpiry gives the module a way to read when the headscale API key expires, so it can warn before
+// the status line (and everything else that calls the API) stops. The zero time means the key never expires.
+func WithKeyExpiry(fn func(context.Context) (time.Time, error)) Option {
+	return func(m *module) { m.expiry = fn }
 }
 
 // New returns the module serving GET /tailnet/status. tracked supplies the
 // set of tailnet names this app controls.
-func New(src headscale.NodeSource, tracked func(context.Context) map[string]bool) core.Module {
-	return &module{src: src, tracked: tracked}
+func New(src headscale.NodeSource, tracked func(context.Context) map[string]bool, opts ...Option) core.Module {
+	m := &module{src: src, tracked: tracked, now: time.Now}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
 }
 
 func (m *module) Name() string                { return "tailnet" }

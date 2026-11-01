@@ -3,18 +3,40 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
 <title>Tasks</title>
-<link rel="stylesheet" href="/tasks/static/tasks.css">
 </head>
 <body>
-<main>
-  <h1>Tasks</h1>
-  <div id="banner" class="banner" role="alert" hidden></div>
-  <p id="status" class="status" aria-live="polite"></p>
-  <p id="updated" class="muted"></p>
-  <div id="tasks" aria-busy="true"><p class="muted">Loading...</p></div>
-</main>
-<script src="/tasks/static/tasks.js"></script>
+<div class="hl" id="tasks">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>Tasks</h1>
+        <p class="t2" id="sub" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note plain" id="notice" role="status" hidden></div>
+    <div class="note" id="stale" role="status" hidden></div>
+
+    <div class="note plain" id="empty" hidden>
+      <h2>No tasks yet</h2>
+      <p class="t2" id="emptytext"></p>
+    </div>
+
+    <div class="cols" id="cols" hidden>
+      <section class="colmain" aria-label="Tasks">
+        <div class="tw">
+          <table>
+            <thead><tr><th>Task</th><th>State</th><th>Last success</th><th>Next run</th><th>Target</th><th><span class="sr">Actions</span></th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+      <aside class="colside" id="panel" aria-label="Selected task"></aside>
+    </div>
+  </div>
+</div>
+<script src="/tasks/static/tasks.js" defer></script>
 </body>
 </html>

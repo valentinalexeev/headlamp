@@ -234,3 +234,20 @@ func TestConcurrentBeginExactlyOneWins(t *testing.T) {
 		t.Fatalf("wins=%d busy=%d", wins.Load(), busy.Load())
 	}
 }
+
+func TestMarkAppliedIsReportedOnPending(t *testing.T) {
+	s, clk, _ := newTestStore(t)
+	id := mustBegin(t, s, clk)
+	p, _, _ := s.Pending()
+	if !p.AppliedAt.IsZero() {
+		t.Errorf("applied before MarkApplied: %v", p.AppliedAt)
+	}
+	clk.Advance(7 * time.Second)
+	if err := s.MarkApplied(id); err != nil {
+		t.Fatal(err)
+	}
+	p, _, _ = s.Pending()
+	if !p.AppliedAt.Equal(clk.Now()) {
+		t.Errorf("AppliedAt %v, want %v", p.AppliedAt, clk.Now())
+	}
+}

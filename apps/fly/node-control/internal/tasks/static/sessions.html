@@ -3,18 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
 <title>Browser sessions</title>
-<link rel="stylesheet" href="/tasks/static/tasks.css">
 </head>
 <body>
-<main>
-  <h1>Browser sessions</h1>
-  <div id="banner" class="banner" role="alert" hidden></div>
-  <p id="status" class="status" aria-live="polite"></p>
-  <p id="updated" class="muted"></p>
-  <div id="nodes" aria-busy="true"><p class="muted">Loading...</p></div>
-</main>
-<script src="/sessions/static/sessions.js"></script>
+<div class="hl" id="sessions">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>Browser sessions</h1>
+        <p class="t2" id="sub" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note plain" id="notice" role="status" hidden></div>
+    <div class="note" id="stale" role="status" hidden></div>
+
+    <div class="note plain" id="empty" hidden>
+      <h2>No nodes offer browser sessions</h2>
+      <p class="t2" id="emptytext"></p>
+    </div>
+
+    <div class="tw" id="tablewrap" hidden>
+      <table>
+        <thead><tr><th>Node</th><th>State</th><th>Time left</th><th><span class="sr">Actions</span></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script src="/sessions/static/sessions.js" defer></script>
 </body>
 </html>

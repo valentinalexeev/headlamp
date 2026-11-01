@@ -3,6 +3,7 @@ package enroll
 import (
 	"encoding/base64"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -303,6 +304,50 @@ func TestContractApprovals(t *testing.T) {
 		}
 		if rows, _ := e.b.ApprovalRows(); len(rows) != 1 {
 			t.Fatalf("rows after unapprove = %+v", rows)
+		}
+	})
+}
+
+func TestBackendAuditAppendAndOrder(t *testing.T) {
+	eachBackend(t, func(t *testing.T, e contractEnv) {
+		if got, err := e.b.AuditLog(10); err != nil || len(got) != 0 {
+			t.Fatalf("empty log = %v, %v", got, err)
+		}
+		for i, a := range []string{"device.create", "device.extend", "device.revoke"} {
+			e.clock.Advance(time.Minute)
+			if err := e.b.Audit("alice@example.net", a, "phone-"+string(rune('a'+i))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := e.b.AuditLog(10)
+		if err != nil || len(got) != 3 {
+			t.Fatalf("log = %+v, %v", got, err)
+		}
+		if got[0].Action != "device.revoke" || got[2].Action != "device.create" {
+			t.Fatalf("not newest first: %+v", got)
+		}
+		if got[0].Actor != "alice@example.net" || got[0].Detail != "phone-c" || !got[0].At.After(got[2].At) {
+			t.Fatalf("fields = %+v", got)
+		}
+		if two, _ := e.b.AuditLog(2); len(two) != 2 || two[0].Action != "device.revoke" {
+			t.Fatalf("limit 2 = %+v", two)
+		}
+	})
+}
+
+func TestBackendAuditIsCapped(t *testing.T) {
+	eachBackend(t, func(t *testing.T, e contractEnv) {
+		for i := range auditKeep + 5 {
+			if err := e.b.Audit("a", "device.create", "n"+strconv.Itoa(i)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := e.b.AuditLog(auditKeep * 2)
+		if err != nil || len(got) != auditKeep {
+			t.Fatalf("kept %d, %v", len(got), err)
+		}
+		if got[0].Detail != "n1004" || got[len(got)-1].Detail != "n5" {
+			t.Fatalf("newest %q oldest %q", got[0].Detail, got[len(got)-1].Detail)
 		}
 	})
 }

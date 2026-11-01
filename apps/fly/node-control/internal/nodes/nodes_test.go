@@ -145,7 +145,7 @@ func TestStatusOnlyWithoutCloudTag(t *testing.T) {
 		t.Fatalf("got %+v", ts)
 	}
 	v := UIView(cfg, ts)["nodes"].(map[string]any)["relay-1"].(map[string]any)
-	// index.html disables a button when the uppercased status equals the
+	// the page disables a button when the uppercased status equals the
 	// button's target status; the status of a status-only node is "unmanaged",
 	// so both buttons are disabled by advertising UNMANAGED for both.
 	if v["startStatus"] != "UNMANAGED" || v["stopStatus"] != "UNMANAGED" {

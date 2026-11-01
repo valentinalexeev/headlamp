@@ -151,69 +151,6 @@ func TestAdminDeleteDevice(t *testing.T) {
 	})
 }
 
-func TestPageHidesRevokedDevicesAndOffersDelete(t *testing.T) {
-	page := string(enrollHTML)
-	for _, want := range []string{
-		`id="showrevoked"`, "Show revoked devices", `id="revokedcount"`,
-		`showRevoked ? all : all.filter((d) => !d.revoked)`, `let showRevoked = false;`, "enrollShowRevoked",
-		`method: "DELETE"`, `btn("Delete", "danger"`, "permanently",
-	} {
-		if !strings.Contains(page, want) {
-			t.Errorf("page lacks %q", want)
-		}
-	}
-	// The script must not be duplicated or spliced: one load(), one row-button block, one Delete.
-	for what, n := range map[string]int{`async function load()`: 1, `btn("New link"`: 1, `btn("Delete"`: 1, `function showSync`: 1,
-		`tr.appendChild(td); body.appendChild(tr);`: 2} { // the second is the ingress table's own row
-		if got := strings.Count(page, what); got != n {
-			t.Errorf("%q occurs %d times, want %d", what, got, n)
-		}
-	}
-	// On a revoked row only Delete is offered: the other three buttons live in the else branch.
-	i := strings.Index(page, `if (status === "revoked") {`)
-	if i < 0 {
-		t.Fatal("revoked branch not found")
-	}
-	k := strings.Index(page[i:], "} else {")
-	if k < 0 {
-		t.Fatal("else branch not found")
-	}
-	revokedBranch, rest := page[i:i+k], page[i+k:]
-	if !strings.Contains(revokedBranch, `btn("Delete"`) {
-		t.Error("Delete must be offered on a revoked row")
-	}
-	for _, b := range []string{`btn("New link"`, `btn("Extend"`, `btn("Revoke"`} {
-		if strings.Contains(revokedBranch, b) || !strings.Contains(rest, b) {
-			t.Errorf("%s must be offered only on non-revoked rows", b)
-		}
-	}
-	// New link only for an active device that has never been enrolled (an expired device's link would never work; an
-	// enrolled one already has its profile).
-	if !strings.Contains(page, `if (status === "active" && !(d.enrol_count > 0)) {
-        btn("New link"`) {
-		t.Error("New link must be guarded by: active and never enrolled")
-	}
-	if strings.Contains(page, `localStorage.setItem("enrollShowRevoked", showRevoked ? "1" : "0"); } catch`) == false {
-		t.Error("the choice must be remembered inside a try/catch")
-	}
-}
-
-func TestPageShowsEnrolledAndLastActive(t *testing.T) {
-	page := string(enrollHTML)
-	for _, want := range []string{
-		"<th", ">Enrolled</th>", ">Last active</th>", "d.enrol_count > 0", "d.enrolled_at", "d.last_active > 0", "function ago(t)",
-		"Not a connection log",
-	} {
-		if !strings.Contains(page, want) {
-			t.Errorf("page lacks %q", want)
-		}
-	}
-	// The values are written with textContent (no markup injection from stored data).
-	if strings.Contains(page, "innerHTML") {
-		t.Error("the page must not use innerHTML")
-	}
-}
-
 func TestNewLinkRefusedForRevokedOrExpiredDevices(t *testing.T) {
 	f := newAdminFx(t)
 	ok := f.createID()

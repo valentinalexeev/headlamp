@@ -3,6 +3,8 @@ package enroll
 import (
 	"errors"
 	"time"
+
+	"example.com/node-control/internal/core"
 )
 
 // ErrNotRevoked means a device cannot be deleted because it has not been revoked first.
@@ -56,6 +58,9 @@ type Backend interface {
 	Approve(name, fingerprint string) error
 	ApproveNode(name, fingerprint string, nodeID uint64, machineKey string) error
 	Unapprove(name string) error
+
+	// The audit log of operator actions (audit.go); not part of the enrolment export.
+	core.AuditLog
 
 	Close() error
 }

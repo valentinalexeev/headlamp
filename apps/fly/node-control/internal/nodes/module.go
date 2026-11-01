@@ -6,16 +6,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
 	"example.com/node-control/internal/core"
 	"example.com/node-control/internal/headscale"
+	"example.com/node-control/internal/ui"
 )
 
-//go:embed static/index.html
-var indexHTML []byte
+//go:embed static/nodes.html
+var pageHTML []byte
+
+//go:embed static/nodes.js
+var pageJS []byte
 
 const nodeTimeout = 10 * time.Second
 
@@ -26,22 +31,44 @@ type Module struct {
 	providers map[string]Provider
 	timeout   time.Duration
 
+	now     func() time.Time // nil means time.Now (tests)
+	stMu    sync.Mutex       // guards stCache
+	stCache map[string]cachedStatus
+
+	audit func() core.AuditLog // nil, or returning nil, when there is no audit log
+	tn    core.Tailnet         // names the caller in audit entries
+	log   *slog.Logger
+
 	mu       sync.Mutex
 	lastGood []headscale.Node // last node list headscale returned successfully
 	haveGood bool
 }
 
+// Option configures the module.
+type Option func(*Module)
+
+// WithAudit gives the module the audit log that records node actions. The log is fetched when an action runs, not
+// here, because the enrolment store that backs it opens at Register, after New. A nil function, or one returning
+// nil, writes a structured "audit" log line instead.
+func WithAudit(f func() core.AuditLog) Option { return func(m *Module) { m.audit = f } }
+
 // New returns the nodes module. providers maps a provider name (see
 // Providers) to its implementation; src may be nil.
-func New(cfg *Config, src headscale.NodeSource, providers map[string]Provider) core.Module {
-	return &Module{cfg: cfg, src: src, providers: providers, timeout: nodeTimeout}
+func New(cfg *Config, src headscale.NodeSource, providers map[string]Provider, opts ...Option) core.Module {
+	m := &Module{cfg: cfg, src: src, providers: providers, timeout: nodeTimeout}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
 }
 
 func (m *Module) Name() string                { return "nodes" }
 func (m *Module) Start(context.Context) error { return nil }
 
 func (m *Module) Register(r *core.Routes) error {
-	r.Admin.HandleFunc("GET /{$}", m.index)
+	m.tn, m.log = r.Tailnet, r.Log
+	r.Admin.HandleFunc("GET /nodes", asset("text/html; charset=utf-8", pageHTML))
+	r.Admin.HandleFunc("GET /nodes/nodes.js", asset("text/javascript; charset=utf-8", pageJS))
 	r.Admin.HandleFunc("GET /nodes.json", m.nodesJSON)
 	r.Admin.HandleFunc("GET /status", m.status)
 	r.Admin.HandleFunc("GET /nodes/{id}/status", m.nodeStatus)
@@ -78,9 +105,18 @@ func detail(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"detail": msg})
 }
 
-func (m *Module) index(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(indexHTML)
+// asset serves an embedded file with headers that forbid framing, sniffing, caching and any script or
+// style that is not from this origin.
+func asset(contentType string, body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", contentType)
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Content-Security-Policy", ui.PageCSP)
+		_, _ = w.Write(body)
+	}
 }
 
 func (m *Module) nodesJSON(w http.ResponseWriter, req *http.Request) {
@@ -188,18 +224,61 @@ func (m *Module) nodeStatus(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, 200, m.statusOf(req.Context(), t))
 }
 
+// record writes the audit entry of a node action: to the audit log, or as one structured line when there is none or
+// it fails. Detail names the node and the outcome ("ok" or the failure class), never the provider's error text. A
+// failure to record never changes the response.
+func (m *Module) record(req *http.Request, action, node, outcome string) {
+	actor := "unknown"
+	if m.tn != nil {
+		if login, _, err := m.tn.WhoIs(req.Context(), req.RemoteAddr); err == nil && login != "" {
+			actor = login
+		}
+	}
+	detail := node + ": " + outcome
+	log := m.log
+	if log == nil {
+		log = slog.Default()
+	}
+	var al core.AuditLog
+	if m.audit != nil {
+		al = m.audit()
+	}
+	if al == nil {
+		log.Info("audit", "actor", actor, "action", action, "detail", detail)
+		return
+	}
+	if err := al.Audit(actor, action, detail); err != nil {
+		log.Error("audit log write failed", "actor", actor, "action", action, "detail", detail, "error_type", fmt.Sprintf("%T", err))
+	}
+}
+
+// failureClass names why an action failed without copying the provider's message.
+func failureClass(err error) string {
+	switch {
+	case errors.Is(err, ErrNotConfigured):
+		return "failed (not_configured)"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "failed (timeout)"
+	default:
+		return "failed (provider_error)"
+	}
+}
+
 func (m *Module) act(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		t, ok := m.find(w, req)
 		if !ok {
 			return
 		}
+		audit := "node." + action
 		if t.Provider == "" {
+			m.record(req, audit, t.ID, "failed (unmanaged)")
 			detail(w, 409, "node has no cloud provider tag")
 			return
 		}
 		p := m.providers[t.Provider]
 		if p == nil {
+			m.record(req, audit, t.ID, "failed (no_provider)")
 			detail(w, 503, "no "+t.Provider+" provider available")
 			return
 		}
@@ -210,6 +289,11 @@ func (m *Module) act(action string) http.HandlerFunc {
 			fn = p.Stop
 		}
 		prev, cur, err := safeAct(ctx, fn, t)
+		if err != nil {
+			m.record(req, audit, t.ID, failureClass(err))
+		} else {
+			m.record(req, audit, t.ID, "ok")
+		}
 		switch {
 		case errors.Is(err, ErrNotConfigured):
 			detail(w, 503, err.Error())
@@ -223,5 +307,5 @@ func (m *Module) act(action string) http.HandlerFunc {
 
 // Nav puts the control page in the top bar.
 func (m *Module) Nav() []core.NavItem {
-	return []core.NavItem{{Label: "Nodes", Path: "/", Order: 10}}
+	return []core.NavItem{{Label: "Nodes", Path: "/nodes", Order: 10, Group: "operate", Icon: "nodes", Source: "nodes"}}
 }

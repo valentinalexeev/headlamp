@@ -87,11 +87,13 @@ func (s *Service) start(ctx context.Context, actor, reason, before, after string
 	if err := s.api.SetPolicy(wctx, after); err != nil {
 		if err := s.settleWriteError(id, before, after, err); err != nil {
 			if errors.Is(err, ErrUncertain) {
+				s.markApplied(id)
 				return id, deadline, err
 			}
 			return 0, time.Time{}, err
 		}
 	}
+	s.markApplied(id)
 	slog.Info("policy change applied", "actor", actor, "id", id, "reason", reasonClass(reason),
 		"before_bytes", len(before), "after_bytes", len(after), "deadline", deadline.Unix())
 	return id, deadline, nil
@@ -129,6 +131,22 @@ func (s *Service) settleWriteError(id int64, before, after string, err error) er
 	}
 	slog.Error("policy write outcome unknown; revert armed", "id", id, "cause", errCause(err))
 	return fmt.Errorf("%w: %w", ErrUncertain, err)
+}
+
+// record notes how a change ended for the activity list. A failing write is logged and never fails the action it
+// describes; the log names the change and the error class, never policy text.
+func (s *Service) record(id int64, action, actor string) {
+	if err := s.store.RecordOutcome(id, action, actor); err != nil {
+		slog.Error("policy outcome record failed", "id", id, "action", action, "cause", errCause(err))
+	}
+}
+
+// markApplied stamps the end of the write attempt. A failing write is logged and never fails the change; the
+// change then has no applied time and pages fail closed to "Reload to confirm".
+func (s *Service) markApplied(id int64) {
+	if err := s.store.MarkApplied(id); err != nil {
+		slog.Error("policy applied-time record failed", "id", id, "cause", errCause(err))
+	}
 }
 
 func (s *Service) abort(id int64) {
@@ -222,6 +240,7 @@ func (s *Service) Confirm(ctx context.Context, actor string, id int64) error {
 	if err := s.store.Confirm(p.ID); err != nil {
 		return err
 	}
+	s.record(p.ID, RecordConfirmed, actor)
 	slog.Info("policy change confirmed", "actor", actor, "id", p.ID)
 	return nil
 }
@@ -251,6 +270,7 @@ func (s *Service) RevertPending(ctx context.Context, actor string, id int64) err
 	if err := s.store.MarkReverted(p.ID, true); err != nil {
 		return err
 	}
+	s.record(p.ID, RecordRevertedOnRequest, actor)
 	slog.Warn("policy change reverted on request", "id", p.ID, "actor", actor, "bytes", len(p.Before))
 	return nil
 }
@@ -315,5 +335,6 @@ func (s *Service) checkRevert(ctx context.Context) {
 		slog.Error("policy revert bookkeeping failed", "id", p.ID, "err", err)
 		return
 	}
+	s.record(p.ID, RecordReverted, "system")
 	slog.Warn("policy change reverted at deadline", "id", p.ID, "actor", p.Actor, "bytes", len(p.Before))
 }

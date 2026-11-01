@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"example.com/node-control/internal/funnel"
 	"example.com/node-control/internal/headscale"
 	"example.com/node-control/internal/nodes"
+	"example.com/node-control/internal/overview"
 	"example.com/node-control/internal/policy"
 	"example.com/node-control/internal/tailnet"
 	"example.com/node-control/internal/tasks"
@@ -28,7 +30,7 @@ const defaultNodesConfig = "/srv/app/nodes.json"
 // trackedTimeout bounds the headscale lookup done on behalf of the tailnet status route.
 const trackedTimeout = 10 * time.Second
 
-// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy, funnel, tasks (funnel submits its ACL changes through the policy module). One cached
+// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy, funnel, tasks, overview (funnel submits its ACL changes through the policy module). One cached
 // headscale source feeds the tailnet, nodes, enroll and tasks modules, so a page load costs one fetch.
 func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	cfg, err := nodes.LoadConfig(env.Default("NODES_CONFIG", defaultNodesConfig))
@@ -47,7 +49,15 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		"selectel": nodes.NewSelectel(env, hc),
 		"fly":      nodes.NewFly(env, hc),
 	}
-	nm, ok := nodes.New(cfg, src, providers).(interface {
+	// The audit log lives in the enrolment store, which opens at Register, after nodes.New: hence a function.
+	enr := enroll.New(env, enroll.WithNodeSource(src))
+	audit := func() core.AuditLog {
+		if p, ok := enr.(interface{ AuditLog() core.AuditLog }); ok {
+			return p.AuditLog()
+		}
+		return nil
+	}
+	nm, ok := nodes.New(cfg, src, providers, nodes.WithAudit(audit)).(interface {
 		core.Module
 		Targets(context.Context) []nodes.Target
 	})
@@ -66,10 +76,10 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		HTTP:    hc,
 	}
 	pol := policy.New(env, hsClient)
-	return []core.Module{
-		tailnet.New(src, tracked),
+	mods := []core.Module{
+		tailnet.New(src, tracked, tailnet.WithKeyExpiry(hsClient.APIKeyExpiry)),
 		nm,
-		enroll.New(env, enroll.WithNodeSource(src)),
+		enr,
 		pol,
 		funnel.New(env, hsClient, func() funnel.PolicyService {
 			// Only an active console has a service; a typed nil must not become a non-nil interface.
@@ -81,7 +91,10 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 			return nil
 		}),
 		tasks.New(env, src),
-	}, nil
+	}
+	// Overview is last: it counts the navigation of everything before it.
+	others := slices.Clone(mods)
+	return append(mods, overview.New(func() []core.Module { return others })), nil
 }
 
 // tailnetUpTimeout bounds waiting for the embedded node to join the tailnet.

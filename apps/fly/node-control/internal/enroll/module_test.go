@@ -255,7 +255,7 @@ func TestEndToEndThroughCore(t *testing.T) {
 	public := "http://" + tn.PublicAddr()
 
 	code, _, page := httpDo(t, "GET", admin+"/enroll", "", "")
-	if code != 200 || !strings.Contains(page, `id="syncbanner"`) {
+	if code != 200 || !strings.Contains(page, `id="syncnote"`) {
 		t.Fatalf("page %d", code)
 	}
 	body := `{"name":"Anna phone","owner":"anna","client":"karing","expires_at":` + "99999999999" + `}`

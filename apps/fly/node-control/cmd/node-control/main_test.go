@@ -72,12 +72,12 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,funnel,tasks" {
+	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,funnel,tasks,overview" {
 		t.Fatalf("module order %s", got)
 	}
 	tn, _ := serve(t, env, mods)
 	base := "http://" + tn.AdminAddr()
-	for _, p := range []string{"/", "/nodes.json", "/status", "/tailnet/status", "/healthz"} {
+	for _, p := range []string{"/", "/nodes", "/nodes.json", "/status", "/tailnet/status", "/healthz"} {
 		if code, _ := fetch(t, base+p); code != 200 {
 			t.Errorf("GET %s = %d", p, code)
 		}
@@ -101,7 +101,7 @@ func TestBuildModulesIncludesTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := mods[len(mods)-1]; last.Name() != "tasks" || mods[len(mods)-2].Name() != "funnel" || mods[len(mods)-3].Name() != "policy" {
+	if last := mods[len(mods)-1]; last.Name() != "overview" || mods[len(mods)-2].Name() != "tasks" || mods[len(mods)-3].Name() != "funnel" || mods[len(mods)-4].Name() != "policy" {
 		t.Fatalf("module order %v", names(mods))
 	}
 	// Without its variables the module registers nothing and node-control serves as before.
@@ -254,11 +254,12 @@ func TestTopBarWiring(t *testing.T) {
 		if err := json.Unmarshal([]byte(nav), &items); err != nil {
 			t.Fatalf("%v: %s", err, nav)
 		}
-		want := []core.NavItem{{Label: "Nodes", Path: "/", Order: 10}, {Label: "Bridge", Path: "/enroll", Order: 20}}
-		if len(items) != 2 || items[0] != want[0] || items[1] != want[1] {
+		if len(items) != 4 || items[3].Label != "Activity" || items[3].Path != "/activity" || items[3].Order != 900 || items[0].Label != "Overview" || items[0].Path != "/" || items[0].Order != 1 ||
+			items[1].Label != "Nodes" || items[1].Path != "/nodes" || items[1].Order != 10 ||
+			items[2].Label != "Devices" || items[2].Path != "/enroll" || items[2].Order != 20 {
 			t.Fatalf("entries %+v", items)
 		}
-		for path, active := range map[string]string{"/": `href="/" aria-current="page"`, "/enroll": `href="/enroll" aria-current="page"`} {
+		for path, active := range map[string]string{"/": `href="/" aria-current="page"`, "/nodes": `href="/nodes" aria-current="page"`, "/enroll": `href="/enroll" aria-current="page"`, "/activity": `href="/activity" aria-current="page"`} {
 			code, body := getHost(t, admin, "admin.test", path)
 			if code != 200 || strings.Count(body, "<nav data-nc-nav") != 1 || !strings.Contains(body, active) {
 				t.Errorf("GET %s = %d, bar/active missing", path, code)
@@ -287,7 +288,7 @@ func TestTopBarWiring(t *testing.T) {
 		}
 	})
 
-	t.Run("without ENROLL_DB only Nodes and no bar", func(t *testing.T) {
+	t.Run("without ENROLL_DB only Nodes and a compact header without sidebar", func(t *testing.T) {
 		env := navEnv(t, false)
 		mods, err := buildModules(env, http.DefaultClient)
 		if err != nil {
@@ -300,8 +301,10 @@ func TestTopBarWiring(t *testing.T) {
 		if err := json.Unmarshal([]byte(nav), &items); err != nil || len(items) != 1 || items[0].Label != "Nodes" {
 			t.Fatalf("entries %v: %s", err, nav)
 		}
-		if code, body := getHost(t, admin, "admin.test", "/"); code != 200 || strings.Contains(body, "data-nc-nav") {
-			t.Fatalf("bar shown with one entry: %d", code)
+		// With one page the front page leads straight to it.
+		if code, body := getHost(t, admin, "admin.test", "/"); code != 200 || !strings.Contains(body, "data-nc-nav") ||
+			strings.Contains(body, "<nav") || strings.Contains(body, "Enrol device") || !strings.Contains(body, `id="nodes"`) {
+			t.Fatalf("compact header and the Nodes page expected with one entry: %d", code)
 		}
 	})
 }
@@ -420,5 +423,49 @@ func TestEnrolmentInRedisIsWiredEndToEnd(t *testing.T) {
 	}
 	if mr.Exists("node-control:enroll:d:"+strconv.FormatInt(d.ID, 10)) == false {
 		t.Fatal("the device is not in Redis")
+	}
+}
+
+// A node action is recorded in the audit log that the enrolment store keeps; the nodes module reaches it through a
+// function because the store opens only at Register.
+func TestNodeActionsReachTheEnrolmentAuditLog(t *testing.T) {
+	m := map[string]string{}
+	base := navEnv(t, true)
+	for _, k := range []string{"ENROLL_DB", "ENROLL_CONFIG", "ENROLL_SECRET_KEY", "AGENT_URL", "AGENT_TOKEN", "ENROLL_ALLOWED_HOSTS"} {
+		m[k] = base.Getenv(k)
+	}
+	nodesFile := filepath.Join(t.TempDir(), "nodes.json")
+	if err := os.WriteFile(nodesFile, []byte(`{"title":"t","nodes":{"plain":{"provider":"yandex"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m["NODES_CONFIG"] = nodesFile
+	env := core.MapEnv(m)
+	mods, err := buildModules(env, http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn, _ := serve(t, env, mods)
+	req, _ := http.NewRequest("POST", "http://"+tn.AdminAddr()+"/nodes/plain/stop", nil)
+	req.Host = "admin.test"
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 503 {
+		t.Fatalf("stop = %d", resp.StatusCode)
+	}
+	var log core.AuditLog
+	for _, mod := range mods {
+		if p, ok := mod.(interface{ AuditLog() core.AuditLog }); ok {
+			log = p.AuditLog()
+		}
+	}
+	if log == nil {
+		t.Fatal("the enrolment module has no audit log")
+	}
+	got, err := log.AuditLog(10)
+	if err != nil || len(got) != 1 || got[0].Action != "node.stop" || got[0].Detail != "plain: failed (not_configured)" || got[0].Actor != "local" {
+		t.Fatalf("audit log = %+v, %v", got, err)
 	}
 }

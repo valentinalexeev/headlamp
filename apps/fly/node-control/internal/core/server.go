@@ -150,6 +150,8 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 	if err != nil {
 		return err
 	}
+	navActions := CollectActions(mods)
+	registerAttention(admin, mods, navItems, tn)
 
 	// Modules start before any listener exists, so no request can reach a
 	// module that has not started. A failed Start leaves nothing open.
@@ -183,7 +185,7 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 		servers = append(servers, &srv{name, ln, newHTTPServer(h, name == "public")})
 		return nil
 	}
-	if err := add("admin", hostGuard(allowed, NavMiddleware(navItems, admin)), tn.ListenAdmin); err != nil {
+	if err := add("admin", hostGuard(allowed, NavMiddleware(navItems, navActions, tn, admin)), tn.ListenAdmin); err != nil {
 		return err
 	}
 	if public != nil {

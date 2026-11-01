@@ -17,6 +17,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"example.com/node-control/internal/core"
+	"example.com/node-control/internal/ui"
 )
 
 // The operator API and page for enrolment. It is tailnet-only with no auth beyond the network. Every
@@ -38,11 +41,22 @@ import (
 //go:embed static/enroll.html
 var enrollHTML []byte
 
+//go:embed static/enroll.js
+var enrollJS []byte
+
 // qrcodeJS is the QR encoder the page draws the enrolment link with (qrcode-generator 2.0.4, MIT, Kazuhiko Arase;
 // the licence header stays in the file).
 //
 //go:embed static/qrcode.js
 var qrcodeJS []byte
+
+// The bridge approval review: a page and its script. Neither carries inline script or style.
+//
+//go:embed static/approve.html
+var approveHTML []byte
+
+//go:embed static/approve.js
+var approveJS []byte
 
 // Clients are the accepted DeviceIn.client values.
 var Clients = []string{"sing-box", "karing", "clash"}
@@ -60,6 +74,7 @@ type Admin struct {
 	store    Backend
 	reg      *Registry
 	activity *ActivityTracker
+	tn       core.Tailnet // names the caller for the audit log; nil records "unknown"
 }
 
 // NewAdmin returns the operator API over store and one agent that serves every configured
@@ -73,13 +88,19 @@ func NewAdminFor(store Backend, reg *Registry) *Admin {
 	return &Admin{store: store, reg: reg, activity: NewActivityTracker(store)}
 }
 
+// SetTailnet gives the API the tailnet that names the caller of each change in the audit log.
+func (a *Admin) SetTailnet(tn core.Tailnet) { a.tn = tn }
+
 // State is the sync state of the first configured ingress.
 func (a *Admin) State() *SyncState { return a.reg.First().State }
 
 // Register adds the admin routes to mux.
 func (a *Admin) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /enroll", a.page)
-	mux.HandleFunc("GET /enroll/qrcode.js", a.qrScript)
+	mux.HandleFunc("GET /enroll", asset("text/html; charset=utf-8", enrollHTML))
+	mux.HandleFunc("GET /enroll/static/enroll.js", asset("text/javascript; charset=utf-8", enrollJS))
+	mux.HandleFunc("GET /enroll/qrcode.js", asset("text/javascript; charset=utf-8", qrcodeJS))
+	mux.HandleFunc("GET /enroll/approve", asset("text/html; charset=utf-8", approveHTML))
+	mux.HandleFunc("GET /enroll/static/approve.js", asset("text/javascript; charset=utf-8", approveJS))
 	mux.HandleFunc("GET /enroll/devices", a.listDevices)
 	mux.HandleFunc("POST /enroll/devices", a.jsonOnly(a.createDevice))
 	mux.HandleFunc("DELETE /enroll/devices/{id}", a.jsonOnly(a.deleteDevice))
@@ -90,6 +111,37 @@ func (a *Admin) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /enroll/ingresses", a.listIngresses)
 	mux.HandleFunc("POST /enroll/ingresses/{name}/approve", a.jsonOnly(a.approve))
 	mux.HandleFunc("POST /enroll/ingresses/{name}/unapprove", a.jsonOnly(a.unapprove))
+}
+
+// actor names the caller for the audit log. A failed WhoIs gives "unknown"; the action still goes ahead.
+func (a *Admin) actor(r *http.Request) string {
+	if a.tn == nil {
+		return "unknown"
+	}
+	login, _, err := a.tn.WhoIs(r.Context(), r.RemoteAddr)
+	if err != nil || login == "" {
+		return "unknown"
+	}
+	return login
+}
+
+// audit records a change that has happened. A failing log is reported and never fails the change. detail holds
+// names and new expiry dates only: no link, subscription URL, UUID or secret.
+func (a *Admin) audit(r *http.Request, action, detail string) {
+	if err := a.store.Audit(a.actor(r), action, detail); err != nil {
+		slog.Error("audit log write failed", "action", action, "error_type", errType(err))
+	}
+}
+
+// expiryText is a new expiry as a UTC date.
+func expiryText(ts int64) string { return time.Unix(ts, 0).UTC().Format("2006-01-02") }
+
+// deviceName is the name of a device for the audit log, best effort.
+func (a *Admin) deviceName(id int64) string {
+	if d, err := a.store.GetDevice(id); err == nil {
+		return d.Name
+	}
+	return "#" + strconv.FormatInt(id, 10)
 }
 
 // opaqueID is the id the agent reports traffic under.
@@ -237,14 +289,18 @@ func (v *validator) integer(obj map[string]json.RawMessage, field string, min, m
 	return n
 }
 
-func (a *Admin) page(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(enrollHTML)
-}
-
-func (a *Admin) qrScript(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	w.Write(qrcodeJS)
+// asset serves an embedded file with headers that forbid framing, sniffing, caching and any script or style that
+// is not from this origin.
+func asset(contentType string, body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		h := w.Header()
+		h.Set("Content-Type", contentType)
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Content-Security-Policy", ui.PageCSP)
+		_, _ = w.Write(body)
+	}
 }
 
 type deviceRow struct {
@@ -415,6 +471,7 @@ func (a *Admin) createDevice(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
+	a.audit(r, "device.create", name+", expires "+expiryText(expires))
 	res := a.syncNow(r)
 	writeJSON(w, http.StatusOK, res.body(map[string]any{"id": d.ID, "subscription_url": SubURL(a.reg.LinkConfig(), secret)}))
 }
@@ -487,6 +544,7 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
+	a.audit(r, "device.link", d.Name)
 	writeJSON(w, http.StatusOK, map[string]any{"url": "https://" + a.reg.LinkConfig().LinkHost + "/e/" + tok})
 }
 
@@ -495,10 +553,12 @@ func (a *Admin) revoke(w http.ResponseWriter, r *http.Request) {
 	if !ok || !a.known(w, id) {
 		return
 	}
+	name := a.deviceName(id)
 	if err := a.store.Revoke(id); err != nil {
 		a.internal(w, err)
 		return
 	}
+	a.audit(r, "device.revoke", name)
 	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }
 
@@ -509,8 +569,10 @@ func (a *Admin) deleteDevice(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	name := a.deviceName(id)
 	switch err := a.store.DeleteDevice(id); {
 	case err == nil:
+		a.audit(r, "device.delete", name)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case errors.Is(err, ErrNotFound):
 		detail(w, http.StatusNotFound, "unknown device")
@@ -539,10 +601,12 @@ func (a *Admin) extend(w http.ResponseWriter, r *http.Request) {
 	if !a.known(w, id) || !a.future(w, expires) {
 		return
 	}
+	name := a.deviceName(id)
 	if err := a.store.Extend(id, expires); err != nil {
 		a.internal(w, err)
 		return
 	}
+	a.audit(r, "device.extend", name+", expires "+expiryText(expires))
 	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }
 
@@ -555,6 +619,7 @@ func (a *Admin) rotate(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
+	a.audit(r, "device.rotate_secret", a.deviceName(id))
 	secret, err := a.store.SubscriptionSecret(id)
 	if err != nil {
 		a.internal(w, err)
@@ -613,6 +678,7 @@ func (a *Admin) approve(w http.ResponseWriter, r *http.Request) {
 		a.approvalFailed(w, err)
 		return
 	}
+	a.audit(r, "bridge.approve", name)
 	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }
 
@@ -628,5 +694,6 @@ func (a *Admin) unapprove(w http.ResponseWriter, r *http.Request) {
 		a.approvalFailed(w, err)
 		return
 	}
+	a.audit(r, "bridge.unapprove", name)
 	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }

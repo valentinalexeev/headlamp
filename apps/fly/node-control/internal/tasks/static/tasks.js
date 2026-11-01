@@ -1,25 +1,25 @@
+// headlamp console: the Tasks page. Needs /_ui/hl.js first (the shell loads it). Everything that came from the
+// network, runner output included, goes in through textContent only; markup is never built from strings.
 (function () {
   'use strict';
+  var hl = window.hl;
+  if (!hl) { return; }
 
   var POLL_MS = 10000;
+  var COLUMNS = 6;
+  var MAX_RUNS = 8;
+  var MAX_RESULT_KEYS = 20;
+  var RUN_WORDS = {
+    succeeded: ['ok', 'Passed'], failed: ['warn', 'Failed'], lost: ['warn', 'Lost'], cancelled: ['off', 'Cancelled'],
+    running: ['ok', 'Running'], queued: ['off', 'Queued']
+  };
 
-  // ---- pure helpers (also exported for the node self-test) ----------------------------------
-
-  function relTime(iso, nowMs) {
-    if (!iso) { return ''; }
-    var t = Date.parse(iso);
-    if (isNaN(t)) { return ''; }
-    var diff = Math.round((t - nowMs) / 1000);
-    var future = diff > 0;
-    var s = Math.abs(diff);
-    var text;
-    if (s < 5) { return 'just now'; }
-    if (s < 60) { text = s + ' s'; }
-    else if (s < 3600) { text = Math.floor(s / 60) + ' min'; }
-    else if (s < 86400) { text = Math.floor(s / 3600) + ' h ' + Math.floor((s % 3600) / 60) + ' min'; }
-    else { text = Math.floor(s / 86400) + ' d ' + Math.floor((s % 86400) / 3600) + ' h'; }
-    return future ? 'in ' + text : text + ' ago';
-  }
+  function arr(v) { return Array.isArray(v) ? v : []; }
+  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+  function label(v, n) { return hl.plain(v, n || 100); }
+  function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
+  function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
   function fmtDuration(ms) {
     if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) { return ''; }
@@ -30,363 +30,364 @@
     return m + ' min ' + Math.round(s % 60) + ' s';
   }
 
+  // fmtValue turns one value of a task result into short text. Results come from the runner, so strings are
+  // cleaned of control and direction characters and every value is cut to a fixed length.
   function fmtValue(v) {
-    if (v === null || v === undefined) { return 'null'; }
-    if (typeof v === 'string') { return v; }
-    if (typeof v === 'number' || typeof v === 'boolean') { return String(v); }
     var j;
-    try { j = JSON.stringify(v); } catch (e) { j = '[unprintable]'; }
+    if (v === null || v === undefined) { return 'null'; }
+    if (typeof v === 'string') { j = label(v, -1); }
+    else if (typeof v === 'number' || typeof v === 'boolean') { return String(v); }
+    else {
+      try { j = JSON.stringify(v); } catch (e) { j = '[unprintable]'; }
+      j = label(j, -1);
+    }
     return j.length > 200 ? j.slice(0, 200) + '...' : j;
-  }
-
-  // The API answers {"error": ...}; helpers shared with other modules answer {"detail": ...}.
-  function errorMessage(status, data) {
-    if (data && typeof data === 'object') {
-      if (typeof data.error === 'string' && data.error) { return data.error; }
-      if (typeof data.detail === 'string' && data.detail) { return data.detail; }
-    }
-    return 'request failed (HTTP ' + status + ')';
-  }
-
-  // Returns [{cls, text}]: the state badges of one task, state always spelled out.
-  function badgesFor(t) {
-    var out = [];
-    if (t.running) { out.push({ cls: 'running', text: 'running' }); }
-    if (t.streak > 0) { out.push({ cls: 'failing', text: 'failing (' + t.streak + ' in a row)' }); }
-    if (t.stale) { out.push({ cls: 'stale', text: 'stale' }); }
-    if (!out.length) {
-      out.push(t.last_success ? { cls: 'ok', text: 'ok' } : { cls: 'waiting', text: 'no success yet' });
-    }
-    return out;
   }
 
   function targetText(target) {
     if (!target) { return ''; }
-    if (target.node) { return 'node ' + target.node; }
+    if (target.node) { return 'node ' + label(target.node, 100); }
     if (target.tags && target.tags.length) {
-      return 'tags ' + target.tags.join(', ') + (target.online ? ' (online only)' : '');
+      return 'tags ' + target.tags.map(function (t) { return label(t, 100); }).join(', ') + (target.online ? ' (online only)' : '');
     }
     return '';
   }
 
-  if (typeof document === 'undefined') {
-    if (typeof module !== 'undefined' && module.exports) {
-      module.exports = { relTime: relTime, fmtDuration: fmtDuration, fmtValue: fmtValue,
-        errorMessage: errorMessage, badgesFor: badgesFor, targetText: targetText };
-    }
-    return;
-  }
-
-  // ---- DOM helpers (textContent only: nothing from the network goes through innerHTML) ------
-
-  function el(tag, cls, text) {
-    var e = document.createElement(tag);
-    if (cls) { e.className = cls; }
-    if (text !== undefined && text !== null) { e.textContent = text; }
-    return e;
-  }
-
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
-
-  function when(iso) {
-    // Relative text with the absolute time as the tooltip.
-    if (!iso) { return el('span', 'muted', 'never'); }
-    var s = el('span', null, relTime(iso, Date.now()) || iso);
-    s.title = iso;
-    return s;
-  }
-
-  // ---- state ---------------------------------------------------------------------------------
-
-  var $ = function (id) { return document.getElementById(id); };
-  var sections = Object.create(null); // task id -> section parts
-  var counter = 0;
-  var placeholder = null;  // the loading / empty / no-data paragraph inside #tasks
-  var haveData = false;
-  var inflight = false;
-  var again = false;
-  var timer = null;
-
-  function setStatus(text, isError) {
-    var s = $('status');
-    s.textContent = text || '';
-    s.className = 'status' + (isError ? ' error' : '');
-  }
-
-  function setBanner(text) {
-    var b = $('banner');
-    b.textContent = text || '';
-    b.hidden = !text;
-  }
-
-  // Resolves to {status, data}; a network failure resolves to {status: 0, data: null}.
-  function call(method, path) {
-    var opts = { method: method, headers: {}, credentials: 'same-origin' };
-    if (method === 'POST') {
-      opts.headers['Content-Type'] = 'application/json';
-      opts.body = '{}';
-    }
-    return fetch(path, opts).then(function (r) {
-      if (r.status === 204) { return { status: 204, data: null }; }
-      return r.json().catch(function () { return null; }).then(function (d) {
-        return { status: r.status, data: d };
+  // taskRows turns the task list into display rows: failing first, then overdue, then the rest by name. Every
+  // state has a shape (the level) and a word.
+  function taskRows(list) {
+    var rows = [];
+    arr(list).forEach(function (t) {
+      t = obj(t);
+      if (typeof t.id !== 'string' || !t.id) { return; }
+      var streak = typeof t.streak === 'number' && t.streak > 0 ? Math.floor(t.streak) : 0;
+      var rank = 2, level, word;
+      if (streak > 0) { rank = 0; level = 'warn'; word = 'Failing, ' + streak + ' in a row'; }
+      else if (t.stale) { rank = 1; level = 'warn'; word = 'Overdue'; }
+      else if (t.running) { level = 'ok'; word = 'Running'; }
+      else if (t.last_success) { level = 'ok'; word = 'Passing'; }
+      else { level = 'off'; word = 'No success yet'; }
+      if (t.running && rank < 2) { word += ' (running)'; }
+      rows.push({
+        id: t.id, rank: rank, level: level, word: word, streak: streak, running: !!t.running, stale: !!t.stale,
+        passing: streak === 0 && !t.stale, script: label(t.script, 100), target: targetText(t.target),
+        every: label(t.every, 40), lastSuccess: t.last_success ? String(t.last_success) : '',
+        nextRun: t.next_run ? String(t.next_run) : '', result: t.last_result
       });
-    }, function () { return { status: 0, data: null }; });
+    });
+    rows.sort(function (a, b) { return (a.rank - b.rank) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
+    return rows;
   }
 
-  function bannerFor(res) {
-    if (res.status === 0) { return 'Cannot reach the server: showing the last data.'; }
-    if (res.status === 503) {
-      var m = errorMessage(res.status, res.data);
-      return m === 'degraded' ? 'Redis is unreachable: showing the last data.' : 'Service unavailable (' + m + '): showing the last data.';
+  function button(text, iconName, cls, onClick) {
+    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
+    b.setAttribute('type', 'button');
+    var ic = iconName ? hl.icon(iconName) : null;
+    if (ic) { b.appendChild(ic); }
+    b.appendChild(hl.el('span', null, text));
+    if (onClick) { b.addEventListener('click', onClick); }
+    return b;
+  }
+
+  function focusKey(box) {
+    var ae = typeof document !== 'undefined' ? document.activeElement : null;
+    for (var n = ae; n; n = n.parentNode) {
+      if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
     }
-    return 'Could not refresh (' + errorMessage(res.status, res.data) + '): showing the last data.';
+    return null;
   }
-
-  // ---- task sections -------------------------------------------------------------------------
-
-  function makeSection(id) {
-    var root = el('section', 'task');
-    var hid = 'h-' + (counter++);
-    root.setAttribute('aria-labelledby', hid);
-    var head = el('div', 'head');
-    var title = el('h2', null, id);
-    title.id = hid;
-    var badges = el('span', 'badges');
-    var spacer = el('span', 'spacer');
-    var runBtn = el('button', 'primary', 'Run now');
-    runBtn.type = 'button';
-    head.appendChild(title); head.appendChild(badges); head.appendChild(spacer); head.appendChild(runBtn);
-    var facts = el('dl', 'facts');
-    var details = el('details', 'runs');
-    var summary = el('summary', null, 'Runs');
-    var runsBody = el('div', 'tablewrap');
-    details.appendChild(summary); details.appendChild(runsBody);
-    root.appendChild(head); root.appendChild(facts); root.appendChild(details);
-    var sec = { id: id, root: root, badges: badges, runBtn: runBtn, facts: facts, details: details,
-      runsBody: runsBody, busy: false, running: false, runsLoaded: false };
-    runBtn.addEventListener('click', function () { runNow(sec); });
-    details.addEventListener('toggle', function () { if (details.open) { loadRuns(sec); } });
-    return sec;
-  }
-
-  function fact(dl, label, node) {
-    dl.appendChild(el('dt', null, label));
-    var dd = el('dd');
-    dd.appendChild(node);
-    dl.appendChild(dd);
-  }
-
-  function resultNode(res) {
-    var box = el('div', 'result');
-    var keys = res ? Object.keys(res).sort() : [];
-    if (!keys.length) { return el('span', 'muted', res ? 'empty result' : 'none yet'); }
-    keys.forEach(function (k) {
-      var v = res[k];
-      var s = el('span', null, k + ': ' + fmtValue(v));
-      if (typeof v === 'string' && v.length > 60) { s.title = v; }
-      box.appendChild(s);
-    });
-    return box;
-  }
-
-  function updateSection(sec, t) {
-    sec.running = !!t.running;
-    clear(sec.badges);
-    badgesFor(t).forEach(function (b) { sec.badges.appendChild(el('span', 'badge ' + b.cls, b.text)); sec.badges.appendChild(document.createTextNode(' ')); });
-    sec.runBtn.disabled = sec.busy || sec.running;
-    clear(sec.facts);
-    fact(sec.facts, 'Script', el('span', null, t.script || ''));
-    fact(sec.facts, 'Target', el('span', null, targetText(t.target)));
-    fact(sec.facts, 'Schedule', el('span', null, t.every ? 'every ' + t.every : ''));
-    fact(sec.facts, 'Last success', when(t.last_success));
-    fact(sec.facts, 'Failure streak', el('span', null, String(t.streak || 0)));
-    fact(sec.facts, 'Next run', t.next_run ? when(t.next_run) : el('span', 'muted', 'not scheduled'));
-    fact(sec.facts, 'Last result', resultNode(t.last_result));
-  }
-
-  function setPlaceholder(text) {
-    var host = $('tasks');
-    if (!text) {
-      if (placeholder && placeholder.parentNode === host) { host.removeChild(placeholder); }
-      placeholder = null;
-      return;
+  function refocus(box, key) {
+    if (!key) { return; }
+    var stack = [box];
+    while (stack.length) {
+      var n = stack.pop();
+      if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
+      (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
     }
-    if (!placeholder || placeholder.parentNode !== host) {
-      clear(host);
-      placeholder = el('p', 'muted');
-      host.appendChild(placeholder);
+  }
+
+  // mount wires the page's elements to the data. deps (all optional): now() for the clock.
+  function mount(els, deps) {
+    deps = deps || {};
+    var now = deps.now || function () { return Date.now(); };
+    var st = {
+      loaded: false, failed: '', rows: [], sel: hl.queryParam('sel') || '', picked: '', busy: {}, runs: {}, runsFor: '',
+      tableSig: null, panelSig: null
+    };
+    var ctrl = {};
+
+    function setError(text) { els.error.textContent = text; els.error.hidden = !text; }
+    function setNotice(text) { els.notice.textContent = text; els.notice.hidden = !text; }
+
+    function when(iso) { return iso ? hl.relTime(iso, now()) : ''; }
+
+    // The task shown in the panel: the one in the URL or last picked, else the first row.
+    function selected() {
+      var want = st.picked || st.sel;
+      for (var i = 0; i < st.rows.length; i++) { if (st.rows[i].id === want) { return st.rows[i]; } }
+      return st.rows[0] || null;
     }
-    placeholder.textContent = text;
-  }
 
-  function renderTasks(list) {
-    var host = $('tasks');
-    host.setAttribute('aria-busy', 'false');
-    if (!Array.isArray(list)) { return; }
-    var seen = {};
-    var prev = null;
-    list.forEach(function (t) {
-      if (!t || typeof t.id !== 'string') { return; }
-      seen[t.id] = true;
-      var sec = sections[t.id];
-      if (!sec) { sec = sections[t.id] = makeSection(t.id); }
-      updateSection(sec, t);
-      // Keep the server's order without recreating nodes (preserves focus and open state).
-      if (placeholder) { setPlaceholder(''); }
-      var want = prev ? prev.root.nextSibling : host.firstChild;
-      if (want !== sec.root) { host.insertBefore(sec.root, want); }
-      prev = sec;
-    });
-    Object.keys(sections).forEach(function (id) {
-      if (!seen[id]) {
-        if (sections[id].root.parentNode) { sections[id].root.parentNode.removeChild(sections[id].root); }
-        delete sections[id];
-      }
-    });
-    setPlaceholder(list.length ? '' : 'No tasks are configured.');
-    $('updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
-  }
-
-  // ---- run lists -----------------------------------------------------------------------------
-
-  var RUN_COLS = ['State', 'Node', 'Attempt', 'Started', 'Duration', 'Reason', 'Script', 'Notify', ''];
-
-  function renderRuns(sec, runs) {
-    clear(sec.runsBody);
-    if (!Array.isArray(runs) || !runs.length) {
-      sec.runsBody.appendChild(el('p', 'muted', 'No runs recorded.'));
-      return;
+    function summary() {
+      if (!st.loaded) { return st.failed ? 'Could not load the tasks. Retrying.' : ''; }
+      var passing = st.rows.filter(function (r) { return r.passing; }).length;
+      var text = passing + ' of ' + st.rows.length + ' passing';
+      if (st.failed) { text += '. The data may be out of date.'; }
+      return text;
     }
-    var table = el('table');
-    var thead = el('thead');
-    var hr = el('tr');
-    RUN_COLS.forEach(function (c) { var th = el('th', null, c); th.scope = 'col'; hr.appendChild(th); });
-    thead.appendChild(hr);
-    table.appendChild(thead);
-    var tb = el('tbody');
-    runs.forEach(function (r) {
-      var tr = el('tr');
-      tr.appendChild(el('td', null, String(r.state || '')));
-      tr.appendChild(el('td', null, String(r.node || '')));
-      tr.appendChild(el('td', null, String(r.attempt === undefined ? '' : r.attempt)));
-      var st = el('td');
-      if (r.started) {
-        st.appendChild(el('div', null, r.started));
-        var rel = el('div', 'muted', relTime(r.started, Date.now()));
-        st.appendChild(rel);
-      }
-      tr.appendChild(st);
-      tr.appendChild(el('td', null, fmtDuration(r.duration_ms)));
-      tr.appendChild(el('td', null, String(r.reason || '')));
-      var sha = el('td', 'sha', String(r.script_sha || '').slice(0, 8));
-      if (r.script_sha) { sha.title = r.script_sha; }
-      tr.appendChild(sha);
-      tr.appendChild(el('td', null, String(r.notify_outcome || '')));
-      var act = el('td');
-      if (r.state === 'running' && typeof r.id === 'string') {
-        var b = el('button', null, 'Cancel');
-        b.type = 'button';
-        b.setAttribute('aria-label', 'Cancel run on ' + (r.node || 'node'));
-        b.addEventListener('click', function () { cancelRun(sec, r.id, b); });
-        act.appendChild(b);
-      }
-      tr.appendChild(act);
-      tb.appendChild(tr);
-    });
-    table.appendChild(tb);
-    sec.runsBody.appendChild(table);
-  }
 
-  function loadRuns(sec) {
-    return call('GET', '/tasks/' + encodeURIComponent(sec.id) + '/runs').then(function (res) {
-      if (sections[sec.id] !== sec) { return; }
-      if (res.status === 200 && Array.isArray(res.data)) {
-        sec.runsLoaded = true;
-        renderRuns(sec, res.data);
-      } else if (!sec.runsLoaded) {
-        clear(sec.runsBody);
-        sec.runsBody.appendChild(el('p', 'muted', 'Runs unavailable: ' + (res.status === 0 ? 'cannot reach the server' : errorMessage(res.status, res.data))));
+    // ----- actions
+
+    function runNow(id) {
+      if (st.busy[id]) { return; }
+      st.busy[id] = true;
+      setError('');
+      setNotice('');
+      render();
+      return hl.api('POST', '/tasks/' + encodeURIComponent(id) + '/run', {}).then(function (d) {
+        st.busy[id] = false;
+        var rid = d && typeof d.run_id === 'string' ? label(d.run_id, 64).slice(0, 8) : '';
+        setNotice('Started ' + id + (rid ? ' (run ' + rid + ')' : '') + '.');
+        return ctrl.reload();
+      }, function (err) {
+        st.busy[id] = false;
+        setError('Run now failed for ' + id + ': ' + label(err && err.message, 200));
+        render();
+      });
+    }
+
+    function cancelRun(taskId, runId) {
+      setError('');
+      setNotice('');
+      return hl.api('DELETE', '/runs/' + encodeURIComponent(runId)).then(function () {
+        setNotice('Cancel requested for ' + taskId + '.');
+        return ctrl.reload();
+      }, function (err) {
+        setError('Cancel failed for ' + taskId + ': ' + label(err && err.message, 200));
+      });
+    }
+
+    function runButton(r, cls, fk) {
+      var b = button(st.busy[r.id] ? 'Starting' : 'Run now', 'play', cls, function () { runNow(r.id); });
+      b.setAttribute('aria-label', (st.busy[r.id] ? 'Starting ' : 'Run ') + r.id + (st.busy[r.id] ? '' : ' now'));
+      keyed(b, fk + r.id);
+      b.disabled = !!(st.busy[r.id] || r.running);
+      if (r.running && !st.busy[r.id]) { b.setAttribute('title', r.id + ' is running now.'); }
+      return b;
+    }
+
+    // ----- the table
+
+    function renderTable(sel) {
+      var shown = st.rows.map(function (r) {
+        return { id: r.id, level: r.level, word: r.word, last: r.lastSuccess ? cap(when(r.lastSuccess)) : 'Never',
+          next: r.nextRun ? cap(when(r.nextRun)) : (r.running ? 'Running now' : 'Not scheduled'), target: r.target || '-',
+          running: r.running, busy: !!st.busy[r.id] };
+      });
+      var sig = JSON.stringify([shown, sel && sel.id]);
+      if (sig === st.tableSig) { return; }
+      st.tableSig = sig;
+      var fk = focusKey(els.rows);
+      clear(els.rows);
+      st.rows.forEach(function (r, i) {
+        var s = shown[i];
+        var isSel = !!sel && sel.id === r.id;
+        var tr = hl.el('tr', isSel ? 'sel' : '');
+        var name = hl.el('td');
+        var pick = keyed(hl.el('button', 'btn sm quiet mono name', r.id), 'pick:' + r.id);
+        pick.setAttribute('type', 'button');
+        pick.setAttribute('aria-pressed', isSel ? 'true' : 'false');
+        pick.addEventListener('click', function () { ctrl.select(r.id); });
+        name.appendChild(pick);
+        tr.appendChild(name);
+        var state = hl.el('td');
+        state.appendChild(hl.status(r.level, r.word));
+        tr.appendChild(state);
+        tr.appendChild(hl.el('td', 't2', s.last));
+        tr.appendChild(hl.el('td', 't2', s.next));
+        tr.appendChild(hl.el('td', 'mono t2', s.target));
+        var act = hl.el('td', 'act');
+        var box = hl.el('div', 'rowbtns');
+        box.appendChild(runButton(r, 'sm' + (isSel ? '' : ' quiet'), 'run:'));
+        act.appendChild(box);
+        tr.appendChild(act);
+        els.rows.appendChild(tr);
+      });
+      refocus(els.rows, fk);
+    }
+
+    // ----- the panel of the selected task
+
+    function lastFailure(runs) {
+      for (var i = 0; i < runs.length; i++) {
+        var r = obj(runs[i]);
+        if ((r.state === 'failed' || r.state === 'lost') && r.reason) { return r; }
       }
-      // A failed reload keeps the previous list; the banner of the task refresh covers the cause.
-    });
-  }
+      return null;
+    }
 
-  // ---- actions -------------------------------------------------------------------------------
+    function resultNode(res) {
+      var keys = Object.keys(obj(res)).sort().slice(0, MAX_RESULT_KEYS);
+      if (!res) { return hl.el('span', 't3', 'None yet'); }
+      if (!keys.length) { return hl.el('span', 't3', 'Empty result'); }
+      var box = hl.el('div', 'stack');
+      keys.forEach(function (k) { box.appendChild(hl.el('p', 'mono small', label(k, 60) + ': ' + fmtValue(res[k]))); });
+      return box;
+    }
 
-  function runNow(sec) {
-    sec.busy = true;
-    sec.runBtn.disabled = true;
-    call('POST', '/tasks/' + encodeURIComponent(sec.id) + '/run').then(function (res) {
-      sec.busy = false;
-      if (res.status === 202) {
-        var rid = res.data && typeof res.data.run_id === 'string' ? res.data.run_id : '';
-        setStatus('Started ' + sec.id + (rid ? ' (run ' + rid.slice(0, 8) + ')' : '') + '.', false);
-      } else if (res.status === 0) {
-        setStatus('Run now failed: cannot reach the server.', true);
+    function renderPanel(sel) {
+      var runs = sel && st.runsFor === sel.id ? st.runs[sel.id] : null;
+      var shown = sel && [sel, !!st.busy[sel.id], runs, sel.lastSuccess ? when(sel.lastSuccess) : '', sel.nextRun ? when(sel.nextRun) : ''];
+      var sig = JSON.stringify(shown || null);
+      if (sig === st.panelSig) { return; }
+      st.panelSig = sig;
+      var fk = focusKey(els.panel);
+      clear(els.panel);
+      if (!sel) { return; }
+      var panel = hl.el('div', 'panel');
+      var head = hl.el('div', 'panelhead');
+      head.appendChild(hl.el('h2', 'mono', sel.id));
+      head.appendChild(runButton(sel, 'sm', 'panelrun:'));
+      panel.appendChild(head);
+
+      var fail = runs ? lastFailure(runs) : null;
+      if (sel.streak > 0 && fail) {
+        var note = hl.el('div', 'note');
+        note.appendChild(hl.el('p', null, label(fail.reason, 400)));
+        var ago = fail.ended || fail.started;
+        note.appendChild(hl.el('p', 't2 small', 'Last failure ' + when(String(ago || '')) + (fail.node ? ' on ' + label(fail.node, 100) : '') + '.'));
+        panel.appendChild(note);
+      }
+
+      var kv = hl.el('dl', 'kv');
+      function fact(k, node) {
+        kv.appendChild(hl.el('dt', null, k));
+        var dd = hl.el('dd');
+        dd.appendChild(typeof node === 'string' ? hl.el('span', null, node) : node);
+        kv.appendChild(dd);
+      }
+      fact('Last success', sel.lastSuccess ? cap(when(sel.lastSuccess)) : 'Never');
+      fact('Script', hl.el('span', 'mono', sel.script || '-'));
+      fact('Target', sel.target || '-');
+      fact('Schedule', sel.every ? 'Every ' + sel.every : '-');
+      fact('Failure streak', String(sel.streak));
+      fact('Next run', sel.nextRun ? cap(when(sel.nextRun)) : (sel.running ? 'Running now' : 'Not scheduled'));
+      var alertOutcome = '';
+      (runs || []).some(function (r) { r = obj(r); if (r.notify_outcome) { alertOutcome = label(r.notify_outcome, 100); return true; } return false; });
+      if (alertOutcome) { fact('Last alert', alertOutcome); }
+      fact('Last result', resultNode(sel.result));
+      panel.appendChild(kv);
+
+      var sec = hl.el('div');
+      var lab = hl.el('div', 'seclabel');
+      lab.appendChild(hl.el('h2', null, 'Recent runs'));
+      sec.appendChild(lab);
+      if (!runs) {
+        sec.appendChild(hl.el('p', 't2', st.failed ? 'The runs are not available right now.' : 'Loading the runs.'));
+      } else if (!runs.length) {
+        sec.appendChild(hl.el('p', 't2', 'No runs recorded yet.'));
       } else {
-        setStatus('Run now failed for ' + sec.id + ': ' + errorMessage(res.status, res.data), true);
-      }
-      sec.runBtn.disabled = sec.running;
-      refresh();
-    });
-  }
-
-  function cancelRun(sec, runId, btn) {
-    btn.disabled = true;
-    call('DELETE', '/runs/' + encodeURIComponent(runId)).then(function (res) {
-      if (res.status === 204) {
-        setStatus('Cancel requested for ' + sec.id + '.', false);
-      } else if (res.status === 0) {
-        setStatus('Cancel failed: cannot reach the server.', true);
-      } else {
-        setStatus('Cancel failed for ' + sec.id + ': ' + errorMessage(res.status, res.data), true);
-      }
-      refresh();
-    });
-  }
-
-  // ---- refresh loop --------------------------------------------------------------------------
-
-  function refresh() {
-    if (inflight) { again = true; return Promise.resolve(); }
-    inflight = true;
-    return call('GET', '/tasks.json').then(function (res) {
-      if (res.status === 200 && Array.isArray(res.data)) {
-        haveData = true;
-        setBanner('');
-        renderTasks(res.data);
-        var loads = [];
-        Object.keys(sections).forEach(function (id) {
-          if (sections[id].details.open) { loads.push(loadRuns(sections[id])); }
+        var tw = hl.el('div', 'tw');
+        var table = hl.el('table');
+        var tb = hl.el('tbody');
+        runs.slice(0, MAX_RUNS).forEach(function (r) {
+          r = obj(r);
+          var w = RUN_WORDS[r.state] || ['off', label(r.state, 30) || 'Unknown'];
+          var tr = hl.el('tr');
+          var t = hl.el('td', 'mono t3', r.started ? when(String(r.started)) : '-');
+          if (r.started) { t.setAttribute('title', label(r.started, 40)); }
+          tr.appendChild(t);
+          var s = hl.el('td');
+          s.appendChild(hl.status(w[0], w[1]));
+          tr.appendChild(s);
+          tr.appendChild(hl.el('td', 'mono t2', fmtDuration(r.duration_ms) || '-'));
+          var act = hl.el('td', 'act');
+          if (r.state === 'running' && typeof r.id === 'string') {
+            var c = keyed(button('Cancel', null, 'sm quiet', function () { cancelRun(sel.id, r.id); }), 'cancel:' + r.id);
+            c.setAttribute('aria-label', 'Cancel the run on ' + label(r.node || 'the node', 100));
+            act.appendChild(c);
+          }
+          tr.appendChild(act);
+          tb.appendChild(tr);
         });
-        return Promise.all(loads);
+        table.appendChild(tb);
+        tw.appendChild(table);
+        sec.appendChild(tw);
       }
-      setBanner(bannerFor(res));
-      if (!haveData) {
-        $('tasks').setAttribute('aria-busy', 'false');
-        setPlaceholder('No data yet.');
-      }
-    }).catch(function () {
-      setBanner('Could not refresh: showing the last data.');
-    }).then(function () {
-      inflight = false;
-      if (again) { again = false; return refresh(); }
+      panel.appendChild(sec);
+      els.panel.appendChild(panel);
+      refocus(els.panel, fk);
+    }
+
+    function renderStale() {
+      els.stale.textContent = st.failed ? 'Could not refresh (' + st.failed + '). Showing the last data.' : '';
+      els.stale.hidden = !st.failed || !st.loaded;
+    }
+
+    function render() {
+      els.sub.textContent = summary();
+      renderStale();
+      var empty = st.loaded && st.rows.length === 0;
+      els.empty.hidden = !empty;
+      els.cols.hidden = st.rows.length === 0;
+      if (empty) { els.emptytext.textContent = 'Tasks come from the task configuration. Add one there and it shows here once the service has read it.'; }
+      var sel = selected();
+      renderTable(sel);
+      renderPanel(sel);
+    }
+
+    function loadRuns() {
+      var sel = selected();
+      if (!sel) { return Promise.resolve(); }
+      var id = sel.id;
+      return hl.api('GET', '/tasks/' + encodeURIComponent(id) + '/runs').then(function (j) {
+        st.runs[id] = arr(j);
+        st.runsFor = id;
+        render();
+      }, function () { /* the stale note of the list reload covers the cause; the old runs stay */ });
+    }
+
+    // ----- control surface
+
+    ctrl.select = function (id) {
+      st.picked = id;
+      hl.setQueryParam('sel', id);
+      st.runsFor = st.runs[id] ? id : '';
+      render();
+      return loadRuns();
+    };
+    ctrl.update = function (list) {
+      st.rows = taskRows(list);
+      st.loaded = true;
+      render();
+      return loadRuns();
+    };
+    ctrl.reload = function () {
+      return hl.api('GET', '/tasks.json').then(function (j) {
+        st.failed = '';
+        return ctrl.update(j);
+      }, function (err) {
+        st.failed = label(err && err.message, 120) || 'request failed';
+        render();
+      });
+    };
+    ctrl.state = st;
+    render();
+    return ctrl;
+  }
+
+  function init() {
+    var root = document.getElementById('tasks');
+    if (!root) { return; }
+    var $ = function (id) { return document.getElementById(id); };
+    var ctrl = mount({
+      sub: $('sub'), error: $('error'), notice: $('notice'), stale: $('stale'), empty: $('empty'), emptytext: $('emptytext'),
+      cols: $('cols'), rows: $('rows'), panel: $('panel')
     });
+    var poller = hl.poll(ctrl.reload, POLL_MS);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { poller.now(); } });
   }
 
-  function visible() { return document.visibilityState !== 'hidden'; }
-
-  function schedule() {
-    clearTimeout(timer);
-    timer = null;
-    if (!visible()) { return; }
-    timer = setTimeout(function () { refresh().then(schedule); }, POLL_MS);
-  }
-
-  placeholder = $('tasks').querySelector('p');
-  document.addEventListener('visibilitychange', function () {
-    if (visible()) { refresh().then(schedule); } else { clearTimeout(timer); timer = null; }
-  });
-  if (visible()) { refresh().then(schedule); }
-}());
+  hl.tasks = { taskRows: taskRows, fmtDuration: fmtDuration, fmtValue: fmtValue, targetText: targetText, mount: mount, init: init };
+  init();
+})();

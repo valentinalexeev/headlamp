@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/node-control/internal/ui"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/ui"
 )
 
 // pages lists every page of the module with its script.

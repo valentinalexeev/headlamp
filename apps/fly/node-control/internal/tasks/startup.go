@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"time"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // sweep finalises runs a previous process left as running or queued (it was

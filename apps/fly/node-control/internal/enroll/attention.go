@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 // bridgeSource is the attention source of bridge items: bridges are nodes, so the sidebar counts them under

@@ -17,7 +17,7 @@ import (
 
 	"tailscale.com/ipn"
 
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 // The shared Redis is billed per command, so the store reads every field once

@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 // RedisEnabled reports whether the environment selects the Redis store (ENROLL_REDIS=1).

@@ -9,8 +9,8 @@ import (
 	"errors"
 	"sort"
 
-	"funnel-ingress/internal/config"
-	"funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
 
 // MaxBody caps what is read from the configuration source and sent to the state endpoint.

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 const cfgJSON = `{"host": "ingress.example.test", "public_key": "P", "short_id": "ab", "sni": "s.example.test"}`

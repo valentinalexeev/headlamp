@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"example.com/node-control/internal/authz"
-	"example.com/node-control/internal/headscale"
-	"example.com/node-control/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
 )
 
 //go:embed static/sessions.html

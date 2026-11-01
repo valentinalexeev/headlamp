@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"funnel-ingress/internal/config"
-	"funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
 
 const domain = "example.com"

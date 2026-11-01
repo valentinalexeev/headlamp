@@ -13,7 +13,7 @@ import (
 
 	"tailscale.com/ipn"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 // KeyFor returns the Redis hash key: REDIS_KEY, or "<FLY_APP_NAME or TAILNET_HOSTNAME>:tsnet". Shared Redis

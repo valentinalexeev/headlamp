@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"example.com/node-control/internal/headscale"
-	"example.com/node-control/internal/scrub"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub"
 )
 
 // outcome is how one attempt ended, before scrubbing.

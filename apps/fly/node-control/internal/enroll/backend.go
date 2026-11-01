@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 // ErrNotRevoked means a device cannot be deleted because it has not been revoked first.

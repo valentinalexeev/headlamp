@@ -11,8 +11,8 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/enroll"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/enroll"
 )
 
 func cliEnv(mr *miniredis.Miniredis) core.Env {

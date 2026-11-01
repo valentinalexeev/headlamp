@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
 
 func TestNodeControlReporterPostsJSON(t *testing.T) {

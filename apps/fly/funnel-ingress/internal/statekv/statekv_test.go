@@ -13,7 +13,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/alicebob/miniredis/v2/server"
 
-	"funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
 )
 
 const redisKey = "funnel-ingress:tsnet"

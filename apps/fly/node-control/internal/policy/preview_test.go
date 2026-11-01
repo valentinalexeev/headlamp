@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 func previewSvc(t *testing.T, current string) (*Service, *fakeAPI) {

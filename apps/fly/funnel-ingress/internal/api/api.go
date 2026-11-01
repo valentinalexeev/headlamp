@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"funnel-ingress/internal/auth"
-	"funnel-ingress/internal/routes"
-	"funnel-ingress/internal/tsnode"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/auth"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/tsnode"
 )
 
 // Deps are the collaborators of the handler.

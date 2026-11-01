@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 const liveEnv = "ENROLL_REDIS_LIVE_URL"

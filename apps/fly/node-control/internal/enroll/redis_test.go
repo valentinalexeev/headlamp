@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/node-control/internal/statestore"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/statestore"
 )
 
 func redisEnv(t *testing.T) (*RedisStore, contractEnv) {

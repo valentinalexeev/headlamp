@@ -18,15 +18,15 @@ import (
 	"syscall"
 	"time"
 
-	"funnel-ingress/internal/api"
-	"funnel-ingress/internal/auth"
-	"funnel-ingress/internal/config"
-	"funnel-ingress/internal/controlsync"
-	"funnel-ingress/internal/proxy"
-	"funnel-ingress/internal/reconcile"
-	"funnel-ingress/internal/routes"
-	"funnel-ingress/internal/statekv"
-	"funnel-ingress/internal/tsnode"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/api"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/auth"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/controlsync"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/proxy"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/reconcile"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/statekv"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/tsnode"
 )
 
 const (

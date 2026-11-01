@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
 )
 
 // Run against a real headscale with a tagged pre-auth key:

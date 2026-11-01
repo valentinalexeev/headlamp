@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"example.com/node-control/internal/authz"
-	"example.com/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
 // taskPath is the page of one task: the id goes through query escaping, so it can never break the path.

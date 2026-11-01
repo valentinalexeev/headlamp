@@ -6,9 +6,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"funnel-ingress/internal/auth"
-	"funnel-ingress/internal/config"
-	"funnel-ingress/internal/routes"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/auth"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
 
 // Applier validates a configuration and installs it.

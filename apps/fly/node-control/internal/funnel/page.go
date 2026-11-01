@@ -4,7 +4,7 @@ import (
 	_ "embed"
 	"net/http"
 
-	"example.com/node-control/internal/ui"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/ui"
 )
 
 //go:embed static/funnel.html

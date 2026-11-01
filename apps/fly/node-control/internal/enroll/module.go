@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"example.com/node-control/internal/core"
-	"example.com/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
 // Module is the enrolment module: the operator API on the admin mux and the public handler on the

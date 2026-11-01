@@ -151,6 +151,9 @@
     input.addEventListener('input', function () { st.active = 0; render(); });
     input.addEventListener('keydown', function (ev) {
       var key = ev && ev.key;
+      // Keys that belong to an input method (Enter picking a candidate, Esc dropping it) are not ours; keyCode 229
+      // is what some browsers report for the Enter that ends a composition.
+      if (ev && (ev.isComposing || ev.keyCode === 229)) { return; }
       if (key === 'ArrowDown') { ev.preventDefault(); setActive(st.active + 1); }
       else if (key === 'ArrowUp') { ev.preventDefault(); setActive(st.active - 1); }
       else if (key === 'Enter') { ev.preventDefault(); go(st.shown[st.active]); }

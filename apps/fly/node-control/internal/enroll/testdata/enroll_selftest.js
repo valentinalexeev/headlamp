@@ -472,7 +472,9 @@ const fieldValue = (els, label) => {
     assert.deepStrictEqual(JSON.parse(sent('POST', '/enroll/devices/7/links')[0].body), { ttl: 86400, max_uses: 1 });
     const secrets = findAll(aside, (n) => hasClass(n, 'secret'));
     assert.deepStrictEqual(secrets.map((n) => n.textContent), [LINK, SUB]);
-    assert.ok(findAll(aside, (n) => n.tag === 'details').length === 1 && findAll(aside, (n) => n.tag === 'details')[0].textContent.includes(SUB), 'the subscription URL is only in Manual setup');
+    const manual = findAll(aside, (n) => n.tag === 'details');
+    assert.strictEqual(manual.length, 1);
+    assert.deepStrictEqual(findAll(manual[0], (n) => hasClass(n, 'secret')).map((n) => n.textContent), [SUB], 'the subscription URL is only in Manual setup');
     assert.ok(/Manual setup: subscription URL/.test(aside.textContent));
     assert.ok(/tablet-4 created for jo/.test(aside.textContent));
     assert.ok(/Waiting for first use/.test(aside.textContent));

@@ -352,148 +352,154 @@ node-control merges traffic figures for each device across the bridges. When a b
 
 ### Discovered bridges, approval and slow agents
 
-Nodes tagged `tag:ingress` in headscale that are not listed in `enroll.json` are discovered (needs `link_host` in the
-file and `HEADSCALE_API_KEY`; the discovery line on the page says why it is off) and shown on the `/enroll` page. Each
-one is asked for its public parameters (`GET /v1/info` on its agent, bearer token `AGENT_TOKEN_<NAME>`, `<NAME>` the
-node name). A discovered bridge is used only after the operator approves it; the approval pins the fingerprint of its
-published parameters AND the headscale node id that published them. Discovered bridges always use derived
-credentials. Approvals live in the enrolment database. States of a row: `configured` (listed in `enroll.json`,
-approved by definition), `pending` (never approved), `approved`, `changed`, `unreachable`, `no token`, `invalid`.
+node-control discovers nodes with the tag `tag:ingress` in headscale that `enroll.json` does not list, and shows them on the `/enroll` page. Discovery needs `link_host` in the file and `HEADSCALE_API_KEY`. The discovery line on the page says why discovery is off.
 
-Adding a bridge, step by step:
+The app asks each discovered bridge for its public parameters: `GET /v1/info` on its agent, with the bearer token `AGENT_TOKEN_<NAME>`, where `<NAME>` is the node name. The app uses a discovered bridge only after the operator approves it. The approval pins the fingerprint of its published parameters AND the headscale node id that published them. Discovered bridges always use derived credentials. Approvals are in the enrolment database.
 
-1. Deploy the host with the `reality-ingress` and `ingress-agent` roles; give its agent its own token and set the
-   `INGRESS_*` values so `/v1/info` answers. Its front must serve `link_host` (see "Compromised bridge").
-2. Register the node in headscale with `tag:ingress` and a name that fits `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`
-   (this becomes the bridge name). Then pin the name with `headscale nodes rename <id> <name>`, using a name that the
-   machine's hostname does not produce (otherwise headscale follows a hostname change). `headscale nodes list` shows
-   the id, addresses and names.
-3. Set the token as a secret named `AGENT_TOKEN_<NAME>` and redeploy node-control (or use an `enroll.json` entry
-   instead, see above, which needs no approval).
-4. Open `/enroll`. The bridge appears as `pending` with its host, the node id, tailnet address and names, a short
-   prefix of its public key and short id, a short prefix of its machine key and a fingerprint. Compare the node id,
-   address, name and machine key with `headscale nodes list`: an impostor holding the name can publish the real bridge's public values, so the node
-   itself must be the one you registered. The agent does not report a fingerprint: it is node-control's SHA-256 over the canonical JSON of
-   `name`, `host`, `port`, `sni`, `public_key` and `short_id`. Compare the host, public key and short id that
-   `GET /v1/info` on the agent reports (over a channel you trust) with what the page shows, then press Approve. The
-   API is `POST /enroll/ingresses/<name>/approve` with `{"fingerprint": "<shown fingerprint>", "node_id": <shown node id>}`;
-   a fingerprint that no longer matches the parameters the bridge publishes at that moment, or a node id other than
-   the node that publishes them, is refused (409). `POST
-   /enroll/ingresses/<name>/unapprove` takes it out again. Both POSTs need `Content-Type: application/json`.
-5. Approval pushes the credential set at once; the row shows its sync state. Phones pick the new bridge up when they
-   refresh their subscription; a profile imported by a one-time link needs the person to refresh it.
+States of a row:
 
-- `GET /enroll/ingresses` returns one row per bridge (`name`, `host`, `source`, `approval`, `active`, `approved`,
-  `fingerprint`, the key, short id and machine key prefixes, `node_id`, `address`, `hostname`, `given_name`, `online`,
-  `sync`, `detail`, `aliases`, `node`, `intermittent`) and, for a discovered bridge that has an approval, what that approval pinned:
-  `approved_fingerprint`, `approved_node_id` and `approved_machine_key_prefix`. The review page (`/enroll/approve`)
-  compares these with the values the bridge publishes now, so a `changed` bridge shows exactly what differs before it
-  is approved again. The store keeps only these three, so nothing else can be compared.
-- A `changed` bridge (its parameters differ, or another node id publishes them) is frozen: it is out of profiles
-  and no longer synced, so it keeps its old credential set until it is approved again or un-approved. A revocation
-  does not reach it meanwhile.
-- Names in headscale are NOT proof of who owns a node. The given name starts as the hostname the machine reports
-  and headscale re-derives it whenever that hostname changes, as long as the given name still follows it (equals the
-  hostname, or the hostname plus `-<digits>`). Only a name set with `headscale nodes rename <id> <name>` to something
-  the hostname does not produce stays put. So:
-  - **Set an explicit `agent_url` (the node's tailnet IP, for example `http://100.64.0.12:9000`) on every configured
-    bridge.** It removes the headscale lookup altogether: the token goes only to that address, which no machine
-    can influence. (`AGENT_URL` does the same for the first entry.) The name lookup is only the fallback, and it
-    is the weaker setting.
-  - For a CONFIGURED bridge without `agent_url`, the lookup accepts a tagged node only when its given name does not
-    follow its hostname, by headscale's own rule (the given name equals what headscale derives from the hostname,
-    optionally followed by `-<number>`; hostnames that sanitise to nothing are refused too). Run
-    `headscale nodes rename <id> <name>` on the bridge node first (the log says so when a lookup is refused). When
-    several nodes share the name the lookup fails and nothing is sent to any of them.
-  - A DISCOVERED bridge is identified by the node id AND the machine key it was approved on, not by its name: the
-    agent is found by that pair, and no other node is ever sent its token or credentials. The id alone is not enough
-    (ids can repeat after a headscale database is rebuilt or restored); the machine key is what a node cannot
-    choose. If the node list does not report machine keys, a bridge cannot be approved. Approvals made before
-    machine keys were pinned show `changed` ("approve again") until you approve them once more. If that node disappears, the row turns `invalid`
-    ("the approved node is not present") and nothing is contacted until you remove the approval; a different node that
-    now carries the name can then be reviewed and approved.
-- Before approval, the token variable `AGENT_TOKEN_<NAME>` is already sent (as the bearer of `GET /v1/info`) to a
-  tagged node whose given name matches it. Pinning the node id after approval reduces this exposure but cannot remove
-  it: anyone who can register a tagged node with that name (and, for a host with no rename, a matching hostname)
-  receives that one token. Do not set the variable before you expect the node.
-- A create, revoke, extend or approval answers after at most 3 seconds. If an agent has not answered by then, its row
-  reads `pending` with state `unknown` until the push ends; the change itself is already recorded and never fails.
+- `configured`: listed in `enroll.json`, approved by definition.
+- `pending`: never approved.
+- `approved`.
+- `changed`.
+- `unreachable`.
+- `no token`.
+- `invalid`.
+
+To add a bridge, do these steps:
+
+1. Deploy the host with the `reality-ingress` and `ingress-agent` roles.
+2. Give its agent its own token, and set the `INGRESS_*` values so that `/v1/info` answers.
+3. Make sure that its front serves `link_host` (see "Compromised bridge").
+4. Register the node in headscale with `tag:ingress` and a name that fits `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`. This name becomes the bridge name.
+5. Pin the name with `headscale nodes rename <id> <name>`. Use a name that the hostname of the machine does not produce. Otherwise, headscale follows a hostname change. `headscale nodes list` shows the id, addresses and names.
+6. Set the token as a secret with the name `AGENT_TOKEN_<NAME>` and redeploy node-control. Alternatively, use an `enroll.json` entry (see above), which needs no approval.
+7. Open `/enroll`. The bridge shows as `pending`, with these values:
+   - Its host.
+   - The node id.
+   - The tailnet address and names.
+   - A short prefix of its public key and short id.
+   - A short prefix of its machine key.
+   - A fingerprint.
+8. Compare the node id, address, name and machine key with `headscale nodes list`.
+
+   > **WARNING:** Make sure that the node itself is the node that you registered. An impostor that holds the name can publish the public values of the real bridge.
+
+9. Use a channel that you trust to get the host, public key and short id from `GET /v1/info` on the agent. Compare them with the values on the page.
+
+   The agent does not report a fingerprint. The fingerprint is the SHA-256 of node-control over the canonical JSON of `name`, `host`, `port`, `sni`, `public_key` and `short_id`.
+
+10. Press Approve.
+
+    The API is `POST /enroll/ingresses/<name>/approve` with `{"fingerprint": "<shown fingerprint>", "node_id": <shown node id>}`. The app refuses the request (409) if the fingerprint does not match the parameters that the bridge publishes at that moment. It also refuses (409) a node id other than the node that publishes them. `POST /enroll/ingresses/<name>/unapprove` removes the approval. Both POSTs need `Content-Type: application/json`.
+
+11. Monitor the sync state on the row. The approval pushes the credential set immediately.
+
+Phones get the new bridge when they refresh their subscription. For a profile imported by a one-time link, the person must refresh it.
+
+- `GET /enroll/ingresses` returns one row for each bridge. The row has these fields: `name`, `host`, `source`, `approval`, `active`, `approved`, `fingerprint`, `node_id`, `address`, `hostname`, `given_name`, `online`, `sync`, `detail`, `aliases`, `node`, `intermittent`. It also has the key, short id and machine key prefixes. For a discovered bridge that has an approval, it also returns what that approval pinned: `approved_fingerprint`, `approved_node_id` and `approved_machine_key_prefix`. The review page (`/enroll/approve`) compares these with the values that the bridge publishes now. Thus a `changed` bridge shows exactly what is different before you approve it again. The store keeps only these three values, so the page cannot compare anything else.
+- A `changed` bridge (its parameters are different, or another node id publishes them) is frozen. It is not in profiles and gets no sync. It keeps its old credential set until you approve it again or remove its approval. A revocation does not reach it during that time.
+- Names in headscale are NOT proof of who owns a node. The given name starts as the hostname that the machine reports. Headscale derives it again when that hostname changes, while the given name still follows it. The given name follows it when it equals the hostname, or the hostname plus `-<digits>`. Only a name set with `headscale nodes rename <id> <name>` to a value that the hostname does not produce stays fixed. Thus:
+  - **Set an explicit `agent_url` (the tailnet IP of the node, for example `http://100.64.0.12:9000`) on every configured bridge.** This removes the headscale lookup completely: the token goes only to that address, and no machine can change that address. (`AGENT_URL` does the same for the first entry.) The name lookup is only the fallback, and it is the weaker setting.
+  - A CONFIGURED bridge without `agent_url` has this limit: the lookup accepts a tagged node only when its given name does not follow its hostname. Headscale gives the rule: the given name equals what headscale derives from the hostname, optionally with `-<number>` after it. The lookup also refuses hostnames that sanitise to nothing. Run `headscale nodes rename <id> <name>` on the bridge node first (the log says so when the app refuses a lookup). When several nodes share the name, the lookup fails and the app sends nothing to any of them.
+  - The app identifies a DISCOVERED bridge by the node id AND the machine key of its approval, not by its name. The app finds the agent by that pair, and never sends its token or credentials to another node. The id alone is not sufficient, because ids can repeat after you rebuild or restore a headscale database. A node cannot choose its machine key. If the node list does not report machine keys, you cannot approve a bridge. Approvals made before the app pinned machine keys show `changed` ("approve again") until you approve them one more time. If that node goes away, the row becomes `invalid` ("the approved node is not present") and the app contacts nothing until you remove the approval. You can then review and approve a different node that now has the name.
+> **WARNING:** Do not set the variable `AGENT_TOKEN_<NAME>` before you expect the node. Before approval, the app already sends this token (as the bearer of `GET /v1/info`) to a tagged node whose given name matches it. A pin of the node id after approval decreases this exposure but cannot remove it. Anyone who can register a tagged node with that name (and, for a host with no rename, a matching hostname) receives that one token.
+
+- A create, revoke, extend or approval answers after at most 3 seconds. If an agent did not answer by then, its row reads `pending` with state `unknown` until the push ends. The app already recorded the change itself, and that change never fails.
 
 ### Compromised bridge
 
-Threat model, in short: a root attacker on one bridge host sees client source addresses and traffic per credential,
-its own Reality private key, and the credentials pushed to it, and controls its own xray and agent (a revocation
-does not bind it). Because TLS ends on the bridge's front, then plain HTTP goes over the tailnet to node-control, it
-also sees every one-time link token and subscription secret that passes through it. It cannot reach node-control's
-admin port or the other bridges' agents (restrict both in the tailnet ACL: the agent port only from node-control,
-`:8081` only from the bridge hosts), nor the tailnet through xray.
+Threat model, in short: a root attacker on one bridge host:
+
+- Sees client source addresses and traffic for each credential.
+- Sees its own Reality private key and the credentials that node-control pushes to it.
+- Controls its own xray and agent (a revocation does not bind it).
+- Sees every one-time link token and subscription secret that goes through it. The reason is that TLS ends on the front of the bridge, and plain HTTP then goes over the tailnet to node-control.
+
+The attacker cannot reach the admin port of node-control or the agents of the other bridges, and cannot reach the tailnet through xray. Restrict both in the tailnet ACL: allow the agent port only from node-control, and `:8081` only from the bridge hosts.
 
 What the design limits:
 
-- Credentials are per bridge (`derived`), so what is stolen from a bridge's agent or xray is valid on that
-  bridge only. This holds for a bridge that never served `link_host`. A bridge whose front serves `link_host`
-  terminates TLS for profiles and subscription secrets: it sees complete profiles, with every bridge's credentials
-  (the `base` ones included), and any host tagged `tag:ingress` may fetch `:8081/sub/` with a secret it harvested. If
-  such a bridge is compromised, rotate the subscription secrets and `ENROLL_SECRET_KEY` (this also changes every
-  derived credential) and re-enrol the devices that held `base` credentials. The `base` bridge holds the stored
-  credentials; keep it the one you trust most or migrate it to a derived entry in time.
-- A discovered bridge is never used before approval, and the approval pins the fingerprint and the node id. A
-  changed host is frozen out of profiles and sync until approved again.
-- Each bridge is asked with its own token and is pushed only its own credential set (see the condition above for a bridge that serves `link_host`).
+- Credentials are per bridge (`derived`), so credentials stolen from the agent or xray of a bridge are valid on that bridge only. This is true for a bridge that never served `link_host`.
+- A bridge whose front serves `link_host` terminates TLS for profiles and subscription secrets. It sees complete profiles, with the credentials of every bridge (also the `base` credentials). Any host with the tag `tag:ingress` can fetch `:8081/sub/` with a secret that it collected.
+- If such a bridge is compromised, do these steps:
+  1. Rotate the subscription secrets and `ENROLL_SECRET_KEY` (this also changes every derived credential).
+  2. Enrol again the devices that held `base` credentials.
+- The `base` bridge holds the stored credentials. Keep it the bridge that you trust most, or migrate it to a derived entry in time.
+- The app never uses a discovered bridge before approval, and the approval pins the fingerprint and the node id. A changed host stays frozen out of profiles and sync until you approve it again.
+- The app asks each bridge with its own token and pushes to it only its own credential set. See the condition above for a bridge that serves `link_host`.
 
-What it does not limit: a compromised bridge that serves `link_host` can hand phones a modified profile (clients do
-not verify a signature) and read the tokens and secrets that pass through. The canary only detects this.
+What it does not limit: a compromised bridge that serves `link_host` can give phones a modified profile (clients do not verify a signature). It can also read the tokens and secrets that go through it. The canary only detects this.
 
-Detection: `scripts/profile-canary.sh <tailnet-base-url> <link-host> [<canary-sub-secret> | -]` fetches a dedicated canary
-device's profile directly (`<tailnet-base-url>:8081/sub/<secret>`) and through `https://<link-host>/sub/<secret>`,
-compares SHA-256 of the two bodies and prints the two short hashes and `OK` or `MISMATCH`, never the body or the
-secret (exit 0 identical, 1 different, 2 usage or fetch error; each side must answer exactly 200 with a non-empty
-body, a redirect or an empty answer is an error). Create a device just for it and run the script from cron or CI on a
-machine on the tailnet; the secret is the canary device's `<digits>.<token>`. Give it as the environment variable
-`CANARY_SECRET` or as `-` (one line on stdin): an argument shows in `ps`, and `sh -x` would print it. A false
-`MISMATCH` is possible if the approved set of bridges changes between the two fetches; run it once more before
-acting. It needs `curl`
-and `sha256sum` or `shasum`; `sh scripts/test_profile_canary.sh` tests it against local fakes. It only catches an
-bridge that serves the canary a different profile than everybody else; one that targets other phones, that only
-watches, or that recognises the canary by its fixed `User-Agent` (`profile-canary`) or its source address and serves it
-the honest profile, passes.
+Detection: `scripts/profile-canary.sh <tailnet-base-url> <link-host> [<canary-sub-secret> | -]` fetches the profile of a dedicated canary device in two ways: directly (`<tailnet-base-url>:8081/sub/<secret>`) and through `https://<link-host>/sub/<secret>`. It compares the SHA-256 of the two bodies. It prints the two short hashes and `OK` or `MISMATCH`, never the body or the secret.
 
-Structural fixes (not built): serve `link_host` from a host that is not on the data path of any bridge, or pass TLS
-through the front to a certificate held by node-control's side, so no bridge terminates it.
+Exit codes: 0 identical, 1 different, 2 usage or fetch error. Each side must answer exactly 200 with a non-empty body. A redirect or an empty answer is an error.
 
-If a bridge is compromised, follow the site's incident runbook (`ingress-compromise`, kept in the private site
-repository that runs this deployment): cut the host off, rebuild it, rotate what it held and re-enrol affected devices.
+To use the canary, do these steps:
+
+1. Create a device only for the canary. The secret is the `<digits>.<token>` of the canary device.
+2. Run the script from cron or CI on a machine on the tailnet.
+
+> **WARNING:** Give the secret as the environment variable `CANARY_SECRET` or as `-` (one line on stdin). An argument shows in `ps`, and `sh -x` would print it.
+
+A false `MISMATCH` is possible if the approved set of bridges changes between the two fetches. Run the script one more time before you act. It needs `curl` and `sha256sum` or `shasum`. `sh scripts/test_profile_canary.sh` tests it against local fakes.
+
+The script only catches a bridge that serves the canary a different profile than all other clients. These bridges pass the check:
+
+- A bridge that targets other phones.
+- A bridge that only watches.
+- A bridge that recognises the canary by its fixed `User-Agent` (`profile-canary`) or its source address and serves it the honest profile.
+
+Structural fixes (not built), so that no bridge terminates TLS:
+
+- Serve `link_host` from a host that is not on the data path of any bridge.
+- Pass TLS through the front to a certificate on the side of node-control.
+
+If a bridge is compromised, follow the incident runbook of the site (`ingress-compromise`). The runbook is in the private site repository that runs this deployment. It tells you to cut the host off, rebuild it, rotate what it held and enrol the affected devices again.
 
 ### What the bridge host sees
 
-The one-time link (`/e/<token>`), its redirect and the subscription (`/sub/<secret>`) all pass through the bridge
-host's Caddy front. None of them carries the device name or owner: the redirect's deep link uses the neutral
-`profile_name` as the profile label.
+The one-time link (`/e/<token>`), its redirect and the subscription (`/sub/<secret>`) all go through the Caddy front of the bridge host. None of them carries the device name or owner: the deep link of the redirect uses the neutral `profile_name` as the profile label.
 
 ### Link previews
 
-Messengers fetch a pasted link to build a preview, which would use up a single-use link before the person taps it.
-`/e/<token>` and `/sub/<secret>` answer a plain empty `404` (and do not consume the token) when the User-Agent
-contains, case-insensitively, one of: `facebookexternalhit`, `twitterbot`, `telegrambot`, `whatsapp`, `slackbot`,
-`discordbot`, `skypeuripreview`, `linkedinbot`, `embedly`, `bot`, `crawler`, `spider`, `preview`, `linkexpanding`,
-`google-` (iMessage previews identify as `facebookexternalhit`/`Twitterbot`). Browsers (Safari, Chrome) and the
-client apps pass; an empty or missing User-Agent counts as a normal client. A preview bot with an unlisted
-User-Agent can still burn a link: create another one.
+Messengers fetch a pasted link to build a preview. This would use a single-use link before the person taps it. `/e/<token>` and `/sub/<secret>` can answer a plain empty `404`, which does not consume the token. They do this when the User-Agent contains one of these values, without regard to case:
+
+- `facebookexternalhit`
+- `twitterbot`
+- `telegrambot`
+- `whatsapp`
+- `slackbot`
+- `discordbot`
+- `skypeuripreview`
+- `linkedinbot`
+- `embedly`
+- `bot`
+- `crawler`
+- `spider`
+- `preview`
+- `linkexpanding`
+- `google-`
+
+iMessage previews identify as `facebookexternalhit`/`Twitterbot`. Browsers (Safari, Chrome) and the client apps pass. An empty User-Agent, or no User-Agent, counts as a normal client. A preview bot with a User-Agent that is not in the list can still burn a link: create another link.
 
 ### Phone profile
 
-The profile is a sing-box config: tun (`172.19.0.1/30`, `fdfe:dcba:9876::1/126`, auto/strict route), a selector
-`select` over the `auto`/`direct`/`exit` VLESS+Reality outbounds, DNS hijacked on the tun and resolved by
-`tls://1.1.1.1` through the selected outbound (`detour: select`, sing-box legacy DNS format, valid through 1.13).
-The bridge hostname (the VLESS outbounds' `server`) is the exception: a DNS rule `outbound: any` resolves it with the
-phone's local resolver (`local` server, no detour), since resolving it through `select` would need the outbound that
-needs the lookup. All other lookups go through the selected outbound. That this works, and that only the bridge
-hostname reaches the local resolver, is verified only in the phone test:
-in `exit` mode a site that is unreachable from the client's own network must open, and a DNS leak test must show only the exit's resolver.
+The profile is a sing-box config:
 
-Differences from the Python app this replaced: the agent is dialled through the embedded tailnet node, and the
-database is closed only after both listeners have drained on shutdown. A misconfigured enrolment (a missing variable,
-an unreadable or invalid `ENROLL_CONFIG`) stops startup with a message naming the problem, never a secret.
+- tun (`172.19.0.1/30`, `fdfe:dcba:9876::1/126`, auto/strict route).
+- A selector `select` over the `auto`/`direct`/`exit` VLESS+Reality outbounds.
+- DNS hijacked on the tun and resolved by `tls://1.1.1.1` through the selected outbound (`detour: select`, sing-box legacy DNS format, valid through 1.13).
+
+The bridge hostname (the `server` of the VLESS outbounds) is the exception. A DNS rule `outbound: any` resolves it with the local resolver of the phone (`local` server, no detour). A lookup through `select` would need the outbound that needs the lookup. All other lookups go through the selected outbound.
+
+Only the phone test verifies that this works and that only the bridge hostname reaches the local resolver. In `exit` mode, a site that the network of the client cannot reach must open. A DNS leak test must show only the resolver of the exit.
+
+Differences from the Python app that this replaced:
+
+- The app dials the agent through the embedded tailnet node.
+- The app closes the database only after both listeners drain on shutdown.
+- A misconfigured enrolment stops startup with a message that names the problem, never a secret. Examples are a variable that is not set, or an `ENROLL_CONFIG` that is not readable or not valid.
 
 ## Console shell
 

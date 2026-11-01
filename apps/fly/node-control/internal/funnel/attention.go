@@ -48,19 +48,19 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 			ActionLabel: "Open Funnel", ActionPath: "/funnel"}
 		switch {
 		case age > staleAfter:
-			it.Title = "The funnel ingress has not reported for " + ageText(age)
+			it.Title, it.AckKey = "The funnel ingress has not reported for "+ageText(age), it.ID+"|stale"
 			it.Detail = "Public routes cannot be verified until it reports again."
 			items = append(items, it)
 		case len(rep.Errors) > 0:
 			n := len(rep.Errors)
-			it.Title = fmt.Sprintf("The funnel ingress reports %d %s", n, plural(n, "error", "errors"))
+			it.Title, it.AckKey = fmt.Sprintf("The funnel ingress reports %d %s", n, plural(n, "error", "errors")), it.ID+"|errors"
 			it.Detail = "Public routes may not be working. The report lists them."
 			items = append(items, it)
 		}
 	} else if len(nss) == 0 {
 		line.State, line.Summary = "off", "No namespaces yet"
 	} else {
-		items = append(items, core.AttentionItem{ID: "funnel-ingress", Source: "funnel", Level: core.LevelWaiting,
+		items = append(items, core.AttentionItem{ID: "funnel-ingress", Source: "funnel", Level: core.LevelWaiting, AckKey: "funnel-ingress|none",
 			Title:       "The funnel ingress has not reported yet",
 			Detail:      "Public routes cannot be verified until it reports.",
 			ActionLabel: "Open Funnel", ActionPath: "/funnel"})

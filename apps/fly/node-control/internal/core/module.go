@@ -96,9 +96,12 @@ type AttentionItem struct {
 	// request naming an older meaning is refused. Acknowledged is set when the item is acknowledged.
 	AckToken     string           `json:"ack_token,omitempty"`
 	Acknowledged *Acknowledgement `json:"acknowledged,omitempty"`
+	module       string           // the module that reported it, set by the core with AckToken
 }
 
-// SystemLine is the one-line health of a module. State is "ok", "waiting", "critical", "unknown" or "off".
+// SystemLine is the one-line health of a module. State is "ok", "waiting", "critical", "unknown" or "off". A line that
+// is waiting or critical must be so because of its module's items: once those are acknowledged the core lowers it. A
+// line that reads "unknown" says the module could not fully look, so an item missing from its answer has not cleared.
 type SystemLine struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`

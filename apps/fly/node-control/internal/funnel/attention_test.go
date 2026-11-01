@@ -68,7 +68,7 @@ func TestFunnelAttention(t *testing.T) {
 		if err != nil || len(items) != 1 {
 			t.Fatalf("%+v %v", items, err)
 		}
-		if it := items[0]; it.Level != core.LevelWaiting || it.Source != "funnel" || it.ActionPath != "/funnel" || it.ActionLabel == "" {
+		if it := items[0]; it.Level != core.LevelWaiting || it.Source != "funnel" || it.ActionPath != "/funnel" || it.ActionLabel == "" || it.AckKey != "funnel-ingress|stale" {
 			t.Errorf("%+v", it)
 		}
 		if lines[0].State != "waiting" {
@@ -92,7 +92,7 @@ func TestFunnelAttention(t *testing.T) {
 			t.Fatalf("%+v %v", items, err)
 		}
 		if it := items[0]; it.Level != core.LevelWaiting || it.ActionPath != "/funnel" || !strings.Contains(it.Title, "2 errors") ||
-			strings.Contains(it.Title+it.Detail, "dial refused") {
+			strings.Contains(it.Title+it.Detail, "dial refused") || it.AckKey != "funnel-ingress|errors" {
 			t.Errorf("%+v", it)
 		}
 	})

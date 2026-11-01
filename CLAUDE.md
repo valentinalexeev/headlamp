@@ -113,20 +113,20 @@ private repo lays its real files over them at deploy time (section 2.5).
 
 ## 2. Bootstrap your own infra
 
-You will end up with: a private repo `<your>-infra` containing your config and encrypted state,
-with this repo at `vendor/headlamp`. Do the steps in order and stop to confirm before anything
+At the end you have a private repo `<your>-infra`. It contains your config and encrypted state,
+with this repo at `vendor/headlamp`. Do the steps in order. Stop to confirm before anything
 that costs money or touches a real account.
 
 ### 2.0 Prerequisites
 
-- Accounts: Fly.io (required, for headscale), and at least one VM provider if you want VM exit
-  nodes (Yandex Cloud / Oracle Cloud / AWS). A domain you control is recommended
+- Accounts: Fly.io (required, for headscale). If you want VM exit nodes, get at least one VM provider
+  (Yandex Cloud, Oracle Cloud or AWS). A domain that you control is recommended
   (MagicDNS base domain, stable node names).
 - Tools: `git`, `sops`, `age`, `terraform` (>= 1.5), `ansible` (+ collections, below), `flyctl`,
-  `jq`, `python3`, `shellcheck`; plus the provider CLIs you use (`yc`, `oci`, `aws`). Optional:
-  1Password CLI `op` (otherwise supply `SOPS_AGE_KEY` from a file/keychain, see 2.3).
-- Dedicated, narrowly scoped cloud credentials per provider (a separate CLI profile such as
-  `~/.oci/config [headlamp]`), never your everyday identity.
+  `jq`, `python3`, `shellcheck`. Add the provider CLIs that you use (`yc`, `oci`, `aws`). Optional:
+  1Password CLI `op`. Without it, supply `SOPS_AGE_KEY` from a file or keychain (see 2.3).
+- Dedicated cloud credentials with narrow scope for each provider (a separate CLI profile such as
+  `~/.oci/config [headlamp]`). Never use your everyday identity.
 
 ### 2.1 Create the private repo and vendor headlamp
 
@@ -140,14 +140,14 @@ git commit -m "chore: vendor headlamp"
 git remote add origin git@github.com:<you>/my-infra.git && git push -u origin main
 ```
 
-Rules for the submodule: never edit files under `vendor/headlamp` as part of site work — a
-change to headlamp is made in a clone of the public repo, pushed there, then pulled in by bumping
-the pointer. Anyone cloning your private repo uses `git clone --recurse-submodules`
+Rules for the submodule: never edit files under `vendor/headlamp` as part of site work.
+Make a change to headlamp in a clone of the public repo. Push it there. Then pull it in by bumping
+the pointer. Anyone who clones your private repo uses `git clone --recurse-submodules`
 (or `git submodule update --init`).
 
 ### 2.2 Private repo layout
 
-Start from `vendor/headlamp/examples/private-repo/` (copy it, then edit); it matches this layout.
+Start from `vendor/headlamp/examples/private-repo/`. Copy it, then edit it. It matches this layout.
 
 ```
 my-infra/
@@ -169,7 +169,7 @@ age-keygen -o ~/age-main.txt            # keep this file OUT of the repo; store 
 age-keygen -o /safe/offline/age-backup.txt   # second key, kept offline: losing the only key loses all state+secrets
 ```
 
-`.sops.yaml` — every rule must list the **same** recipients (`tf-run.sh` encrypts to one set):
+`.sops.yaml`: every rule must list the **same** recipients (`tf-run.sh` encrypts to one set):
 
 ```yaml
 creation_rules:
@@ -177,9 +177,9 @@ creation_rules:
     age: age1<main-public-key>,age1<backup-public-key>
 ```
 
-Make the private key available as `SOPS_AGE_KEY` (env var holding the key text). With 1Password:
-`export SOPS_AGE_KEY := $(shell op read "op://<vault>/<item>/<field>")` in the Makefile (fetched
-once per `make`). Without: `export SOPS_AGE_KEY := $(shell cat ~/age-main.txt)`.
+Make the private key available as `SOPS_AGE_KEY` (env var that holds the key text). With 1Password, put
+`export SOPS_AGE_KEY := $(shell op read "op://<vault>/<item>/<field>")` in the Makefile (make fetches it
+once for each `make` run). Without 1Password, put `export SOPS_AGE_KEY := $(shell cat ~/age-main.txt)` in the Makefile.
 
 Minimal private `Makefile`:
 
@@ -195,32 +195,40 @@ tf-save:  hooks ; $(H)/scripts/tf-run.sh save
 ```
 
 Run `tf-run.sh` from the private repo root (it uses the git toplevel of your current directory).
-To create an encrypted secrets file: write the plaintext to a temp path **outside the repo**,
-`sops -e --filename-override secrets/<name>.sops.yaml <tmp> > secrets/<name>.sops.yaml`
-(`--filename-override` makes the creation rules match the destination name, not the temp
-path), then delete the temp. The hook refuses plaintext secret files and unencrypted `*.enc.*`/`*.sops.*` files.
+
+To create an encrypted secrets file:
+
+1. Write the plaintext to a temp path **outside the repo**.
+2. Run `sops -e --filename-override secrets/<name>.sops.yaml <tmp> > secrets/<name>.sops.yaml`.
+   `--filename-override` makes the creation rules match the destination name, not the temp path.
+3. Delete the temp file.
+
+The hook refuses plaintext secret files and unencrypted `*.enc.*` and `*.sops.*` files.
 
 ### 2.4 headscale control server (Fly.io)
 
 1. Copy `vendor/headlamp/apps/fly/headscale/{fly.toml,headscale.yaml,acl.json}` into
-   `fly/headscale/` and edit: Fly app name, `server_url`, `base_domain` (must differ from
-   `server_url`'s domain), and the ACL (`tagOwners`, `autoApprovers.exitNode`) for your users/tags.
-2. Create the app and its persistent volume, then deploy with the overlay procedure (2.5):
-   `flyctl apps create <app>` · `flyctl volumes create headscale_data -a <app> -r <region> -n 1`.
+   `fly/headscale/`. Edit the Fly app name, `server_url` and `base_domain`. `base_domain` must differ from
+   the domain of `server_url`. Edit the ACL (`tagOwners`, `autoApprovers.exitNode`) for your users and tags.
+2. Create the app and its persistent volume:
+   `flyctl apps create <app>` and `flyctl volumes create headscale_data -a <app> -r <region> -n 1`.
+   Then deploy with the overlay procedure (2.5).
 3. Create a user and pre-auth keys on the server
    (`flyctl ssh console -a <app> -C "headscale users create <user>"`, then
-   `headscale preauthkeys create …` — flags differ between headscale versions, check `--help`).
+   `headscale preauthkeys create …`). The flags differ between headscale versions, so check `--help`.
    Use reusable, non-ephemeral keys for exit nodes. Keep keys only in sops-encrypted files or
    `flyctl secrets`.
 
 ### 2.5 Deploying Fly apps from the submodule (overlay procedure)
 
 The Fly Dockerfiles `COPY` some site files from the app directory (`headscale.yaml`, `acl.json`,
-`direct-hosts.txt`, `app/nodes.json`, `fly.toml`), so the build context needs your files while
-the submodule must stay pristine. `examples/private-repo/fly/deploy.sh` does exactly that: it
-refuses to run if `vendor/headlamp` is dirty, copies `fly/<app>/` over
-`vendor/headlamp/apps/fly/<app>/`, runs `flyctl deploy` there, and restores the submodule on exit
-(even on failure).
+`direct-hosts.txt`, `app/nodes.json`, `fly.toml`). The build context needs your files, and the
+submodule must stay pristine. `examples/private-repo/fly/deploy.sh` does exactly that:
+
+- It refuses to run if `vendor/headlamp` is dirty.
+- It copies `fly/<app>/` over `vendor/headlamp/apps/fly/<app>/`.
+- It runs `flyctl deploy` there.
+- It restores the submodule on exit (even on failure).
 
 ```bash
 fly/deploy.sh headscale
@@ -228,15 +236,15 @@ fly/deploy.sh exit-ams --build-arg TSVERSION=<x.y.z>
 fly/deploy.sh headscale --build-arg HEADSCALE_VERSION=<tag>   # default is pinned in the Dockerfile
 ```
 
-The headscale image tag is pinned on purpose: `jauderho/headscale:latest` stopped shipping a shell in
-v0.29.5, which breaks the Dockerfile's `apk add` step. Check the new tag has `/bin/sh` before bumping.
+The headscale image tag is pinned on purpose. `jauderho/headscale:latest` stopped shipping a shell in
+v0.29.5, and this breaks the `apk add` step of the Dockerfile. Before you bump the tag, check that the new tag has `/bin/sh`.
 
-Deploying is a real change: confirm with the operator first. `git -C vendor/headlamp status` must
-be clean afterwards.
+Deploying is a real change, so confirm with the operator first. Afterwards, `git -C vendor/headlamp status` must
+be clean.
 
 ### 2.6 VM exit nodes (Terraform) and state
 
-In `terraform/` of the private repo write a root stack that uses the modules by path:
+In `terraform/` of the private repo, write a root stack that uses the modules by path:
 
 ```hcl
 module "node1" {
@@ -252,20 +260,27 @@ module "node1" {
 }
 ```
 
-Plus `providers.tf` (dedicated profiles, no inline credentials), `versions.tf`, `variables.tf`,
+Add also `providers.tf` (dedicated profiles, no inline credentials), `versions.tf`, `variables.tf`,
 and secrets in `terraform/secrets.auto.tfvars.enc.json` (sops-encrypted JSON of tfvars).
-Module inputs are documented in each module's `variables.tf`; the Yandex module additionally
-takes `folder_id`, `zone`, `subnet_id`, `image_id`, sizing, `user_data`, `extra_metadata`.
+Each module documents its inputs in `variables.tf`. The Yandex module also
+takes `folder_id`, `zone`, `subnet_id`, `image_id`, sizing, `user_data` and `extra_metadata`.
 
-**State is a sops-encrypted file in git** (`terraform/terraform.tfstate.enc.json`) handled by
-`tf-run.sh`; there is no remote backend. Always use `make tf-plan` / `make tf-apply`, never bare
-`terraform` in that directory. What the wrapper guarantees and how to recover: see
-`README.md` → "Terraform state workflow". In short: apply refuses from a dirty/stale checkout;
-state is verified, committed and pushed after every run that changed it (even a failed one);
-plaintext state is never deleted on error, and the next run refuses until `make tf-save`.
-First run with no state yet works: apply creates and commits it. Keep one operator machine and
-a private remote. Merge conflicts in the encrypted file cannot be resolved by hand — take one
-side and re-plan.
+**State is a sops-encrypted file in git** (`terraform/terraform.tfstate.enc.json`). `tf-run.sh` handles it.
+There is no remote backend. Always use `make tf-plan` and `make tf-apply`. Never use bare
+`terraform` in that directory.
+
+For what the wrapper guarantees and how to recover, see
+`README.md` → "Terraform state workflow". In short:
+
+- Apply refuses to run from a dirty or stale checkout.
+- The wrapper verifies, commits and pushes the state after every run that changed it (even a failed run).
+- The wrapper never deletes plaintext state on error. The next run refuses until you run `make tf-save`.
+
+The first run with no state works: apply creates and commits the state.
+
+Keep one operator machine and
+a private remote. You cannot resolve merge conflicts in the encrypted file by hand. Take one
+side and plan again.
 
 ### 2.7 Ansible (tailscale join + split-tunnel routes)
 
@@ -279,65 +294,80 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
 ```
 
 - Install collections: `ansible-galaxy collection install -r vendor/headlamp/ansible/requirements.yml`.
-- `inventory/hosts.yml`: group `exit_nodes_vm` (and `route_provisioned` for nodes that get route
-  lists) with `ansible_host` (stable MagicDNS name) and `ansible_user`.
-- `site.yml`: apply role `tailscale` to `exit_nodes_vm` and `route-provisioner` to
-  `route_provisioned` (copy the structure of `vendor/headlamp/ansible/site.yml`, minus the
-  node-control rendering play unless you use node-control).
+- `inventory/hosts.yml`: use the group `exit_nodes_vm`. For nodes that get route
+  lists, use also the group `route_provisioned`. Give each host `ansible_host` (stable MagicDNS name) and `ansible_user`.
+- `site.yml`: apply role `tailscale` to `exit_nodes_vm`. Apply `route-provisioner` to
+  `route_provisioned`. Copy the structure of `vendor/headlamp/ansible/site.yml`. Remove the
+  node-control rendering play, unless you use node-control.
 - `group_vars/all/main.yml`: `headscale_login_server`, `tailscale_version`.
   `group_vars/all/vault.sops.yaml` (encrypted): per-host auth keys.
 - `host_vars/<host>.yml`: `tailscale_hostname`, `tailscale_authkey`, optional
-  `tailscale_advertise_exit_node`, and the route lists `route_asns`, `route_hosts`,
-  `route_hosts_direct` (see `ansible/roles/route-provisioner/defaults/main.yml` for what each does
-  and when to prefer `route_hosts_direct` — large shared ASNs like AWS/Akamai must NOT go in
-  `route_asns`). Hosts in `route_hosts` / `route_hosts_direct` are published only if this node can open a TCP
-  connection to them (`route_verify_reachability`, default on; ports/timeout/attempts are `route_probe_*`), so a
-  service that filters the node's address range is not advertised. Test: `bash scripts/test/route-provisioner/run.sh`.
+  `tailscale_advertise_exit_node`, and the route lists `route_asns`, `route_hosts` and
+  `route_hosts_direct`. See `ansible/roles/route-provisioner/defaults/main.yml` for what each does
+  and when to prefer `route_hosts_direct`. Do NOT put large shared ASNs like AWS or Akamai in
+  `route_asns`.
+- The role publishes hosts in `route_hosts` and `route_hosts_direct` only if this node can open a TCP
+  connection to them. `route_verify_reachability` controls this (default on). The ports, timeout and attempts are `route_probe_*`.
+  A service that filters the address range of the node is therefore not advertised. Test: `bash scripts/test/route-provisioner/run.sh`.
 - Run from `ansible/` with `SOPS_AGE_KEY` set:
-  `ansible-playbook site.yml --extra-vars tailscale_version=<x.y.z>` (add `--check --diff` first).
+  `ansible-playbook site.yml --extra-vars tailscale_version=<x.y.z>`. Add `--check --diff` first.
 
 ### 2.8 Fly exit node and node-control (optional)
 
-- `apps/fly/exit-ams`: copy `fly.toml`, `direct-hosts.txt` to `fly/exit-ams/`; set your app name;
-  `flyctl volumes create tailscale_state …`; `flyctl secrets set TAILSCALE_AUTH_KEY=… HEADSCALE_LOGIN_SERVER=…`;
-  deploy via 2.5. Its `direct-hosts.txt` is a list of hostnames resolved to `/32` routes
-  advertised through that node — yours, not the example.
-- `apps/fly/node-control`: a Go service (one binary, embedded tailscale) with a start/stop UI and API for your exit nodes,
-  reachable only over the tailnet by design (no public service). Exit nodes are discovered from headscale: a node with
-  `tag:exit` is listed, and a `tag:cloud-<provider>` tag (`yandex`, `oci`, `selectel`, `fly`) plus its reported name
-  selects the VM or app to control. The optional JSON `app/nodes.json` (see `testdata/nodes.example.json`; keep the real file in
-  your private repo and lay it over the app dir with the overlay procedure) only adds overrides: explicit connection
-  blocks, labels, aliases, `hidden`. Provider credentials are Fly secrets (`YANDEX_SA_KEY_JSON`, `FLY_API_TOKEN`, the
-  OCI keys, `SELECTEL_*`, `HEADSCALE_API_KEY`). Tailnet identity: keep it on the `tailscale_state` volume (see its
+- `apps/fly/exit-ams`: copy `fly.toml` and `direct-hosts.txt` to `fly/exit-ams/`. Set your app name.
+  Run `flyctl volumes create tailscale_state …`. Run `flyctl secrets set TAILSCALE_AUTH_KEY=… HEADSCALE_LOGIN_SERVER=…`.
+  Deploy with 2.5. Its `direct-hosts.txt` is a list of hostnames. The node resolves them to `/32` routes
+  and advertises these routes. Use your own list, not the example.
+- `apps/fly/node-control` is a Go service (one binary, embedded tailscale). It has a start/stop UI and API for your exit nodes.
+  It is reachable only over the tailnet by design (no public service). It discovers exit nodes from headscale.
+  It lists a node with `tag:exit`. A `tag:cloud-<provider>` tag (`yandex`, `oci`, `selectel`, `fly`) plus the reported name of the node
+  selects the VM or app to control.
+
+  The optional JSON `app/nodes.json` (see `testdata/nodes.example.json`) only adds overrides: explicit connection
+  blocks, labels, aliases and `hidden`. Keep the real file in
+  your private repo and lay it over the app dir with the overlay procedure.
+
+  Provider credentials are Fly secrets (`YANDEX_SA_KEY_JSON`, `FLY_API_TOKEN`, the
+  OCI keys, `SELECTEL_*`, `HEADSCALE_API_KEY`). Keep the tailnet identity on the `tailscale_state` volume (see its
   `fly.toml`), or in a shared Redis with `REDIS_URL` and an encryption key. Details: `apps/fly/node-control/README.md`.
 - Tasks module (optional, needs that Redis): scheduled browser-script checks that run on a node, with retries, alerts,
-  metrics and a heartbeat. Set `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `TASKS_RUNNER_TOKEN`, `TASKS_ADMIN_USERS` and
-  `ENROLL_ALLOWED_HOSTS` (required by the module), deploy the `task-runner` role (`ansible/roles/task-runner`) to the nodes
-  that should run scripts, give those nodes the runner tag (`TASKS_RUNNER_TAG`, default `tag:task-runner`; untagged nodes
-  are never used, and a `node` target means the headscale given name) as an admin (`scripts/headscale-tag-node.sh`),
-  list only the admin/service identity as owner of that tag in the policy's `tagOwners` (it decides who may have the
-  tag at registration, and on pre-0.28 headscale a node can also request one later, so `tagOwners` is the trust
-  boundary; on 0.28+ tagging a user-owned node drops its user ownership), allow node-control to reach the runner port of
-  that tag in the tailnet ACL, and manage config, scripts and secrets from your private repo with `scripts/tasks.sh`
-  (example files: `examples/private-repo/fly/node-control/tasks/`). Variables, API, metrics and the trust model:
+  metrics and a heartbeat. To set it up, do these steps:
+  1. Set `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `TASKS_RUNNER_TOKEN`, `TASKS_ADMIN_USERS` and
+     `ENROLL_ALLOWED_HOSTS`. The module requires them.
+  2. Deploy the `task-runner` role (`ansible/roles/task-runner`) to the nodes that must run scripts.
+  3. Give those nodes the runner tag (`TASKS_RUNNER_TAG`, default `tag:task-runner`) as an admin (`scripts/headscale-tag-node.sh`).
+     node-control never uses untagged nodes. A `node` target means the headscale given name.
+  4. In the `tagOwners` of the policy, list only the admin or service identity as owner of that tag.
+  5. In the tailnet ACL, allow node-control to reach the runner port of that tag.
+  6. Manage config, scripts and secrets from your private repo with `scripts/tasks.sh`
+     (example files: `examples/private-repo/fly/node-control/tasks/`).
+
+  **WARNING:** `tagOwners` is the trust boundary. It decides who can have the tag at registration. On headscale before 0.28,
+  a node can also request the tag later. On 0.28+, tagging a user-owned node drops its user ownership.
+
+  For variables, API, metrics and the trust model, see
   `apps/fly/node-control/README.md`, section "Tasks module".
 
 ### 2.9 tailguard (optional, operator-run)
 
-For a Docker host that should offer a WireGuard server routed through an exit node: copy
-`vendor/headlamp/apps/tailguard/` to the host, create `.env` from `.env.example` and
-`config/wg0.conf` from the example, `docker compose up -d`. It is documented end to end in
-`apps/tailguard/README.md` (key generation, router client config, verification script, the
+Use this for a Docker host that must offer a WireGuard server routed through an exit node. Do these steps:
+
+1. Copy `vendor/headlamp/apps/tailguard/` to the host.
+2. Create `.env` from `.env.example`.
+3. Create `config/wg0.conf` from the example.
+4. Run `docker compose up -d`.
+
+`apps/tailguard/README.md` documents it end to end (key generation, router client config, verification script, the
 watchdog and exit-node-tracker sidecars). Its state (`.env`, `config/wg0.conf`, `state/`) lives
-on the host only and is gitignored — keep it out of both repos.
+on the host only and is gitignored. Keep it out of both repos.
 
 ### 2.10 Verify
 
-- `make tf-plan` shows no unexpected changes; `make test-tf-run` passes.
-- `tailscale status` (on a client of your tailnet) lists the exit nodes; pick one and confirm
-  your egress IP changes.
-- `git -C vendor/headlamp status` is clean; `git status` in the private repo is clean after a
-  successful apply (the state commit was made for you).
+- `make tf-plan` shows no unexpected changes, and `make test-tf-run` passes.
+- `tailscale status` (on a client of your tailnet) lists the exit nodes. Pick one and confirm
+  that your egress IP changes.
+- `git -C vendor/headlamp status` is clean. `git status` in the private repo is clean after a
+  successful apply, because the wrapper made the state commit for you.
 
 ### 2.11 Updating headlamp later
 

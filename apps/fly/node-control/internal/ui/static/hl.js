@@ -87,9 +87,9 @@
     return v.toFixed(1) + ' ' + units[i];
   }
 
-  // plain: a label from outside, safe to show. Control, bidi-override, zero-width and line
+  // plain: a label from outside, safe to show. Control, soft-hyphen, bidi-override, zero-width and line
   // separator characters are dropped, then the text is cut to n characters.
-  var UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+  var UNSAFE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
   function plain(s, n) {
     if (s === undefined || s === null) { return ''; }
     var chars = Array.from(String(s).replace(UNSAFE, ''));
@@ -200,10 +200,50 @@
     } catch (e) { /* no history: the page still works */ }
   }
 
+  function arr(v) { return Array.isArray(v) ? v : []; }
+  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+
+  // button: a plain button with an optional icon and click handler.
+  function button(text, iconName, cls, onClick) {
+    var b = el('button', 'btn' + (cls ? ' ' + cls : ''));
+    b.setAttribute('type', 'button');
+    var ic = iconName ? icon(iconName) : null;
+    if (ic) { b.appendChild(ic); }
+    b.appendChild(el('span', null, text));
+    if (onClick) { b.addEventListener('click', onClick); }
+    return b;
+  }
+
+  // focusKey: the data-fk of the focused control when it sits inside box, else null. A page redraws box from
+  // scratch and calls refocus with this key afterwards, so keyboard focus survives the redraw.
+  function focusKey(box) {
+    var ae = typeof document !== 'undefined' ? document.activeElement : null;
+    for (var n = ae; n; n = n.parentNode) {
+      if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
+    }
+    return null;
+  }
+
+  // refocus puts focus on the control under box that carries key. A control that is disabled now (a button that
+  // was just pressed) cannot take focus; fallback, when given, names the one that gets it instead.
+  function refocus(box, key, fallback) {
+    if (!key) { return; }
+    var stack = [box];
+    while (stack.length) {
+      var n = stack.pop();
+      if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
+      (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
+    }
+    if (fallback) { refocus(box, fallback); }
+  }
+
   // confirmPanel builds an inline confirmation that names the object and the consequence. It
   // replaces confirm() and prompt(). opts: title, object, consequence, confirmLabel,
-  // cancelLabel, icon, into (optional parent), onConfirm, onCancel. Focus starts on Cancel.
+  // cancelLabel, icon, into (optional parent), onConfirm, onCancel. Focus starts on Cancel and, when the panel is
+  // cancelled or dismissed with Esc, goes back to the control that was focused when it opened (if that is still on the page).
   function confirmPanel(opts) {
+    var opener = typeof document !== 'undefined' ? document.activeElement : null;
     var panel = el('div', 'note crit confirm');
     panel.setAttribute('role', 'group');
     panel.setAttribute('aria-label', plain(opts.title || 'Confirm', 120));
@@ -231,10 +271,15 @@
       panel.remove();
       if (typeof cb === 'function') { cb(); }
     }
-    cancel.addEventListener('click', function () { close(opts.onCancel); });
+    function dismiss() {
+      // First, so a caller that redraws and places focus itself in onCancel has the last word.
+      if (opener && opener.isConnected && typeof opener.focus === 'function') { opener.focus(); }
+      close(opts.onCancel);
+    }
+    cancel.addEventListener('click', dismiss);
     ok.addEventListener('click', function () { close(opts.onConfirm); });
     panel.addEventListener('keydown', function (ev) {
-      if (ev && ev.key === 'Escape') { close(opts.onCancel); }
+      if (ev && ev.key === 'Escape') { dismiss(); }
     });
 
     if (opts.into) { opts.into.appendChild(panel); }
@@ -249,5 +294,6 @@
   window.hl = {
     el: el, icon: icon, relTime: relTime, fmtBytes: fmtBytes, plain: plain, api: api, poll: poll,
     status: status, queryParam: queryParam, setQueryParam: setQueryParam, confirmPanel: confirmPanel,
+    arr: arr, obj: obj, clear: clear, button: button, focusKey: focusKey, refocus: refocus,
   };
 })();

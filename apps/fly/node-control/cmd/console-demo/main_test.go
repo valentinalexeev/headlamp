@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,8 +78,9 @@ func TestDemoServesEveryScenario(t *testing.T) {
 					t.Fatalf("minimal: want one item, got %v", labels)
 				}
 			case "partial":
-				if len(labels) != 4 {
-					t.Fatalf("partial: want Overview, Nodes, Devices and Activity, got %v", labels)
+				want := []string{"Overview", "Nodes", "Devices", "Activity"}
+				if !slices.Equal(labels, want) {
+					t.Fatalf("partial: want %v, got %v", want, labels)
 				}
 			default:
 				if len(labels) < 6 {
@@ -85,6 +88,37 @@ func TestDemoServesEveryScenario(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The clear scenario promises a front page with nothing to act on. startDemo returns only after the seeding has
+// finished, so this reads the settled state: a read taken mid-seeding shows false alerts (an unapproved bridge,
+// a funnel with no report yet).
+func TestClearScenarioIsClear(t *testing.T) {
+	addr := startDemo(t, "clear")
+	code, body := get(t, addr, "/_attention.json")
+	if code != 200 {
+		t.Fatalf("/_attention.json: %d %s", code, body)
+	}
+	var att struct {
+		Items []struct{ ID, Title string } `json:"items"`
+		Lines []struct {
+			Name, State string
+		} `json:"systems"`
+	}
+	if err := json.Unmarshal(body, &att); err != nil {
+		t.Fatal(err)
+	}
+	if len(att.Items) != 0 {
+		t.Errorf("clear should have nothing needing attention, got %+v", att.Items)
+	}
+	if len(att.Lines) == 0 {
+		t.Error("no system lines reported")
+	}
+	for _, l := range att.Lines {
+		if l.State != "ok" {
+			t.Errorf("system %s is %q, want ok", l.Name, l.State)
+		}
 	}
 }
 
@@ -233,5 +267,51 @@ func TestFunnelSeededInBothFullScenarios(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The attention scenario shows the bridge settings and an acknowledged item; clear has neither problem.
+func TestAttentionScenarioShowsIntermittentBridgeAndAcknowledgedItem(t *testing.T) {
+	addr := startDemo(t, "attention")
+	_, body := get(t, addr, "/_attention.json")
+	var att struct {
+		Items []struct {
+			ID           string `json:"id"`
+			Level        string `json:"level"`
+			AckToken     string `json:"ack_token"`
+			Acknowledged *struct {
+				By string `json:"by"`
+			} `json:"acknowledged"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &att); err != nil {
+		t.Fatal(err)
+	}
+	levels := map[string]string{}
+	acked := map[string]string{}
+	for _, it := range att.Items {
+		levels[it.ID] = it.Level
+		if it.Acknowledged != nil {
+			acked[it.ID] = it.Acknowledged.By
+		}
+	}
+	if levels["bridge-sync-bridge-4"] != "info" {
+		t.Errorf("the intermittent bridge is a notice: %v", levels)
+	}
+	if levels["bridge-sync-bridge-2"] != "critical" {
+		t.Errorf("the other unreachable bridge is a risk: %v", levels)
+	}
+	if acked["devices-expiring"] != "alice" || len(acked) != 1 {
+		t.Errorf("one acknowledged item: %v", acked)
+	}
+
+	_, body = get(t, addr, "/_activity.json")
+	if !strings.Contains(string(body), `"action":"attention.acknowledge"`) || !strings.Contains(string(body), "within 7 days") {
+		t.Errorf("the acknowledgement is in Activity: %s", body)
+	}
+
+	_, body = get(t, addr, "/enroll/ingresses")
+	if !strings.Contains(string(body), `"node":"vm-4"`) || !strings.Contains(string(body), `"intermittent":true`) {
+		t.Errorf("%s", body)
 	}
 }

@@ -3,7 +3,8 @@
 // markup is never built from strings.
 //
 // Secrets: the one-time link and the subscription URL exist only in the enrolment panel, right after they are
-// made. They are never put in a URL, an anchor, storage or a table row, and a rebuilt table cannot show them.
+// made. They are never put in a URL, an anchor, storage or a table row, and a rebuilt table cannot show them. The
+// panel drops them when it closes and when it moves on to the next device.
 (function () {
   'use strict';
   var hl = window.hl;
@@ -26,9 +27,6 @@
   };
   var ICON = { link: 'link', extend: 'extend', revoke: 'ban', delete: 'trash' };
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
-  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function pad(n) { return n < 10 ? '0' + n : String(n); }
   function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 
@@ -129,40 +127,9 @@
     return Math.floor(t.getTime() / 1000);
   }
 
-  function button(label, iconName, cls, onClick) {
-    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
-    b.setAttribute('type', 'button');
-    var ic = iconName ? hl.icon(iconName) : null;
-    if (ic) { b.appendChild(ic); }
-    b.appendChild(hl.el('span', null, label));
-    if (onClick) { b.addEventListener('click', onClick); }
-    return b;
-  }
-  function firstButton(n) {
-    if (n.tag === 'button') { return n; }
-    var kids = n.children || [];
-    for (var i = 0; i < kids.length; i++) { var f = firstButton(kids[i]); if (f) { return f; } }
-    return null;
-  }
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
 
   // focusKey names the focused control inside box by its data-fk, so a rebuild can give focus back.
-  function focusKey(box) {
-    var ae = typeof document !== 'undefined' ? document.activeElement : null;
-    for (var n = ae; n; n = n.parentNode) {
-      if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
-    }
-    return null;
-  }
-  function refocus(box, key) {
-    if (!key) { return; }
-    var stack = [box];
-    while (stack.length) {
-      var n = stack.pop();
-      if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
-      (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
-    }
-  }
 
   // qrOf draws the link as an SVG inside a white box with a quiet zone, in the browser: the link never goes to
   // another server. Without the library, or for a link too long to encode, the code is just absent.
@@ -255,10 +222,10 @@
 
     function renderSync() {
       var box = els.syncnote;
-      clear(box);
+      hl.clear(box);
       var s = st.sync;
       if (!s || !s.pending) { box.hidden = true; return; }
-      var behind = arr(st.ingresses).filter(function (r) { return r && r.sync && r.sync.pending && typeof r.name === 'string'; });
+      var behind = hl.arr(st.ingresses).filter(function (r) { return r && r.sync && r.sync.pending && typeof r.name === 'string'; });
       var list = behind.map(function (r) { return hl.plain(r.name, 63); });
       var title, where;
       if (list.length === 0) {
@@ -276,7 +243,7 @@
         var bits = [reason, since ? 'since ' + since : ''].filter(Boolean).join(', ');
         if (bits) { why.push(list.length > 1 ? hl.plain(r.name, 63) + ': ' + bits : bits); }
       });
-      var p = hl.el('p', 't2 small', 'Revoking or extending a device here will not take effect on ' + where + ' until it catches up.' + (why.length ? ' ' + why.join('; ') + '.' : ''));
+      var p = hl.el('p', 't2 small', 'Revoking or extending a device here will not take effect on ' + where + ' until it catches up.' + (why.length ? ' ' + why.join('; ') + '.' : '') + ' Retrying every 5 minutes.');
       box.appendChild(p);
       var links = hl.el('p', 'small');
       (list.length ? list : ['']).forEach(function (n, i) {
@@ -329,7 +296,7 @@
       fn().then(function (res) {
         delete st.busy[d.id];
         if (res && res.notice) { setNotice(res.notice); }
-        if (res && res.sync !== undefined) { st.sync = res.sync; st.ingresses = arr(res.ingresses); renderSync(); }
+        if (res && res.sync !== undefined) { st.sync = res.sync; st.ingresses = hl.arr(res.ingresses); renderSync(); }
         render();
         if (ctrl.onAction) { ctrl.onAction(); }
       }, function (err) {
@@ -343,7 +310,7 @@
     function doRevoke(d) {
       runAction(d, 'Revoke', function () {
         return hl.api('POST', '/enroll/devices/' + encodeURIComponent(d.id) + '/revoke', {}).then(function (j) {
-          return { notice: 'Revoked ' + hl.plain(d.name, 100) + '.', sync: obj(j).sync || null, ingresses: obj(j).ingresses };
+          return { notice: 'Revoked ' + hl.plain(d.name, 100) + '.', sync: hl.obj(j).sync || null, ingresses: hl.obj(j).ingresses };
         });
       });
     }
@@ -357,7 +324,7 @@
     function doExtend(d, seconds) {
       runAction(d, 'Extend', function () {
         return hl.api('POST', '/enroll/devices/' + encodeURIComponent(d.id) + '/extend', { expires_at: seconds }).then(function (j) {
-          return { notice: 'Extended ' + hl.plain(d.name, 100) + ' to ' + fmtDate(seconds) + '.', sync: obj(j).sync || null, ingresses: obj(j).ingresses };
+          return { notice: 'Extended ' + hl.plain(d.name, 100) + ' to ' + fmtDate(seconds) + '.', sync: hl.obj(j).sync || null, ingresses: hl.obj(j).ingresses };
         });
       });
     }
@@ -369,7 +336,7 @@
       hl.api('POST', '/enroll/devices/' + encodeURIComponent(d.id) + '/links', { ttl: LINK_TTL, max_uses: 1 }).then(function (j) {
         delete st.busy[d.id];
         render();
-        openDrawer({ mode: 'link', device: { id: d.id, name: hl.plain(d.name, 100), owner: hl.plain(d.owner, 100), expires_at: d.expires_at }, link: String(obj(j).url || '') });
+        openDrawer({ mode: 'link', device: { id: d.id, name: hl.plain(d.name, 100), owner: hl.plain(d.owner, 100), expires_at: d.expires_at }, link: String(hl.obj(j).url || '') });
       }, function (err) {
         delete st.busy[d.id];
         setError('New link failed for ' + hl.plain(d.name, 100) + ': ' + hl.plain(err && err.message, 200));
@@ -410,7 +377,7 @@
       var row = hl.el('div', 'rowbtns');
       [30, 90].forEach(function (days) {
         var target = extendTo(d, days, t);
-        var b = button(days + ' days, to ' + fmtDate(target), 'extend', '', function () { doExtend(d, target); });
+        var b = hl.button(days + ' days, to ' + fmtDate(target), 'extend', '', function () { doExtend(d, target); });
         keyed(b, 'extend:' + days);
         row.appendChild(b);
       });
@@ -425,7 +392,7 @@
       var err = hl.el('p', 't2 small');
       err.hidden = true;
       panel.appendChild(err);
-      var go = button('Set date', 'extend', '', function () {
+      var go = hl.button('Set date', 'extend', '', function () {
         var sec = endOfDay(input.value);
         if (isNaN(sec) || sec * 1000 <= now()) {
           err.textContent = 'Pick a date in the future.';
@@ -434,7 +401,7 @@
         }
         doExtend(d, sec);
       });
-      var cancel = button('Cancel', null, 'quiet', closeOpen);
+      var cancel = hl.button('Cancel', null, 'quiet', closeOpen);
       var row2 = hl.el('div', 'rowbtns');
       row2.appendChild(go);
       row2.appendChild(cancel);
@@ -454,8 +421,7 @@
       var panel = key === 'extend' ? openExtend(d, cell) : openConfirm(d, key, cell);
       st.open.el = panel;
       if (key === 'extend') {
-        var first = firstButton(panel);
-        if (first) { first.focus(); }
+        hl.refocus(panel, 'extend:30');
       }
     }
 
@@ -475,8 +441,8 @@
       }
       if (!force && sig === st.tableSig) { return; }
       st.tableSig = sig;
-      var fk = focusKey(els.rows);
-      clear(els.rows);
+      var fk = hl.focusKey(els.rows);
+      hl.clear(els.rows);
       if (st.open) { st.open.cell = null; }
       if (rows.length === 0) {
         var tr0 = hl.el('tr');
@@ -502,7 +468,7 @@
         var actCell = hl.el('td', 'act');
         var box = hl.el('div', 'rowbtns');
         r.actions.forEach(function (a) {
-          var b = keyed(button(a.label, a.icon, 'sm quiet', function () { rowAction(d, a); }), 'act:' + r.id + ':' + a.key);
+          var b = keyed(hl.button(a.label, a.icon, 'sm quiet', function () { rowAction(d, a); }), 'act:' + r.id + ':' + a.key);
           b.disabled = !!st.busy[r.id];
           box.appendChild(b);
         });
@@ -518,7 +484,7 @@
           st.open.cell = cell;
         }
       });
-      refocus(els.rows, fk);
+      hl.refocus(els.rows, fk);
     }
 
     function renderChips() {
@@ -527,7 +493,7 @@
       if (sig !== st.chipSig) {
         st.chipSig = sig;
         st.chips = {};
-        clear(els.chips);
+        hl.clear(els.chips);
         FILTERS.forEach(function (f) {
           var b = hl.el('button', 'chip', f[1]);
           b.setAttribute('type', 'button');
@@ -572,6 +538,10 @@
       if (!dr || dr.creating) { return; }
       if (dr.poller) { dr.poller.stop(); dr.poller = null; }
       dr.root.remove();
+      dr.link = '';
+      dr.subscription = '';
+      dr.linkBox = null;
+      hl.clear(dr.body);
       st.drawer = null;
       hl.setQueryParam('enrol', null);
       var back = dr.opener;
@@ -592,7 +562,7 @@
     // setWaiting fills the status under the link: waiting for the first use, or enrolled.
     function setWaiting(dr) {
       if (!dr.waitBox) { return; }
-      clear(dr.waitBox);
+      hl.clear(dr.waitBox);
       if (dr.enrolled) {
         dr.waitBox.appendChild(hl.status('ok', 'Enrolled'));
         dr.waitBox.appendChild(hl.el('p', 't3 small', 'The device added its profile' + (dr.enrolledAt ? ' ' + hl.relTime(new Date(dr.enrolledAt * 1000).toISOString(), now()) : '') + '. The link is used up.'));
@@ -625,7 +595,7 @@
 
     // copyButton: the clipboard if there is one, else the text is selected for a copy by hand.
     function copyButton(label, text, shown, note, primary) {
-      var b = button(label, 'copy', primary ? 'primary' : '', function () {
+      var b = hl.button(label, 'copy', primary ? 'primary' : '', function () {
         copy(text).then(function (ok) {
           if (ok) { showCopied(b, 'Copied'); return; }
           selectAll(shown);
@@ -644,7 +614,7 @@
 
     function buildLink(dr) {
       var body = dr.body;
-      clear(body);
+      hl.clear(body);
       dr.step = 'link';
       var dev = dr.device;
       var head = dr.mode === 'create'
@@ -675,7 +645,7 @@
       body.appendChild(dr.copyNote);
       if (dr.mode === 'create') {
         var again = hl.el('div', 'rowbtns start');
-        again.appendChild(button('Enrol another device', null, 'quiet', function () { dr.enrolled = false; buildDetails(dr); }));
+        again.appendChild(hl.button('Enrol another device', null, 'quiet', function () { dr.enrolled = false; buildDetails(dr); }));
         body.appendChild(again);
       }
       if (!dr.linkError) {
@@ -714,11 +684,13 @@
 
     function buildDetails(dr) {
       var body = dr.body;
-      clear(body);
+      hl.clear(body);
       dr.step = 'details';
       dr.mode = 'create';
       dr.waitBox = null;
       dr.linkBox = null;
+      dr.link = '';
+      dr.subscription = '';
       if (dr.poller) { dr.poller.stop(); dr.poller = null; }
       var form = hl.el('form', 'stack');
       form.setAttribute('novalidate', '');
@@ -788,7 +760,7 @@
         fields[key].input.setAttribute('aria-invalid', 'true');
       }
       function valid(key) {
-        clear(fields[key].err);
+        hl.clear(fields[key].err);
         fields[key].err.hidden = true;
         fields[key].input.removeAttribute('aria-invalid');
       }
@@ -812,16 +784,16 @@
         dr.formError.hidden = true;
         var made = null;
         hl.api('POST', '/enroll/devices', { name: n, owner: o, client: c, expires_at: sec }).then(function (j) {
-          made = obj(j);
+          made = hl.obj(j);
           dr.device = { id: made.id, name: hl.plain(n, 100), owner: hl.plain(o, 100), expires_at: sec };
           dr.subscription = typeof made.subscription_url === 'string' ? made.subscription_url : '';
           dr.link = '';
           dr.linkError = '';
           dr.enrolled = false;
-          if (made.sync !== undefined) { st.sync = made.sync || null; st.ingresses = arr(made.ingresses); renderSync(); }
+          if (made.sync !== undefined) { st.sync = made.sync || null; st.ingresses = hl.arr(made.ingresses); renderSync(); }
           if (ctrl.loadDevices) { ctrl.loadDevices(); }
           return hl.api('POST', '/enroll/devices/' + encodeURIComponent(made.id) + '/links', { ttl: LINK_TTL, max_uses: 1 }).then(function (l) {
-            dr.link = String(obj(l).url || '');
+            dr.link = String(hl.obj(l).url || '');
           }, function (e) {
             dr.linkError = hl.plain(e && e.message, 200);
           });
@@ -914,11 +886,11 @@
       render(true);
     };
     ctrl.update = function (d) {
-      d = obj(d);
+      d = hl.obj(d);
       st.loaded = true;
-      st.devices = arr(d.devices);
+      st.devices = hl.arr(d.devices);
       st.sync = d.sync || null;
-      st.ingresses = arr(d.ingresses);
+      st.ingresses = hl.arr(d.ingresses);
       st.partial = !!d.stats_partial;
       els.traffic.textContent = st.partial ? 'Traffic*' : 'Traffic';
       if (st.partial) { els.traffic.setAttribute('title', 'Partial: a bridge did not answer, so its traffic is missing.'); } else { els.traffic.removeAttribute('title'); }
@@ -933,7 +905,7 @@
     ctrl.onAction = null;
 
     if (els.empty) {
-      els.empty.appendChild(hl.el('div', 'rowbtns start')).appendChild(button('Enrol device', 'plus', 'primary', function () { openDrawer(); }));
+      els.empty.appendChild(hl.el('div', 'rowbtns start')).appendChild(hl.button('Enrol device', 'plus', 'primary', function () { openDrawer(); }));
     }
     render();
     // The top-bar action links to /enroll?enrol=1: the panel is open on arrival.

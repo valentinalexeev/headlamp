@@ -9,18 +9,7 @@
   var hl = window.hl;
   if (!hl) { return; }
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
 
-  function button(label, iconName, cls, onClick) {
-    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
-    b.setAttribute('type', 'button');
-    var ic = iconName ? hl.icon(iconName) : null;
-    if (ic) { b.appendChild(ic); }
-    b.appendChild(hl.el('span', null, label));
-    if (onClick) { b.addEventListener('click', onClick); }
-    return b;
-  }
 
   // approvable: a discovered bridge whose published parameters are known and which is not approved as they are.
   function approvable(v) {
@@ -55,6 +44,13 @@
     add('Node', v.approved_node_id ? String(v.approved_node_id) : '', v.node_id ? String(v.node_id) : '');
     add('Machine key', more(v.approved_machine_key_prefix), more(v.machine_key_prefix));
     return out;
+  }
+
+  // differsText: the values of differences(v) as words: "a different node", "a different fingerprint and node".
+  function differsText(diffs) {
+    var names = diffs.map(function (d) { return d[0].toLowerCase(); });
+    var last = names.pop();
+    return 'a different ' + (names.length ? names.join(', ') + ' and ' : '') + last;
   }
 
   // mount wires the page's elements. deps.go(url) leaves the page after an approval.
@@ -97,7 +93,7 @@
     }
 
     function ask(opts) {
-      clear(els.confirm);
+      hl.clear(els.confirm);
       hl.confirmPanel({
         title: opts.title, object: opts.object, consequence: opts.consequence,
         confirmLabel: opts.confirmLabel, cancelLabel: 'Cancel', icon: opts.icon, into: els.confirm,
@@ -108,11 +104,11 @@
 
     function render() {
       var v = st.view;
-      clear(els.fields);
-      clear(els.confirm);
-      clear(els.actions);
+      hl.clear(els.fields);
+      hl.clear(els.confirm);
+      hl.clear(els.actions);
       els.changed.hidden = true;
-      clear(els.changed);
+      hl.clear(els.changed);
       els.info.hidden = true;
       els.review.hidden = true;
       els.actions.hidden = true;
@@ -135,8 +131,9 @@
         if (changed) {
           var head = hl.status('crit', name + ' changed its host identity');
           els.changed.appendChild(head);
-          els.changed.appendChild(hl.el('p', 't2 small', name + ' was approved with a different fingerprint. If you did not rebuild this host, treat it as compromised and do not approve. The changed values are listed next to the approved ones.'));
           var diffs = differences(v);
+          els.changed.appendChild(hl.el('p', 't2 small', name + (diffs.length ? ' was approved with ' + differsText(diffs) : ' no longer matches what was approved') +
+            '. If you did not rebuild this host, treat it as compromised and do not approve.' + (diffs.length ? ' The changed values are listed next to the approved ones.' : '')));
           if (diffs.length) {
             var dl = hl.el('dl', 'kv');
             diffs.forEach(function (d) {
@@ -160,7 +157,7 @@
           els.fields.appendChild(hl.el('dd', f[1] ? 'mono' : 'mono t3', f[1] || 'not reported'));
         });
         els.review.hidden = false;
-        var go1 = button(changed ? 'Approve ' + name + ' anyway' : 'Approve ' + name, 'check', changed ? 'danger' : 'primary', function () {
+        var go1 = hl.button(changed ? 'Approve ' + name + ' anyway' : 'Approve ' + name, 'check', changed ? 'danger' : 'primary', function () {
           if (!changed) { approve(); return; }
           ask({
             title: 'Approve a changed identity?', object: name,
@@ -180,7 +177,7 @@
       els.title.textContent = name;
       if (v.source === 'discovered' && v.approved && v.approval === 'approved') {
         els.sub.textContent = name + ' is approved. It receives device credentials and appears in every profile.';
-        var rm = button('Remove approval', 'ban', 'danger', function () {
+        var rm = hl.button('Remove approval', 'ban', 'danger', function () {
           ask({
             title: 'Remove the approval of ' + name + '?', object: name,
             consequence: 'It leaves the profiles and gets no more updates; it keeps the set it last received.',
@@ -202,7 +199,7 @@
       if (!keepError) { setError(''); }
       if (!st.name) { st.loaded = true; st.view = null; render(); return Promise.resolve(); }
       return hl.api('GET', '/enroll/ingresses').then(function (res) {
-        var list = arr(res && res.ingresses);
+        var list = hl.arr(res && res.ingresses);
         st.view = null;
         list.forEach(function (v) { if (v && v.name === st.name) { st.view = v; } });
         st.loaded = true;

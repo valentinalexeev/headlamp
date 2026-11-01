@@ -329,6 +329,52 @@ const historyButtons = (els) => findAll(els.rows, (n) => n.tag === 'button');
     assert.notStrictEqual(els.diff.children[0], lines[0]);
   }
 
+  // pollKeepsHistoryRows: the same history is not rebuilt by a poll; a changed one is
+  {
+    loadedAt = appliedSec + 30;
+    const { els, ctrl } = mountPage();
+    ctrl.update(stateOf());
+    const rows = els.rows.children.slice();
+    assert.ok(rows.length >= 3);
+    historyButtons(els)[0].focus();
+    ctrl.update(stateOf());
+    assert.ok(els.rows.children.every((n, i) => n === rows[i]), 'history rows were rebuilt by a poll');
+    ctrl.update(stateOf({ history: hist().concat([{ id: 45, at: iso(95000), actor: 'bob', reason: 'edit', state: 'reverted', deadline: iso(94000) }]) }));
+    assert.strictEqual(els.rows.children.length, rows.length + 1, 'a new entry does rebuild');
+    ctrl.update(quiet());
+    assert.notStrictEqual(els.rows.children[0], rows[0], 'the Revert buttons change with the pending state');
+    assert.ok(historyButtons(els).every((b) => !b.disabled));
+  }
+
+  // pollDuringAnActionIsIgnored: a read begun while an action is out is neither sent nor drawn
+  {
+    loadedAt = appliedSec + 30;
+    const { els, ctrl } = mountPage();
+    ctrl.update(stateOf());
+    const realFetch = global.fetch;
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    fetches.length = 0;
+    global.fetch = (url, opts) => {
+      fetches.push({ url, method: (opts && opts.method) || 'GET' });
+      if (url === '/policy/confirm') { return gate.then(() => ({ ok: true, status: 204, text: () => Promise.resolve('') })); }
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(quiet())) });
+    };
+    buttonNamed(els.pendbtns, 'Confirm change').click();
+    await flush();
+    const before = els.pendbtns.children.slice();
+    await ctrl.reload();
+    await flush();
+    assert.strictEqual(sent('GET', '/policy/state').length, 0, 'no read while the action is out');
+    assert.strictEqual(els.pending.hidden, false);
+    assert.ok(els.pendbtns.children.every((n, i) => n === before[i]), 'the panel was redrawn');
+    release();
+    await flush();
+    assert.strictEqual(sent('GET', '/policy/state').length, 1, 'the action reads again itself');
+    assert.strictEqual(els.pending.hidden, true);
+    global.fetch = realFetch;
+  }
+
   // slowPollCannotRestoreAConfirmedChange
   {
     loadedAt = appliedSec + 30;

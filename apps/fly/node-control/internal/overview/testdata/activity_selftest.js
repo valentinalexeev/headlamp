@@ -12,6 +12,7 @@ function node(tag) {
     getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; },
     addEventListener(t, f) { this.listeners[t] = f; },
     click() { return this.listeners.click(); },
+    focus() { global.document.activeElement = this; },
   };
 }
 function find(n, pred, out = []) { if (pred(n)) out.push(n); n.children.forEach((c) => find(c, pred, out)); return out; }
@@ -107,6 +108,22 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
     release(); await first;
     assert.strictEqual(slow.state.data.entries.length, 0);
   }
+  {
+    // chips that are rebuilt (a new source shows up in the entries) give focus back to the one that had it
+    const answers = [{ entries: [] }, { entries: [{ at: at(31, 9, 0), actor: 'a', source: 'Tasks', action: 'x', detail: '' }] }];
+    const ctl = act.create(els(), { now: () => NOW, sources: [], getParam: () => null, setParam() {}, api: async () => answers.shift() });
+    await ctl.refresh();
+    const all = ctl.state.chips[0].el;
+    all.focus();
+    await ctl.refresh();
+    assert.deepStrictEqual(ctl.state.chips.map((c) => c.name), ['All', 'Tasks']);
+    assert.notStrictEqual(ctl.state.chips[0].el, all, 'the chips were rebuilt');
+    assert.strictEqual(global.document.activeElement, ctl.state.chips[0].el, 'focus came back to All');
+    // a focus elsewhere is left alone
+    global.document.activeElement = null;
+    ctl.render();
+    assert.strictEqual(global.document.activeElement, null);
+  }
 
   // chips only for what would match something
   {
@@ -131,6 +148,75 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
     assert.deepStrictEqual(c2.state.chips.map((c) => c.name), ['All']);
     await c2.refresh();
     assert.deepStrictEqual(c2.state.chips.map((c) => c.name), ['All', 'Tasks']);
+  }
+
+  // the nav does not answer: a source nothing confirms gets no chip and no filter
+  {
+    const params = [], calls = [];
+    const e = els();
+    const bogus = act.create(e, { now: () => NOW, getParam: () => 'Bogus', setParam: (k, v) => params.push([k, v]),
+      api: async (m, u) => { calls.push(u); return { entries: [] }; } });
+    await bogus.refresh();
+    assert.strictEqual(bogus.state.source, 'Bogus', 'still provisional while the nav has not answered');
+    await bogus.navFailed();
+    assert.strictEqual(bogus.state.source, 'All', 'no entry shows the source exists');
+    assert.deepStrictEqual(params, [['source', '']]);
+    assert.deepStrictEqual(bogus.state.chips.map((c) => c.name), ['All']);
+    assert.strictEqual(calls[calls.length - 1], '/_activity.json?limit=200');
+
+    // the same when the nav fails first: no chip from then on, and the answer settles it
+    const f = els();
+    let answer;
+    const gate = new Promise((r) => { answer = r; });
+    const early = act.create(f, { now: () => NOW, getParam: () => 'Bogus', setParam() {}, api: async () => { await gate; return { entries: [] }; } });
+    await early.navFailed();
+    assert.deepStrictEqual(early.state.chips.map((c) => c.name), ['All'], 'no chip while the answer is out');
+    assert.strictEqual(early.state.source, 'Bogus', 'nothing has said it is wrong yet');
+    answer();
+    await early.refresh();
+    assert.strictEqual(early.state.source, 'All');
+
+    // the activity read fails as well: still no chip, and the filter stays until an answer can settle it
+    const g = els();
+    const down = act.create(g, { now: () => NOW, getParam: () => 'Bogus', setParam() {}, api: async () => { throw new Error('down'); } });
+    await down.navFailed();
+    await down.refresh();
+    assert.deepStrictEqual(down.state.chips.map((c) => c.name), ['All']);
+
+    // a real source in the URL stays: its entries confirm it
+    const h = els();
+    const hp = [];
+    const real = act.create(h, { now: () => NOW, getParam: () => 'Funnel', setParam: (k, v) => hp.push([k, v]),
+      api: async () => ({ entries: [{ at: at(31, 1, 0), actor: 'a', source: 'Funnel', action: 'x', detail: '' }] }) });
+    await real.navFailed();
+    await real.refresh();
+    assert.strictEqual(real.state.source, 'Funnel');
+    assert.deepStrictEqual(hp, []);
+    assert.deepStrictEqual(real.state.chips.map((c) => c.name), ['All', 'Funnel']);
+  }
+
+  // the page as it loads, with the nav failing and a made-up source in the URL
+  {
+    const made = {};
+    const urls = [], replaced = [];
+    const realTimeout = global.setTimeout;
+    global.setTimeout = () => 0; // no timers left behind by hl.api and hl.poll
+    global.document.getElementById = (id) => { made[id] = made[id] || node('div'); return made[id]; };
+    global.window.location = { search: '?source=Bogus', href: 'http://localhost/activity?source=Bogus' };
+    global.window.history = { replaceState(_a, _b, u) { replaced.push(u); } };
+    global.fetch = (u) => {
+      urls.push(u);
+      const nav = u === '/_nav.json';
+      return Promise.resolve({ ok: !nav, status: nav ? 502 : 200, text: () => Promise.resolve(nav ? '{}' : '{"entries":[]}') });
+    };
+    act.init();
+    for (let i = 0; i < 12; i++) { await flush(); }
+    global.setTimeout = realTimeout;
+    global.document.getElementById = () => null;
+    assert.deepStrictEqual(find(made.chips, (x) => x.tag === 'button').map((b) => b.textContent), ['All']);
+    assert.strictEqual(made.chips.children[0].attrs['aria-pressed'], 'true');
+    assert.strictEqual(urls[urls.length - 1], '/_activity.json?limit=200', urls.join(' '));
+    assert.deepStrictEqual(replaced, ['/activity']);
   }
 
   // rows

@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +27,10 @@ const (
 	maxSummaryRunes = 300
 	defaultActivity = 200
 	maxActivity     = 500
+	// A source's search entries are capped so one cannot crowd out the others, and the whole answer so the palette
+	// never has to filter an unbounded list. Both are far above what a console has.
+	maxSearchPerSource = 2000
+	maxSearchItems     = 5000
 )
 
 // cleanText removes control and format characters (bidi overrides, zero-width marks), repairs
@@ -81,11 +87,16 @@ func cleanItem(it AttentionItem, source string) AttentionItem {
 		it.Level = LevelInfo
 	}
 	it.Title = cleanText(it.Title, maxTitleRunes)
+	if it.ID == "" { // from the title, so that it holds from one poll to the next
+		sum := sha256.Sum256([]byte(it.Title))
+		it.ID = cleanText(it.Source, maxShortRunes-9) + "-" + hex.EncodeToString(sum[:4])
+	}
 	it.Detail = cleanText(it.Detail, maxDetailRunes)
 	it.ActionLabel = cleanText(it.ActionLabel, maxShortRunes)
 	if !safeLocalPath(it.ActionPath) {
 		it.ActionPath, it.ActionLabel = "", ""
 	}
+	it.AckToken, it.Acknowledged, it.module = "", nil, "" // the core's own, whatever a source put there
 	return it
 }
 
@@ -163,8 +174,73 @@ func sourcesOf[S any](mods []Module) []modOf[S] {
 	return out
 }
 
-// registerAttention serves GET /_attention.json, /_activity.json and /_search.json on mux. Sources
-// are the modules that implement the matching interface. nav gives the page of an unreachable system.
+// attentionView is what one caller sees: the merged items and system lines, sorted.
+type attentionView struct {
+	items   []AttentionItem
+	systems []SystemLine
+	hidden  bool
+}
+
+type attOut struct {
+	items []AttentionItem
+	lines []SystemLine
+}
+
+// readAttention asks every source for this caller and applies the acknowledgements, ending those that no longer hold.
+func readAttention(ctx context.Context, att []modOf[AttentionSource], navPath func(string) string, acks *ackKeeper, login string) attentionView {
+	// Read before the sources are asked: what they say is then never older than the acknowledgements it is compared
+	// with, so one made a moment ago is not ended by an answer from before its item appeared.
+	held := acks.load()
+	results, errs := fanOut(ctx, att, func(c context.Context, s modOf[AttentionSource]) (attOut, error) {
+		i, l, err := s.src.Attention(c, login)
+		return attOut{i, l}, err
+	})
+	v := attentionView{items: []AttentionItem{}, systems: []SystemLine{}}
+	for i, s := range att {
+		switch err := errs[i]; {
+		case errors.Is(err, ErrNotVisible):
+			v.hidden = true
+		case err != nil:
+			// The error text is never shown: it may carry upstream detail.
+			name := cleanText(s.name, maxShortRunes)
+			path := navPath(s.name)
+			it := AttentionItem{ID: "unknown-" + name, Source: s.name, Level: LevelCritical,
+				Title: name + " could not be checked", Detail: "Its status is unknown until it answers again."}
+			if path != "" {
+				it.ActionLabel, it.ActionPath = "Open", path
+			}
+			v.items = append(v.items, cleanItem(it, s.name))
+			v.systems = append(v.systems, cleanLine(SystemLine{Name: name, Path: path, State: "unknown", Summary: "No answer"}))
+		default:
+			items := make([]AttentionItem, 0, len(results[i].items))
+			for _, it := range results[i].items {
+				items = append(items, cleanItem(it, s.name))
+			}
+			lines := make([]SystemLine, 0, len(results[i].lines))
+			for _, l := range results[i].lines {
+				lines = append(lines, cleanLine(l))
+			}
+			acks.apply(s.name, items, lines, held)
+			v.items = append(v.items, items...)
+			v.systems = append(v.systems, lines...)
+		}
+	}
+	sort.SliceStable(v.items, func(a, b int) bool {
+		if ra, rb := levelRank(v.items[a].Level), levelRank(v.items[b].Level); ra != rb {
+			return ra < rb
+		}
+		sa, sb := v.items[a].Since, v.items[b].Since
+		if sa.IsZero() != sb.IsZero() {
+			return !sa.IsZero()
+		}
+		return sa.Before(sb)
+	})
+	return v
+}
+
+// registerAttention serves GET /_attention.json, /_activity.json and /_search.json on mux, and the acknowledge routes
+// when some module offers an AckStore. Sources are the modules that implement the matching interface. nav gives the
+// page of an unreachable system.
 func registerAttention(mux *http.ServeMux, mods []Module, nav []NavItem, tn Tailnet) {
 	att := sourcesOf[AttentionSource](mods)
 	act := sourcesOf[ActivitySource](mods)
@@ -229,56 +305,27 @@ func registerAttention(mux *http.ServeMux, mods []Module, nav []NavItem, tn Tail
 		return ""
 	}
 
-	type attOut struct {
-		items []AttentionItem
-		lines []SystemLine
+	acks := newAckKeeper(mods)
+	read := func(ctx context.Context, login string) attentionView {
+		return readAttention(ctx, att, navPath, acks, login)
 	}
 	mux.HandleFunc("GET /_attention.json", func(w http.ResponseWriter, r *http.Request) {
 		serve(w, r, func(ctx context.Context, login string) any {
-			results, errs := fanOut(ctx, att, func(c context.Context, s modOf[AttentionSource]) (attOut, error) {
-				i, l, err := s.src.Attention(c, login)
-				return attOut{i, l}, err
-			})
-			items, systems := []AttentionItem{}, []SystemLine{}
-			hidden := false
-			for i, s := range att {
-				switch err := errs[i]; {
-				case errors.Is(err, ErrNotVisible):
-					hidden = true
-				case err != nil:
-					// The error text is never shown: it may carry upstream detail.
-					name := cleanText(s.name, maxShortRunes)
-					path := navPath(s.name)
-					it := AttentionItem{ID: "unknown-" + name, Source: s.name, Level: LevelCritical,
-						Title: name + " could not be checked", Detail: "Its status is unknown until it answers again."}
-					if path != "" {
-						it.ActionLabel, it.ActionPath = "Open", path
-					}
-					items = append(items, cleanItem(it, s.name))
-					systems = append(systems, cleanLine(SystemLine{Name: name, Path: path, State: "unknown", Summary: "No answer"}))
-				default:
-					for _, it := range results[i].items {
-						items = append(items, cleanItem(it, s.name))
-					}
-					for _, l := range results[i].lines {
-						systems = append(systems, cleanLine(l))
-					}
+			v := read(ctx, login)
+			for i := range v.items {
+				if a := v.items[i].Acknowledged; a != nil {
+					shown := *a
+					shown.By = cleanText(shown.By, maxShortRunes)
+					v.items[i].Acknowledged = &shown
 				}
 			}
-			sort.SliceStable(items, func(a, b int) bool {
-				if ra, rb := levelRank(items[a].Level), levelRank(items[b].Level); ra != rb {
-					return ra < rb
-				}
-				sa, sb := items[a].Since, items[b].Since
-				if sa.IsZero() != sb.IsZero() {
-					return !sa.IsZero()
-				}
-				return sa.Before(sb)
-			})
-			return map[string]any{"items": items, "systems": systems, "hidden_systems": hidden,
+			return map[string]any{"items": v.items, "systems": v.systems, "hidden_systems": v.hidden,
 				"updated_at": time.Now().UTC().Format(time.RFC3339)}
 		})
 	})
+	if acks != nil {
+		registerAckRoutes(mux, tn, acks, read)
+	}
 
 	mux.HandleFunc("GET /_activity.json", func(w http.ResponseWriter, r *http.Request) {
 		serve(w, r, func(ctx context.Context, login string) any {
@@ -316,6 +363,11 @@ func registerAttention(mux *http.ServeMux, mods []Module, nav []NavItem, tn Tail
 					}
 				}
 			}
+			if acks != nil {
+				got, gotPartial, gotHidden := acks.activity(ctx, att, nav, login, limit, only)
+				entries = append(entries, got...)
+				partial, hidden = partial || gotPartial, hidden || gotHidden
+			}
 			sort.SliceStable(entries, func(a, b int) bool { return entries[a].At.After(entries[b].At) })
 			if len(entries) > limit {
 				entries = entries[:limit]
@@ -330,17 +382,23 @@ func registerAttention(mux *http.ServeMux, mods []Module, nav []NavItem, tn Tail
 				return s.src.Search(c, login)
 			})
 			items := []SearchItem{}
-			for i := range srch {
+			for i, s := range srch {
 				if errs[i] != nil {
 					continue // a failing or hidden source contributes nothing, not even a placeholder
 				}
+				kept := 0
 				for _, it := range results[i] {
+					if kept == maxSearchPerSource || len(items) == maxSearchItems {
+						slog.Warn("console search cut short", "source", s.name, "offered", len(results[i]), "kept", kept)
+						break
+					}
 					it.Label = cleanText(it.Label, maxShortRunes)
 					it.Kind = cleanText(it.Kind, maxShortRunes)
 					if it.Label == "" || !safeLocalPath(it.Path) {
 						continue
 					}
 					items = append(items, it)
+					kept++
 				}
 			}
 			return map[string]any{"items": items}

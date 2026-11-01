@@ -12,38 +12,10 @@
   var RELOAD_RETRY_MS = 3000;
   var COLUMNS = 3;
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
-  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function label(v, n) { return hl.plain(v, n || 100); }
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
 
-  function button(text, iconName, cls, onClick) {
-    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
-    b.setAttribute('type', 'button');
-    var ic = iconName ? hl.icon(iconName) : null;
-    if (ic) { b.appendChild(ic); }
-    b.appendChild(hl.el('span', null, text));
-    if (onClick) { b.addEventListener('click', onClick); }
-    return b;
-  }
 
-  function focusKey(box) {
-    var ae = typeof document !== 'undefined' ? document.activeElement : null;
-    for (var n = ae; n; n = n.parentNode) {
-      if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
-    }
-    return null;
-  }
-  function refocus(box, key) {
-    if (!key) { return; }
-    var stack = [box];
-    while (stack.length) {
-      var n = stack.pop();
-      if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
-      (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
-    }
-  }
 
   function clock(sec) {
     var s = Math.max(0, Math.floor(sec));
@@ -55,7 +27,7 @@
   // drawDiff writes unified diff text into a pre, one span per line, as text. Added and removed lines get the
   // add and rem classes (those are block-level); other lines are quiet and carry their own newline.
   function drawDiff(pre, text) {
-    clear(pre);
+    hl.clear(pre);
     var lines = String(text || '').split('\n');
     if (lines.length && lines[lines.length - 1] === '') { lines.pop(); }
     lines.forEach(function (line) {
@@ -81,7 +53,7 @@
     var st = {
       state: null, pending: null, history: [], loaded: false, failed: false, busy: false, receivedAt: 0,
       loadedText: null, base: '', baseSeen: '', lastPoll: 0, loading: false, loadErr: false,
-      pendSig: null, editSig: null, countEl: null, diffText: null, gen: 0, loadSeq: 0, errKind: ''
+      pendSig: null, editSig: null, histSig: null, countEl: null, diffText: null, gen: 0, loadSeq: 0, errKind: ''
     };
     var ctrl = {};
 
@@ -120,10 +92,10 @@
       var reverting = !isStuck && (secondsLeft() <= 0 || !!p.overdue);
       var sig = JSON.stringify([p.id, isFresh, isStuck, Number(p.attempts), reverting, st.busy]);
       if (sig === st.pendSig) { if (st.countEl) { st.countEl.textContent = clock(secondsLeft()); } return; }
-      var fk = focusKey(els.pending);
+      var fk = hl.focusKey(els.pending);
       st.pendSig = sig;
       els.pending.className = isStuck ? 'note crit split' : 'note split';
-      clear(els.pendtitle);
+      hl.clear(els.pendtitle);
       var g = hl.el('span', 'g ' + (isStuck ? 'crit' : 'warn'));
       g.setAttribute('aria-hidden', 'true');
       els.pendtitle.appendChild(g);
@@ -154,19 +126,19 @@
       }
       els.pendtext.textContent = text;
 
-      clear(els.pendbtns);
+      hl.clear(els.pendbtns);
       var primary;
       if (isFresh) {
-        primary = keyed(button('Confirm change', 'check', 'primary', function () { ctrl.confirmChange(); }), 'confirm');
+        primary = keyed(hl.button('Confirm change', 'check', 'primary', function () { ctrl.confirmChange(); }), 'confirm');
         primary.disabled = st.busy;
       } else {
-        primary = keyed(button('Reload to confirm', null, 'primary', function () { reloadPage(); }), 'reload-to-confirm');
+        primary = keyed(hl.button('Reload to confirm', null, 'primary', function () { reloadPage(); }), 'reload-to-confirm');
       }
-      var revert = keyed(button('Revert now', 'undo', '', function () { ctrl.revertNow(); }), 'revert-now');
+      var revert = keyed(hl.button('Revert now', 'undo', '', function () { ctrl.revertNow(); }), 'revert-now');
       revert.disabled = st.busy;
       els.pendbtns.appendChild(primary);
       els.pendbtns.appendChild(revert);
-      refocus(els.pending, fk);
+      hl.refocus(els.pending, fk);
     }
 
     // ----- the diff of the pending change, or the editor
@@ -174,18 +146,18 @@
     function drawEditButtons() {
       var sig = JSON.stringify([!!st.pending, st.busy]);
       if (sig === st.editSig) { return; }
-      var fk = focusKey(els.editbtns);
+      var fk = hl.focusKey(els.editbtns);
       st.editSig = sig;
-      clear(els.editbtns);
-      var pv = keyed(button('Preview', null, '', function () { ctrl.preview(); }), 'preview');
-      var ap = keyed(button('Apply', null, 'primary', function () { ctrl.apply(); }), 'apply');
-      var rl = keyed(button('Reload', null, 'quiet', function () { ctrl.reloadNow(); }), 'reload');
+      hl.clear(els.editbtns);
+      var pv = keyed(hl.button('Preview', null, '', function () { ctrl.preview(); }), 'preview');
+      var ap = keyed(hl.button('Apply', null, 'primary', function () { ctrl.apply(); }), 'apply');
+      var rl = keyed(hl.button('Reload', null, 'quiet', function () { ctrl.reloadNow(); }), 'reload');
       pv.disabled = st.busy || !!st.pending;
       ap.disabled = st.busy || !!st.pending;
       els.editbtns.appendChild(pv);
       els.editbtns.appendChild(ap);
       els.editbtns.appendChild(rl);
-      refocus(els.editbtns, fk);
+      hl.refocus(els.editbtns, fk);
     }
 
     function drawEditArea() {
@@ -218,8 +190,16 @@
     // ----- history
 
     function drawHistory() {
-      var fk = focusKey(els.rows);
-      clear(els.rows);
+      // Rebuilt only when what it shows changes (the relative times are part of that), so a poll that finds the
+      // same history leaves the rows, and the focus in them, alone.
+      var sig = JSON.stringify([st.loaded, !!st.pending, st.busy, st.history.map(function (e) {
+        e = hl.obj(e);
+        return [e.id, e.at, e.actor, e.reason, e.state, hl.relTime(String(e.at || ''), now())];
+      })]);
+      if (sig === st.histSig) { return; }
+      st.histSig = sig;
+      var fk = hl.focusKey(els.rows);
+      hl.clear(els.rows);
       if (st.history.length === 0) {
         var tr0 = hl.el('tr');
         var td0 = hl.el('td', 't2', st.loaded ? 'No console changes yet.' : 'Loading.');
@@ -229,7 +209,7 @@
         return;
       }
       st.history.forEach(function (e) {
-        e = obj(e);
+        e = hl.obj(e);
         var id = Number(e.id);
         var tr = hl.el('tr');
         // Who and why sit on a second line, so the table stays three columns wide.
@@ -245,7 +225,7 @@
         var known = Object.prototype.hasOwnProperty.call(STATE_STATUS, e.state) ? STATE_STATUS[e.state] : ['warn', 'Outcome unknown'];
         state.appendChild(hl.status(known[0], known[1]));
         var box = hl.el('div', 'rowbtns start');
-        var b = keyed(button('Revert change', 'undo', 'sm quiet', function () { ctrl.restore(id); }), 'restore:' + id);
+        var b = keyed(hl.button('Revert change', 'undo', 'sm quiet', function () { ctrl.restore(id); }), 'restore:' + id);
         if (st.pending || st.busy) {
           // Undoing an older change is a new change, which cannot start while one is pending.
           b.disabled = true;
@@ -256,7 +236,7 @@
         tr.appendChild(state);
         els.rows.appendChild(tr);
       });
-      refocus(els.rows, fk);
+      hl.refocus(els.rows, fk);
     }
 
     function summary() {
@@ -264,11 +244,11 @@
       var text;
       if (st.pending) {
         var kept = null;
-        for (var k = 0; k < st.history.length; k++) { if (obj(st.history[k]).state === 'confirmed') { kept = obj(st.history[k]); break; } }
+        for (var k = 0; k < st.history.length; k++) { if (hl.obj(st.history[k]).state === 'confirmed') { kept = hl.obj(st.history[k]); break; } }
         text = (kept ? 'Version ' + Number(kept.id) + ' confirmed. ' : '') + 'Change #' + Number(st.pending.id) + ' is live but not yet kept.';
       }
       else {
-        var last = st.history.length ? obj(st.history[0]) : null;
+        var last = st.history.length ? hl.obj(st.history[0]) : null;
         text = last ? 'Last change #' + Number(last.id) + ' ' + label(last.state, 20) + ' ' + hl.relTime(String(last.at || ''), now()) + '.'
           : 'No console changes yet.';
       }
@@ -291,11 +271,11 @@
     // update takes a /policy/state answer. The editor text is replaced only when the person has not edited it, or
     // when force says so, so a poll never eats an edit.
     ctrl.update = function (d, force) {
-      d = obj(d);
+      d = hl.obj(d);
       var updated = String(d.updated_at || '');
       st.state = d;
-      st.pending = d.pending ? obj(d.pending) : null;
-      st.history = arr(d.history);
+      st.pending = d.pending ? hl.obj(d.pending) : null;
+      st.history = hl.arr(d.history);
       st.receivedAt = now();
       st.loaded = true;
       if (force || !dirty()) {
@@ -314,6 +294,8 @@
     // load reads the state. An answer is dropped when an action began after the read started (that action reads
     // again itself) or a newer read exists, so a slow poll cannot bring back a panel the person just closed.
     function load(force) {
+      // An action in flight reads again itself when it ends; a read begun now would only show its half-done state.
+      if (st.busy) { return Promise.resolve(); }
       var gen = st.gen;
       var seq = ++st.loadSeq;
       st.loading = true;
@@ -342,7 +324,7 @@
       setMessage('');
       setNotice('');
       els.prevdiff.hidden = true;
-      clear(els.warnings);
+      hl.clear(els.warnings);
       return load(true);
     };
 
@@ -408,8 +390,8 @@
       if (st.pending) { return Promise.resolve(); }
       return run(function () {
         return hl.api('POST', '/policy/revert/' + encodeURIComponent(String(hid)), {}).then(function (d) {
-          if (obj(d).uncertain) { return 'The outcome is unknown. An automatic revert is armed; reload and check the policy.'; }
-          return 'Started change #' + Number(obj(d).change_id) + ' to undo #' + hid + '. Confirm it to keep it.';
+          if (hl.obj(d).uncertain) { return 'The outcome is unknown. An automatic revert is armed; reload and check the policy.'; }
+          return 'Started change #' + Number(hl.obj(d).change_id) + ' to undo #' + hid + '. Confirm it to keep it.';
         });
       }, 'Revert of #' + hid, true);
     };
@@ -419,12 +401,12 @@
       setError('');
       setMessage('');
       return hl.api('POST', '/policy/preview', { policy: els.editor.value }).then(function (p) {
-        p = obj(p);
+        p = hl.obj(p);
         setMessage(p.valid ? 'Valid.' : 'Invalid: ' + label(p.error, 300));
         els.prevdiff.hidden = false;
         drawDiff(els.prevdiff, p.diff || '(no differences)');
-        clear(els.warnings);
-        arr(p.warnings).slice(0, 50).forEach(function (w) { els.warnings.appendChild(hl.el('li', null, label(w, 300))); });
+        hl.clear(els.warnings);
+        hl.arr(p.warnings).slice(0, 50).forEach(function (w) { els.warnings.appendChild(hl.el('li', null, label(w, 300))); });
       }, function (err) { fail(err, 'Preview'); });
     };
 
@@ -439,10 +421,10 @@
       return hl.api('POST', '/policy/apply', { policy: text, base_updated_at: st.base }).then(function (d) {
         st.busy = false;
         els.prevdiff.hidden = true;
-        clear(els.warnings);
+        hl.clear(els.warnings);
         setMessage('');
-        if (obj(d).uncertain) { setError('The outcome is unknown. An automatic revert is armed; reload and check the policy.'); }
-        else { setNotice('Applied as change #' + Number(obj(d).change_id) + '. Confirm it to keep it.'); }
+        if (hl.obj(d).uncertain) { setError('The outcome is unknown. An automatic revert is armed; reload and check the policy.'); }
+        else { setNotice('Applied as change #' + Number(hl.obj(d).change_id) + '. Confirm it to keep it.'); }
         nudgeShell();
         return load(true);
       }, function (err) {

@@ -97,6 +97,23 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(u.canPower, false);
   }
 
+  // a runner that no node claims but whose id is a node's id gets its own row, suffixed
+  {
+    const n = { a: cfg({ tailnetName: 'real' }) };
+    const s = { a: { status: 'RUNNING' } };
+    // matched by neither id nor name against the node (its tailnet name is "real"), and carrying no id of its own
+    const rows = merge(n, s, null, null, [{ name: 'a', available: true }]);
+    assert.deepStrictEqual(rows.map((r) => r.id).sort(), ['a', 'a (runner)']);
+    const extra = one(rows, 'a (runner)');
+    assert.strictEqual(extra.canPower, false, 'a runner row cannot be powered');
+    assert.strictEqual(one(rows, 'a').canPower, true, 'the node keeps its own row');
+    // two such runners and a bridge: every id stays distinct, the second runner taking the suffix twice
+    const many = merge(n, s, null, [ing('a', { given_name: 'nope' })], [{ name: 'a' }, { name: 'a' }]);
+    assert.deepStrictEqual(many.map((r) => r.id).sort(), ['a', 'a (bridge)', 'a (runner)', 'a (runner) (runner)']);
+    // an unclaimed runner whose id is free keeps it as it is
+    assert.deepStrictEqual(merge({}, {}, null, null, [{ id: 'r1', name: 'r1' }]).map((r) => r.id), ['r1']);
+  }
+
   // bridgeMatchesByGivenName
   {
     const n = { 'exit-x': cfg({ tailnetName: 'bridge-1' }) };
@@ -126,6 +143,45 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(r.state, 'Online');
   }
 
+  // a bridge can name the machine it runs on
+  {
+    const rows = merge({ 'vm-7': cfg() }, { 'vm-7': { status: 'RUNNING' } }, { 'vm-7': tn('vm-7', true) }, [ing('bridge-2', { node: 'vm-7' })]);
+    assert.strictEqual(rows.length, 1, 'the bridge joins the node it names');
+    assert.strictEqual(rows[0].role, 'Bridge');
+    assert.strictEqual(rows[0].bridge, 'bridge-2');
+    // the node it names wins over another bridge that only shares the name, and over its own name
+    const two = merge({ 'vm-7': cfg() }, { 'vm-7': { status: 'RUNNING' } }, null, [ing('vm-7', {}), ing('bridge-2', { node: 'vm-7' })]);
+    assert.strictEqual(one(two, 'vm-7').bridge, 'bridge-2');
+    const own = merge({ 'bridge-2': cfg() }, { 'bridge-2': { status: 'RUNNING' } }, null, [ing('bridge-2', { node: 'vm-7' })]);
+    assert.strictEqual(own.length, 2, 'a node that only shares its name is another machine');
+    // a stopped machine it names is no risk
+    const stopped = merge({ 'vm-7': cfg() }, { 'vm-7': { status: 'STOPPED' } }, null,
+      [ing('bridge-2', { node: 'vm-7', sync: { pending: true, state: 'unreachable', since: null } })])[0];
+    assert.strictEqual(stopped.state, 'Stopped');
+  }
+
+  // an intermittent bridge whose agent is unreachable is no risk on its row; anything else stays one
+  {
+    const away = { pending: true, state: 'unreachable', since: Math.floor((NOW - 38 * 60000) / 1000) };
+    const n = { 'bridge-2': cfg() };
+    const s = { 'bridge-2': { status: 'RUNNING' } };
+    let r = merge(n, s, { 'bridge-2': tn('bridge-2', true) }, [ing('bridge-2', { intermittent: true, sync: away })])[0];
+    assert.strictEqual(r.state, 'Running');
+    assert.strictEqual(r.level, 'ok');
+    assert.strictEqual(r.detail, 'Sync pending');
+    assert.strictEqual(r.action, '');
+    assert.ok(/may not be in effect/.test(r.explain), r.explain);
+    r = merge({}, {}, null, [ing('bridge-2', { intermittent: true, online: false, sync: away })])[0];
+    assert.strictEqual(r.state, 'Offline');
+    assert.strictEqual(r.level, 'off');
+    assert.strictEqual(r.detail, 'Sync pending');
+    r = merge(n, s, null, [ing('bridge-2', { intermittent: true, sync: { pending: true, state: 'rejected', since: null } })])[0];
+    assert.strictEqual(r.state, 'Out of sync');
+    assert.strictEqual(r.level, 'crit');
+    r = merge(n, s, null, [ing('bridge-2', { sync: away })])[0];
+    assert.strictEqual(r.state, 'Out of sync', 'not marked intermittent');
+  }
+
   // outOfSyncBeatsRunning
   {
     const bad = { pending: true, state: 'unreachable', since: Math.floor((NOW - 38 * 60000) / 1000) };
@@ -135,6 +191,11 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(r.state, 'Out of sync');
     assert.strictEqual(r.level, 'crit');
     assert.ok(/Agent unreachable/.test(r.detail));
+    assert.ok(/first failed 38 min ago/.test(r.detail), r.detail);
+    assert.strictEqual(r.explain, 'Revocations and extensions made since 38 min ago are not in effect on this bridge. Retrying every 5 minutes.');
+    // a failure this fresh has no "ago" to quote
+    const fresh = merge(n, s, { 'bridge-2': tn('bridge-2', true) }, [ing('bridge-2', { sync: Object.assign({}, bad, { since: Math.floor(NOW / 1000) }) })])[0];
+    assert.strictEqual(fresh.explain, 'Revocations and extensions made recently are not in effect on this bridge. Retrying every 5 minutes.');
     r = merge(n, s, { 'bridge-2': tn('bridge-2', false) }, [ing('bridge-2', { sync: bad })])[0];
     assert.strictEqual(r.state, 'Out of sync', 'beats running-but-offline');
     // stopped at the provider it serves nobody, so the wait is no risk; the same machine running is
@@ -144,6 +205,7 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(stopped.level, 'off');
     assert.strictEqual(stopped.detail, 'Sync pending');
     assert.ok(stopped.explain.includes('when it is started again'));
+    assert.ok(!/Retrying/.test(stopped.explain), 'a stopped machine waits for its start, as far as anyone needs to know');
     assert.strictEqual(merge({ 'b-1': cfg() }, { 'b-1': { status: 'RUNNING' } }, null, [ing('b-1', waiting)])[0].state, 'Out of sync');
     // and beats a waiting approval
     r = merge({}, {}, null, [ing('bridge-3', { approval: 'pending', sync: bad })])[0];
@@ -230,6 +292,16 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     const els2 = mkEls();
     nodes.mount(els2).update(sample());
     assert.strictEqual(findAll(els2.rows, (n) => hasClass(n, 'name')).length, 3);
+    global.window.location.search = '';
+  }
+
+  // ?sel= with a bridge's name finds the row of the machine it runs on: that is what its Attention item links to
+  {
+    global.window.location.search = '?sel=bridge-2';
+    const els = mkEls();
+    nodes.mount(els).update({ nodes: { 'vm-7': cfg() }, status: { 'vm-7': { status: 'RUNNING' } }, tailnet: null, ingresses: [ing('bridge-2', { node: 'vm-7' })], sessions: null, now: NOW });
+    assert.strictEqual(findAll(els.rows, (n) => n.tag === 'tr' && hasClass(n, 'sel')).length, 1);
+    assert.ok(/vm-7/.test(els.panel.textContent));
     global.window.location.search = '';
   }
 
@@ -378,6 +450,46 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.ok(/bridge-3/.test(els.panel.textContent));
     ctrl.update(Object.assign(d, { status: Object.assign({}, d.status, { 'exit-c': { status: 'RUNNING' } }) }));
     assert.strictEqual(ctrl.busyOf('exit-c'), null);
+  }
+
+  // pressing Start disables it; focus must not fall to the page, in the row or in the panel
+  {
+    fetchReply = () => ({ ok: true, status: 200, body: '{}' });
+    global.window.location.search = '?sel=exit-c';
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    const d = sample();
+    d.nodes['exit-c'] = cfg(); d.status['exit-c'] = { status: 'STOPPED' }; d.tailnet['exit-c'] = tn('exit-c', false);
+    ctrl.update(d);
+    const inside = (box) => { for (let n = global.document.activeElement; n; n = n.parentNode) { if (n === box) { return true; } } return false; };
+    const rowBtn = buttonNamed(els.rows, 'Start');
+    rowBtn.focus(); rowBtn.click();
+    assert.ok(buttonNamed(els.rows, 'Start').disabled);
+    assert.ok(global.document.activeElement && global.document.activeElement.isConnected && inside(els.rows), 'row: focus stays in the row');
+    await flush();
+    ctrl.update(Object.assign(d, { status: Object.assign({}, d.status, { 'exit-c': { status: 'STOPPED' } }) }));
+    // the panel's own Start: the same
+    ctrl.refresh();
+    const panelBtn = buttonNamed(els.panel, 'Start');
+    panelBtn.focus(); panelBtn.click();
+    assert.ok(buttonNamed(els.panel, 'Start').disabled);
+    assert.ok(global.document.activeElement && global.document.activeElement.isConnected && inside(els.panel), 'panel: focus stays in the panel');
+    global.window.location.search = '';
+    ctrl.update(Object.assign(d, { status: Object.assign({}, d.status, { 'exit-c': { status: 'RUNNING' } }) }));
+  }
+
+  // Keep running puts focus back on the panel's Stop
+  {
+    global.window.location.search = '?sel=exit-a';
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    ctrl.update(sample());
+    const stopBtn = buttonNamed(els.panel, 'Stop');
+    stopBtn.focus(); stopBtn.click();
+    buttonNamed(els.panel, 'Keep running').click();
+    const now = global.document.activeElement;
+    assert.ok(now && now.isConnected && now.textContent === 'Stop' && now.tag === 'button', 'focus is on Stop again');
+    global.window.location.search = '';
   }
 
   // Start and Stop are offered only where they make sense

@@ -15,9 +15,7 @@
   var describe = hl.activityText ? hl.activityText.describe : function (e) { return hl.plain(e && e.action, 100); };
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
   function two(n) { return (n < 10 ? '0' : '') + n; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
 
   // sourceOf: the filter named by the URL, or "All" for anything that is not one of the sources. Without a list
   // (the nav has not answered yet) a plain name is taken provisionally and checked once the list is known.
@@ -30,7 +28,7 @@
   // sourcesFromNav: the entries of /_nav.json that can have activity, in nav order.
   function sourcesFromNav(nav) {
     var out = [];
-    arr(nav).forEach(function (it) {
+    hl.arr(nav).forEach(function (it) {
       var label = it && typeof it.label === 'string' ? hl.plain(it.label, 40) : '';
       if (label && NOT_SOURCES.indexOf(label) < 0 && out.indexOf(label) < 0) { out.push(label); }
     });
@@ -75,15 +73,15 @@
     var now = opts.now || function () { return Date.now(); };
     var getParam = opts.getParam || function (k) { return hl.queryParam(k); };
     var setParam = opts.setParam || function (k, v) { hl.setQueryParam(k, v); };
-    var st = { source: sourceOf(getParam('source'), opts.sources), sources: arr(opts.sources).slice(), seen: [],
-      data: null, failed: false, token: 0, chips: [], shown: '' };
+    var st = { source: sourceOf(getParam('source'), opts.sources), sources: hl.arr(opts.sources).slice(), seen: [],
+      data: null, failed: false, navFailed: false, token: 0, chips: [], shown: '' };
 
     // names: the chips that would match something: the sources the nav lists, plus any source an entry has
-    // come from, plus the one chosen now.
+    // come from, plus the one chosen now, unless the nav failed and so nothing vouches for it.
     function names() {
       var out = ['All'];
       st.sources.concat(st.seen).forEach(function (n) { if (out.indexOf(n) < 0) { out.push(n); } });
-      if (out.indexOf(st.source) < 0) { out.push(st.source); }
+      if (out.indexOf(st.source) < 0 && !st.navFailed) { out.push(st.source); }
       return out;
     }
 
@@ -91,7 +89,11 @@
       var list = names();
       if (list.join('\n') !== st.shown) {
         st.shown = list.join('\n');
-        clear(els.chips);
+        // A rebuild would drop focus from the chip that has it: remember which, and focus its replacement.
+        var ae = typeof document !== 'undefined' ? document.activeElement : null;
+        var focused = null;
+        st.chips.forEach(function (c) { if (ae && c.el === ae) { focused = c.name; } });
+        hl.clear(els.chips);
         st.chips = list.map(function (name) {
           var b = hl.el('button', 'chip', name);
           b.setAttribute('type', 'button');
@@ -99,6 +101,7 @@
           els.chips.appendChild(b);
           return { name: name, el: b };
         });
+        st.chips.forEach(function (c) { if (c.name === focused) { c.el.focus(); } });
       }
       st.chips.forEach(function (c) {
         var on = c.name === st.source;
@@ -109,7 +112,7 @@
 
     function render() {
       var data = st.data;
-      var entries = arr(data && data.entries).filter(function (e) { return e; });
+      var entries = hl.arr(data && data.entries).filter(function (e) { return e; });
       entries.forEach(function (e) {
         var src = hl.plain(e.source, 100);
         if (src && st.seen.indexOf(src) < 0) { st.seen.push(src); }
@@ -130,7 +133,7 @@
         els.emptytext.textContent = t[1];
       }
       els.table.hidden = entries.length === 0;
-      clear(els.rows);
+      hl.clear(els.rows);
       var at = now();
       entries.forEach(function (e) {
         var tr = hl.el('tr');
@@ -140,6 +143,17 @@
         tr.appendChild(hl.el('td', null, describe(e)));
         els.rows.appendChild(tr);
       });
+    }
+
+    // dropUnconfirmed: with no nav to check against, a source chosen by the URL stands only if an answer shows
+    // entries from it. Returns the new read, or undefined when the choice stands or no answer has come yet.
+    function dropUnconfirmed() {
+      if (!st.navFailed || !st.data || st.source === 'All' || st.seen.indexOf(st.source) >= 0) { return undefined; }
+      st.source = 'All';
+      setParam('source', '');
+      st.data = null;
+      render();
+      return ctl.refresh();
     }
 
     var ctl = {
@@ -156,6 +170,7 @@
           st.data = data || {};
           st.failed = false;
           render();
+          return dropUnconfirmed();
         }, function () {
           if (token !== st.token) { return; }
           st.failed = true;
@@ -164,7 +179,7 @@
       },
       // setSources gives the sources the nav lists. A source chosen by the URL that is not one of them is dropped.
       setSources: function (list) {
-        st.sources = arr(list).slice();
+        st.sources = hl.arr(list).slice();
         if (st.source !== 'All' && names().indexOf(st.source) >= 0 && st.sources.indexOf(st.source) < 0 && st.seen.indexOf(st.source) < 0) {
           st.source = 'All';
           setParam('source', '');
@@ -174,6 +189,12 @@
         }
         render();
         return Promise.resolve();
+      },
+      // navFailed says the nav could not be read, so the chosen source cannot be checked against it.
+      navFailed: function () {
+        st.navFailed = true;
+        render();
+        return dropUnconfirmed() || Promise.resolve();
       },
       pick: function (name) {
         var next = sourceOf(name, names());
@@ -199,7 +220,7 @@
     ctl.render();
     // The chips follow the nav: a source the console does not have gets none. If the nav does not answer, the
     // chips come from the entries that arrive.
-    hl.api('GET', '/_nav.json').then(function (nav) { return ctl.setSources(sourcesFromNav(nav)); }, function () {});
+    hl.api('GET', '/_nav.json').then(function (nav) { return ctl.setSources(sourcesFromNav(nav)); }, function () { return ctl.navFailed(); });
     var poller = hl.poll(function () { return ctl.refresh(); }, POLL_MS);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) { poller.now(); } });
   }

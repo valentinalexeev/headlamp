@@ -6,9 +6,10 @@
 /* headlamp console: shared tokens and parts. No style attributes anywhere: pages use these classes (style-src 'self'). */
 .hl{--bg:#0e0f11;--surface:#15171a;--raised:#1d2024;--line:#272a2f;--line2:#3a3e45;--text:#e8eaed;--t2:#a9aeb7;--t3:#8c929c;--act:#e8eaed;--acton:#0e0f11;--warn:#e9a640;--warnbg:rgba(233,166,64,.09);--warnline:rgba(233,166,64,.38);--crit:#f26d62;--critbg:rgba(242,109,98,.09);--critline:rgba(242,109,98,.42);--ok:#62bd8e;
 color-scheme:dark;background:var(--bg);color:var(--text);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;box-sizing:border-box}
-/* Theme: no attribute on the root means System. .hl.dark and .hl.light pin one element whatever the choice. */
-.hl.light,:root[data-hl-theme="light"] .hl:not(.dark){color-scheme:light;--bg:#f6f6f7;--surface:#fff;--raised:#eff0f2;--line:#e2e4e7;--line2:#c9ccd1;--text:#16181b;--t2:#50565f;--t3:#646a74;--act:#16181b;--acton:#fff;--warn:#8a5600;--warnbg:rgba(180,115,10,.09);--warnline:rgba(150,95,0,.4);--crit:#bd261b;--critbg:rgba(200,40,28,.07);--critline:rgba(189,38,27,.4);--ok:#1b7750}
-@media (prefers-color-scheme:light){:root:not([data-hl-theme="dark"]) .hl:not(.dark){color-scheme:light;--bg:#f6f6f7;--surface:#fff;--raised:#eff0f2;--line:#e2e4e7;--line2:#c9ccd1;--text:#16181b;--t2:#50565f;--t3:#646a74;--act:#16181b;--acton:#fff;--warn:#8a5600;--warnbg:rgba(180,115,10,.09);--warnline:rgba(150,95,0,.4);--crit:#bd261b;--critbg:rgba(200,40,28,.07);--critline:rgba(189,38,27,.4);--ok:#1b7750}}
+/* Theme: no attribute on the root means System. The light tokens appear twice, as CSS cannot join an attribute rule
+   and a media rule: change both together. */
+:root[data-hl-theme="light"] .hl{color-scheme:light;--bg:#f6f6f7;--surface:#fff;--raised:#eff0f2;--line:#e2e4e7;--line2:#c9ccd1;--text:#16181b;--t2:#50565f;--t3:#646a74;--act:#16181b;--acton:#fff;--warn:#8a5600;--warnbg:rgba(180,115,10,.09);--warnline:rgba(150,95,0,.4);--crit:#bd261b;--critbg:rgba(200,40,28,.07);--critline:rgba(189,38,27,.4);--ok:#1b7750}
+@media (prefers-color-scheme:light){:root:not([data-hl-theme="dark"]) .hl{color-scheme:light;--bg:#f6f6f7;--surface:#fff;--raised:#eff0f2;--line:#e2e4e7;--line2:#c9ccd1;--text:#16181b;--t2:#50565f;--t3:#646a74;--act:#16181b;--acton:#fff;--warn:#8a5600;--warnbg:rgba(180,115,10,.09);--warnline:rgba(150,95,0,.4);--crit:#bd261b;--critbg:rgba(200,40,28,.07);--critline:rgba(189,38,27,.4);--ok:#1b7750}}
 .hl *,.hl *::before,.hl *::after{box-sizing:border-box}
 .hl a{color:inherit}
 .hl .mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;font-variant-numeric:tabular-nums}
@@ -103,6 +104,7 @@ td.act{text-align:right;width:1%}
 .drawer{position:absolute;top:0;right:0;bottom:0;width:440px;max-width:100%;background:var(--surface);border-left:1px solid var(--line2);padding:22px;display:flex;flex-direction:column;gap:18px;overflow:auto}
 @media (max-width:760px){.side{min-height:0}.sidefoot{margin-top:0}.seg button{min-height:44px}.page{padding:16px}.top,.strip{padding-left:16px;padding-right:16px}.navgroup.collapsible{display:none}}
 /* classes that replace inline styles */
+body{margin:0} /* the browser's default would show around every page, in its own colour */
 .hl{margin:0;min-height:100vh}
 .hl [hidden]{display:none!important}
 .ico{flex:none;display:block}
@@ -128,6 +130,10 @@ body:has(>nav.side[data-nc-nav]){padding-left:216px}
 .top .brand{padding-left:0}
 .top .seg{min-width:112px}
 /* top-bar search button and the command palette (a native dialog, opened with showModal) */
+/* A phone has no keyboard for the shortcut, and needs the room for the text; the icon stays beside it. */
+.search .row{flex-wrap:nowrap;min-width:0}
+.search .row span{overflow:hidden;text-overflow:ellipsis}
+@media (max-width:760px){.search .kbd{display:none}}
 button.search{font:inherit;font-size:14px;cursor:pointer;text-align:left}
 button.search:hover{border-color:var(--line2);color:var(--t2)}
 .palette{width:560px;max-width:calc(100vw - 32px);margin:12vh auto auto;padding:0;border:1px solid var(--line2);border-radius:10px;background:var(--surface);color:var(--text);overflow:hidden}
@@ -156,7 +162,15 @@ button.search:hover{border-color:var(--line2);color:var(--t2)}
 .hl .drawer{z-index:1002}
 .page.narrow{max-width:860px}
 /* an open row detail inside a table: wraps, and is not held to the row height */
+/* Cells wrap so a table fits beside a side column instead of scrolling. What must read as one piece stays whole: names,
+   actions, and mono values such as times and ports. A wrapped row grows from the 46px minimum (height acts as one). */
+.hl td{white-space:normal;padding-top:6px;padding-bottom:6px}
+.hl td.name,.hl td.act,.hl td.mono{white-space:nowrap}
+.hl td .st{white-space:normal}
 .hl td.detail{white-space:normal;height:auto;padding:12px 14px}
+/* a side column with nothing in it gives its room back, and tables in one are tighter */
+.colside:empty{display:none}
+.hl .colside th,.hl .colside td,.hl .colside td.detail{padding-left:10px;padding-right:10px}
 /* a cell whose text may wrap, in a narrow column (the recent activity beside Overview) */
 .hl td.wrap{white-space:normal;padding-top:8px;padding-bottom:8px}
 /* a status line that may run to two lines on a phone (the Overview headline) */
@@ -171,3 +185,7 @@ button.search:hover{border-color:var(--line2);color:var(--t2)}
 .input.area{height:auto;min-height:320px;padding:10px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.55;resize:vertical}
 /* a compact select in a table row (Browser sessions) */
 .input.sm{height:30px;width:auto;font-size:13px}
+/* the collapsed list of acknowledged attention items (Overview) */
+.acked summary{cursor:pointer;color:var(--t2);font-size:12.5px;font-weight:500;line-height:30px}
+.acked[open] summary{margin-bottom:9px}
+.ackchoices{display:flex;flex-wrap:wrap;align-items:center;gap:6px}

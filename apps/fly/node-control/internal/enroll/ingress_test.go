@@ -272,3 +272,32 @@ func TestUnknownKeysRejectedInNewShape(t *testing.T) {
 		}
 	})
 }
+
+func TestParseBridgeNodeAndIntermittent(t *testing.T) {
+	cfg, err := ParseIngressConfig(cfgOf(`"link_host":"l.example.com"`,
+		ing("bridge-1", "a.example.com", `"node":"machine-1.tail","intermittent":true`),
+		ing("bridge-2", "b.example.com", `"intermittent":false`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := cfg.Ingresses[0]; a.Node != "machine-1.tail" || !a.Intermittent {
+		t.Errorf("%+v", a)
+	}
+	if b := cfg.Ingresses[1]; b.Node != "" || b.Intermittent {
+		t.Errorf("%+v", b)
+	}
+	for _, tc := range []struct{ extra, want string }{
+		{`"node":""`, "node must be"},
+		{`"node":7`, "node must be"},
+		{`"node":"Has Space"`, "node must be"},
+		{`"node":"UPPER"`, "node must be"},
+		{`"intermittent":"yes"`, "intermittent must be"},
+		{`"intermittent":1`, "intermittent must be"},
+		{`"intermittent":null`, "intermittent must be"},
+	} {
+		_, err := ParseIngressConfig(cfgOf("", ing("bridge-1", "a.example.com", tc.extra)))
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "bridge-1") {
+			t.Errorf("%s: %v", tc.extra, err)
+		}
+	}
+}

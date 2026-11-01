@@ -66,6 +66,10 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 				break
 			}
 		}
+		it.AckKey = it.ID + "|overdue"
+		if v.Streak > 0 {
+			it.AckKey = it.ID + "|failing"
+		}
 		switch {
 		case v.Streak == 1:
 			it.Title = fmt.Sprintf("Task %s has failed 1 time in a row", id)
@@ -100,13 +104,28 @@ func (m *Module) sessionAttention(ctx context.Context) ([]core.AttentionItem, []
 		return nil, nil
 	}
 	m.sessMu.Lock()
-	defer m.sessMu.Unlock()
 	if now := m.now(); m.sessLines != nil && now.Sub(m.sessAt) < sessionTTL {
+		defer m.sessMu.Unlock()
 		return m.sessItems, m.sessLines
 	}
-	items, lines := m.readSessions(ctx)
-	m.sessAt, m.sessItems, m.sessLines = m.now(), items, lines
-	return items, lines
+	m.sessMu.Unlock()
+	res, err := m.sessRead.Do(ctx, "", func(c context.Context) (sessionsRead, error) {
+		items, lines := m.readSessions(c)
+		m.sessMu.Lock()
+		m.sessAt, m.sessItems, m.sessLines = m.now(), items, lines
+		m.sessMu.Unlock()
+		return sessionsRead{items, lines}, nil
+	})
+	if err != nil { // the caller left, or the read did not end: nothing is known, and nothing was cached
+		return nil, []core.SystemLine{{Name: "Sessions", Path: "/sessions", State: "unknown", Summary: "Not checked"}}
+	}
+	return res.items, res.lines
+}
+
+// sessionsRead is what one read of the runners found.
+type sessionsRead struct {
+	items []core.AttentionItem
+	lines []core.SystemLine
 }
 
 func (m *Module) readSessions(ctx context.Context) ([]core.AttentionItem, []core.SystemLine) {

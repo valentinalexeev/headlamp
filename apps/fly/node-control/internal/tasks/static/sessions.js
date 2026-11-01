@@ -12,9 +12,6 @@
   var TTL_CHOICES = [[3600, '1 hour'], [1800, '30 minutes'], [14400, '4 hours']];
   var ORDER = { running: 0, idle: 1, unavailable: 2 };
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
-  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function label(v, n) { return hl.plain(v, n || 100); }
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
 
@@ -39,10 +36,10 @@
   // sessionRows: one display row per node, running first, then idle, then unavailable, each by name.
   function sessionRows(nodes) {
     var rows = [];
-    arr(nodes).forEach(function (n) {
-      n = obj(n);
+    hl.arr(nodes).forEach(function (n) {
+      n = hl.obj(n);
       if (typeof n.id !== 'string' || !n.id) { return; }
-      var s = obj(n.session);
+      var s = hl.obj(n.session);
       var kind = !n.available ? 'unavailable' : (s.state === 'running' ? 'running' : 'idle');
       var level = kind === 'running' ? 'ok' : 'off';
       var word = kind === 'running' ? 'Running' : kind === 'unavailable' ? 'Unavailable' : 'No session';
@@ -56,32 +53,7 @@
     return rows;
   }
 
-  function button(text, iconName, cls, onClick) {
-    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
-    b.setAttribute('type', 'button');
-    var ic = iconName ? hl.icon(iconName) : null;
-    if (ic) { b.appendChild(ic); }
-    b.appendChild(hl.el('span', null, text));
-    if (onClick) { b.addEventListener('click', onClick); }
-    return b;
-  }
 
-  function focusKey(box) {
-    var ae = typeof document !== 'undefined' ? document.activeElement : null;
-    for (var n = ae; n; n = n.parentNode) {
-      if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
-    }
-    return null;
-  }
-  function refocus(box, key) {
-    if (!key) { return; }
-    var stack = [box];
-    while (stack.length) {
-      var n = stack.pop();
-      if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
-      (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
-    }
-  }
 
   // mount wires the page's elements to the data. deps (all optional): now() for the clock.
   function mount(els, deps) {
@@ -174,7 +146,7 @@
           a.setAttribute('aria-label', 'Open the session on ' + r.name);
           box.appendChild(keyed(a, 'open:' + r.id));
         }
-        var stop = keyed(button('Stop', 'stop', 'sm quiet', function () { openStop(r); }), 'stop:' + r.id);
+        var stop = keyed(hl.button('Stop', 'stop', 'sm quiet', function () { openStop(r); }), 'stop:' + r.id);
         stop.setAttribute('aria-label', 'Stop the session on ' + r.name);
         stop.disabled = st.busy;
         box.appendChild(stop);
@@ -190,7 +162,7 @@
         sel.disabled = st.busy;
         sel.addEventListener('change', function () { st.ttl[r.id] = parseInt(sel.value, 10) || DEFAULT_TTL; });
         box.appendChild(sel);
-        var start = keyed(button('Start', 'play', 'sm', function () { doStart(r); }), 'start:' + r.id);
+        var start = keyed(hl.button('Start', 'play', 'sm', function () { doStart(r); }), 'start:' + r.id);
         start.setAttribute('aria-label', 'Start a session on ' + r.name);
         start.disabled = st.busy;
         box.appendChild(start);
@@ -204,8 +176,8 @@
       if (!force && st.open && st.open.el) { return; }
       if (!force && sig === st.tableSig) { return; }
       st.tableSig = sig;
-      var fk = focusKey(els.rows);
-      clear(els.rows);
+      var fk = hl.focusKey(els.rows);
+      hl.clear(els.rows);
       st.cells = {};
       if (st.open) { st.open.cell = null; }
       rows.forEach(function (r) {
@@ -237,7 +209,7 @@
           st.open.cell = cell;
         }
       });
-      refocus(els.rows, fk);
+      hl.refocus(els.rows, fk);
     }
 
     function render(force) {
@@ -255,14 +227,14 @@
     // ----- control surface
 
     ctrl.update = function (d) {
-      st.rows = sessionRows(obj(d).nodes);
+      st.rows = sessionRows(hl.obj(d).nodes);
       st.loaded = true;
       render();
     };
     ctrl.tick = function (at) { paintTimes(typeof at === 'number' ? at : now()); };
     ctrl.reload = function () {
       return hl.api('GET', '/sessions.json').then(function (j) {
-        if (!Array.isArray(obj(j).nodes)) { throw new Error('unexpected answer'); }
+        if (!Array.isArray(hl.obj(j).nodes)) { throw new Error('unexpected answer'); }
         st.failed = '';
         ctrl.update(j);
       }).catch(function (err) {

@@ -14,14 +14,11 @@
   var DEFAULT_SUB = 'Changing a namespace edits the access policy and needs confirming.';
   var NAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
-  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function label(v, n) { return hl.plain(v, n || 100); }
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
 
   function fmtPorts(ps) {
-    return arr(ps).map(function (p) { p = obj(p); return p.lo === p.hi ? String(p.lo) : p.lo + '-' + p.hi; }).join(', ');
+    return hl.arr(ps).map(function (p) { p = hl.obj(p); return p.lo === p.hi ? String(p.lo) : p.lo + '-' + p.hi; }).join(', ');
   }
 
   // parsePorts: "9000-9010, 9100" as ranges. Throws an Error with a message fit for the form.
@@ -43,8 +40,8 @@
   // namespaceState: the word, the level and the flags of a namespace row. A change that waits for the policy
   // console and a change that was reverted are both attention (amber); only an active namespace reads as ok.
   function namespaceState(n) {
-    n = obj(n);
-    var pendingPorts = arr(n.pending_ports).length > 0;
+    n = hl.obj(n);
+    var pendingPorts = hl.arr(n.pending_ports).length > 0;
     if (n.state === 'active' && pendingPorts) { return { level: 'warn', word: 'Ports change waiting for policy confirm', waiting: true, failed: false }; }
     if (n.state === 'active') { return { level: 'ok', word: 'Active', waiting: false, failed: false }; }
     if (n.state === 'pending') { return { level: 'warn', word: 'Waiting for policy confirm', waiting: true, failed: false }; }
@@ -54,10 +51,10 @@
 
   // routeCount: public names in a namespace, from the ingress report and the manual routes, once each.
   function routeCount(state, ns) {
-    state = obj(state);
+    state = hl.obj(state);
     var seen = {};
-    arr(obj(obj(state.ingress).report).routes).concat(arr(state.routes)).forEach(function (r) {
-      r = obj(r);
+    hl.arr(hl.obj(hl.obj(state.ingress).report).routes).concat(hl.arr(state.routes)).forEach(function (r) {
+      r = hl.obj(r);
       if (r.ns === ns && r.service) { seen[r.service] = true; }
     });
     return Object.keys(seen).length;
@@ -75,32 +72,7 @@
     return [k.reusable ? 'Reusable' : 'Single use', k.ephemeral ? 'ephemeral' : '', k.used ? 'used' : '', k.expired ? 'expired' : ''].filter(Boolean).join(', ');
   }
 
-  function button(text, iconName, cls, onClick) {
-    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
-    b.setAttribute('type', 'button');
-    var ic = iconName ? hl.icon(iconName) : null;
-    if (ic) { b.appendChild(ic); }
-    b.appendChild(hl.el('span', null, text));
-    if (onClick) { b.addEventListener('click', onClick); }
-    return b;
-  }
 
-  function focusKey(box) {
-    var ae = typeof document !== 'undefined' ? document.activeElement : null;
-    for (var n = ae; n; n = n.parentNode) {
-      if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
-    }
-    return null;
-  }
-  function refocus(box, key) {
-    if (!key) { return; }
-    var stack = [box];
-    while (stack.length) {
-      var n = stack.pop();
-      if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
-      (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
-    }
-  }
 
   function copyText(text) {
     try {
@@ -132,7 +104,7 @@
     function setError(text) { els.error.textContent = text; els.error.hidden = !text; }
     // setNotice shows a line, with a link to the policy page when the change it describes waits there.
     function setNotice(text, policy) {
-      clear(els.notice);
+      hl.clear(els.notice);
       els.notice.appendChild(hl.el('span', null, text || ''));
       if (policy) {
         els.notice.appendChild(document.createTextNode(' '));
@@ -143,7 +115,7 @@
       els.notice.hidden = !text;
     }
 
-    function namespaces() { return arr(obj(st.state).namespaces).map(obj); }
+    function namespaces() { return hl.arr(hl.obj(st.state).namespaces).map(hl.obj); }
     function findNS(name) {
       var list = namespaces();
       for (var i = 0; i < list.length; i++) { if (list[i].name === name) { return list[i]; } }
@@ -154,7 +126,7 @@
 
     function renderWait() {
       var box = els.waitnote;
-      clear(box);
+      hl.clear(box);
       var waiting = namespaces().filter(function (n) { return namespaceState(n).waiting; });
       if (!waiting.length) { box.hidden = true; return; }
       box.appendChild(hl.status('warn', waiting.length === 1 ? '1 namespace change waits for policy confirm' : waiting.length + ' namespace changes wait for policy confirm'));
@@ -202,7 +174,7 @@
       run(function () {
         return hl.api('DELETE', nsUrl(n.name)).then(function (j) {
           if (st.sel === n.name) { select(''); }
-          var left = obj(j).unexpired_keys;
+          var left = hl.obj(j).unexpired_keys;
           var text = 'Deleted ' + label(n.name, 63) + '. Its access entries are removed through the policy console.';
           if (left) { text += ' ' + left + ' publisher key' + (left === 1 ? ' has' : 's have') + ' not expired yet: expire ' + (left === 1 ? 'it' : 'them') + ' under Keys.'; }
           return { notice: text, policy: true };
@@ -229,24 +201,24 @@
     // ----- namespaces table
 
     function checklistDetail(n, td) {
-      var cl = obj(n.checklist);
+      var cl = hl.obj(n.checklist);
       var box = hl.el('div', 'stack');
       box.appendChild(hl.el('h2', null, 'DNS and certificate for ' + label(n.name, 63)));
       box.appendChild(hl.el('p', 't2 small', 'Both are set up by hand, outside this console. They are not checked from here.'));
-      var recs = arr(cl.records);
+      var recs = hl.arr(cl.records);
       if (recs.length) {
         var dl = hl.el('dl', 'kv');
         recs.forEach(function (r) {
-          r = obj(r);
+          r = hl.obj(r);
           dl.appendChild(hl.el('dt', 'mono', label(r.type, 12)));
           dl.appendChild(hl.el('dd', 'mono', label(r.name, 253) + '  ->  ' + label(r.value, 300)));
         });
         box.appendChild(dl);
       }
-      arr(cl.commands).forEach(function (c) { box.appendChild(hl.el('pre', 'code', label(c, 400))); });
-      arr(cl.notes).forEach(function (t) { box.appendChild(hl.el('p', 't2 small', label(t, 400))); });
+      hl.arr(cl.commands).forEach(function (c) { box.appendChild(hl.el('pre', 'code', label(c, 400))); });
+      hl.arr(cl.notes).forEach(function (t) { box.appendChild(hl.el('p', 't2 small', label(t, 400))); });
       var row = hl.el('div', 'rowbtns start');
-      row.appendChild(keyed(button('Close', null, 'quiet', closeOpen), 'close'));
+      row.appendChild(keyed(hl.button('Close', null, 'quiet', closeOpen), 'close'));
       box.appendChild(row);
       box.addEventListener('keydown', function (ev) { if (ev && ev.key === 'Escape') { closeOpen(); } });
       td.appendChild(box);
@@ -276,7 +248,7 @@
       var save = hl.el('button', 'btn primary', 'Submit change');
       save.setAttribute('type', 'submit');
       row.appendChild(save);
-      row.appendChild(button('Cancel', null, 'quiet', closeOpen));
+      row.appendChild(hl.button('Cancel', null, 'quiet', closeOpen));
       form.appendChild(row);
       form.addEventListener('submit', function (ev) {
         if (ev && ev.preventDefault) { ev.preventDefault(); }
@@ -316,15 +288,15 @@
       var model = list.map(function (n) {
         var s = namespaceState(n);
         var ports = fmtPorts(n.ports);
-        if (arr(n.pending_ports).length) { ports += ' -> ' + fmtPorts(n.pending_ports); }
+        if (hl.arr(n.pending_ports).length) { ports += ' -> ' + fmtPorts(n.pending_ports); }
         return [label(n.name, 63), s.level, s.word, ports, routeCount(st.state, n.name), n.state, s.failed];
       });
       var sig = JSON.stringify([model, st.sel, st.open && [st.open.name, st.open.kind], st.busy]);
       if (!force && st.open && st.open.el) { return; }
       if (!force && sig === st.tableSig) { return; }
       st.tableSig = sig;
-      var fk = focusKey(els.rows);
-      clear(els.rows);
+      var fk = hl.focusKey(els.rows);
+      hl.clear(els.rows);
       if (st.open) { st.open.cell = null; }
       list.forEach(function (n, i) {
         var m = model[i];
@@ -347,12 +319,12 @@
         tr.appendChild(hl.el('td', 't2', String(m[4])));
         var dns = hl.el('td', 't2');
         if (s.failed) { dns.className = 't3'; dns.textContent = 'Not checked'; }
-        else { dns.appendChild(keyed(button('Show steps', null, 'sm quiet', function () { openPanel(n, 'dns'); }), 'dns:' + m[0])); }
+        else { dns.appendChild(keyed(hl.button('Show steps', null, 'sm quiet', function () { openPanel(n, 'dns'); }), 'dns:' + m[0])); }
         tr.appendChild(dns);
         var act = hl.el('td', 'act');
         var box = hl.el('div', 'rowbtns');
         var add = function (key, text, icon, fn) {
-          var b = keyed(button(text, icon, 'sm quiet', fn), key + ':' + m[0]);
+          var b = keyed(hl.button(text, icon, 'sm quiet', fn), key + ':' + m[0]);
           b.disabled = st.busy;
           box.appendChild(b);
         };
@@ -373,7 +345,7 @@
           st.open.cell = cell;
         }
       });
-      refocus(els.rows, fk);
+      hl.refocus(els.rows, fk);
     }
 
     // ----- publisher keys
@@ -396,7 +368,7 @@
       if (!name) { return Promise.resolve(); }
       return hl.api('GET', nsUrl(name) + '/keys').then(function (j) {
         if (st.sel !== name) { return; }
-        st.keys = arr(obj(j).keys).map(obj);
+        st.keys = hl.arr(hl.obj(j).keys).map(hl.obj);
         st.keysLoaded = true;
         st.keysFailed = '';
         renderKeys();
@@ -418,16 +390,16 @@
       var sigAdd = 'x';
       if (st.keyAddSig !== sigAdd) {
         st.keyAddSig = sigAdd;
-        clear(els.keyaddslot);
-        els.keyaddslot.appendChild(keyed(button('Mint key', 'key', 'sm', function () { openMintPanel(); }), 'mint'));
+        hl.clear(els.keyaddslot);
+        els.keyaddslot.appendChild(keyed(hl.button('Mint key', 'key', 'sm', function () { openMintPanel(); }), 'mint'));
       }
       var model = st.keys.map(function (k) { return [k.id, k.expiration, k.expired, k.reusable, k.ephemeral, k.used]; });
       var sig = JSON.stringify([st.sel, model, st.keyOpen, st.keysLoaded, st.busy]);
       if (!force && st.keyOpen !== null && st.keyEl) { return; }
       if (!force && sig === st.keySig) { return; }
       st.keySig = sig;
-      var fk = focusKey(els.keyrows);
-      clear(els.keyrows);
+      var fk = hl.focusKey(els.keyrows);
+      hl.clear(els.keyrows);
       st.keyCell = null;
       if (st.keys.length === 0) {
         var tr0 = hl.el('tr');
@@ -443,7 +415,7 @@
         tr.appendChild(hl.el('td', 't2', keyFlags(k)));
         var act = hl.el('td', 'act');
         if (!k.expired) {
-          var b = keyed(button('Expire', 'ban', 'sm quiet', function () { openExpire(k); }), 'expire:' + k.id);
+          var b = keyed(hl.button('Expire', 'ban', 'sm quiet', function () { openExpire(k); }), 'expire:' + k.id);
           b.disabled = st.busy;
           act.appendChild(b);
         }
@@ -458,7 +430,7 @@
           st.keyCell = cell;
         }
       });
-      refocus(els.keyrows, fk);
+      hl.refocus(els.keyrows, fk);
     }
 
     function closeExpire() { st.keyOpen = null; st.keyEl = null; renderKeys(true); }
@@ -526,7 +498,7 @@
       var submit = hl.el('button', 'btn primary', 'Mint key');
       submit.setAttribute('type', 'submit');
       btns.appendChild(submit);
-      btns.appendChild(button('Cancel', null, 'quiet', closeMintPanel));
+      btns.appendChild(hl.button('Cancel', null, 'quiet', closeMintPanel));
       p.root.appendChild(btns);
       p.root.addEventListener('keydown', function (ev) { if (ev && ev.key === 'Escape') { closeMintPanel(); } });
       p.root.addEventListener('submit', function (ev) {
@@ -547,7 +519,7 @@
         submit.disabled = true;
         hl.api('POST', nsUrl(name) + '/keys', body).then(function (j) {
           p.saving = false;
-          var key = typeof obj(j).key === 'string' ? j.key : '';
+          var key = typeof hl.obj(j).key === 'string' ? j.key : '';
           closeMintPanel();
           // Shown even when the selection moved on meanwhile: the panel names its namespace, and the key is not lost.
           if (key) { showSecret(key, name); }
@@ -580,7 +552,7 @@
       note.hidden = true;
       root.appendChild(note);
       var row = hl.el('div', 'rowbtns start');
-      var cp = button('Copy key', 'copy', 'primary', function () {
+      var cp = hl.button('Copy key', 'copy', 'primary', function () {
         copy(box.textContent).then(function (ok) {
           if (ok) {
             var span = cp.children[cp.children.length - 1];
@@ -595,7 +567,7 @@
       });
       row.appendChild(cp);
       var secret = { root: root, box: box, ns: ns };
-      row.appendChild(button('Done', null, 'quiet', function () { clearSecret(secret); }));
+      row.appendChild(hl.button('Done', null, 'quiet', function () { clearSecret(secret); }));
       root.appendChild(row);
       els.side.appendChild(root);
       st.secrets.push(secret);
@@ -648,7 +620,7 @@
       var submit = hl.el('button', 'btn primary', 'Submit change');
       submit.setAttribute('type', 'submit');
       btns.appendChild(submit);
-      btns.appendChild(button('Cancel', null, 'quiet', closeAddPanel));
+      btns.appendChild(hl.button('Cancel', null, 'quiet', closeAddPanel));
       p.root.appendChild(btns);
       p.root.addEventListener('keydown', function (ev) { if (ev && ev.key === 'Escape') { closeAddPanel(); } });
       p.root.addEventListener('submit', function (ev) {
@@ -685,7 +657,7 @@
     function renderAdd() {
       if (st.addDone) { return; }
       st.addDone = true;
-      els.addslot.appendChild(keyed(button('Add namespace', 'plus', '', function () { openAddPanel(); }), 'add'));
+      els.addslot.appendChild(keyed(hl.button('Add namespace', 'plus', '', function () { openAddPanel(); }), 'add'));
     }
 
     function render(force) {
@@ -706,7 +678,7 @@
     }
 
     ctrl.update = function (d) {
-      st.state = obj(d);
+      st.state = hl.obj(d);
       st.loaded = true;
       if (st.sel && !findNS(st.sel)) { select(''); }
       render();

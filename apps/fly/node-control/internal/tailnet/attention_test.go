@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,6 +69,13 @@ func TestTailnetAttentionAPIKeyExpiry(t *testing.T) {
 			}
 			if !strings.Contains(it.Detail, "rotate-headscale-api-key.sh") {
 				t.Errorf("the detail must carry the rotation hint: %q", it.Detail)
+			}
+			want := "tailnet-api-key|expiring" // however many days are left
+			if tc.wantTitle == "has expired" {
+				want = "tailnet-api-key|expired"
+			}
+			if it.AckKey != want {
+				t.Errorf("key %q, want %q", it.AckKey, want)
 			}
 		})
 	}
@@ -221,5 +230,111 @@ func TestTailnetAttentionHidesTheKeyFromOtherViewers(t *testing.T) {
 	items, lines, err := m.Attention(context.Background(), "bob@")
 	if !errors.Is(err, core.ErrNotVisible) || len(items) != 0 || len(lines) != 0 {
 		t.Fatalf("anyone else must not: %+v %+v %v", items, lines, err)
+	}
+}
+
+func TestTailnetAttentionPollsShareOneExpiryRead(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	var calls atomic.Int32
+	entered, release := make(chan struct{}, 8), make(chan struct{})
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		calls.Add(1)
+		entered <- struct{}{}
+		<-release
+		return now.Add(24 * time.Hour), nil
+	})).(*module)
+	m.now = func() time.Time { return now }
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if items, _, err := m.Attention(context.Background(), "alice@"); err != nil || len(items) != 1 {
+				t.Errorf("%+v %v", items, err)
+			}
+		}()
+	}
+	<-entered
+	time.Sleep(50 * time.Millisecond) // let the others arrive
+	close(release)
+	wg.Wait()
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("concurrent polls read the expiry %d times, want 1", n)
+	}
+}
+
+// A poll that goes away mid-read says nothing about the key, so the next poll must not inherit it as a failure.
+func TestTailnetAttentionCancelledReadIsNotCached(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	entered, release := make(chan struct{}, 8), make(chan struct{})
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(ctx context.Context) (time.Time, error) {
+		entered <- struct{}{}
+		select {
+		case <-release:
+			return now.Add(24 * time.Hour), nil
+		case <-ctx.Done():
+			return time.Time{}, ctx.Err()
+		}
+	})).(*module)
+	m.now = func() time.Time { return now }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.Attention(ctx, "alice@")
+		close(done)
+	}()
+	<-entered
+	cancel()
+	<-done
+	close(release)
+
+	items, _, err := m.Attention(context.Background(), "alice@")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("the warning is missing after a cancelled read: %+v %v", items, err)
+	}
+}
+
+func TestTailnetAttentionRefusedKeyKeepsItsSince(t *testing.T) {
+	first := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	now := first
+	refuse := true
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		if refuse {
+			return time.Time{}, &headscale.APIError{Status: 401, Message: "Unauthorized"}
+		}
+		return now.Add(90 * 24 * time.Hour), nil
+	})).(*module)
+	m.now = func() time.Time { return now }
+	since := func() time.Time {
+		t.Helper()
+		items, _, _ := m.Attention(context.Background(), "a")
+		if len(items) != 1 || !strings.Contains(items[0].Title, "is refused") {
+			t.Fatalf("want a refused item, got %+v", items)
+		}
+		return items[0].Since
+	}
+	if got := since(); !got.Equal(first) {
+		t.Fatalf("since %v, want the first refusal %v", got, first)
+	}
+	now = now.Add(30 * time.Second) // a poll, on the cached refusal
+	if got := since(); !got.Equal(first) {
+		t.Fatalf("a poll moved since to %v", got)
+	}
+	now = now.Add(5 * time.Minute) // past the cache, refused again
+	if got := since(); !got.Equal(first) {
+		t.Fatalf("another refused read moved since to %v", got)
+	}
+
+	// a key that works again ends it: the next refusal is a new one
+	refuse = false
+	now = now.Add(5 * time.Minute)
+	if items, _, _ := m.Attention(context.Background(), "a"); len(items) != 0 {
+		t.Fatalf("a working key raises nothing: %+v", items)
+	}
+	refuse = true
+	now = now.Add(11 * time.Minute)
+	if got := since(); !got.Equal(now) {
+		t.Fatalf("since %v, want the new refusal %v", got, now)
 	}
 }

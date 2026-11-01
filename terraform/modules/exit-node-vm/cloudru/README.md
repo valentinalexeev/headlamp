@@ -1,18 +1,21 @@
 # exit-node-vm/cloudru
 
-A tailnet exit node on a **Cloud.ru Evolution** VM (the former SberCloud): subnet, security group (inbound only
-tailscale's UDP port, optional SSH), public IP, boot disk, network interface and the VM itself.
+A tailnet exit node on a **Cloud.ru Evolution** VM (the former SberCloud). The module creates these resources: subnet,
+security group (inbound only tailscale's UDP port, optional SSH), public IP, boot disk, network interface and the VM itself.
 
 **Status:** schema-validated against provider `cloudru/cloud` v2.1.5 (`terraform validate`). It has **not been
-applied against a live Cloud.ru account**, so check the first `terraform plan`/`apply` carefully. Points the docs
-leave open: whether `cloud_init_userdata` is base64 (it follows Cloud.ru's guide and base64-encodes), which
-`image_metadata` an image needs, and the exact flavor/disk-type names in your zone.
+applied against a live Cloud.ru account**. Check the first `terraform plan` and `terraform apply` carefully.
+The Cloud.ru docs leave these points open:
+
+- Whether `cloud_init_userdata` is base64. The module follows the Cloud.ru guide and encodes it in base64.
+- Which `image_metadata` an image needs.
+- The exact flavor and disk-type names in your zone.
 
 ## Provider
 
-The provider is not on the public Terraform registry. Install it through Cloud.ru's network mirror or as a local
-plugin ([quick start](https://cloud.ru/docs/terraform-evolution/ug/topics/quickstart)) and configure it in your root
-stack (credentials from a service account key, e.g. via the `AUTH_KEY_ID` / `AUTH_SECRET` env vars):
+The provider is not on the public Terraform registry. Install it from the network mirror of Cloud.ru, or as a local
+plugin ([quick start](https://cloud.ru/docs/terraform-evolution/ug/topics/quickstart)). Configure it in your root
+stack. The credentials come from a service account key, for example through the `AUTH_KEY_ID` and `AUTH_SECRET` env vars:
 
 ```hcl
 provider "cloudru" {
@@ -20,7 +23,7 @@ provider "cloudru" {
 }
 ```
 
-The provider's schema changed between minor versions, so `versions.tf` pins `~> 2.1.5`.
+The schema of the provider changed between minor versions, so `versions.tf` pins `~> 2.1.5`.
 
 ## Usage
 
@@ -38,17 +41,19 @@ module "node" {
 
 ## Tailscale bootstrap
 
-`bootstrap_tailscale` defaults to **false**: hosts in restricted networks often cannot reach `tailscale.com` /
-`pkgs.tailscale.com`, so cloud-init does not try. Instead run the Ansible `tailscale` role (it downloads the `.deb`
-on the control host and copies it over) against `module.node.external_ip`, which needs SSH from your admin address
-(`admin_ssh_cidr`) for that first run. Once the node is on the tailnet you can drop `admin_ssh_cidr`. Set
+`bootstrap_tailscale` defaults to **false**. Hosts in restricted networks often cannot reach `tailscale.com` and
+`pkgs.tailscale.com`, so cloud-init does not try. Instead, run the Ansible `tailscale` role against `module.node.external_ip`.
+The role downloads the `.deb` on the control host and copies it over. That first run needs SSH from your admin address
+(`admin_ssh_cidr`).
+
+When the node is on the tailnet, you can drop `admin_ssh_cidr`. Set
 `bootstrap_tailscale = true` (plus `headscale_login_server`, `tailscale_authkey`) only if the VM can reach those hosts.
 
 ## Preemptible VMs
 
-Cloud.ru Evolution's provider exposes no preemptible/spot option as of v2.1.5, so this node is a regular VM.
+As of v2.1.5, the Cloud.ru Evolution provider has no preemptible or spot option, so this node is a regular VM.
 
 ## Replacing the VM
 
-`cloud_init_userdata` is ignored after creation (it only runs on first boot). Redeploy deliberately with
+Terraform ignores `cloud_init_userdata` after creation, because it runs only on first boot. Redeploy on purpose with
 `terraform apply -replace='module.<name>.cloudru_evolution_compute_vm.this'`.

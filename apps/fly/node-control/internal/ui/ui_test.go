@@ -3,8 +3,10 @@ package ui
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -45,6 +47,17 @@ func TestHandlerServesAssets(t *testing.T) {
 	for _, path := range []string{"/_ui/nothing.js", "/_ui/", "/_ui/fonts/", "/_ui/../ui.go", "/_ui/fonts/OFL.txt/x"} {
 		if rec := get(path); rec.Code != http.StatusNotFound {
 			t.Errorf("%s = %d, want 404", path, rec.Code)
+		}
+	}
+}
+
+func TestHeadCarriesContentLength(t *testing.T) {
+	for _, path := range []string{"/_ui/hl.js", "/_ui/fonts/ibm-plex-sans-latin-400-normal.woff2"} {
+		size := strconv.Itoa(get(path).Body.Len())
+		rec := httptest.NewRecorder()
+		Handler().ServeHTTP(rec, httptest.NewRequest("HEAD", path, nil))
+		if rec.Code != 200 || rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != size {
+			t.Errorf("%s: %d, %d bytes of body, Content-Length %q, want %s", path, rec.Code, rec.Body.Len(), rec.Header().Get("Content-Length"), size)
 		}
 	}
 }
@@ -177,6 +190,52 @@ func TestIconPathsUseAbsoluteMoves(t *testing.T) {
 	for name, d := range iconPaths {
 		if strings.Contains(d[1:], "m") {
 			t.Errorf("%s: relative move after the first command: %q", name, d)
+		}
+	}
+}
+
+// The browser's default body margin shows white around every page, whichever theme is on.
+// Table text wraps, or a table beside a side column scrolls sideways with room to spare.
+func TestTableCellsWrap(t *testing.T) {
+	css, err := os.ReadFile("static/hl.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), ".hl td{white-space:normal") {
+		t.Error("hl.css must let table cells wrap")
+	}
+}
+
+func TestBodyMarginIsReset(t *testing.T) {
+	css, err := os.ReadFile("static/hl.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), "body{margin:0}") {
+		t.Error("hl.css must reset the body margin")
+	}
+}
+
+func TestSearchBoxKeepsItsIconBesideTheText(t *testing.T) {
+	css, err := os.ReadFile("static/hl.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), ".search .row{flex-wrap:nowrap") {
+		t.Error(".row wraps, so without this the icon drops above the text on a narrow screen")
+	}
+}
+
+// The wrap classes exist so that long text breaks onto a second line on a phone instead of running off the page. Each
+// is a rule that undoes the nowrap a table cell or status line has by default.
+func TestWrapClassesAllowTextToBreak(t *testing.T) {
+	css, err := os.ReadFile("static/hl.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{".hl td.wrap{white-space:normal", ".hl .st.wrap{white-space:normal"} {
+		if !strings.Contains(string(css), rule) {
+			t.Errorf("hl.css lacks %q", rule)
 		}
 	}
 }

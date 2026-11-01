@@ -93,9 +93,25 @@ func TestNodeActionsWhoIsFailureAndLogFailure(t *testing.T) {
 	if len(lg.entries) != 1 || lg.entries[0].Actor != "unknown" {
 		t.Fatalf("entries = %+v", lg.entries)
 	}
-	lg.err = errors.New("disk full")
+	// A fresh handler with a captured logger, so the line a failed write leaves behind can be read.
+	var buf bytes.Buffer
+	lg = &recLog{err: errors.New("disk full")}
+	h = auditHandler(t, whoStub{login: "operator@example.net"}, slog.New(slog.NewTextHandler(&buf, nil)),
+		func() core.AuditLog { return lg }, map[string]Provider{"yandex": okProvider()})
 	if rec := do(h, "POST", "/nodes/up/start"); rec.Code != 200 {
 		t.Fatalf("a failing log failed the action: %d", rec.Code)
+	}
+	out := buf.String()
+	for _, frag := range []string{"level=ERROR", `msg="audit log write failed"`, "actor=operator@example.net", "action=node.start", `detail="up: ok"`, "error_type=*errors.errorString"} {
+		if !strings.Contains(out, frag) {
+			t.Errorf("the error line %q lacks %q", out, frag)
+		}
+	}
+	if strings.Contains(out, "disk full") {
+		t.Errorf("the line carries the error text, which may hold detail: %q", out)
+	}
+	if len(lg.entries) != 0 {
+		t.Errorf("entries = %+v", lg.entries)
 	}
 }
 

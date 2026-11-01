@@ -34,11 +34,17 @@ func (m *module) Attention(ctx context.Context, login string) ([]core.AttentionI
 		m.mu.Unlock()
 		switch {
 		case errors.As(err, &ae) && (ae.Status == 401 || ae.Status == 403) && (known.IsZero() || known.After(m.now())):
+			m.mu.Lock()
+			if m.refused.IsZero() {
+				m.refused = m.now()
+			}
+			since := m.refused
+			m.mu.Unlock()
 			return []core.AttentionItem{{
-				ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting,
+				ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting, AckKey: "tailnet-api-key|refused",
 				Title:  "The headscale API key is refused",
 				Detail: "The tailnet status line stops until it is replaced. Rotate it with scripts/rotate-headscale-api-key.sh.",
-				Since:  m.now(),
+				Since:  since,
 			}}, nil, nil
 		case !known.IsZero():
 			at = known
@@ -52,8 +58,9 @@ func (m *module) Attention(ctx context.Context, login string) ([]core.AttentionI
 	if left > keyWarn {
 		return nil, nil, nil
 	}
-	title := "The headscale API key has expired"
+	title, key := "The headscale API key has expired", "tailnet-api-key|expired"
 	if left > 0 {
+		key = "tailnet-api-key|expiring"
 		days := int(left / (24 * time.Hour))
 		title = fmt.Sprintf("The headscale API key expires in %d %s", days, plural(days, "day", "days"))
 		if days == 0 {
@@ -61,7 +68,7 @@ func (m *module) Attention(ctx context.Context, login string) ([]core.AttentionI
 		}
 	}
 	return []core.AttentionItem{{
-		ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting, Title: title,
+		ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting, Title: title, AckKey: key,
 		Detail: "The tailnet status line stops when it does. Rotate it with scripts/rotate-headscale-api-key.sh.",
 		Since:  at.Add(-keyWarn),
 	}}, nil, nil
@@ -87,14 +94,19 @@ func (m *module) keyExpiry(ctx context.Context) (time.Time, error) {
 	}
 	m.mu.Unlock()
 
-	at, err := m.expiry(ctx) // the network call runs without the lock
-	m.mu.Lock()
-	m.expAt, m.expSet, m.expV, m.expErr = m.now(), true, at, err
-	if err == nil {
-		m.lastKey = at
-	}
-	m.mu.Unlock()
-	return at, err
+	// The network call runs without the lock, once for all who wait. A caller that leaves is not a failed read, so
+	// its leaving is not cached.
+	return m.expRead.Do(ctx, "", func(c context.Context) (time.Time, error) {
+		at, err := m.expiry(c)
+		m.mu.Lock()
+		m.expAt, m.expSet, m.expV, m.expErr = m.now(), true, at, err
+		if err == nil {
+			m.lastKey = at
+			m.refused = time.Time{}
+		}
+		m.mu.Unlock()
+		return at, err
+	})
 }
 
 func plural(n int, one, many string) string {

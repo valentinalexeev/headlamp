@@ -7,6 +7,7 @@ import (
 	"embed"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -55,8 +56,9 @@ func Handler() http.Handler {
 		h.Set("Content-Type", ctype)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Cache-Control", "no-store")
+		h.Set("Content-Length", strconv.Itoa(len(body)))
 		if r.Method == http.MethodGet {
-			w.Write(body)
+			_, _ = w.Write(body) // a failed write is a client that left: nothing is left to tell it
 		}
 	})
 }

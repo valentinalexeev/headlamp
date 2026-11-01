@@ -270,3 +270,11 @@ func TestPagesLoadTheSharedActivityText(t *testing.T) {
 		}
 	}
 }
+
+// The headline may run to two lines on a phone: it needs the wrap class, which the stylesheet defines (see the ui tests).
+func TestOverviewHeadlineMayWrap(t *testing.T) {
+	m := regexp.MustCompile(`<div class="([^"]*)"><span[^>]*id="glyph"`).FindSubmatch(pageHTML)
+	if m == nil || !strings.Contains(" "+string(m[1])+" ", " wrap ") {
+		t.Errorf("the headline line has no wrap class: %q", m)
+	}
+}

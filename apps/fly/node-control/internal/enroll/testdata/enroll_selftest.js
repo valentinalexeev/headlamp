@@ -21,6 +21,8 @@ class FakeNode {
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   focus() { this.focused = true; global.document.activeElement = this; }
   select() { this.selected = true; }
+  // a tag name only, which is all the page asks for
+  querySelector(tag) { return walk(this).slice(1).find((n) => n.tag === tag) || null; }
   set innerHTML(v) { throw new Error('innerHTML must not be used'); }
   set outerHTML(v) { throw new Error('outerHTML must not be used'); }
   click() { if (this.disabled) { return; } fire(this, 'click'); }
@@ -181,6 +183,28 @@ const fieldValue = (els, label) => {
     assert.strictEqual(posts.length, 1);
     assert.deepStrictEqual(JSON.parse(posts[0].body), { fingerprint: '7e3b91c40fa2d86e15b7c3409a1d62ef', node_id: 21 });
     assert.deepStrictEqual(went, ['/nodes']);
+  }
+
+  // changedIdentityNamesWhatDiffers: the sentence says which values differ, not always the fingerprint
+  {
+    const sentence = async (extra) => {
+      fetchReply = () => json({ ingresses: [bridge(Object.assign({ approval: 'changed', approved: true, approved_fingerprint: '7e3b91c40fa2d86e15b7c3409a1d62ef', approved_node_id: 21, approved_machine_key_prefix: 'mkey:4f1a9c02e7' }, extra))] });
+      const els = approveEls();
+      await approve.mount(els, {}).load('bridge-3');
+      return els.changed.textContent;
+    };
+    const FP = { approved_fingerprint: '1111aaaa' }, NODE = { approved_node_id: 18 }, MK = { approved_machine_key_prefix: 'mkey:0000000000' };
+    assert.ok(/bridge-3 was approved with a different node\. /.test(await sentence(NODE)));
+    assert.ok(/bridge-3 was approved with a different machine key\. /.test(await sentence(MK)));
+    assert.ok(/bridge-3 was approved with a different fingerprint\. /.test(await sentence(FP)));
+    assert.ok(/a different node and machine key\. /.test(await sentence(Object.assign({}, NODE, MK))));
+    assert.ok(/a different fingerprint, node and machine key\. /.test(await sentence(Object.assign({}, FP, NODE, MK))));
+    assert.ok(!/different fingerprint/.test(await sentence(NODE)), 'the fingerprint did not change');
+    // an approval from before node pinning has nothing to compare: nothing is claimed to differ or to be listed
+    const old = await sentence({ approved_node_id: 0, approved_machine_key_prefix: '', detail: 'approval predates node pinning, approve again' });
+    assert.ok(/bridge-3 no longer matches what was approved\. /.test(old), old);
+    assert.ok(!/was approved with a different/.test(old) && !/listed next to/.test(old), old);
+    assert.ok(/treat it as compromised/.test(old));
   }
 
   // not found, approved and not approvable
@@ -470,6 +494,8 @@ const fieldValue = (els, label) => {
     assert.strictEqual(created.owner, 'jo');
     assert.strictEqual(created.expires_at, devices.endOfDay(devices.defaultExpiry(NOW)));
     assert.deepStrictEqual(JSON.parse(sent('POST', '/enroll/devices/7/links')[0].body), { ttl: 86400, max_uses: 1 });
+    // the form and its focused button are gone: focus lands on the copy button, not on the page
+    assert.strictEqual(global.document.activeElement, buttonNamed(aside, 'Copy link'), 'focus is on Copy link');
     const secrets = findAll(aside, (n) => hasClass(n, 'secret'));
     assert.deepStrictEqual(secrets.map((n) => n.textContent), [LINK, SUB]);
     const manual = findAll(aside, (n) => n.tag === 'details');
@@ -508,9 +534,14 @@ const fieldValue = (els, label) => {
     assert.strictEqual(polls[0].stopped, true, 'the poll stops once enrolled');
     assert.ok(!findAll(aside, (n) => hasClass(n, 'secret')).some((n) => n.textContent === LINK && !n.parentNode.hidden), 'the used-up link is hidden');
     // another device can be enrolled from the same panel; the finished wait does not poll again
+    const held = ctrl.state.drawer;
+    assert.strictEqual(held.link, LINK);
+    assert.strictEqual(held.subscription, SUB);
     buttonNamed(aside, 'Enrol another device').click();
     assert.ok(findAll(aside, (n) => n.tag === 'form').length === 1 && findAll(aside, (n) => n.tag === 'input')[0].value === '', 'a blank form');
     assert.strictEqual(polls.length, 1);
+    assert.strictEqual(held.link, '', 'the blank form does not keep the last link');
+    assert.strictEqual(held.subscription, '', 'nor the last subscription URL');
     // Escape closes and removes the param
     fire(aside, 'keydown', { key: 'Escape' });
     assert.ok(!drawerNode(els));
@@ -558,9 +589,16 @@ const fieldValue = (els, label) => {
     fire(findAll(aside, (n) => n.tag === 'form')[0], 'submit');
     await flush();
     assert.strictEqual(polls.length, 1);
+    const closed = z.ctrl.state.drawer;
+    assert.strictEqual(findAll(closed.aside, (n) => hasClass(n, 'secret')).length, 2);
     fire(findAll(z.els.drawer, (n) => hasClass(n, 'scrim'))[0], 'click');
     assert.ok(!drawerNode(z.els));
     assert.strictEqual(polls[0].stopped, true, 'closing the panel stops the poll');
+    // closing the panel forgets what it showed
+    assert.strictEqual(closed.link, '', 'the link is gone from the closed panel');
+    assert.strictEqual(closed.subscription, '', 'the subscription URL too');
+    assert.strictEqual(closed.linkBox, null);
+    assert.strictEqual(findAll(closed.aside, (n) => hasClass(n, 'secret')).length, 0, 'no node keeps them');
   }
 
   // the panel cannot be closed while the device is being made; an exception on the success path shows an error
@@ -629,6 +667,9 @@ const fieldValue = (els, label) => {
     assert.deepStrictEqual(findAll(aside, (n) => hasClass(n, 'secret')).map((n) => n.textContent), ['https://e.example.net/e/NL']);
     assert.strictEqual(polls.length, 1);
     assert.ok(/enrol=1/.test(replaced[replaced.length - 1]));
+    const held = ctrl.state.drawer;
+    fire(aside, 'keydown', { key: 'Escape' });
+    assert.strictEqual(held.link, '', 'a link from New link is forgotten on close as well');
   }
 
   // extendOffers30And90, no prompt()
@@ -641,6 +682,7 @@ const fieldValue = (els, label) => {
     rowBtn(els, 'phone-4', 'Extend').click();
     const panel = findAll(els.rows, (n) => hasClass(n, 'confirm'))[0];
     assert.ok(panel, 'a panel opens under the row');
+    assert.ok(/^30 days, to /.test(global.document.activeElement.textContent), 'focus lands on the first extend offer');
     const labels = findAll(panel, (n) => n.tag === 'button').map((b) => b.textContent);
     assert.ok(labels.some((l) => /^30 days, to /.test(l)) && labels.some((l) => /^90 days, to /.test(l)), labels.join('|'));
     const date = findAll(panel, (n) => n.tag === 'input')[0];
@@ -734,6 +776,8 @@ const fieldValue = (els, label) => {
     assert.ok(!/bridge-1/.test(t), 'only the bridge that lags is named');
     assert.ok(/will not take effect on bridge-2 until it catches up/.test(t));
     assert.ok(/Agent unreachable/.test(t));
+    assert.ok(/since 38 min ago/.test(t), t);
+    assert.ok(/Retrying every 5 minutes\./.test(t), t);
     const link = findAll(els.syncnote, (n) => n.tag === 'a')[0];
     assert.strictEqual(link.getAttribute('href'), '/nodes?sel=bridge-2');
     assert.strictEqual(link.textContent, 'Open bridge');

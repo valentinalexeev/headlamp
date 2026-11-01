@@ -6,9 +6,10 @@
 /* headlamp console: shared tokens and parts. No style attributes anywhere: pages use these classes (style-src 'self'). */
 .hl{--bg:#0e0f11;--surface:#15171a;--raised:#1d2024;--line:#272a2f;--line2:#3a3e45;--text:#e8eaed;--t2:#a9aeb7;--t3:#8c929c;--act:#e8eaed;--acton:#0e0f11;--warn:#e9a640;--warnbg:rgba(233,166,64,.09);--warnline:rgba(233,166,64,.38);--crit:#f26d62;--critbg:rgba(242,109,98,.09);--critline:rgba(242,109,98,.42);--ok:#62bd8e;
 color-scheme:dark;background:var(--bg);color:var(--text);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;box-sizing:border-box}
-/* Theme: no attribute on the root means System. .hl.dark and .hl.light pin one element whatever the choice. */
-.hl.light,:root[data-hl-theme="light"] .hl:not(.dark){color-scheme:light;--bg:#f6f6f7;--surface:#fff;--raised:#eff0f2;--line:#e2e4e7;--line2:#c9ccd1;--text:#16181b;--t2:#50565f;--t3:#646a74;--act:#16181b;--acton:#fff;--warn:#8a5600;--warnbg:rgba(180,115,10,.09);--warnline:rgba(150,95,0,.4);--crit:#bd261b;--critbg:rgba(200,40,28,.07);--critline:rgba(189,38,27,.4);--ok:#1b7750}
-@media (prefers-color-scheme:light){:root:not([data-hl-theme="dark"]) .hl:not(.dark){color-scheme:light;--bg:#f6f6f7;--surface:#fff;--raised:#eff0f2;--line:#e2e4e7;--line2:#c9ccd1;--text:#16181b;--t2:#50565f;--t3:#646a74;--act:#16181b;--acton:#fff;--warn:#8a5600;--warnbg:rgba(180,115,10,.09);--warnline:rgba(150,95,0,.4);--crit:#bd261b;--critbg:rgba(200,40,28,.07);--critline:rgba(189,38,27,.4);--ok:#1b7750}}
+/* Theme: no attribute on the root means System. The light tokens appear twice, as CSS cannot join an attribute rule
+   and a media rule: change both together. */
+:root[data-hl-theme="light"] .hl{color-scheme:light;--bg:#f6f6f7;--surface:#fff;--raised:#eff0f2;--line:#e2e4e7;--line2:#c9ccd1;--text:#16181b;--t2:#50565f;--t3:#646a74;--act:#16181b;--acton:#fff;--warn:#8a5600;--warnbg:rgba(180,115,10,.09);--warnline:rgba(150,95,0,.4);--crit:#bd261b;--critbg:rgba(200,40,28,.07);--critline:rgba(189,38,27,.4);--ok:#1b7750}
+@media (prefers-color-scheme:light){:root:not([data-hl-theme="dark"]) .hl{color-scheme:light;--bg:#f6f6f7;--surface:#fff;--raised:#eff0f2;--line:#e2e4e7;--line2:#c9ccd1;--text:#16181b;--t2:#50565f;--t3:#646a74;--act:#16181b;--acton:#fff;--warn:#8a5600;--warnbg:rgba(180,115,10,.09);--warnline:rgba(150,95,0,.4);--crit:#bd261b;--critbg:rgba(200,40,28,.07);--critline:rgba(189,38,27,.4);--ok:#1b7750}}
 .hl *,.hl *::before,.hl *::after{box-sizing:border-box}
 .hl a{color:inherit}
 .hl .mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;font-variant-numeric:tabular-nums}

@@ -20,7 +20,7 @@ global.window = {};
 require(path.resolve(process.argv[2]));
 const hl = global.window.hl;
 assert.ok(hl, 'window.hl is defined');
-for (const k of ['el', 'icon', 'relTime', 'fmtBytes', 'plain', 'api', 'poll', 'status', 'queryParam', 'setQueryParam', 'confirmPanel']) {
+for (const k of ['el', 'icon', 'relTime', 'fmtBytes', 'plain', 'api', 'poll', 'status', 'queryParam', 'setQueryParam', 'confirmPanel', 'arr', 'obj', 'clear', 'button', 'focusKey', 'refocus']) {
   assert.strictEqual(typeof hl[k], 'function', k);
 }
 
@@ -42,6 +42,7 @@ assert.strictEqual(hl.fmtBytes(-1), '');
 
 assert.strictEqual(hl.plain('a\u202eb\u0000c', 63), 'abc');
 assert.strictEqual(hl.plain('a\u200bb\u2066c\ufeffd', 63), 'abcd');
+assert.strictEqual(hl.plain('a\u00adb\u180ec', 63), 'abc', 'soft hyphen and Mongolian vowel separator are dropped');
 assert.strictEqual(hl.plain('abcdef', 3), 'abc');
 assert.strictEqual(hl.plain(null, 5), '');
 assert.strictEqual(hl.plain(42, 5), '42');

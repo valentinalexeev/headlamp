@@ -138,7 +138,7 @@ func renderShell(items []NavItem, actions []NavAction, login, reqPath string, no
 		navGroup(&b, ungrouped, activePath, "")
 		navGroup(&b, operate, activePath, "Operate")
 		navGroup(&b, configure, activePath, "Configure")
-		b.WriteString(`<div class="sidefoot"><div class="navlabel" id="theme-label">Theme</div>` + themeControl() + `</div></nav>`)
+		b.WriteString(`<div class="sidefoot"><div class="navlabel">Theme</div>` + themeControl() + `</div></nav>`)
 		b.WriteString(`<div class="hl shellbar">`)
 	} else {
 		b.WriteString(`<div ` + navMarker + ` class="hl shellbar">`)

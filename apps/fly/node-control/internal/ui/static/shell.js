@@ -97,7 +97,7 @@
   // onPage: this page is the given local path.
   function onPage(path) {
     var here = typeof window !== 'undefined' && window.location ? window.location.pathname : '';
-    return typeof path === 'string' && !!here && path.split('?')[0] === here;
+    return !!here && path === here;
   }
 
   function countdown(deadlineIso, nowMs) {

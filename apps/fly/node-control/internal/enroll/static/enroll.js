@@ -277,7 +277,7 @@
         var bits = [reason, since ? 'since ' + since : ''].filter(Boolean).join(', ');
         if (bits) { why.push(list.length > 1 ? hl.plain(r.name, 63) + ': ' + bits : bits); }
       });
-      var p = hl.el('p', 't2 small', 'Revoking or extending a device here will not take effect on ' + where + ' until it catches up.' + (why.length ? ' ' + why.join('; ') + '.' : ''));
+      var p = hl.el('p', 't2 small', 'Revoking or extending a device here will not take effect on ' + where + ' until it catches up.' + (why.length ? ' ' + why.join('; ') + '.' : '') + ' Retrying every 5 minutes.');
       box.appendChild(p);
       var links = hl.el('p', 'small');
       (list.length ? list : ['']).forEach(function (n, i) {

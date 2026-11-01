@@ -771,6 +771,8 @@ const fieldValue = (els, label) => {
     assert.ok(!/bridge-1/.test(t), 'only the bridge that lags is named');
     assert.ok(/will not take effect on bridge-2 until it catches up/.test(t));
     assert.ok(/Agent unreachable/.test(t));
+    assert.ok(/since 38 min ago/.test(t), t);
+    assert.ok(/Retrying every 5 minutes\./.test(t), t);
     const link = findAll(els.syncnote, (n) => n.tag === 'a')[0];
     assert.strictEqual(link.getAttribute('href'), '/nodes?sel=bridge-2');
     assert.strictEqual(link.textContent, 'Open bridge');

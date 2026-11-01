@@ -159,6 +159,11 @@ func (a *sessionAPI) list(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 	wg.Wait()
+	if r.URL.Query().Get("links") == "0" { // for a page that only shows the state: a link carries a session token
+		for i := range views {
+			views[i].URL = ""
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": views})
 }
 

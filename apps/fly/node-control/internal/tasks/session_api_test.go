@@ -453,3 +453,12 @@ func TestSessionsJSONNoTokenWhenNoSession(t *testing.T) {
 		t.Fatalf("no running session must mean no token (%d): %s", rec.Code, rec.Body)
 	}
 }
+
+func TestSessionsJSONCanLeaveOutTheLinks(t *testing.T) {
+	h := newSessHarness(t, true, sessNode("a1", "100.64.0.10", sessTag))
+	h.fake.cur["100.64.0.10"] = &SessionInfo{ID: "s1", State: "running", Port: 6080, Token: sessTok, ExpiresAt: time.Now().Add(time.Hour)}
+	rec := h.do("GET", "/sessions.json?links=0", aliceAddr, "")
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), sessTok) || !strings.Contains(rec.Body.String(), `"running"`) {
+		t.Fatalf("the state stays, the token goes (%d): %s", rec.Code, rec.Body)
+	}
+}

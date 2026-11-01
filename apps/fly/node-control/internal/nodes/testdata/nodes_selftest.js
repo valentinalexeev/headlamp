@@ -450,7 +450,7 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
       if (u === '/status') return {};
       if (u === '/tailnet/status') return null;
       if (u === '/enroll/ingresses') { const e = new Error('x'); e.status = ingStatus; throw e; }
-      if (u === '/sessions.json') { const e = new Error('x'); e.status = 403; throw e; }
+      if (u === '/sessions.json?links=0') { const e = new Error('x'); e.status = 403; throw e; }
       throw new Error('unexpected ' + u);
     };
     const reader = nodes.makeReader(api, ctrl);
@@ -458,7 +458,7 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     await reader.refresh();
     await reader.refresh();
     assert.strictEqual(calls.filter((u) => u === '/enroll/ingresses').length, 1, 'ingresses asked again after a 404');
-    assert.strictEqual(calls.filter((u) => u === '/sessions.json').length, 1, 'sessions asked again after a 403');
+    assert.strictEqual(calls.filter((u) => u === '/sessions.json?links=0').length, 1, 'sessions asked again after a 403');
     assert.strictEqual(calls.filter((u) => u === '/nodes.json').length, 3);
     assert.strictEqual(updates[2].ingresses, null);
     // any other failure is asked again

@@ -561,7 +561,7 @@
         api('GET', '/status').then(function (v) { last.status = obj(v); fresh = true; }, function () { failed = true; }),
         api('GET', '/tailnet/status').then(function (v) { last.tailnet = v; }, function () { last.tailnet = null; }),
         optional('ingresses', '/enroll/ingresses', 'ingresses', function (v) { return v.ingresses; }),
-        optional('sessions', '/sessions.json', 'sessions', function (v) { return v.nodes; })
+        optional('sessions', '/sessions.json?links=0', 'sessions', function (v) { return v.nodes; })
       ];
       return Promise.all(reads).then(function () {
         if (last.nodes) {

@@ -58,6 +58,22 @@
       (a.at ? ' ' + hl.relTime(a.at, nowMs) : '') + (ends ? ', ends ' + ends : ', until it changes') + '.';
   }
 
+  // nextAfterAck: the id of the item that takes over from one just acknowledged: the next one that has a control, else
+  // the nearest before it, else any (order is the queue as it was, active as it is now). null when none has a control.
+  function nextAfterAck(order, id, active) {
+    var live = {};
+    active.forEach(function (it) {
+      var r = rowModel(it, 0);
+      if (r.actions.length || r.ackToken) { live['$' + it.id] = true; }
+    });
+    var at = order.indexOf(id);
+    var i;
+    for (i = at + 1; i < order.length; i++) { if (live['$' + order[i]]) { return order[i]; } }
+    for (i = at - 1; i >= 0; i--) { if (live['$' + order[i]]) { return order[i]; } }
+    for (i = 0; i < active.length; i++) { if (live['$' + active[i].id]) { return active[i].id; } }
+    return null;
+  }
+
   // model: what the heading and the sentence under it say. opts: { lastIssue: ms or null, now: ms }.
   // kind is "attention", "unknown" or "clear". Unknown is never clear: a system that cannot be read
   // blocks "All clear", whatever else is true.
@@ -161,7 +177,7 @@
       activity: $('activity'), rows: $('activity-rows'),
       acked: $('acked'), ackedSummary: $('acked-summary'), ackedRows: $('acked-rows'), ackError: $('ack-error')
     };
-    var st = { data: null, activity: [], failed: false, ages: [], sig: null, ackedSig: null, ackedTexts: [], choosing: null, busy: false, ackError: '', refocus: null, focusEl: null };
+    var st = { data: null, activity: [], failed: false, ages: [], sig: null, ackedSig: null, ackedTexts: [], choosing: null, busy: false, ackError: '', after: null };
 
     function actionButton(label, iconName, name) {
       var b = hl.el('button', 'btn sm');
@@ -176,16 +192,20 @@
 
     // send posts one acknowledge or undo. The item's token says what the operator was looking at; the answer, good or
     // bad, is followed by a fresh read, as the item may have moved on.
-    function send(url, body) {
+    function send(url, body, done, failed) {
       st.busy = true;
       st.ackError = '';
       render();
       return hl.api('POST', url, body).then(function () {
         st.choosing = null;
+        st.after = done;
       }, function (err) {
         st.ackError = err && err.message ? err.message : 'That did not work. Try again.';
+        st.after = failed;
       }).then(function () {
         st.busy = false;
+        // The sidebar counts and the lamp read their own copy.
+        if (hl.shell && hl.shell.refresh) { hl.shell.refresh(); }
         return refresh();
       });
     }
@@ -194,12 +214,12 @@
       if (!r.ackToken) { return; }
       if (st.choosing !== it.id) {
         var open = actionButton('Acknowledge', 'check', 'Acknowledge: ' + r.title);
+        open.setAttribute('data-fk', 'ack:' + it.id);
         open.addEventListener('click', function () {
           st.choosing = it.id;
-          st.refocus = 'choice';
+          st.after = { key: 'choice:' + it.id };
           render();
         });
-        if (st.refocus === 'open:' + it.id) { st.refocus = null; st.focusEl = open; }
         row.appendChild(open);
         return;
       }
@@ -211,16 +231,17 @@
         b.addEventListener('click', function () {
           var body = { id: it.id, ack_token: r.ackToken };
           if (c.seconds) { body.expires_in_seconds = c.seconds; }
-          send(ACK_URL, body);
+          var order = splitItems(st.data && st.data.items).active.map(function (x) { return x.id; });
+          send(ACK_URL, body, { nextAfter: it.id, order: order }, { key: 'choice:' + it.id });
         });
-        if (i === 0 && st.refocus === 'choice') { st.refocus = null; st.focusEl = b; }
+        if (i === 0) { b.setAttribute('data-fk', 'choice:' + it.id); }
         box.appendChild(b);
       });
       var cancel = actionButton('Cancel', null, null);
       cancel.className = 'btn sm quiet';
       cancel.addEventListener('click', function () {
         st.choosing = null;
-        st.refocus = 'open:' + it.id;
+        st.after = { key: 'ack:' + it.id };
         render();
       });
       box.appendChild(cancel);
@@ -254,6 +275,7 @@
           r.actions.forEach(function (a) {
             var link = hl.el('a', 'btn sm' + (a.primary ? ' primary' : ''), a.label);
             link.setAttribute('href', a.path);
+            link.setAttribute('data-fk', 'main:' + it.id);
             row.appendChild(link);
           });
           ackControls(row, it, r);
@@ -268,7 +290,6 @@
         });
       }
       st.ages.forEach(function (a) { a.el.textContent = ageText(a.item, now); });
-      if (st.focusEl) { st.focusEl.focus(); st.focusEl = null; }
     }
 
     // renderAcked keeps the section's open or closed state: only the rows are rebuilt, and only when they change.
@@ -300,13 +321,54 @@
             row.appendChild(link);
           });
           var undo = actionButton('Undo', 'undo', 'Undo acknowledging: ' + r.title);
-          undo.addEventListener('click', function () { send(UNACK_URL, { id: it.id, ack_token: r.ackToken }); });
+          undo.setAttribute('data-fk', 'undo:' + it.id);
+          undo.addEventListener('click', function () {
+            send(UNACK_URL, { id: it.id, ack_token: r.ackToken }, { key: 'ack:' + it.id }, { key: 'undo:' + it.id });
+          });
           if (!r.ackToken) { undo.disabled = true; }
           row.appendChild(undo);
           els.ackedRows.appendChild(row);
         });
       }
       st.ackedTexts.forEach(function (a) { a.el.textContent = ackedText(a.item, now); });
+    }
+
+    // focusKey focuses the enabled control with this data-fk, if there is one. Rows are rebuilt when they change, so
+    // a control is found by what it is for, not held on to.
+    function focusKey(key) {
+      var stack = [root];
+      while (stack.length) {
+        var n = stack.pop();
+        if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return true; }
+        (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
+      }
+      return false;
+    }
+
+    function focusLost() {
+      var ae = document.activeElement;
+      return !ae || ae === document.body;
+    }
+
+    // placeFocus runs after the rows are drawn. What the operator just did decides, and failing that the heading;
+    // otherwise a control rebuilt under them by a poll gets focus back. Focus they moved elsewhere is left alone.
+    function placeFocus(kept, active) {
+      if (st.busy) { return; }
+      var a = st.after;
+      st.after = null;
+      if (!focusLost()) { return; }
+      if (!a) {
+        if (kept) { focusKey(kept); }
+        return;
+      }
+      var placed = false;
+      if (a.key) {
+        placed = focusKey(a.key);
+      } else {
+        var next = nextAfterAck(a.order, a.nextAfter, active);
+        placed = next !== null && (focusKey('main:' + next) || focusKey('ack:' + next));
+      }
+      if (!placed) { els.heading.focus(); }
     }
 
     function renderSystems(systems, showStatus) {
@@ -348,6 +410,8 @@
     function render() {
       var now = Date.now();
       var data = st.data;
+      var focused = document.activeElement;
+      var kept = focused && focused.getAttribute ? focused.getAttribute('data-fk') : null;
       if (!data) {
         if (st.failed) { els.sub.textContent = 'Could not load the status. Retrying.'; }
         return;
@@ -364,6 +428,7 @@
       els.ackError.hidden = !st.ackError;
       renderQueue(split.active, now);
       renderAcked(split.acked, now);
+      placeFocus(kept, split.active);
       renderSystems(arr(data.systems).filter(function (s) { return s; }), m.kind !== 'clear');
       renderActivity(now);
     }
@@ -394,6 +459,6 @@
   }
 
   hl.overview = { describe: describe, model: model, rowModel: rowModel, ageText: ageText, fmtWhen: fmtWhen, countdown: countdown,
-    splitItems: splitItems, ackedText: ackedText, ACK_CHOICES: ACK_CHOICES, init: init };
+    splitItems: splitItems, ackedText: ackedText, nextAfterAck: nextAfterAck, ACK_CHOICES: ACK_CHOICES, init: init };
   init();
 })();

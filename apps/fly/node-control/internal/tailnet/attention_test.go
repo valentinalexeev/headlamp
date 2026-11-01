@@ -208,3 +208,18 @@ func TestTailnetAttentionNamesAKeyRefusedAfterAGoodRead(t *testing.T) {
 		t.Fatalf("want an expired item, got %+v", items)
 	}
 }
+
+func TestTailnetAttentionHidesTheKeyFromOtherViewers(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		return now.Add(time.Hour), nil
+	}), WithKeyViewers(func(login string) bool { return login == "alice@" })).(*module)
+	m.now = func() time.Time { return now }
+	if items, _, err := m.Attention(context.Background(), "alice@"); err != nil || len(items) != 1 {
+		t.Fatalf("an admin sees the item: %+v %v", items, err)
+	}
+	items, lines, err := m.Attention(context.Background(), "bob@")
+	if !errors.Is(err, core.ErrNotVisible) || len(items) != 0 || len(lines) != 0 {
+		t.Fatalf("anyone else must not: %+v %+v %v", items, lines, err)
+	}
+}

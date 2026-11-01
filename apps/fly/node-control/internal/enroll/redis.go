@@ -28,10 +28,11 @@ import (
 //	                     enrolled_at, enrol_count, last_active (activity times; absent in older records, read as 0)
 //	<prefix>:t:<hash>    hash per one-time link, with a TTL: device_id, expires, max_uses, uses
 //	<prefix>:approvals   hash; field = ingress name, value = sealed JSON
+//	<prefix>:acks        hash; field = module/item id, value = JSON (a login, an id and a hash, like the audit log not sealed)
 //
 // Devices are never expired by Redis. A link's key expires through its TTL, and every spend also checks the stored
 // expiry, so an eviction or clock surprise cannot revive a link. Commands sent: EVAL (never EVALSHA), HGET, HGETALL,
-// HINCRBY, HSET, HDEL; the scripts also use EXISTS, HSET, HINCRBY and PEXPIRE. Nothing scans, selects a database or
+// HINCRBY, HSET, HDEL; the scripts also use EXISTS, HGET, HDEL, HSET, HINCRBY and PEXPIRE. Nothing scans, selects a database or
 // flushes. Error texts never contain the Redis URL or its password.
 type RedisStore struct {
 	rdb     *redis.Client

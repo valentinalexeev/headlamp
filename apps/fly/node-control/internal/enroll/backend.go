@@ -59,8 +59,10 @@ type Backend interface {
 	ApproveNode(name, fingerprint string, nodeID uint64, machineKey string) error
 	Unapprove(name string) error
 
-	// The audit log of operator actions (audit.go); not part of the enrolment export.
+	// The audit log of operator actions (audit.go) and the acknowledgements of attention items (ack.go); neither is part
+	// of the enrolment export.
 	core.AuditLog
+	core.AckStore
 
 	Close() error
 }

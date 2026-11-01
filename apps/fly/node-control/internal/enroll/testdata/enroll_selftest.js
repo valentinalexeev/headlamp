@@ -678,6 +678,7 @@ const fieldValue = (els, label) => {
     rowBtn(els, 'phone-4', 'Extend').click();
     const panel = findAll(els.rows, (n) => hasClass(n, 'confirm'))[0];
     assert.ok(panel, 'a panel opens under the row');
+    assert.ok(/^30 days, to /.test(global.document.activeElement.textContent), 'focus lands on the first extend offer');
     const labels = findAll(panel, (n) => n.tag === 'button').map((b) => b.textContent);
     assert.ok(labels.some((l) => /^30 days, to /.test(l)) && labels.some((l) => /^90 days, to /.test(l)), labels.join('|'));
     const date = findAll(panel, (n) => n.tag === 'input')[0];

@@ -127,12 +127,6 @@
     return Math.floor(t.getTime() / 1000);
   }
 
-  function firstButton(n) {
-    if (n.tag === 'button') { return n; }
-    var kids = n.children || [];
-    for (var i = 0; i < kids.length; i++) { var f = firstButton(kids[i]); if (f) { return f; } }
-    return null;
-  }
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
 
   // focusKey names the focused control inside box by its data-fk, so a rebuild can give focus back.
@@ -427,8 +421,7 @@
       var panel = key === 'extend' ? openExtend(d, cell) : openConfirm(d, key, cell);
       st.open.el = panel;
       if (key === 'extend') {
-        var first = firstButton(panel);
-        if (first) { first.focus(); }
+        hl.refocus(panel, 'extend:30');
       }
     }
 

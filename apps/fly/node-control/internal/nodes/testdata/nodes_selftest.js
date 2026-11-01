@@ -435,6 +435,46 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(ctrl.busyOf('exit-c'), null);
   }
 
+  // pressing Start disables it; focus must not fall to the page, in the row or in the panel
+  {
+    fetchReply = () => ({ ok: true, status: 200, body: '{}' });
+    global.window.location.search = '?sel=exit-c';
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    const d = sample();
+    d.nodes['exit-c'] = cfg(); d.status['exit-c'] = { status: 'STOPPED' }; d.tailnet['exit-c'] = tn('exit-c', false);
+    ctrl.update(d);
+    const inside = (box) => { for (let n = global.document.activeElement; n; n = n.parentNode) { if (n === box) { return true; } } return false; };
+    const rowBtn = buttonNamed(els.rows, 'Start');
+    rowBtn.focus(); rowBtn.click();
+    assert.ok(buttonNamed(els.rows, 'Start').disabled);
+    assert.ok(global.document.activeElement && global.document.activeElement.isConnected && inside(els.rows), 'row: focus stays in the row');
+    await flush();
+    ctrl.update(Object.assign(d, { status: Object.assign({}, d.status, { 'exit-c': { status: 'STOPPED' } }) }));
+    // the panel's own Start: the same
+    ctrl.refresh();
+    const panelBtn = buttonNamed(els.panel, 'Start');
+    panelBtn.focus(); panelBtn.click();
+    assert.ok(buttonNamed(els.panel, 'Start').disabled);
+    assert.ok(global.document.activeElement && global.document.activeElement.isConnected && inside(els.panel), 'panel: focus stays in the panel');
+    global.window.location.search = '';
+    ctrl.update(Object.assign(d, { status: Object.assign({}, d.status, { 'exit-c': { status: 'RUNNING' } }) }));
+  }
+
+  // Keep running puts focus back on the panel's Stop
+  {
+    global.window.location.search = '?sel=exit-a';
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    ctrl.update(sample());
+    const stopBtn = buttonNamed(els.panel, 'Stop');
+    stopBtn.focus(); stopBtn.click();
+    buttonNamed(els.panel, 'Keep running').click();
+    const now = global.document.activeElement;
+    assert.ok(now && now.isConnected && now.textContent === 'Stop' && now.tag === 'button', 'focus is on Stop again');
+    global.window.location.search = '';
+  }
+
   // Start and Stop are offered only where they make sense
   {
     for (const [status, want] of [['RUNNING', ['Stop']], ['STOPPED', ['Start']], ['STOPPING', ['Start', 'Stop']], ['error', ['Start', 'Stop']], ['unknown', []]]) {

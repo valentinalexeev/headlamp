@@ -91,6 +91,10 @@
       var list = names();
       if (list.join('\n') !== st.shown) {
         st.shown = list.join('\n');
+        // A rebuild would drop focus from the chip that has it: remember which, and focus its replacement.
+        var ae = typeof document !== 'undefined' ? document.activeElement : null;
+        var focused = null;
+        st.chips.forEach(function (c) { if (ae && c.el === ae) { focused = c.name; } });
         clear(els.chips);
         st.chips = list.map(function (name) {
           var b = hl.el('button', 'chip', name);
@@ -99,6 +103,7 @@
           els.chips.appendChild(b);
           return { name: name, el: b };
         });
+        st.chips.forEach(function (c) { if (c.name === focused) { c.el.focus(); } });
       }
       st.chips.forEach(function (c) {
         var on = c.name === st.source;

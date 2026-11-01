@@ -62,7 +62,7 @@ function fixture(over = {}) {
 const flush = () => new Promise((r) => setImmediate(r));
 const type = (ctl, v) => { ctl.input.value = v; ctl.input.fire('input', {}); };
 const labels = (ctl) => ctl.state.shown.map((e) => e.label);
-const key = (ctl, k) => { const ev = {}; ctl.input.fire('keydown', Object.assign(ev, { key: k })); };
+const key = (ctl, k, extra) => { const ev = {}; ctl.input.fire('keydown', Object.assign(ev, { key: k }, extra)); };
 
 (async () => {
   // nothing is requested before the palette opens, or while it is built
@@ -150,6 +150,18 @@ const key = (ctl, k) => { const ev = {}; ctl.input.fire('keydown', Object.assign
     key(f.ctl, 'Enter');
     assert.strictEqual(f.nav.length, 2);
     assert.strictEqual(f.ctl.isOpen(), true);
+  }
+
+  // enterDuringCompositionIsLeftToTheIme: Enter that confirms an IME candidate must not open the entry
+  {
+    const f = fixture();
+    f.ctl.open(); await flush();
+    key(f.ctl, 'Enter', { isComposing: true });
+    key(f.ctl, 'Enter', { keyCode: 229 });
+    assert.deepStrictEqual(f.nav, []);
+    assert.strictEqual(f.ctl.isOpen(), true);
+    key(f.ctl, 'Enter', { isComposing: false });
+    assert.deepStrictEqual(f.nav, ['/enroll?enrol=1']);
   }
 
   // escapeCloses

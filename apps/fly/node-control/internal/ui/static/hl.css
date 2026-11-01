@@ -129,6 +129,10 @@ body:has(>nav.side[data-nc-nav]){padding-left:216px}
 .top .brand{padding-left:0}
 .top .seg{min-width:112px}
 /* top-bar search button and the command palette (a native dialog, opened with showModal) */
+/* A phone has no keyboard for the shortcut, and needs the room for the text; the icon stays beside it. */
+.search .row{flex-wrap:nowrap;min-width:0}
+.search .row span{overflow:hidden;text-overflow:ellipsis}
+@media (max-width:760px){.search .kbd{display:none}}
 button.search{font:inherit;font-size:14px;cursor:pointer;text-align:left}
 button.search:hover{border-color:var(--line2);color:var(--t2)}
 .palette{width:560px;max-width:calc(100vw - 32px);margin:12vh auto auto;padding:0;border:1px solid var(--line2);border-radius:10px;background:var(--surface);color:var(--text);overflow:hidden}

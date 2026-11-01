@@ -306,7 +306,9 @@
       }
       return null;
     }
-    function refocus(box, key) {
+    // A control that is disabled now (a Start that was just pressed) cannot take focus; fallback names the one
+    // that gets it instead, so focus never falls to the page.
+    function refocus(box, key, fallback) {
       if (!key) { return; }
       var stack = [box];
       while (stack.length) {
@@ -314,6 +316,7 @@
         if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
         (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
       }
+      if (fallback) { refocus(box, fallback); }
     }
     function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
     // view: the row as shown. While a start or stop is unresolved the state reads Starting or Stopping.
@@ -426,7 +429,7 @@
         tr.appendChild(actCell);
         els.rows.appendChild(tr);
       });
-      refocus(els.rows, fk);
+      refocus(els.rows, fk, fk && fk.indexOf('act:') === 0 ? 'name:' + fk.slice(4) : null);
     }
 
     function renderPanel(force) {
@@ -447,7 +450,9 @@
       }
       var head = hl.el('div', 'panelhead');
       var title = hl.el('div');
-      title.appendChild(hl.el('h2', null, row.label));
+      var h2 = keyed(hl.el('h2', null, row.label), 'panel:title');
+      h2.setAttribute('tabindex', '-1');
+      title.appendChild(h2);
       title.appendChild(hl.status(row.level, row.state));
       head.appendChild(title);
       panel.appendChild(head);
@@ -508,7 +513,7 @@
         mwrap.appendChild(manageLink);
         panel.appendChild(mwrap);
       }
-      refocus(panel, fk);
+      refocus(panel, fk, fk && fk.indexOf('panel:') === 0 ? 'panel:title' : null);
     }
 
     function render() {

@@ -204,3 +204,13 @@ func TestBodyMarginIsReset(t *testing.T) {
 		t.Error("hl.css must reset the body margin")
 	}
 }
+
+func TestSearchBoxKeepsItsIconBesideTheText(t *testing.T) {
+	css, err := os.ReadFile("static/hl.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), ".search .row{flex-wrap:nowrap") {
+		t.Error(".row wraps, so without this the icon drops above the text on a narrow screen")
+	}
+}

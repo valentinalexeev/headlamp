@@ -202,8 +202,10 @@
 
   // confirmPanel builds an inline confirmation that names the object and the consequence. It
   // replaces confirm() and prompt(). opts: title, object, consequence, confirmLabel,
-  // cancelLabel, icon, into (optional parent), onConfirm, onCancel. Focus starts on Cancel.
+  // cancelLabel, icon, into (optional parent), onConfirm, onCancel. Focus starts on Cancel and, when the panel is
+  // cancelled or dismissed with Esc, goes back to the control that was focused when it opened (if that is still on the page).
   function confirmPanel(opts) {
+    var opener = typeof document !== 'undefined' ? document.activeElement : null;
     var panel = el('div', 'note crit confirm');
     panel.setAttribute('role', 'group');
     panel.setAttribute('aria-label', plain(opts.title || 'Confirm', 120));
@@ -231,10 +233,15 @@
       panel.remove();
       if (typeof cb === 'function') { cb(); }
     }
-    cancel.addEventListener('click', function () { close(opts.onCancel); });
+    function dismiss() {
+      // First, so a caller that redraws and places focus itself in onCancel has the last word.
+      if (opener && opener.isConnected && typeof opener.focus === 'function') { opener.focus(); }
+      close(opts.onCancel);
+    }
+    cancel.addEventListener('click', dismiss);
     ok.addEventListener('click', function () { close(opts.onConfirm); });
     panel.addEventListener('keydown', function (ev) {
-      if (ev && ev.key === 'Escape') { close(opts.onCancel); }
+      if (ev && ev.key === 'Escape') { dismiss(); }
     });
 
     if (opts.into) { opts.into.appendChild(panel); }

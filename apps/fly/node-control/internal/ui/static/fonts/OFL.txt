@@ -1,7 +1,7 @@
-IBM Plex Sans and IBM Plex Mono, as packaged by @fontsource/ibm-plex-sans 5.2.8 and @fontsource/ibm-plex-mono 5.2.7.
+The five embedded woff2 files (IBM Plex Sans 400, 500, 600 and IBM Plex Mono 400, 500, Latin subset), as packaged by @fontsource/ibm-plex-sans 5.2.8 and @fontsource/ibm-plex-mono 5.2.7.
 IBM Plex Mono: Copyright 2017 IBM Corp. All rights reserved.
 
-Copyright 2019 IBM Corp. All rights reserved. IBMPlexSans-Italic[wdth,wght].ttf: Copyright 2019 IBM Corp. All rights reserved.
+IBM Plex Sans: Copyright 2019 IBM Corp. All rights reserved.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

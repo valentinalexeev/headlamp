@@ -81,7 +81,7 @@
     var st = {
       state: null, pending: null, history: [], loaded: false, failed: false, busy: false, receivedAt: 0,
       loadedText: null, base: '', baseSeen: '', lastPoll: 0, loading: false, loadErr: false,
-      pendSig: null, editSig: null, countEl: null, diffText: null, gen: 0, loadSeq: 0, errKind: ''
+      pendSig: null, editSig: null, histSig: null, countEl: null, diffText: null, gen: 0, loadSeq: 0, errKind: ''
     };
     var ctrl = {};
 
@@ -218,6 +218,14 @@
     // ----- history
 
     function drawHistory() {
+      // Rebuilt only when what it shows changes (the relative times are part of that), so a poll that finds the
+      // same history leaves the rows, and the focus in them, alone.
+      var sig = JSON.stringify([st.loaded, !!st.pending, st.busy, st.history.map(function (e) {
+        e = obj(e);
+        return [e.id, e.at, e.actor, e.reason, e.state, hl.relTime(String(e.at || ''), now())];
+      })]);
+      if (sig === st.histSig) { return; }
+      st.histSig = sig;
       var fk = focusKey(els.rows);
       clear(els.rows);
       if (st.history.length === 0) {
@@ -314,6 +322,8 @@
     // load reads the state. An answer is dropped when an action began after the read started (that action reads
     // again itself) or a newer read exists, so a slow poll cannot bring back a panel the person just closed.
     function load(force) {
+      // An action in flight reads again itself when it ends; a read begun now would only show its half-done state.
+      if (st.busy) { return Promise.resolve(); }
       var gen = st.gen;
       var seq = ++st.loadSeq;
       st.loading = true;

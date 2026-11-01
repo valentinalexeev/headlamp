@@ -83,6 +83,33 @@ cancel.listeners.click();
 assert.strictEqual(cancelled, 1);
 assert.ok(panel.removed);
 
+// confirmPanel gives focus back to the control that opened it when it closes without a confirm
+{
+  const trigger = node('button');
+  trigger.isConnected = true;
+  global.document.activeElement = trigger;
+  const p1 = hl.confirmPanel({ title: 'Stop', onConfirm() {} });
+  const b1 = []; (function walk(n) { if (n.tag === 'button') b1.push(n); n.children.forEach(walk); })(p1);
+  trigger.focused = false;
+  b1[0].listeners.click();
+  assert.ok(trigger.focused, 'Cancel returns focus to the opener');
+  const p2 = hl.confirmPanel({ title: 'Stop' });
+  trigger.focused = false;
+  p2.listeners.keydown({ key: 'Escape' });
+  assert.ok(trigger.focused, 'Escape returns focus to the opener');
+  // an opener that is gone is not focused, and a confirm leaves focus to its handler
+  const p3 = hl.confirmPanel({ title: 'Stop', onConfirm() {} });
+  const b3 = []; (function walk(n) { if (n.tag === 'button') b3.push(n); n.children.forEach(walk); })(p3);
+  trigger.focused = false;
+  b3[1].listeners.click();
+  assert.ok(!trigger.focused, 'a confirm does not move focus');
+  const p4 = hl.confirmPanel({ title: 'Stop' });
+  trigger.isConnected = false; trigger.focused = false;
+  p4.listeners.keydown({ key: 'Escape' });
+  assert.ok(!trigger.focused, 'a removed opener is skipped');
+  delete global.document.activeElement;
+}
+
 // api gives up on a request that never ends, and says it may still have gone through
 (async () => {
   const pending = (url, opts) => new Promise((_, reject) => {

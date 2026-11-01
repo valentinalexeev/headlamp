@@ -12,6 +12,7 @@ function node(tag) {
     getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; },
     addEventListener(t, f) { this.listeners[t] = f; },
     click() { return this.listeners.click(); },
+    focus() { global.document.activeElement = this; },
   };
 }
 function find(n, pred, out = []) { if (pred(n)) out.push(n); n.children.forEach((c) => find(c, pred, out)); return out; }
@@ -106,6 +107,22 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
     await slow.pick('Tasks');
     release(); await first;
     assert.strictEqual(slow.state.data.entries.length, 0);
+  }
+  {
+    // chips that are rebuilt (a new source shows up in the entries) give focus back to the one that had it
+    const answers = [{ entries: [] }, { entries: [{ at: at(31, 9, 0), actor: 'a', source: 'Tasks', action: 'x', detail: '' }] }];
+    const ctl = act.create(els(), { now: () => NOW, sources: [], getParam: () => null, setParam() {}, api: async () => answers.shift() });
+    await ctl.refresh();
+    const all = ctl.state.chips[0].el;
+    all.focus();
+    await ctl.refresh();
+    assert.deepStrictEqual(ctl.state.chips.map((c) => c.name), ['All', 'Tasks']);
+    assert.notStrictEqual(ctl.state.chips[0].el, all, 'the chips were rebuilt');
+    assert.strictEqual(global.document.activeElement, ctl.state.chips[0].el, 'focus came back to All');
+    // a focus elsewhere is left alone
+    global.document.activeElement = null;
+    ctl.render();
+    assert.strictEqual(global.document.activeElement, null);
   }
 
   // chips only for what would match something

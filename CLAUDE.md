@@ -79,6 +79,8 @@ commits on top of it or attempt a rewrite on your own.
 - Versions: strict semver, one version for the repo; see `VERSIONING.md`. Mark a breaking change with `!` or a
   `BREAKING CHANGE:` footer, since releases are checked against commit subjects. Note user-visible changes under
   `Unreleased` in `CHANGELOG.md`. Never move or delete a release tag.
+- Manuals: write and update them in Simplified Technical English, to `docs/writing-manuals.md`. CI checks each manual a
+  PR changes (`make check-manuals`). Accuracy comes first: keep every value, limit, condition and warning.
 - A new or renamed image goes in `.github/components.json`, and in `docs/images.md`; CI builds from that list.
 - Verify before claiming something works: `make test-tf-run`; `shellcheck` on shell scripts;
   `terraform fmt -check && terraform validate` for module changes; `ansible-playbook

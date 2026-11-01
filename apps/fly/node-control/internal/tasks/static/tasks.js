@@ -14,9 +14,6 @@
     running: ['ok', 'Running'], queued: ['off', 'Queued']
   };
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
-  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function label(v, n) { return hl.plain(v, n || 100); }
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
   function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
@@ -69,8 +66,8 @@
   // state has a shape (the level) and a word.
   function taskRows(list) {
     var rows = [];
-    arr(list).forEach(function (t) {
-      t = obj(t);
+    hl.arr(list).forEach(function (t) {
+      t = hl.obj(t);
       if (typeof t.id !== 'string' || !t.id) { return; }
       var streak = typeof t.streak === 'number' && t.streak > 0 ? Math.floor(t.streak) : 0;
       var rank = 2, level, word;
@@ -91,32 +88,7 @@
     return rows;
   }
 
-  function button(text, iconName, cls, onClick) {
-    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
-    b.setAttribute('type', 'button');
-    var ic = iconName ? hl.icon(iconName) : null;
-    if (ic) { b.appendChild(ic); }
-    b.appendChild(hl.el('span', null, text));
-    if (onClick) { b.addEventListener('click', onClick); }
-    return b;
-  }
 
-  function focusKey(box) {
-    var ae = typeof document !== 'undefined' ? document.activeElement : null;
-    for (var n = ae; n; n = n.parentNode) {
-      if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
-    }
-    return null;
-  }
-  function refocus(box, key) {
-    if (!key) { return; }
-    var stack = [box];
-    while (stack.length) {
-      var n = stack.pop();
-      if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
-      (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
-    }
-  }
 
   // mount wires the page's elements to the data. deps (all optional): now() for the clock.
   function mount(els, deps) {
@@ -180,7 +152,7 @@
     }
 
     function runButton(r, cls, fk) {
-      var b = button(st.busy[r.id] ? 'Starting' : 'Run now', 'play', cls, function () { runNow(r.id); });
+      var b = hl.button(st.busy[r.id] ? 'Starting' : 'Run now', 'play', cls, function () { runNow(r.id); });
       b.setAttribute('aria-label', (st.busy[r.id] ? 'Starting ' : 'Run ') + r.id + (st.busy[r.id] ? '' : ' now'));
       keyed(b, fk + r.id);
       b.disabled = !!(st.busy[r.id] || r.running);
@@ -199,8 +171,8 @@
       var sig = JSON.stringify([shown, sel && sel.id]);
       if (sig === st.tableSig) { return; }
       st.tableSig = sig;
-      var fk = focusKey(els.rows);
-      clear(els.rows);
+      var fk = hl.focusKey(els.rows);
+      hl.clear(els.rows);
       st.rows.forEach(function (r, i) {
         var s = shown[i];
         var isSel = !!sel && sel.id === r.id;
@@ -225,21 +197,21 @@
         tr.appendChild(act);
         els.rows.appendChild(tr);
       });
-      refocus(els.rows, fk);
+      hl.refocus(els.rows, fk);
     }
 
     // ----- the panel of the selected task
 
     function lastFailure(runs) {
       for (var i = 0; i < runs.length; i++) {
-        var r = obj(runs[i]);
+        var r = hl.obj(runs[i]);
         if ((r.state === 'failed' || r.state === 'lost') && r.reason) { return r; }
       }
       return null;
     }
 
     function resultNode(res) {
-      var keys = Object.keys(obj(res)).sort().slice(0, MAX_RESULT_KEYS);
+      var keys = Object.keys(hl.obj(res)).sort().slice(0, MAX_RESULT_KEYS);
       if (!res) { return hl.el('span', 't3', 'None yet'); }
       if (!keys.length) { return hl.el('span', 't3', 'Empty result'); }
       var box = hl.el('div', 'stack');
@@ -253,8 +225,8 @@
       var sig = JSON.stringify(shown || null);
       if (sig === st.panelSig) { return; }
       st.panelSig = sig;
-      var fk = focusKey(els.panel);
-      clear(els.panel);
+      var fk = hl.focusKey(els.panel);
+      hl.clear(els.panel);
       if (!sel) { return; }
       var panel = hl.el('div', 'panel');
       var head = hl.el('div', 'panelhead');
@@ -286,7 +258,7 @@
       fact('Next run', sel.nextRun ? cap(when(sel.nextRun)) : (sel.running ? 'Running now' : 'Not scheduled'));
       var lastAlert = '';
       (runs || []).some(function (r) {
-        r = obj(r);
+        r = hl.obj(r);
         var word = alertWord(r.notify_outcome);
         if (!word) { return false; }
         var at = when(String(r.ended || r.started || ''));
@@ -310,7 +282,7 @@
         var table = hl.el('table');
         var tb = hl.el('tbody');
         runs.slice(0, MAX_RUNS).forEach(function (r) {
-          r = obj(r);
+          r = hl.obj(r);
           var w = RUN_WORDS[r.state] || ['off', label(r.state, 30) || 'Unknown'];
           var tr = hl.el('tr');
           var t = hl.el('td', 'mono t3', r.started ? when(String(r.started)) : '-');
@@ -322,7 +294,7 @@
           tr.appendChild(hl.el('td', 'mono t2', fmtDuration(r.duration_ms) || '-'));
           var act = hl.el('td', 'act');
           if (r.state === 'running' && typeof r.id === 'string') {
-            var c = keyed(button('Cancel', null, 'sm quiet', function () { cancelRun(sel.id, r.id); }), 'cancel:' + r.id);
+            var c = keyed(hl.button('Cancel', null, 'sm quiet', function () { cancelRun(sel.id, r.id); }), 'cancel:' + r.id);
             c.setAttribute('aria-label', 'Cancel the run on ' + label(r.node || 'the node', 100));
             act.appendChild(c);
           }
@@ -335,7 +307,7 @@
       }
       panel.appendChild(sec);
       els.panel.appendChild(panel);
-      refocus(els.panel, fk);
+      hl.refocus(els.panel, fk);
     }
 
     function renderStale() {
@@ -360,7 +332,7 @@
       if (!sel) { return Promise.resolve(); }
       var id = sel.id;
       return hl.api('GET', '/tasks/' + encodeURIComponent(id) + '/runs').then(function (j) {
-        st.runs[id] = arr(j);
+        st.runs[id] = hl.arr(j);
         st.runsFor = id;
         render();
       }, function () { /* the stale note of the list reload covers the cause; the old runs stay */ });

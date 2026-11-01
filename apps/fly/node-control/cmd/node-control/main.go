@@ -11,9 +11,11 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/enroll"
 	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/funnel"
@@ -49,20 +51,30 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		"selectel": nodes.NewSelectel(env, hc),
 		"fly":      nodes.NewFly(env, hc),
 	}
+	// Nodes takes the audit log from enrolment, and enrolment asks Nodes what is stopped: hence nm is declared first.
+	var nm interface {
+		core.Module
+		Targets(context.Context) []nodes.Target
+		StoppedNames(context.Context) map[string]bool
+	}
 	// The audit log lives in the enrolment store, which opens at Register, after nodes.New: hence a function.
-	enr := enroll.New(env, enroll.WithNodeSource(src))
+	enr := enroll.New(env, enroll.WithNodeSource(src), enroll.WithStoppedNodes(func(ctx context.Context) map[string]bool {
+		return nm.StoppedNames(ctx)
+	}))
 	audit := func() core.AuditLog {
 		if p, ok := enr.(interface{ AuditLog() core.AuditLog }); ok {
 			return p.AuditLog()
 		}
 		return nil
 	}
-	nm, ok := nodes.New(cfg, src, providers, nodes.WithAudit(audit)).(interface {
+	var ok bool
+	nm, ok = nodes.New(cfg, src, providers, nodes.WithAudit(audit)).(interface {
 		core.Module
 		Targets(context.Context) []nodes.Target
+		StoppedNames(context.Context) map[string]bool
 	})
 	if !ok {
-		return nil, errors.New("nodes module does not expose Targets")
+		return nil, errors.New("nodes module does not expose Targets and StoppedNames")
 	}
 
 	tracked := func(ctx context.Context) map[string]bool {
@@ -77,7 +89,7 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	}
 	pol := policy.New(env, hsClient)
 	mods := []core.Module{
-		tailnet.New(src, tracked, tailnet.WithKeyExpiry(hsClient.APIKeyExpiry)),
+		tailnet.New(src, tracked, tailnet.WithKeyExpiry(hsClient.APIKeyExpiry), tailnet.WithKeyViewers(keyViewers(env))),
 		nm,
 		enr,
 		pol,
@@ -95,6 +107,16 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	// Overview is last: it counts the navigation of everything before it.
 	others := slices.Clone(mods)
 	return append(mods, overview.New(func() []core.Module { return others })), nil
+}
+
+// keyViewers is who sees the headscale API key warning: anyone on an admin list of a module. With no list at all
+// there is nobody to limit it to, so it returns nil and anyone who can reach the console sees it.
+func keyViewers(env core.Env) func(string) bool {
+	lists := strings.Join([]string{env.Getenv("POLICY_ADMIN_USERS"), env.Getenv("FUNNEL_ADMIN_USERS"), env.Getenv("TASKS_ADMIN_USERS")}, ",")
+	if strings.Trim(lists, ", \t") == "" {
+		return nil
+	}
+	return authz.ParseAllowed(lists).Has
 }
 
 // tailnetUpTimeout bounds waiting for the embedded node to join the tailnet.

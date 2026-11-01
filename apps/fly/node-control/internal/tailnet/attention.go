@@ -18,9 +18,13 @@ const keyWarn = 30 * 24 * time.Hour
 // finally expires (an expired key is what makes the read fail); with no earlier read it raises nothing, as a
 // failed read must not look like a problem with the tailnet. Headscale refusing the key (401 or 403) says so, unless
 // the last read shows the key has simply run out. The module has no line of its own; its status is part of Nodes.
-func (m *module) Attention(ctx context.Context, _ string) ([]core.AttentionItem, []core.SystemLine, error) {
+// With WithKeyViewers, nobody else sees it.
+func (m *module) Attention(ctx context.Context, login string) ([]core.AttentionItem, []core.SystemLine, error) {
 	if m.expiry == nil {
 		return nil, nil, nil
+	}
+	if m.viewers != nil && !m.viewers(login) {
+		return nil, nil, core.ErrNotVisible
 	}
 	at, err := m.keyExpiry(ctx)
 	if err != nil {

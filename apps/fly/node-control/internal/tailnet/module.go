@@ -18,6 +18,7 @@ type module struct {
 	src     headscale.NodeSource
 	tracked func(context.Context) map[string]bool
 	expiry  func(context.Context) (time.Time, error)
+	viewers func(login string) bool // who sees the key warning; nil means anyone who can reach the console
 	now     func() time.Time
 
 	mu      sync.Mutex // guards the cached read; never held across the read itself
@@ -35,6 +36,11 @@ type Option func(*module)
 // the status line (and everything else that calls the API) stops. The zero time means the key never expires.
 func WithKeyExpiry(fn func(context.Context) (time.Time, error)) Option {
 	return func(m *module) { m.expiry = fn }
+}
+
+// WithKeyViewers limits the API key warning to the logins fn accepts: replacing the key is an administrator's job.
+func WithKeyViewers(fn func(login string) bool) Option {
+	return func(m *module) { m.viewers = fn }
 }
 
 // New returns the module serving GET /tailnet/status. tracked supplies the

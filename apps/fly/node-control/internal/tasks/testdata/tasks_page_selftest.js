@@ -153,7 +153,7 @@ const setSearch = (s) => { global.window.location.search = s; global.window.loca
     assert.ok(hasClass(st, 'warn') && findAll(st, (n) => hasClass(n, 'g') && hasClass(n, 'warn')).length === 1);
     assert.strictEqual(st.textContent, 'Failing, 3 in a row');
     assert.ok(!els.cols.hidden && els.empty.hidden);
-    assert.strictEqual(els.sub.textContent, '3 of 5 passing', 'the same count the Overview line gives');
+    assert.strictEqual(els.sub.textContent, '2 of 5 passing', 'the same count the Overview line gives; a task with no success yet is not passing');
   }
 
   // selectedInURL: ?sel= picks the task, a click writes it back, an unknown id falls back to the first row

@@ -9,7 +9,8 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
 )
 
-// Attention reports a stale or erroring ingress report and namespaces whose change was reverted. Only
+// Attention reports a stale or erroring ingress report, one still missing while there are namespaces to serve (with
+// none, Funnel is not in use yet), and namespaces whose change was reverted. Only
 // FUNNEL_ADMIN_USERS see it. An inactive module reports nothing; an unreadable store is an error.
 //
 // The text of the ingress's errors is data from another node: it is counted here, never repeated.
@@ -56,6 +57,13 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 			it.Detail = "Public routes may not be working. The report lists them."
 			items = append(items, it)
 		}
+	} else if len(nss) == 0 {
+		line.State, line.Summary = "off", "No namespaces yet"
+	} else {
+		items = append(items, core.AttentionItem{ID: "funnel-ingress", Source: "funnel", Level: core.LevelWaiting,
+			Title:       "The funnel ingress has not reported yet",
+			Detail:      "Public routes cannot be verified until it reports.",
+			ActionLabel: "Open Funnel", ActionPath: "/funnel"})
 	}
 	for _, n := range nss {
 		if n.State != StateFailed {

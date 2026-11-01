@@ -88,6 +88,29 @@ func isAnswer(st Status) bool {
 	return true
 }
 
+// StoppedNames returns the tailnet names, in lower case, of the managed nodes their provider reports as not running.
+// A node whose provider did not answer is not among them.
+func (m *Module) StoppedNames(ctx context.Context) map[string]bool {
+	ts := m.Targets(ctx)
+	statuses := m.attentionStatuses(ctx, ts)
+	out := map[string]bool{}
+	for _, t := range ts {
+		st, ok := statuses[t.ID]
+		if !ok || !isAnswer(st) || isRunning(st) {
+			continue
+		}
+		if s, _ := st["status"].(string); s == "not_configured" {
+			continue
+		}
+		name := t.TailnetName
+		if name == "" {
+			name = t.ID
+		}
+		out[strings.ToLower(name)] = true
+	}
+	return out
+}
+
 // tailnetNode finds the headscale registration of a target: by its tailnet name, or that name with a
 // "-N" re-registration suffix, preferring one that is online.
 func tailnetNode(ns []headscale.Node, name string) *headscale.Node {

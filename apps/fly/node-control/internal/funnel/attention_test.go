@@ -116,11 +116,25 @@ func TestFunnelAttention(t *testing.T) {
 		}
 	})
 
-	t.Run("no report yet is unknown, not normal", func(t *testing.T) {
+	t.Run("no report and no namespaces is not in use, so nothing to worry about", func(t *testing.T) {
 		m := attentionModule(t)
 		items, lines, err := m.Attention(ctx, "alice@")
-		if err != nil || len(items) != 0 || len(lines) != 1 || lines[0].State != "unknown" {
+		if err != nil || len(items) != 0 || len(lines) != 1 || lines[0].State != "off" {
 			t.Fatalf("%+v %+v %v", items, lines, err)
+		}
+	})
+
+	t.Run("no report with a namespace says why it is not clear", func(t *testing.T) {
+		m := attentionModule(t)
+		if err := m.st.CreateNamespace("demo", []Range{{Lo: 8080, Hi: 8080}}, "", 7); err != nil {
+			t.Fatal(err)
+		}
+		items, lines, err := m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 1 || len(lines) != 1 || lines[0].State != "waiting" {
+			t.Fatalf("%+v %+v %v", items, lines, err)
+		}
+		if it := items[0]; it.Level != core.LevelWaiting || it.ActionPath != "/funnel" || !strings.Contains(it.Title, "has not reported yet") {
+			t.Errorf("%+v", it)
 		}
 	})
 

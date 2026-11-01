@@ -137,6 +137,14 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.ok(/Agent unreachable/.test(r.detail));
     r = merge(n, s, { 'bridge-2': tn('bridge-2', false) }, [ing('bridge-2', { sync: bad })])[0];
     assert.strictEqual(r.state, 'Out of sync', 'beats running-but-offline');
+    // stopped at the provider it serves nobody, so the wait is no risk; the same machine running is
+    const waiting = { sync: { pending: true, state: 'unreachable', since: null } };
+    const stopped = merge({ 'b-1': cfg() }, { 'b-1': { status: 'STOPPED' } }, null, [ing('b-1', waiting)])[0];
+    assert.strictEqual(stopped.state, 'Stopped');
+    assert.strictEqual(stopped.level, 'off');
+    assert.strictEqual(stopped.detail, 'Sync pending');
+    assert.ok(stopped.explain.includes('when it is started again'));
+    assert.strictEqual(merge({ 'b-1': cfg() }, { 'b-1': { status: 'RUNNING' } }, null, [ing('b-1', waiting)])[0].state, 'Out of sync');
     // and beats a waiting approval
     r = merge({}, {}, null, [ing('bridge-3', { approval: 'pending', sync: bad })])[0];
     assert.strictEqual(r.state, 'Out of sync');
@@ -450,7 +458,7 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
       if (u === '/status') return {};
       if (u === '/tailnet/status') return null;
       if (u === '/enroll/ingresses') { const e = new Error('x'); e.status = ingStatus; throw e; }
-      if (u === '/sessions.json') { const e = new Error('x'); e.status = 403; throw e; }
+      if (u === '/sessions.json?links=0') { const e = new Error('x'); e.status = 403; throw e; }
       throw new Error('unexpected ' + u);
     };
     const reader = nodes.makeReader(api, ctrl);
@@ -458,7 +466,7 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     await reader.refresh();
     await reader.refresh();
     assert.strictEqual(calls.filter((u) => u === '/enroll/ingresses').length, 1, 'ingresses asked again after a 404');
-    assert.strictEqual(calls.filter((u) => u === '/sessions.json').length, 1, 'sessions asked again after a 403');
+    assert.strictEqual(calls.filter((u) => u === '/sessions.json?links=0').length, 1, 'sessions asked again after a 403');
     assert.strictEqual(calls.filter((u) => u === '/nodes.json').length, 3);
     assert.strictEqual(updates[2].ingresses, null);
     // any other failure is asked again

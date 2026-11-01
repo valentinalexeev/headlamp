@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -182,13 +183,41 @@ func registerAttention(mux *http.ServeMux, mods []Module, nav []NavItem, tn Tail
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		out, _ := json.Marshal(body(r.Context(), login))
+		out, err := json.Marshal(body(r.Context(), login))
+		if err != nil { // a time out of range, say: an empty answer would read as nothing to report
+			slog.Error("console data could not be encoded", "path", r.URL.Path, "err", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		out = append(out, '\n')
 		h.Set("Content-Type", "application/json")
 		h.Set("Content-Length", strconv.Itoa(len(out)))
 		if r.Method == http.MethodGet {
 			_, _ = w.Write(out)
 		}
+	}
+
+	// asked is who to ask for the activity of the source named only: the module whose page has that label. A name
+	// no page owns could be any module's, so all are asked.
+	asked := func(only string) []modOf[ActivitySource] {
+		if only == "" {
+			return act
+		}
+		var out []modOf[ActivitySource]
+		for _, it := range nav {
+			if it.Label != only {
+				continue
+			}
+			for _, s := range act {
+				if s.name == it.Source {
+					out = append(out, s)
+				}
+			}
+		}
+		if out == nil {
+			return act
+		}
+		return out
 	}
 
 	navPath := func(source string) string {
@@ -260,12 +289,13 @@ func registerAttention(mux *http.ServeMux, mods []Module, nav []NavItem, tn Tail
 				}
 			}
 			only := r.URL.Query().Get("source")
-			results, errs := fanOut(ctx, act, func(c context.Context, s modOf[ActivitySource]) ([]ActivityEntry, error) {
+			from := asked(only)
+			results, errs := fanOut(ctx, from, func(c context.Context, s modOf[ActivitySource]) ([]ActivityEntry, error) {
 				return s.src.Activity(c, login, limit)
 			})
 			entries := []ActivityEntry{}
 			partial, hidden := false, false
-			for i, s := range act {
+			for i, s := range from {
 				switch err := errs[i]; {
 				case errors.Is(err, ErrNotVisible):
 					hidden = true

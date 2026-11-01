@@ -24,6 +24,8 @@ type Module struct {
 	store Backend
 	admin *Admin
 	reg   *Registry
+	// stopped names the machines stopped at their provider; nil when nothing can say.
+	stopped func(context.Context) map[string]bool
 
 	loopDone     chan struct{} // closed when the reconcile loop has returned; nil if never started
 	activityDone chan struct{} // the same for the activity loop
@@ -36,6 +38,12 @@ type Option func(*Module)
 // without an address, reports whether each ingress node is online and discovers new ingress nodes
 // (which are never used before the operator approves them).
 func WithNodeSource(src headscale.NodeSource) Option { return func(m *Module) { m.src = src } }
+
+// WithStoppedNodes gives the module a way to learn which machines are stopped at their provider: their tailnet names
+// in lower case. A stopped bridge serves nobody, so a sync waiting for it is not a risk.
+func WithStoppedNodes(fn func(context.Context) map[string]bool) Option {
+	return func(m *Module) { m.stopped = fn }
+}
 
 // withClock replaces the clock of the sync states and the discovery cache (tests).
 func withClock(now func() time.Time) Option { return func(m *Module) { m.now = now } }

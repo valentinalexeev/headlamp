@@ -469,3 +469,16 @@ func TestNodeActionsReachTheEnrolmentAuditLog(t *testing.T) {
 		t.Fatalf("audit log = %+v, %v", got, err)
 	}
 }
+
+func TestKeyViewers(t *testing.T) {
+	env := func(m map[string]string) core.Env { return core.MapEnv(m) }
+	if keyViewers(env(map[string]string{"TASKS_ADMIN_USERS": " , "})) != nil {
+		t.Error("with no admin list there is nobody to limit it to")
+	}
+	has := keyViewers(env(map[string]string{"POLICY_ADMIN_USERS": "alice@", "FUNNEL_ADMIN_USERS": "bob@", "TASKS_ADMIN_USERS": "carol@"}))
+	for login, want := range map[string]bool{"alice@": true, "bob@": true, "carol@": true, "dave@": false} {
+		if has(login) != want {
+			t.Errorf("%s: want %v", login, want)
+		}
+	}
+}

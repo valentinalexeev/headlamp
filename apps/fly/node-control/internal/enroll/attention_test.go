@@ -63,6 +63,30 @@ func TestEnrollAttentionBridgeOutOfSync(t *testing.T) {
 	}
 }
 
+func TestEnrollAttentionStoppedBridgeIsNotAtRisk(t *testing.T) {
+	f := newRegFx(t, nil)
+	f.reg.Current(context.Background(), true).Targets[0].State.Failed("unreachable")
+	m := attentionFor(f)
+	m.stopped = func(context.Context) map[string]bool { return map[string]bool{"ingress-1": true} }
+	items, lines, err := m.Attention(context.Background(), "alice@")
+	if err != nil || len(items) != 1 || len(lines) != 1 {
+		t.Fatalf("%+v %+v %v", items, lines, err)
+	}
+	it := items[0]
+	if it.Level != core.LevelInfo || it.ID != "bridge-sync-ingress-1" || !strings.Contains(it.Title, "stopped") || !strings.Contains(it.Detail, "when it is started") {
+		t.Errorf("%+v", it)
+	}
+	if lines[0].State != "ok" || !strings.Contains(lines[0].Summary, "1 bridge sync pending") {
+		t.Errorf("%+v", lines[0])
+	}
+
+	m.stopped = func(context.Context) map[string]bool { return map[string]bool{"other": true} }
+	items, lines, _ = m.Attention(context.Background(), "alice@")
+	if len(items) != 1 || items[0].Level != core.LevelCritical || lines[0].State != "critical" {
+		t.Errorf("a bridge not known to be stopped stays critical: %+v %+v", items, lines)
+	}
+}
+
 func TestEnrollAttentionEachBridgeIsNamedInItsOwnItem(t *testing.T) {
 	a := newInfoAgent(t, "ingress-3")
 	usePort(t, a)

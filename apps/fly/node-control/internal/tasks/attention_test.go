@@ -25,6 +25,15 @@ func TestTasksAttention(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
+	t.Run("a task with no success yet is not counted as passing and raises nothing", func(t *testing.T) {
+		h, s := attentionHarness(t)
+		s.SaveState("job", TaskState{NextRun: now.Add(time.Hour)})
+		items, lines, err := h.m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 0 || len(lines) != 1 || lines[0].State != "ok" || !strings.Contains(lines[0].Summary, "0 of 1 passing") {
+			t.Fatalf("%+v %+v %v", items, lines, err)
+		}
+	})
+
 	t.Run("a task that passed is normal", func(t *testing.T) {
 		h, s := attentionHarness(t)
 		s.SaveState("job", TaskState{LastSuccess: now.Add(-time.Minute), NextRun: now.Add(time.Hour)})

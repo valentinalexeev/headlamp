@@ -76,14 +76,14 @@
     var getParam = opts.getParam || function (k) { return hl.queryParam(k); };
     var setParam = opts.setParam || function (k, v) { hl.setQueryParam(k, v); };
     var st = { source: sourceOf(getParam('source'), opts.sources), sources: arr(opts.sources).slice(), seen: [],
-      data: null, failed: false, token: 0, chips: [], shown: '' };
+      data: null, failed: false, navFailed: false, token: 0, chips: [], shown: '' };
 
     // names: the chips that would match something: the sources the nav lists, plus any source an entry has
-    // come from, plus the one chosen now.
+    // come from, plus the one chosen now, unless the nav failed and so nothing vouches for it.
     function names() {
       var out = ['All'];
       st.sources.concat(st.seen).forEach(function (n) { if (out.indexOf(n) < 0) { out.push(n); } });
-      if (out.indexOf(st.source) < 0) { out.push(st.source); }
+      if (out.indexOf(st.source) < 0 && !st.navFailed) { out.push(st.source); }
       return out;
     }
 
@@ -142,6 +142,17 @@
       });
     }
 
+    // dropUnconfirmed: with no nav to check against, a source chosen by the URL stands only if an answer shows
+    // entries from it. Returns the new read, or undefined when the choice stands or no answer has come yet.
+    function dropUnconfirmed() {
+      if (!st.navFailed || !st.data || st.source === 'All' || st.seen.indexOf(st.source) >= 0) { return undefined; }
+      st.source = 'All';
+      setParam('source', '');
+      st.data = null;
+      render();
+      return ctl.refresh();
+    }
+
     var ctl = {
       state: st,
       render: render,
@@ -156,6 +167,7 @@
           st.data = data || {};
           st.failed = false;
           render();
+          return dropUnconfirmed();
         }, function () {
           if (token !== st.token) { return; }
           st.failed = true;
@@ -174,6 +186,12 @@
         }
         render();
         return Promise.resolve();
+      },
+      // navFailed says the nav could not be read, so the chosen source cannot be checked against it.
+      navFailed: function () {
+        st.navFailed = true;
+        render();
+        return dropUnconfirmed() || Promise.resolve();
       },
       pick: function (name) {
         var next = sourceOf(name, names());
@@ -199,7 +217,7 @@
     ctl.render();
     // The chips follow the nav: a source the console does not have gets none. If the nav does not answer, the
     // chips come from the entries that arrive.
-    hl.api('GET', '/_nav.json').then(function (nav) { return ctl.setSources(sourcesFromNav(nav)); }, function () {});
+    hl.api('GET', '/_nav.json').then(function (nav) { return ctl.setSources(sourcesFromNav(nav)); }, function () { return ctl.navFailed(); });
     var poller = hl.poll(function () { return ctl.refresh(); }, POLL_MS);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) { poller.now(); } });
   }

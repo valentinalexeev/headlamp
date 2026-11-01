@@ -34,11 +34,17 @@ func (m *module) Attention(ctx context.Context, login string) ([]core.AttentionI
 		m.mu.Unlock()
 		switch {
 		case errors.As(err, &ae) && (ae.Status == 401 || ae.Status == 403) && (known.IsZero() || known.After(m.now())):
+			m.mu.Lock()
+			if m.refused.IsZero() {
+				m.refused = m.now()
+			}
+			since := m.refused
+			m.mu.Unlock()
 			return []core.AttentionItem{{
 				ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting,
 				Title:  "The headscale API key is refused",
 				Detail: "The tailnet status line stops until it is replaced. Rotate it with scripts/rotate-headscale-api-key.sh.",
-				Since:  m.now(),
+				Since:  since,
 			}}, nil, nil
 		case !known.IsZero():
 			at = known
@@ -95,6 +101,7 @@ func (m *module) keyExpiry(ctx context.Context) (time.Time, error) {
 		m.expAt, m.expSet, m.expV, m.expErr = m.now(), true, at, err
 		if err == nil {
 			m.lastKey = at
+			m.refused = time.Time{}
 		}
 		m.mu.Unlock()
 		return at, err

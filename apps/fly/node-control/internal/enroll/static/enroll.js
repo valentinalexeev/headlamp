@@ -3,7 +3,8 @@
 // markup is never built from strings.
 //
 // Secrets: the one-time link and the subscription URL exist only in the enrolment panel, right after they are
-// made. They are never put in a URL, an anchor, storage or a table row, and a rebuilt table cannot show them.
+// made. They are never put in a URL, an anchor, storage or a table row, and a rebuilt table cannot show them. The
+// panel drops them when it closes and when it moves on to the next device.
 (function () {
   'use strict';
   var hl = window.hl;
@@ -276,7 +277,7 @@
         var bits = [reason, since ? 'since ' + since : ''].filter(Boolean).join(', ');
         if (bits) { why.push(list.length > 1 ? hl.plain(r.name, 63) + ': ' + bits : bits); }
       });
-      var p = hl.el('p', 't2 small', 'Revoking or extending a device here will not take effect on ' + where + ' until it catches up.' + (why.length ? ' ' + why.join('; ') + '.' : ''));
+      var p = hl.el('p', 't2 small', 'Revoking or extending a device here will not take effect on ' + where + ' until it catches up.' + (why.length ? ' ' + why.join('; ') + '.' : '') + ' Retrying every 5 minutes.');
       box.appendChild(p);
       var links = hl.el('p', 'small');
       (list.length ? list : ['']).forEach(function (n, i) {
@@ -572,6 +573,10 @@
       if (!dr || dr.creating) { return; }
       if (dr.poller) { dr.poller.stop(); dr.poller = null; }
       dr.root.remove();
+      dr.link = '';
+      dr.subscription = '';
+      dr.linkBox = null;
+      clear(dr.body);
       st.drawer = null;
       hl.setQueryParam('enrol', null);
       var back = dr.opener;
@@ -719,6 +724,8 @@
       dr.mode = 'create';
       dr.waitBox = null;
       dr.linkBox = null;
+      dr.link = '';
+      dr.subscription = '';
       if (dr.poller) { dr.poller.stop(); dr.poller = null; }
       var form = hl.el('form', 'stack');
       form.setAttribute('novalidate', '');

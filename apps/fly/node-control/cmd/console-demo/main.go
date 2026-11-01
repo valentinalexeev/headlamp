@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -94,32 +95,43 @@ func serve(ctx context.Context, o options, ready func(admin string)) error {
 	runDone := make(chan error, 1)
 	go func() { runDone <- core.Run(ctx, mods, env, tn) }()
 
+	// The seeding runs in the background and is waited for before returning, so nothing it started touches
+	// the fakes after they are closed. A failed seeding stops the demo instead of announcing it ready.
+	seedDone := make(chan error, 1)
 	select {
 	case admin := <-tn.adminUp:
 		go func() {
-			if err := world.seed(ctx, admin, tn.asIngress); err != nil {
-				fmt.Fprintln(os.Stderr, "console-demo: seeding stopped early:", err)
+			err := world.seed(ctx, admin, tn.ingressClient())
+			if err == nil {
+				tn.login.Store(sc.login)
+				if ready != nil {
+					ready(admin)
+				}
+			} else {
+				cancel()
 			}
-			tn.login.Store(sc.login)
-			if ready != nil {
-				ready(admin)
-			}
+			seedDone <- err
 		}()
 	case err := <-runDone:
 		return err
 	}
 	err = <-runDone
+	cancel()
+	if serr := <-seedDone; serr != nil {
+		return fmt.Errorf("seeding: %w", serr)
+	}
+	world.wg.Wait()
 	return err
 }
 
 // demoTailnet is a core.Tailnet on loopback. Dial maps the invented tailnet addresses to the local
 // fakes and refuses everything else, so nothing leaves the machine.
 type demoTailnet struct {
-	addr    string
-	world   *world
-	login   atomic.Value // string: who WhoIs reports
-	adminUp chan string
-	ingress atomic.Bool // the next callers are the funnel ingress node
+	addr         string
+	world        *world
+	login        atomic.Value // string: who WhoIs reports
+	adminUp      chan string
+	ingressConns sync.Map // local address (string) of each open connection made by the ingress client
 
 	mu     sync.Mutex
 	public net.Listener
@@ -156,11 +168,36 @@ func (t *demoTailnet) Dial(ctx context.Context, network, addr string) (net.Conn,
 	return d.DialContext(ctx, network, target)
 }
 
-// asIngress makes WhoIs answer as the funnel ingress node while the seeding posts its report.
-func (t *demoTailnet) asIngress(on bool) { t.ingress.Store(on) }
+// ingressClient returns an HTTP client whose connections WhoIs reports as the funnel ingress node, for the
+// seeding to post the ingress report. Only those connections are affected; every other caller keeps the login.
+func (t *demoTailnet) ingressClient() *http.Client {
+	var d net.Dialer
+	return &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := d.DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			key := c.LocalAddr().String()
+			t.ingressConns.Store(key, true)
+			return &ingressConn{Conn: c, onClose: func() { t.ingressConns.Delete(key) }}, nil
+		},
+		DisableKeepAlives: true,
+	}}
+}
 
-func (t *demoTailnet) WhoIs(context.Context, string) (string, []string, error) {
-	if t.ingress.Load() {
+type ingressConn struct {
+	net.Conn
+	onClose func()
+}
+
+func (c *ingressConn) Close() error {
+	c.onClose()
+	return c.Conn.Close()
+}
+
+func (t *demoTailnet) WhoIs(_ context.Context, remoteAddr string) (string, []string, error) {
+	if _, ok := t.ingressConns.Load(remoteAddr); ok {
 		return "", []string{"tag:funnel-ingress"}, nil
 	}
 	l, _ := t.login.Load().(string)

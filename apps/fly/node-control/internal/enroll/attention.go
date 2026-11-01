@@ -78,7 +78,7 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		it := core.AttentionItem{
 			ID: "bridge-sync-" + row.Name, Source: bridgeSource, Level: core.LevelCritical,
 			Title:       row.Name + " is out of sync",
-			Detail:      "Revocations and extensions are not in effect there. " + reason,
+			Detail:      "Revocations and extensions are not in effect there. " + reason + " Retrying every 5 minutes.",
 			ActionLabel: "Open bridge", ActionPath: "/nodes?sel=" + url.QueryEscape(row.Name),
 		}
 		if row.Sync.Since != nil {

@@ -103,6 +103,7 @@ td.act{text-align:right;width:1%}
 .drawer{position:absolute;top:0;right:0;bottom:0;width:440px;max-width:100%;background:var(--surface);border-left:1px solid var(--line2);padding:22px;display:flex;flex-direction:column;gap:18px;overflow:auto}
 @media (max-width:760px){.side{min-height:0}.sidefoot{margin-top:0}.seg button{min-height:44px}.page{padding:16px}.top,.strip{padding-left:16px;padding-right:16px}.navgroup.collapsible{display:none}}
 /* classes that replace inline styles */
+body{margin:0} /* the browser's default would show around every page, in its own colour */
 .hl{margin:0;min-height:100vh}
 .hl [hidden]{display:none!important}
 .ico{flex:none;display:block}

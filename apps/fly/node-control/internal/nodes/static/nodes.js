@@ -124,8 +124,8 @@
       var failed = since ? hl.relTime(since, now) : '';
       level = 'crit'; state = 'Out of sync';
       detail = (SYNC_REASON[sync.state] || 'Last sync did not succeed') + (failed ? ', first failed ' + failed : '');
-      explain = 'Revocations and extensions made ' + (failed ? 'since ' + failed.replace(/ ago$/, '') + ' ago ' : 'recently ') +
-        'are not in effect on this bridge.';
+      explain = 'Revocations and extensions made ' + (/ ago$/.test(failed) ? 'since ' + failed + ' ' : 'recently ') +
+        'are not in effect on this bridge. Retrying every 5 minutes.';
     } else if (kind === 'running' && online === false) {
       level = 'crit'; state = 'Offline on tailnet';
       detail = 'Provider reports running' + (lastSeen ? ', last seen ' + lastSeen : '');

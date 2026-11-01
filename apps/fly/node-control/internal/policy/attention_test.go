@@ -48,6 +48,11 @@ func TestPolicyAttention(t *testing.T) {
 		if !strings.Contains(it.Title, "#") || !strings.Contains(it.Detail, "Reverts by itself") {
 			t.Errorf("copy: %q / %q", it.Title, it.Detail)
 		}
+		// The reason says what is being confirmed against the clock. Only POLICY_ADMIN_USERS see this item, and they
+		// see the same text on the Policy and Activity pages.
+		if !strings.HasPrefix(it.Detail, "edit. ") {
+			t.Errorf("the item must name the change: %q", it.Detail)
+		}
 		if len(lines) != 1 || lines[0].Name != "Policy" || lines[0].Path != "/policy" || lines[0].State != "waiting" {
 			t.Errorf("lines: %+v", lines)
 		}

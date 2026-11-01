@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 )
@@ -76,8 +77,9 @@ func TestDemoServesEveryScenario(t *testing.T) {
 					t.Fatalf("minimal: want one item, got %v", labels)
 				}
 			case "partial":
-				if len(labels) != 4 {
-					t.Fatalf("partial: want Overview, Nodes, Devices and Activity, got %v", labels)
+				want := []string{"Overview", "Nodes", "Devices", "Activity"}
+				if !slices.Equal(labels, want) {
+					t.Fatalf("partial: want %v, got %v", want, labels)
 				}
 			default:
 				if len(labels) < 6 {
@@ -85,6 +87,37 @@ func TestDemoServesEveryScenario(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The clear scenario promises a front page with nothing to act on. startDemo returns only after the seeding has
+// finished, so this reads the settled state: a read taken mid-seeding shows false alerts (an unapproved bridge,
+// a funnel with no report yet).
+func TestClearScenarioIsClear(t *testing.T) {
+	addr := startDemo(t, "clear")
+	code, body := get(t, addr, "/_attention.json")
+	if code != 200 {
+		t.Fatalf("/_attention.json: %d %s", code, body)
+	}
+	var att struct {
+		Items []struct{ ID, Title string } `json:"items"`
+		Lines []struct {
+			Name, State string
+		} `json:"systems"`
+	}
+	if err := json.Unmarshal(body, &att); err != nil {
+		t.Fatal(err)
+	}
+	if len(att.Items) != 0 {
+		t.Errorf("clear should have nothing needing attention, got %+v", att.Items)
+	}
+	if len(att.Lines) == 0 {
+		t.Error("no system lines reported")
+	}
+	for _, l := range att.Lines {
+		if l.State != "ok" {
+			t.Errorf("system %s is %q, want ok", l.Name, l.State)
+		}
 	}
 }
 

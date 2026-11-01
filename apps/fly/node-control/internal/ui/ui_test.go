@@ -3,6 +3,7 @@ package ui
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -190,5 +191,16 @@ func TestIconPathsUseAbsoluteMoves(t *testing.T) {
 		if strings.Contains(d[1:], "m") {
 			t.Errorf("%s: relative move after the first command: %q", name, d)
 		}
+	}
+}
+
+// The browser's default body margin shows white around every page, whichever theme is on.
+func TestBodyMarginIsReset(t *testing.T) {
+	css, err := os.ReadFile("static/hl.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), "body{margin:0}") {
+		t.Error("hl.css must reset the body margin")
 	}
 }

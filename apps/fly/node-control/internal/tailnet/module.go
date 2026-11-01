@@ -20,11 +20,12 @@ type module struct {
 	expiry  func(context.Context) (time.Time, error)
 	now     func() time.Time
 
-	mu     sync.Mutex // guards the cached read; never held across the read itself
-	expAt  time.Time  // when it was read
-	expSet bool
-	expV   time.Time
-	expErr error
+	mu      sync.Mutex // guards the cached read; never held across the read itself
+	expAt   time.Time  // when it was read
+	expSet  bool
+	expV    time.Time
+	expErr  error
+	lastKey time.Time // the last expiry read successfully (zero: none, or the key never expires)
 }
 
 // Option configures the module.

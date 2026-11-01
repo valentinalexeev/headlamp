@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"example.com/node-control/internal/core"
+	"example.com/node-control/internal/headscale"
 )
 
 var _ core.AttentionSource = (*module)(nil)
@@ -134,4 +135,50 @@ func TestTailnetAttentionDoesNotHoldTheLockDuringTheRead(t *testing.T) {
 	}
 	close(release)
 	<-done
+}
+
+func TestTailnetAttentionNamesAnExpiredKeyAfterTheReadFails(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	fail := false
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		if fail {
+			return time.Time{}, errors.New("headscale is down")
+		}
+		return now.Add(2 * time.Hour), nil
+	})).(*module)
+	m.now = func() time.Time { return now }
+	if items, _, _ := m.Attention(context.Background(), "a"); len(items) != 1 || !strings.Contains(items[0].Title, "expires") {
+		t.Fatalf("%+v", items)
+	}
+	fail = true
+	now = now.Add(11 * time.Minute) // the good read is stale; the next read fails
+	if items, _, _ := m.Attention(context.Background(), "a"); len(items) != 1 {
+		t.Fatalf("a failed read before the expiry must keep warning from the last good read, got %+v", items)
+	}
+	now = now.Add(3 * time.Hour)
+	items, _, _ := m.Attention(context.Background(), "a")
+	if len(items) != 1 || !strings.Contains(items[0].Title, "has expired") {
+		t.Fatalf("want an expired item, got %+v", items)
+	}
+}
+
+func TestTailnetAttentionNamesARefusedKey(t *testing.T) {
+	for _, status := range []int{401, 403} {
+		_, _, err := attentionOf(t, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		items, _, _ := attentionOf(t, func(context.Context) (time.Time, error) {
+			return time.Time{}, &headscale.APIError{Status: status, Message: "Unauthorized"}
+		})
+		if len(items) != 1 || !strings.Contains(items[0].Title, "is refused") || items[0].Level != core.LevelWaiting {
+			t.Fatalf("status %d: %+v", status, items)
+		}
+	}
+	items, _, _ := attentionOf(t, func(context.Context) (time.Time, error) {
+		return time.Time{}, &headscale.APIError{Status: 500, Message: "boom"}
+	})
+	if len(items) != 0 {
+		t.Fatalf("a 500 is not a refusal: %+v", items)
+	}
 }

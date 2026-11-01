@@ -2,24 +2,46 @@ package tailnet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"example.com/node-control/internal/core"
+	"example.com/node-control/internal/headscale"
 )
 
 // keyWarn is how long before the API key expires the module starts to ask for a rotation.
 const keyWarn = 30 * 24 * time.Hour
 
-// Attention warns when the headscale API key is about to expire. A key whose expiry cannot be read, or
-// that never expires, raises nothing: the warning is advice, and a failed read must not look like a problem
-// with the tailnet. The module has no line of its own; its status is part of Nodes.
+// Attention warns when the headscale API key is about to expire. A key that never expires raises nothing. A read
+// that fails keeps reporting from the last expiry read successfully, so the item does not vanish when the key
+// finally expires (an expired key is what makes the read fail); with no earlier read it raises nothing, as a
+// failed read must not look like a problem with the tailnet. Headscale refusing the key (401 or 403) says so.
+// The module has no line of its own; its status is part of Nodes.
 func (m *module) Attention(ctx context.Context, _ string) ([]core.AttentionItem, []core.SystemLine, error) {
 	if m.expiry == nil {
 		return nil, nil, nil
 	}
 	at, err := m.keyExpiry(ctx)
-	if err != nil || at.IsZero() {
+	if err != nil {
+		var ae *headscale.APIError
+		m.mu.Lock()
+		known := m.lastKey
+		m.mu.Unlock()
+		switch {
+		case !known.IsZero():
+			at = known
+		case errors.As(err, &ae) && (ae.Status == 401 || ae.Status == 403):
+			return []core.AttentionItem{{
+				ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting,
+				Title:  "The headscale API key is refused",
+				Detail: "The tailnet status line stops until it is replaced. Rotate it with scripts/rotate-headscale-api-key.sh.",
+				Since:  m.now(),
+			}}, nil, nil
+		default:
+			return nil, nil, nil
+		}
+	} else if at.IsZero() {
 		return nil, nil, nil
 	}
 	left := at.Sub(m.now())
@@ -64,6 +86,9 @@ func (m *module) keyExpiry(ctx context.Context) (time.Time, error) {
 	at, err := m.expiry(ctx) // the network call runs without the lock
 	m.mu.Lock()
 	m.expAt, m.expSet, m.expV, m.expErr = m.now(), true, at, err
+	if err == nil {
+		m.lastKey = at
+	}
 	m.mu.Unlock()
 	return at, err
 }

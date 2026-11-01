@@ -1,0 +1,49 @@
+[
+  {
+    "image": "node-control",
+    "context": "apps/fly/node-control",
+    "dockerfile": "Dockerfile",
+    "paths": ["apps/fly/node-control"],
+    "go": true,
+    "test": "make test-node-control"
+  },
+  {
+    "image": "funnel-ingress",
+    "context": "apps/fly/funnel-ingress",
+    "dockerfile": "Dockerfile",
+    "paths": ["apps/fly/funnel-ingress"],
+    "go": true,
+    "test": "cd apps/fly/funnel-ingress && go vet ./... && go test -count=1 ./..."
+  },
+  {
+    "image": "funnel-sidecar",
+    "context": "apps/fly/funnel-ingress",
+    "dockerfile": "Dockerfile.sidecar",
+    "paths": ["apps/fly/funnel-ingress"],
+    "go": true,
+    "test": "cd apps/fly/funnel-ingress && go vet ./... && go test -count=1 ./..."
+  },
+  {
+    "image": "headscale",
+    "context": "apps/fly/headscale",
+    "dockerfile": "Dockerfile",
+    "paths": ["apps/fly/headscale"],
+    "test": "make test-headscale-policy"
+  },
+  {
+    "image": "exit-node",
+    "context": "apps/fly/exit-ams",
+    "dockerfile": "Dockerfile",
+    "paths": ["apps/fly/exit-ams", "TAILSCALE_VERSION"],
+    "args_from_files": {"TSVERSION": "TAILSCALE_VERSION"},
+    "test": "make test-exit-node-state"
+  },
+  {
+    "image": "task-runner-session",
+    "context": "apps/task-runner/image",
+    "dockerfile": "Containerfile",
+    "paths": ["apps/task-runner/image"],
+    "args": {"BASE": "mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"},
+    "test": "sh apps/task-runner/image/session_test.sh"
+  }
+]

@@ -76,6 +76,10 @@ synonym or abbreviation. If something slipped into history, tell the operator; d
 commits on top of it or attempt a rewrite on your own.
 - Commit style: Conventional Commits with a scope (`feat(tailguard): …`, `fix(exit-ams): …`,
   `docs: …`). Keep commits focused.
+- Versions: strict semver, one version for the repo; see `VERSIONING.md`. Mark a breaking change with `!` or a
+  `BREAKING CHANGE:` footer, since releases are checked against commit subjects. Note user-visible changes under
+  `Unreleased` in `CHANGELOG.md`. Never move or delete a release tag.
+- A new or renamed image goes in `.github/components.json`; CI builds from that list.
 - Verify before claiming something works: `make test-tf-run`; `shellcheck` on shell scripts;
   `terraform fmt -check && terraform validate` for module changes; `ansible-playbook
   --syntax-check` for roles; `docker build` for app images. Say what you ran and what you did not.
@@ -84,6 +88,7 @@ commits on top of it or attempt a rewrite on your own.
 
 | Path | What it is |
 |---|---|
+| `.github/components.json`, `.github/workflows/`, `VERSIONING.md` | images CI publishes to GHCR, rebuilt per component; the release rules and their checks (`scripts/check-release.sh`) |
 | `terraform/modules/exit-node-vm/{yandex,oci,aws,cloudru,selectel}` | reusable VM exit-node modules (root stacks live in YOUR repo) |
 | `ansible/roles/{tailscale,route-provisioner,task-runner}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; the task runner on a VM node (rootless podman, nftables guard for its user; see the role README); version bump / key rotation playbooks |
 | `apps/fly/headscale` | headscale server image; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. The route approver (`approve-gateway-routes.sh`, `cron-approve-routes.sh`) is shipped but OFF by default (commented `route_approver` process in `fly.toml`); prefer `autoApprovers.routes` in `acl.json` |

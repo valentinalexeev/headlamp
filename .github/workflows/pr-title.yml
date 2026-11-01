@@ -1,0 +1,16 @@
+# The release rules read commit subjects, and a PR title usually becomes one: see VERSIONING.md.
+name: pr-title
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  conventional:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: scripts/check-conventional.sh "$TITLE"

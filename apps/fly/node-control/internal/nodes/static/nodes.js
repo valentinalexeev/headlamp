@@ -538,6 +538,41 @@
     return ctrl;
   }
 
+  // makeReader reads everything the page shows and hands it to ctrl. Enrolment off (404) or not allowed (403)
+  // means there are no rows of that kind, and the page does not ask again for as long as it stays open; any
+  // other failure keeps what was last read.
+  function makeReader(api, ctrl) {
+    var last = { nodes: null, status: {}, tailnet: null, ingresses: null, sessions: null };
+    var skip = { ingresses: false, sessions: false };
+
+    function gone(err) { return err && (err.status === 404 || err.status === 403); }
+
+    function optional(key, url, field, pick) {
+      if (skip[key]) { return Promise.resolve(); }
+      return api('GET', url).then(function (v) { last[field] = arr(pick(obj(v))); }, function (e) {
+        if (gone(e)) { last[field] = null; skip[key] = true; }
+      });
+    }
+
+    function refresh() {
+      var failed = false, fresh = false;
+      var reads = [
+        api('GET', '/nodes.json').then(function (v) { last.nodes = obj(obj(v).nodes); }, function () { failed = true; }),
+        api('GET', '/status').then(function (v) { last.status = obj(v); fresh = true; }, function () { failed = true; }),
+        api('GET', '/tailnet/status').then(function (v) { last.tailnet = v; }, function () { last.tailnet = null; }),
+        optional('ingresses', '/enroll/ingresses', 'ingresses', function (v) { return v.ingresses; }),
+        optional('sessions', '/sessions.json', 'sessions', function (v) { return v.nodes; })
+      ];
+      return Promise.all(reads).then(function () {
+        if (last.nodes) {
+          ctrl.update({ nodes: last.nodes, status: last.status, tailnet: last.tailnet, ingresses: last.ingresses, sessions: last.sessions, statusFresh: fresh });
+        }
+        ctrl.setFailed(failed);
+      });
+    }
+    return { refresh: refresh };
+  }
+
   function init() {
     var root = document.getElementById('nodes');
     if (!root) { return; }
@@ -547,28 +582,8 @@
     });
     var refreshBtn = $('refresh');
     if (refreshBtn) { refreshBtn.addEventListener('click', function () { ctrl.refresh(); }); }
-    var last = { nodes: null, status: {}, tailnet: null, ingresses: null, sessions: null };
-
-    // gone: enrolment off (404) or not allowed (403) means no rows of that kind; any other failure keeps
-    // what was last read.
-    function gone(err) { return err && (err.status === 404 || err.status === 403); }
-
-    function refresh() {
-      var failed = false, fresh = false;
-      var reads = [
-        hl.api('GET', '/nodes.json').then(function (v) { last.nodes = obj(obj(v).nodes); }, function () { failed = true; }),
-        hl.api('GET', '/status').then(function (v) { last.status = obj(v); fresh = true; }, function () { failed = true; }),
-        hl.api('GET', '/tailnet/status').then(function (v) { last.tailnet = v; }, function () { last.tailnet = null; }),
-        hl.api('GET', '/enroll/ingresses').then(function (v) { last.ingresses = arr(obj(v).ingresses); }, function (e) { if (gone(e)) { last.ingresses = null; } }),
-        hl.api('GET', '/sessions.json').then(function (v) { last.sessions = arr(obj(v).nodes); }, function (e) { if (gone(e)) { last.sessions = null; } })
-      ];
-      return Promise.all(reads).then(function () {
-        if (last.nodes) {
-          ctrl.update({ nodes: last.nodes, status: last.status, tailnet: last.tailnet, ingresses: last.ingresses, sessions: last.sessions, statusFresh: fresh });
-        }
-        ctrl.setFailed(failed);
-      });
-    }
+    var reader = makeReader(hl.api, ctrl);
+    var refresh = reader.refresh;
 
     // A page opened in a background tab still loads once; the poll pauses while hidden and resumes at once
     // when the tab is shown.
@@ -580,6 +595,6 @@
     setInterval(function () { if (!document.hidden && ctrl.isBusy()) { poller.now(); } }, BUSY_MS);
   }
 
-  hl.nodes = { mergeNodes: mergeNodes, summary: summary, plainRole: plainRole, mount: mount, init: init };
+  hl.nodes = { mergeNodes: mergeNodes, summary: summary, plainRole: plainRole, mount: mount, makeReader: makeReader, init: init };
   init();
 })();

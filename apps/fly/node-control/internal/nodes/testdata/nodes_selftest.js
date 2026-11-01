@@ -437,6 +437,42 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
 
   assert.strictEqual(nodes.plainRole('Bridge'), 'Bridge');
   assert.strictEqual(nodes.plainRole('<x>'), 'All');
+
+  // a 404 or 403 on the optional reads is remembered for the page session
+  {
+    const calls = [];
+    const updates = [];
+    const ctrl = { update: (d) => updates.push(d), setFailed() {} };
+    let ingStatus = 404;
+    const api = async (m, u) => {
+      calls.push(u);
+      if (u === '/nodes.json') return { nodes: { 'exit-a': cfg() } };
+      if (u === '/status') return {};
+      if (u === '/tailnet/status') return null;
+      if (u === '/enroll/ingresses') { const e = new Error('x'); e.status = ingStatus; throw e; }
+      if (u === '/sessions.json') { const e = new Error('x'); e.status = 403; throw e; }
+      throw new Error('unexpected ' + u);
+    };
+    const reader = nodes.makeReader(api, ctrl);
+    await reader.refresh();
+    await reader.refresh();
+    await reader.refresh();
+    assert.strictEqual(calls.filter((u) => u === '/enroll/ingresses').length, 1, 'ingresses asked again after a 404');
+    assert.strictEqual(calls.filter((u) => u === '/sessions.json').length, 1, 'sessions asked again after a 403');
+    assert.strictEqual(calls.filter((u) => u === '/nodes.json').length, 3);
+    assert.strictEqual(updates[2].ingresses, null);
+    // any other failure is asked again
+    const calls2 = [];
+    const flaky = nodes.makeReader(async (m, u) => {
+      calls2.push(u);
+      if (u === '/nodes.json') return { nodes: { 'exit-a': cfg() } };
+      if (u === '/status') return {};
+      if (u === '/tailnet/status') return null;
+      const e = new Error('x'); e.status = 500; throw e;
+    }, ctrl);
+    await flaky.refresh(); await flaky.refresh();
+    assert.strictEqual(calls2.filter((u) => u === '/enroll/ingresses').length, 2);
+  }
   console.log('ok');
 
   function mkEls() {

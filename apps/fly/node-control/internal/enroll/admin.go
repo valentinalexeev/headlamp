@@ -493,17 +493,18 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-// known answers 404 for an unknown device.
-func (a *Admin) known(w http.ResponseWriter, id int64) bool {
-	if _, err := a.store.GetDevice(id); err != nil {
+// known returns the device, answering 404 for an unknown one.
+func (a *Admin) known(w http.ResponseWriter, id int64) (Device, bool) {
+	d, err := a.store.GetDevice(id)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			detail(w, http.StatusNotFound, "unknown device")
 		} else {
 			a.internal(w, err)
 		}
-		return false
+		return Device{}, false
 	}
-	return true
+	return d, true
 }
 
 func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
@@ -550,15 +551,18 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 
 func (a *Admin) revoke(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
-	if !ok || !a.known(w, id) {
+	if !ok {
 		return
 	}
-	name := a.deviceName(id)
+	d, ok := a.known(w, id)
+	if !ok {
+		return
+	}
 	if err := a.store.Revoke(id); err != nil {
 		a.internal(w, err)
 		return
 	}
-	a.audit(r, "device.revoke", name)
+	a.audit(r, "device.revoke", d.Name)
 	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }
 
@@ -598,28 +602,32 @@ func (a *Admin) extend(w http.ResponseWriter, r *http.Request) {
 		invalid(w, v.errs...)
 		return
 	}
-	if !a.known(w, id) || !a.future(w, expires) {
+	d, ok := a.known(w, id)
+	if !ok || !a.future(w, expires) {
 		return
 	}
-	name := a.deviceName(id)
 	if err := a.store.Extend(id, expires); err != nil {
 		a.internal(w, err)
 		return
 	}
-	a.audit(r, "device.extend", name+", expires "+expiryText(expires))
+	a.audit(r, "device.extend", d.Name+", expires "+expiryText(expires))
 	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }
 
 func (a *Admin) rotate(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
-	if !ok || !a.known(w, id) {
+	if !ok {
+		return
+	}
+	d, ok := a.known(w, id)
+	if !ok {
 		return
 	}
 	if err := a.store.RotateSecret(id); err != nil {
 		a.internal(w, err)
 		return
 	}
-	a.audit(r, "device.rotate_secret", a.deviceName(id))
+	a.audit(r, "device.rotate_secret", d.Name)
 	secret, err := a.store.SubscriptionSecret(id)
 	if err != nil {
 		a.internal(w, err)

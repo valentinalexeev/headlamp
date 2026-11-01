@@ -624,3 +624,42 @@ func TestSyncSinceUsesStoreClock(t *testing.T) {
 		t.Fatalf("%v", b)
 	}
 }
+
+// countingDevices counts the reads of one device.
+type countingDevices struct {
+	Backend
+	reads int
+}
+
+func (c *countingDevices) GetDevice(id int64) (Device, error) {
+	c.reads++
+	return c.Backend.GetDevice(id)
+}
+
+func TestDeviceActionsReadTheDeviceOnce(t *testing.T) {
+	for _, tc := range []struct {
+		action string
+		body   func(f *adminFx) map[string]any
+	}{
+		{"revoke", func(*adminFx) map[string]any { return map[string]any{} }},
+		{"rotate-secret", func(*adminFx) map[string]any { return map[string]any{} }},
+		{"extend", func(*adminFx) map[string]any { return map[string]any{"expires_at": adminNow + 86400} }},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			f := newAdminFx(t)
+			id := f.createID()
+			count := &countingDevices{Backend: f.store}
+			f.admin.store = count
+			if rec := f.post(idPath(id, tc.action), tc.body(f)); rec.Code != 200 {
+				t.Fatalf("%d %s", rec.Code, rec.Body.String())
+			}
+			if count.reads != 1 {
+				t.Fatalf("read the device %d times, want 1", count.reads)
+			}
+			log, err := f.store.AuditLog(1)
+			if err != nil || len(log) != 1 || !strings.Contains(log[0].Detail, "Anna phone") {
+				t.Fatalf("the audit entry must still name the device: %+v %v", log, err)
+			}
+		})
+	}
+}

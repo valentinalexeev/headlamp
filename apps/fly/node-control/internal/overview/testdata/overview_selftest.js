@@ -187,6 +187,7 @@ const hasCls = (n, c) => (' ' + n.className + ' ').includes(' ' + c + ' ');
     assert.strictEqual(dom.activity.hidden, false);
     assert.strictEqual(dom['activity-rows'].children.length, 1);
     assert.ok(/phone-3 revoked/.test(dom['activity-rows'].children[0].children[1].textContent));
+    assert.ok(hasCls(dom['activity-rows'].children[0].children[1], 'wrap'), 'the sentence cell may wrap, in the narrow column');
     assert.strictEqual(pollTimer().length, 1, 'the next poll is scheduled');
 
     // a poll with the same queue keeps the rows (focus and a pending click survive) and only moves the ages

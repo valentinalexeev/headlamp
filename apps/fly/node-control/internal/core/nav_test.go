@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -873,5 +874,27 @@ func TestCompactShellHasNoSearchBox(t *testing.T) {
 	}
 	if !strings.Contains(body, `<script src="/_ui/palette.js" defer></script>`) {
 		t.Error("the palette script is part of every shell")
+	}
+}
+
+func TestSearchBoxActionsStayInsideTheirAttribute(t *testing.T) {
+	label := `"><script>alert('x')</script> & "more"`
+	out := searchBox([]NavAction{{Label: label, Path: "/enroll?enrol=1&a=b", Icon: "plus"}})
+	if strings.Contains(out, "<script") {
+		t.Fatalf("the label broke out of the attribute: %s", out)
+	}
+	m := regexp.MustCompile(`data-actions="([^"]*)"`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("no data-actions attribute: %s", out)
+	}
+	var got []struct{ Label, Path string }
+	if err := json.Unmarshal([]byte(html.UnescapeString(m[1])), &got); err != nil {
+		t.Fatalf("%v: %s", err, m[1])
+	}
+	if len(got) != 1 || got[0].Label != label || got[0].Path != "/enroll?enrol=1&a=b" {
+		t.Fatalf("the page must read back what was written: %+v", got)
+	}
+	if !strings.Contains(out, "<svg") || !strings.Contains(out, "data-palette") {
+		t.Fatalf("the icon and the palette hook stay: %s", out)
 	}
 }

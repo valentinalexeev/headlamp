@@ -5,7 +5,7 @@ node-control is a small web UI and JSON API. Use it to start, stop and inspect y
 node-control is a single static Go binary that embeds a tailscale node (`tsnet`). The binary joins your headscale tailnet and listens **only on its tailnet address**:
 
 - `:80` is the admin listener.
-- `:8081` is the public enrolment listener, when `ENROLL_DB` is set.
+- `:8081` is the public enrolment listener, when `ENROLL_DB` or `ENROLL_REDIS=1` is set.
 
 node-control exposes nothing through the Fly proxy (`fly.toml` has no `[[services]]`).
 
@@ -34,19 +34,19 @@ Put secrets in Fly secrets. Put plain settings in `fly.toml`.
 | `TAILNET_HOSTNAME` | The name on the tailnet. The default is `node-control`. |
 | `TSNET_VERBOSE` | `1` forwards the logs of the embedded tailscale node (a large quantity of log lines). By default, the app logs only messages for users, such as the login URL. At start, the app waits up to 60 s for the node to join the tailnet. If the node cannot join (bad auth key, control server not reachable), the app exits with a non-zero code. |
 | `REDIS_URL` | Secret (Fly secret only, never in `fly.toml`). The plain `redis://` URL of the shared Redis on the Fly private network. When it is set, the tailscale state is in Redis, not in a file (see "Tailscale state"). When it is not set, the state is in a file under `/var/lib/tailscale`, as before. |
-| `REDIS_KEY` | Optional hash key for the state. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:tsnet` (for example `node-control:tsnet`). It must have the form `<app>:<name>` and must not contain `* ? [`. |
+| `REDIS_KEY` | Optional hash key for the state. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:tsnet` (for example `node-control:tsnet`). It must have the form `<app>:<name>` and must not contain `* ? [ \`. |
 | `NODE_CONTROL_STATE_KEY` | Secret. 32 random bytes, base64 (`openssl rand -base64 32`). It encrypts the Redis state (AES-256-GCM). It is required with `REDIS_URL` unless `STATE_ALLOW_PLAINTEXT=1`. Without `REDIS_URL`, the app ignores it and logs a warning. |
 | `STATE_ALLOW_PLAINTEXT` | `1` keeps the Redis state unencrypted. This is an explicit opt-out. We do not recommend it, because the state holds node private keys. |
 | `STATE_IMPORT_FROM` | Optional path of a tailscaled or tsnet state file (for example `/var/lib/tailscale/tailscaled.state`). The app imports the file one time at start when the Redis hash is empty. In other conditions, the app ignores it. |
 | `NODES_CONFIG` | Optional overrides file. The default is `/srv/app/nodes.json`. If the file does not exist, the app continues. If the file is malformed, the app does not start. |
 | `ENROLL_ALLOWED_HOSTS` | Optional for the core. **Required** by the policy module (`POLICY_DB`) and the tasks module (on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set). Comma-separated Host values that the admin listener accepts. Any other value gets 400. Set it to block DNS rebinding. `*` allows any host (those two modules refuse it). `*.example.com` allows any host that ends in `.example.com` (list `example.com` too for the bare name), as in the Python app. |
 | `ENROLL_DB` | The path of the SQLite database. It enables enrolment. Put it on the state volume: `/var/lib/tailscale/enroll.db`. |
-| `ENROLL_REDIS` | `1` keeps the enrolment data in Redis, not in SQLite, so no volume is necessary (see "Enrolment in Redis"). It needs `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `ENROLL_SECRET_KEY`. The app then does not use `ENROLL_DB`. |
+| `ENROLL_REDIS` | `1` keeps the enrolment data in Redis, not in SQLite, so no volume is necessary (see "Enrolment in Redis"). It turns on enrolment, like `ENROLL_DB`. It needs `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `ENROLL_CONFIG` and `ENROLL_SECRET_KEY`. The app then does not use `ENROLL_DB`. |
 | `ENROLL_REDIS_KEY` | The key prefix of the enrolment data, `<app>:<name>`. The default is `<app>:enroll`. |
 | `ENROLL_IMPORT_FROM` | With `ENROLL_REDIS=1`: the path of an old enrolment SQLite file. The app copies it into Redis one time, when Redis holds no enrolment data. The app opens the file read-only and does not change it. |
-| `ENROLL_CONFIG` | The description of the enrolment bridges, for example `/srv/app/enroll.json`. It is required with `ENROLL_DB`. "Enrolment" gives the shape. |
-| `ENROLL_SECRET_KEY` | Secret, at least 16 bytes. It derives subscription secrets. It is required with `ENROLL_DB`. |
-| `AGENT_URL`, `AGENT_TOKEN` | The address (dialled through the tailnet) and bearer token of the agent of the first bridge. They are required with `ENROLL_DB` only for the old single-host `enroll.json`. In the list shape, they are the optional fallback of the FIRST entry (no `agent_url`, no `AGENT_TOKEN_<NAME>`). |
+| `ENROLL_CONFIG` | The description of the enrolment bridges, for example `/srv/app/enroll.json`. It is required with `ENROLL_DB` or `ENROLL_REDIS=1`. "Enrolment" gives the shape. |
+| `ENROLL_SECRET_KEY` | Secret, at least 16 bytes. It derives subscription secrets. It is required with `ENROLL_DB` or `ENROLL_REDIS=1`. |
+| `AGENT_URL`, `AGENT_TOKEN` | The address (dialled through the tailnet) and bearer token of the agent of the first bridge. They are required with `ENROLL_DB` or `ENROLL_REDIS=1` only for the old single-host `enroll.json`. In the list shape, they are the optional fallback of the FIRST entry (no `agent_url`, no `AGENT_TOKEN_<NAME>`). |
 | `AGENT_TOKEN_<NAME>` | One bearer token for each bridge. `<NAME>` is the bridge name in upper case, with `-` as `_` (`ingress-2` reads `AGENT_TOKEN_INGRESS_2`). The `token_env` of an entry names another variable in its place. |
 | `POLICY_DB` | The path of the SQLite change history. It enables the policy console (`/policy`). Put it on the state volume: `/var/lib/tailscale/policy.db`. It needs `HEADSCALE_LOGIN_SERVER` and `HEADSCALE_API_KEY`. |
 | `POLICY_ADMIN_USERS` | Comma-separated tailnet logins that can use the console (required with `POLICY_DB`). Tagged nodes never have access. |
@@ -120,6 +120,7 @@ Layout under the prefix `P` (all in DB 0):
 - `P:t:<hash>` is one hash for each one-time link, **with a TTL**.
 - `P:approvals` is sealed.
 - `P:acks` holds acknowledged attention items: a login, an item id and a hash. It is not sealed, like the audit log.
+- `P:audit` is a list that holds the audit log (see "The enrolment audit log").
 
 The key of a link expires through its TTL, and every spend also checks the stored expiry. A spend is one Lua script (link key and device key). The script writes nothing unless all of these conditions are true:
 
@@ -127,7 +128,9 @@ The key of a link expires through its TTL, and every spend also checks the store
 - The device is not revoked or expired.
 - The link has a use left and did not expire. (A bare `HINCRBY` on an expired key would create it again without a TTL.)
 
-Commands that the store sends: `EVAL` (never `EVALSHA`), `HGET`, `HGETALL`, `HINCRBY`, `HSET`, `HDEL`, `HEXISTS`. The scripts also use `EXISTS`, `HGET`, `HDEL`, `HSET`, `HINCRBY` and `PEXPIRE`. Nothing scans, selects a database or flushes. A Redis error is an error, never an empty set: the sync to the agents does not push when the store cannot read its data.
+Commands that the store sends: `EVAL` (never `EVALSHA`), `HGET`, `HGETALL`, `HINCRBY`, `HSET`, `HDEL`, `HEXISTS`. For the audit log, it also sends `LPUSH` and `LTRIM` in one `MULTI`/`EXEC` transaction, and `LRANGE`. The scripts also use `EXISTS`, `HGET`, `HDEL`, `HSET`, `HINCRBY`, `PEXPIRE` and `DEL`.
+
+Nothing scans, selects a database or flushes. A Redis error is an error, never an empty set: the sync to the agents does not push when the store cannot read its data.
 
 Move a SQLite database that exists: do one of these procedures.
 
@@ -207,13 +210,13 @@ The file is optional. Files from the Python version continue to work. Start from
 
 `GET /` (Overview) · `GET /nodes` (page) · `GET /activity` (page) · `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` · `POST /nodes/{id}/stop` · `GET /tailnet/status` · `GET /healthz`.
 
-With `ENROLL_DB`, these are also available: the `/enroll` admin pages and API on `:80`, and the public `/e/<token>` and `/sub/<secret>` on `:8081`.
+With `ENROLL_DB` or `ENROLL_REDIS=1`, these are also available: the `/enroll` admin pages and API on `:80`, and the public `/e/<token>` and `/sub/<secret>` on `:8081`.
 
 Start and stop are idempotent. A provider failure shows as `error` on that node only.
 
 ## Enrolment (optional)
 
-Set `ENROLL_DB` to turn on user enrolment for a REALITY bridge proxy. The binary then serves a second, public enrolment listener next to the admin app. Both bind to the tailnet address only:
+Set `ENROLL_DB` or `ENROLL_REDIS=1` to turn on user enrolment for a REALITY bridge proxy. The binary then serves a second, public enrolment listener next to the admin app. Both bind to the tailnet address only:
 
 | port | serves | reachable by |
 |---|---|---|
@@ -480,6 +483,8 @@ Messengers fetch a pasted link to build a preview. This would use a single-use l
 - `preview`
 - `linkexpanding`
 - `google-`
+- `vkshare`
+- `viber`
 
 iMessage previews identify as `facebookexternalhit`/`Twitterbot`. Browsers (Safari, Chrome) and the client apps pass. An empty User-Agent, or no User-Agent, counts as a normal client. A preview bot with a User-Agent that is not in the list can still burn a link: create another link.
 
@@ -635,7 +640,7 @@ Confirm names the pending change. It succeeds only while headscale still serves 
 
 "Revert now" in the pending banner undoes the pending change immediately, without a wait for its deadline. The "Revert" buttons in the history restore an older policy as a new change, so they are disabled while a change is pending.
 
-> **WARNING:** If the page shows a warning that the automatic revert continues to fail, use Confirm as the way out. Confirm keeps the change.
+> **WARNING:** If the page shows a warning that the automatic revert continues to fail, check headscale. Then use Confirm or Revert now as the way out. Confirm keeps the change. Revert now tries the revert again.
 
 The console adds a "Policy" entry to the sidebar. Its Content-Security-Policy (`ui.PageCSP`, like every admin page) allows scripts and styles only from the files of the page: no inline script and no style attributes.
 
@@ -924,7 +929,9 @@ An attempt fails with a short reason, such as:
 
 When `alert` is set, the module evaluates the condition on every successful run. A result without the field, or with a non-number there, is a failed attempt (`bad result`), not a silent pass.
 
-A true condition sends the alert, unless a cooldown runs or the same message is in the send process at that time. Only a successful send stores the cooldown, so after a failed send the next run tries again. A false condition clears the cooldown. The module retries ntfy sends up to three times (1 s, then 2 s) for transport errors, `429` and `5xx`. With `healthcheck` set, the module fetches the ping URL after every successful sequence, and `<url>/fail` after a failed one.
+A true condition sends the alert, unless a cooldown runs or the same message is in the send process at that time. Only a successful send stores the cooldown, so after a failed send the next run tries again. A false condition clears the cooldown. The module makes at most three attempts for an ntfy send: the first send and two retries. It retries only after a transport error, `429` or `5xx`. The wait is 1 s before the first retry and 2 s before the second retry.
+
+With `healthcheck` set, the module fetches the ping URL after every successful sequence, and `<url>/fail` after a failed one.
 
 Crash behaviour: the module stores the cooldown only after ntfy accepted the message. During a send, the module holds back a second send of the same message in memory only. The app can stop (or a deploy can cut a send off) between the send and the store of the cooldown. The next run then sends the message again. A crash can duplicate an alert or a failure message, but can never suppress one.
 
@@ -1035,8 +1042,8 @@ With `SESSIONS_TAG` set, the admin listener serves a **Browser** page (`/session
 |---|---|
 | `GET /sessions` | The page: one row for each tagged node with a status dot, a length choice (30 min, 1 h, 4 h), Start, Stop, a countdown and an Open link while the session runs. It refreshes every 5 s. |
 | `GET /sessions.json` | `{"nodes":[{"id","name","available","session":null or {"id","state","started_at","expires_at","port","reason"},"url"}]}`. A node whose runner cannot be reached shows `available: false`, never an error and never "no session". |
-| `POST /sessions/{node}/start` | JSON body `{"ttl_seconds":N,"idle_seconds":N}` (both optional; defaults 3600 and 900; the runner enforces 60 to 14400 and 60 to 3600). `201` with the node view, `409` busy, `422` settings refused, `503` unreachable or sessions disabled on that node, `404` for a node without the tag. |
-| `POST /sessions/{node}/stop` | `204`, also when nothing runs; `404` for a node without the tag. |
+| `POST /sessions/{node}/start` | JSON body `{"ttl_seconds":N,"idle_seconds":N}` (both optional; defaults 3600 and 900; the runner enforces 60 to 14400 and 60 to 3600). `201` with the node view. `409` busy, or more than one node has this name. `422` settings refused. `503` node list not available, node offline, node without a tailnet IPv4 address, node not reachable, or sessions disabled on that node. `404` for an unknown name or a node without the tag. |
+| `POST /sessions/{node}/stop` | `204`, also when nothing runs. `404` for an unknown name or a node without the tag. `409` more than one node has this name. `503` node list not available, node offline, node without a tailnet IPv4 address, or node not reachable. |
 
 `{node}` is the headscale given name of the node. The app never contacts a node without `SESSIONS_TAG`, and that node never receives the runner token.
 
@@ -1072,7 +1079,7 @@ make build                 # bin/node-control, CGO off
 docker build -t node-control .
 ```
 
-The image is `alpine` (so a shell is available for `fly ssh console`), with the binary at `/usr/local/bin/node-control` and `app/` at `/srv/app`. `ARG TSVERSION` only documents the tailscale.com release, and fails the build if `go.mod` pins another one. State is on the volume mounted at `/var/lib/tailscale` (see `fly.toml`). Deploy with the overlay procedure from the repository `CLAUDE.md` (section 2.5).
+The image is `alpine` (so a shell is available for `fly ssh console`), with the binary at `/usr/local/bin/node-control` and `app/` at `/srv/app`. `ARG TSVERSION` only documents the tailscale.com release, and fails the build if `go.mod` pins another one. Without `REDIS_URL`, the tailscale state is on the volume mounted at `/var/lib/tailscale` (see `fly.toml`). With `REDIS_URL`, the state is in Redis (see "Tailscale state"). Deploy with the overlay procedure from the repository `CLAUDE.md` (section 2.5).
 
 ## Tests
 

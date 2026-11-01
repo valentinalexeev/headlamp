@@ -81,6 +81,8 @@ func (m *Module) HasActivity() bool { return m.store != nil }
 // no record; it reads as a plain revert (change.reverted_earlier) with no actor, since nothing says who, at its
 // deadline, or when the change was applied if that deadline is still ahead.
 // An old confirmation is not listed: nothing says when it happened. The policy text is never part of an entry.
+// Times are whole seconds, so a change's end comes before its application here: when both fall in one second, the
+// newest-first sort, which is stable, keeps them in that order.
 // Only POLICY_ADMIN_USERS see it.
 func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.ActivityEntry, error) {
 	if m.store == nil {
@@ -107,7 +109,6 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 		if r := strings.TrimRight(strings.TrimSpace(e.Reason), "."); r != "" {
 			detail += ": " + r
 		}
-		out = append(out, core.ActivityEntry{At: e.At, Actor: e.Actor, Source: "Policy", Action: "change.applied", Detail: detail})
 		id := fmt.Sprintf("%d", e.ID)
 		if r, ok := recs[e.ID]; ok {
 			action := map[string]string{RecordConfirmed: "change.confirmed", RecordReverted: "change.reverted",
@@ -122,6 +123,7 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 			}
 			out = append(out, core.ActivityEntry{At: at, Source: "Policy", Action: "change.reverted_earlier", Detail: id})
 		}
+		out = append(out, core.ActivityEntry{At: e.At, Actor: e.Actor, Source: "Policy", Action: "change.applied", Detail: detail})
 	}
 	return out, nil
 }

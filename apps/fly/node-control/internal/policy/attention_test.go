@@ -282,3 +282,27 @@ func TestPolicyActivity(t *testing.T) {
 		}
 	})
 }
+
+// Times are whole seconds, so a change that ended within the second it was applied ties with its own application.
+// Sorted newest first by a stable sort, the outcome must still come first.
+func TestPolicyActivityOutcomeBeforeItsApplyInTheSameSecond(t *testing.T) {
+	m, svc, _, clk := attentionModule(t)
+	st := svc.store
+	id, err := st.Begin("alice", "r", "a", "b", clk.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordOutcome(id, RecordRevertedOnRequest, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkReverted(id, true); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Activity(context.Background(), "alice", 20)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got[0].Action != "change.reverted_on_request" || got[1].Action != "change.applied" {
+		t.Fatalf("newest first: %+v", got)
+	}
+}

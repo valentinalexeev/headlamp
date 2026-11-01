@@ -24,15 +24,12 @@
     Runner: 'Tasks and sessions on it stop until you start it again.'
   };
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
-  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
   function str(v) { return typeof v === 'string' ? v : ''; }
   function up(v) { return str(v).toUpperCase(); }
   function pick(map, k) {
     return map && typeof map === 'object' && typeof k === 'string' && has(map, k) && map[k] && typeof map[k] === 'object' ? map[k] : null;
   }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
 
   // sentence turns a provider word ("STOPPING", "not_ready") into "Stopping", "Not ready".
   function sentence(s) {
@@ -43,10 +40,10 @@
   // formatDetail: the detail line a node's config asks for. detailFields is an ordered list of field
   // names or {field, template}; the first field with a value wins.
   function formatDetail(cfg, st) {
-    var fields = arr(cfg.detailFields);
+    var fields = hl.arr(cfg.detailFields);
     for (var i = 0; i < fields.length; i++) {
       var f = fields[i];
-      var field = typeof f === 'string' ? f : str(obj(f).field);
+      var field = typeof f === 'string' ? f : str(hl.obj(f).field);
       var v = field && has(st, field) ? st[field] : '';
       if (!v) { continue; }
       v = hl.plain(v, 120);
@@ -180,7 +177,7 @@
       else { tailnet = 'Offline, ' + (lastSeen ? 'last seen ' + lastSeen : 'never seen'); }
     } else if (online === true) { tailnet = 'Online'; }
     else if (online === false) { tailnet = 'Offline'; }
-    var addr = (tn && arr(tn.ip_addresses)[0]) || (ing && ing.address) || '';
+    var addr = (tn && hl.arr(tn.ip_addresses)[0]) || (ing && ing.address) || '';
     var action = '';
     if (approve) { action = 'Compare'; }
     else if (level === 'crit' || level === 'warn') { action = 'Open'; }
@@ -210,10 +207,10 @@
   // without such a node is a row of its own that cannot be powered. opts.now is for tests.
   function mergeNodes(nodes, status, tailnet, ingresses, sessions, opts) {
     var now = opts && typeof opts.now === 'number' ? opts.now : Date.now();
-    nodes = obj(nodes); status = obj(status);
+    nodes = hl.obj(nodes); status = hl.obj(status);
     var usable = tailnetUsable(tailnet);
-    var ings = arr(ingresses).filter(function (i) { return i && typeof i === 'object'; });
-    var runs = arr(sessions).filter(function (r) { return r && typeof r === 'object'; });
+    var ings = hl.arr(ingresses).filter(function (i) { return i && typeof i === 'object'; });
+    var runs = hl.arr(sessions).filter(function (r) { return r && typeof r === 'object'; });
     var usedIng = [], usedRun = [];
     var rows = [];
     var taken = {};
@@ -227,7 +224,7 @@
     }
 
     Object.keys(nodes).forEach(function (id) {
-      var cfg = obj(nodes[id]);
+      var cfg = hl.obj(nodes[id]);
       var tname = str(cfg.tailnetName) || id;
       var ing = null, run = null;
       for (var n = 0; n < ings.length && !ing; n++) {
@@ -272,15 +269,6 @@
     return rows.length === 1 ? '1 node, nothing needs you' : rows.length + ' nodes, nothing needs you';
   }
 
-  function button(label, iconName, cls, onClick) {
-    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
-    b.setAttribute('type', 'button');
-    var ic = iconName ? hl.icon(iconName) : null;
-    if (ic) { b.appendChild(ic); }
-    b.appendChild(hl.el('span', null, label));
-    if (onClick) { b.addEventListener('click', onClick); }
-    return b;
-  }
 
   // mount wires the page's elements to the data. Nothing here fetches except the start and stop POSTs.
   // busy[id] is null when idle, or the action ('start'/'stop') whose request is still unresolved. While it is
@@ -299,25 +287,8 @@
     st.confirmEl = null;
 
     // focusKey names the focused control inside box by its data-fk, so a rebuild can give focus back.
-    function focusKey(box) {
-      var ae = typeof document !== 'undefined' ? document.activeElement : null;
-      for (var n = ae; n; n = n.parentNode) {
-        if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
-      }
-      return null;
-    }
     // A control that is disabled now (a Start that was just pressed) cannot take focus; fallback names the one
     // that gets it instead, so focus never falls to the page.
-    function refocus(box, key, fallback) {
-      if (!key) { return; }
-      var stack = [box];
-      while (stack.length) {
-        var n = stack.pop();
-        if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
-        (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
-      }
-      if (fallback) { refocus(box, fallback); }
-    }
     function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
     // view: the row as shown. While a start or stop is unresolved the state reads Starting or Stopping.
     function view(r) {
@@ -379,7 +350,7 @@
       if (sig !== st.chipSig) {
         st.chipSig = sig;
         st.chips = {};
-        clear(els.chips);
+        hl.clear(els.chips);
         ['All'].concat(roles).forEach(function (r) {
           var b = hl.el('button', 'chip', r);
           b.setAttribute('type', 'button');
@@ -401,8 +372,8 @@
       var sig = JSON.stringify([shown.map(view), st.sel, st.busy]);
       if (sig === st.tableSig) { return; }
       st.tableSig = sig;
-      var fk = focusKey(els.rows);
-      clear(els.rows);
+      var fk = hl.focusKey(els.rows);
+      hl.clear(els.rows);
       shown.forEach(function (raw) {
         var r = view(raw);
         var tr = hl.el('tr', r.id === st.sel ? 'sel' : '');
@@ -422,14 +393,14 @@
         if (raw.action) {
           // Start starts the node (it is not destructive) under the same busy rule; Open and Compare select.
           var starts = raw.action === 'Start';
-          var ab = keyed(button(raw.action, null, 'sm', function () { if (starts) { act(raw.id, 'start'); } else { select(raw.id); } }), 'act:' + r.id);
+          var ab = keyed(hl.button(raw.action, null, 'sm', function () { if (starts) { act(raw.id, 'start'); } else { select(raw.id); } }), 'act:' + r.id);
           ab.disabled = starts && !!st.busy[raw.id];
           actCell.appendChild(ab);
         }
         tr.appendChild(actCell);
         els.rows.appendChild(tr);
       });
-      refocus(els.rows, fk, fk && fk.indexOf('act:') === 0 ? 'name:' + fk.slice(4) : null);
+      hl.refocus(els.rows, fk, fk && fk.indexOf('act:') === 0 ? 'name:' + fk.slice(4) : null);
     }
 
     function renderPanel(force) {
@@ -441,9 +412,9 @@
       if (!force && sig === st.panelSig) { return; }
       st.panelSig = sig;
       var panel = els.panel;
-      var fk = focusKey(panel);
+      var fk = hl.focusKey(panel);
       st.confirmEl = null;
-      clear(panel);
+      hl.clear(panel);
       if (!row) {
         panel.appendChild(hl.el('p', 't2', 'Select a node to see its detail.'));
         return;
@@ -477,7 +448,7 @@
             consequence: CONSEQUENCE[row.role] || CONSEQUENCE.Exit,
             confirmLabel: 'Stop ' + row.label, cancelLabel: 'Keep running', icon: 'stop', into: box,
             onConfirm: function () { st.confirming = null; st.confirmEl = null; act(row.id, 'stop'); },
-            onCancel: function () { st.confirming = null; st.confirmEl = null; renderPanel(true); refocus(els.panel, 'panel:stop'); }
+            onCancel: function () { st.confirming = null; st.confirmEl = null; renderPanel(true); hl.refocus(els.panel, 'panel:stop'); }
           });
         } else {
           var btns = hl.el('div', 'rowbtns');
@@ -485,12 +456,12 @@
           // changing, which may be stuck and is when they are needed, and neither while its state is unknown.
           var unsettled = row.kind === 'error' || row.kind === 'transition';
           if (row.kind === 'stopped' || unsettled) {
-            var start = keyed(button('Start', 'play', 'primary', function () { act(row.id, 'start'); }), 'panel:start');
+            var start = keyed(hl.button('Start', 'play', 'primary', function () { act(row.id, 'start'); }), 'panel:start');
             start.disabled = !!busy;
             btns.appendChild(start);
           }
           if (row.kind === 'running' || unsettled) {
-            var stop = keyed(button('Stop', 'stop', '', function () { st.confirming = row.id; renderPanel(true); }), 'panel:stop');
+            var stop = keyed(hl.button('Stop', 'stop', '', function () { st.confirming = row.id; renderPanel(true); }), 'panel:stop');
             stop.disabled = !!busy;
             btns.appendChild(stop);
           }
@@ -513,7 +484,7 @@
         mwrap.appendChild(manageLink);
         panel.appendChild(mwrap);
       }
-      refocus(panel, fk, fk && fk.indexOf('panel:') === 0 ? 'panel:title' : null);
+      hl.refocus(panel, fk, fk && fk.indexOf('panel:') === 0 ? 'panel:title' : null);
     }
 
     function render() {
@@ -578,7 +549,7 @@
 
     function optional(key, url, field, pick) {
       if (skip[key]) { return Promise.resolve(); }
-      return api('GET', url).then(function (v) { last[field] = arr(pick(obj(v))); }, function (e) {
+      return api('GET', url).then(function (v) { last[field] = hl.arr(pick(hl.obj(v))); }, function (e) {
         if (gone(e)) { last[field] = null; skip[key] = true; }
       });
     }
@@ -586,8 +557,8 @@
     function refresh() {
       var failed = false, fresh = false;
       var reads = [
-        api('GET', '/nodes.json').then(function (v) { last.nodes = obj(obj(v).nodes); }, function () { failed = true; }),
-        api('GET', '/status').then(function (v) { last.status = obj(v); fresh = true; }, function () { failed = true; }),
+        api('GET', '/nodes.json').then(function (v) { last.nodes = hl.obj(hl.obj(v).nodes); }, function () { failed = true; }),
+        api('GET', '/status').then(function (v) { last.status = hl.obj(v); fresh = true; }, function () { failed = true; }),
         api('GET', '/tailnet/status').then(function (v) { last.tailnet = v; }, function () { last.tailnet = null; }),
         optional('ingresses', '/enroll/ingresses', 'ingresses', function (v) { return v.ingresses; }),
         optional('sessions', '/sessions.json?links=0', 'sessions', function (v) { return v.nodes; })

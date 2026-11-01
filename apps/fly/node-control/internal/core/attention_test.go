@@ -341,3 +341,41 @@ func TestActivityRespectsVisibility(t *testing.T) {
 		t.Fatalf("bob sees the open source only, and is told something is hidden: %+v", r)
 	}
 }
+
+func TestActivitySourceFilterAsksOnlyThatSource(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	nav := []NavItem{{Label: "Nodes", Path: "/nodes", Source: "nodes"}, {Label: "Policy", Path: "/policy", Source: "policy"}, {Label: "Funnel", Path: "/funnel", Source: "funnel"}}
+	nodes := &actM{stubModule: named("nodes"), entries: []ActivityEntry{{At: at, Action: "node.stop", Source: "Nodes"}}}
+	broken := &actM{stubModule: named("funnel"), err: errors.New("down")}
+	hidden := &actM{stubModule: named("policy"), err: ErrNotVisible}
+	h := attHandler(alice, nav, nodes, broken, hidden)
+
+	var r actResp
+	getJSON(t, h, "/_activity.json?source=Nodes", &r)
+	if len(r.Entries) != 1 || r.Partial || r.Hidden {
+		t.Fatalf("a source that was not asked for says nothing about this list: %+v", r)
+	}
+	r = actResp{}
+	getJSON(t, h, "/_activity.json?source=Funnel", &r)
+	if len(r.Entries) != 0 || !r.Partial {
+		t.Fatalf("the chosen source failing does: %+v", r)
+	}
+	r = actResp{}
+	getJSON(t, h, "/_activity.json", &r)
+	if len(r.Entries) != 1 || !r.Partial || !r.Hidden {
+		t.Fatalf("with no filter every source counts: %+v", r)
+	}
+	r = actResp{}
+	getJSON(t, h, "/_activity.json?source=Other", &r)
+	if len(r.Entries) != 0 || !r.Partial {
+		t.Fatalf("a name no page owns still asks everyone, as it could be any module's: %+v", r)
+	}
+}
+
+func TestAttentionThatCannotBeEncodedIsAnError(t *testing.T) {
+	m := &attMod{stubModule: named("a"), items: []AttentionItem{{ID: "x", Level: LevelWaiting, Title: "x", Since: time.Date(12026, 1, 1, 0, 0, 0, 0, time.UTC)}}}
+	rec := do(attHandler(alice, nil, m), "GET", "/_attention.json")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("an empty 200 reads as nothing to report: %d %q", rec.Code, rec.Body.String())
+	}
+}

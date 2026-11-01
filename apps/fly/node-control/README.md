@@ -99,12 +99,12 @@ secrets are derived from it, device id and epoch), optional `ENROLL_REDIS_KEY`.
 
 Layout under the prefix `P` (all DB 0): `P:meta` (hash; `seq` is the last device id, never reused), `P:d:<id>` (one hash
 per device, no TTL: sealed name/owner/client/UUIDs plus plain `expires_at`, `revoked`, `epoch` and the activity numbers below, so revoke, extend and
-rotate are single atomic commands), `P:t:<hash>` (one hash per one-time link, **with a TTL**), `P:approvals` (sealed).
+rotate are single atomic commands), `P:t:<hash>` (one hash per one-time link, **with a TTL**), `P:approvals` (sealed), `P:acks` (acknowledged attention items: a login, an item id and a hash, not sealed, like the audit log).
 A link's key expires through its TTL, and every spend also checks the stored expiry. Spending is one Lua script (link
 key and device key) that writes nothing unless both exist, the device is not revoked or expired, and the link has a use left
 and has not expired (a bare `HINCRBY` on an expired key would
 recreate it without a TTL). Commands sent: `EVAL` (never `EVALSHA`), `HGET`, `HGETALL`, `HINCRBY`, `HSET`, `HDEL`,
-`HEXISTS`; the scripts also use `EXISTS`, `HSET`, `HINCRBY` and `PEXPIRE`. Nothing scans, selects a database or
+`HEXISTS`; the scripts also use `EXISTS`, `HGET`, `HDEL`, `HSET`, `HINCRBY` and `PEXPIRE`. Nothing scans, selects a database or
 flushes. A Redis error is an error, never an empty set: the sync to the agents does not push when the store cannot be
 read.
 
@@ -246,7 +246,10 @@ active bridge and the phone profile lists them all.
   `short_id`, `uuids` (required, see below). Optional: `sni` (default `host`), `port` (default 443),
   `agent_url` (`http(s)://host:port`; without it the first entry uses `AGENT_URL` and the others are found through
   headscale as the `tag:ingress` node carrying the entry's name, agent port 9000), `token_env` (name of the token
-  variable, `^[A-Z][A-Z0-9_]{0,63}$`; default `AGENT_TOKEN_<NAME>`, and for the first entry also `AGENT_TOKEN`).
+  variable, `^[A-Z][A-Z0-9_]{0,63}$`; default `AGENT_TOKEN_<NAME>`, and for the first entry also `AGENT_TOKEN`),
+  `node` (tailnet name of the machine the bridge runs on, a lowercase DNS name; needed when it differs from `name`,
+  because the stopped check, the online flag and the Nodes page otherwise match the bridge by name), `intermittent`
+  (`true` or `false`, default `false`; see "Intermittent bridges").
   `sni`, `short_id` and `public_key` must equal the `reality-ingress` role's `reality_sni`, `reality_short_id` and
   the public half of `reality_private_key` (`xray x25519 -i <private>`); `port` must equal its `ingress_listen_port`.
 - `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>`
@@ -257,6 +260,19 @@ active bridge and the phone profile lists them all.
 - The old single-host file (`host`, `public_key`, `short_id`, `sni`, `port` at the top level, no `ingresses`) still
   loads as one bridge named `default` with `"uuids": "base"`, and uses `AGENT_TOKEN`. Mixing the two shapes is an
   error.
+
+### Intermittent bridges
+
+`"intermittent": true` is for a bridge that is expected to come and go. While its agent is `unreachable`, Attention
+shows an info item instead of a critical one, and its row on the Nodes page has no At risk state and does not count
+towards the lamp. Every other sync failure (`unauthorized`, `rejected`, `conflict`, `error`) stays critical, since a
+reachable agent that refuses credentials is a real problem.
+
+**The risk:** unreachable over the tailnet does not prove the bridge stopped serving clients. Its tailnet connection
+can be down while its front still accepts connections, and then revocations and extensions made meanwhile are not in
+effect on it: a revoked device may keep working there until the agent answers again. Only mark a bridge intermittent
+if you accept that for it. A bridge stopped at its provider needs no such setting: it serves nobody, and it is
+already an info item.
 
 ### Credentials per bridge (`uuids`)
 
@@ -362,7 +378,7 @@ Adding a bridge, step by step:
 
 - `GET /enroll/ingresses` returns one row per bridge (`name`, `host`, `source`, `approval`, `active`, `approved`,
   `fingerprint`, the key, short id and machine key prefixes, `node_id`, `address`, `hostname`, `given_name`, `online`,
-  `sync`, `detail`, `aliases`) and, for a discovered bridge that has an approval, what that approval pinned:
+  `sync`, `detail`, `aliases`, `node`, `intermittent`) and, for a discovered bridge that has an approval, what that approval pinned:
   `approved_fingerprint`, `approved_node_id` and `approved_machine_key_prefix`. The review page (`/enroll/approve`)
   compares these with the values the bridge publishes now, so a `changed` bridge shows exactly what differs before it
   is approved again. The store keeps only these three, so nothing else can be compared.
@@ -531,6 +547,46 @@ local, and no secret belongs in an item. A source that returns `core.ErrNotVisib
 `hidden_systems` is set. A source that fails or does not answer in time becomes a critical "could not be checked"
 item, never its error text. Overview, the sidebar counts and the timed strip all read this one endpoint.
 
+### Acknowledging an attention item
+
+Someone who has looked at an item can acknowledge it: "I know, stop asking". It leaves the queue, the sidebar counts and
+the lamp and no longer blocks "All clear", and sits in a collapsed "Acknowledged (N)" section on Overview with an Undo.
+It stays in `/_attention.json` with `acknowledged: {by, at, until}`, and the system line follows the items that are left,
+adding "N acknowledged" to its summary.
+
+**Acknowledging fixes nothing and changes no behaviour.** A bridge that is out of sync stays out of sync, and revocations
+stay not in effect there; the page just stops pointing at it, for everyone who can see the item (acknowledgements are
+shared, not per person). The Nodes page still shows the state of the row.
+
+An acknowledgement ends by itself, and the item is back in the queue, when:
+
+- the item changes meaning: another level, or another reason (`AttentionItem.AckKey`, which a source sets to what the
+  item means; the default is the id and the level). A bridge going from `unreachable` to `rejected` comes back; a count
+  or an age changing in a title does not;
+- its optional expiry passes (the page offers until it changes, 1 day and 7 days);
+- the item clears: its source answered, without it. A source that errored or is hidden from the caller never ends one,
+  nor does a module with a system line that reads `unknown`, as it could not fully look. This is only noticed while a
+  console is open: an item that clears and returns while nobody is looking keeps its acknowledgement, if it means the same.
+
+Who may do what: only someone who sees the item in their own attention list right now may acknowledge it or undo that.
+`timed` items cannot be acknowledged, since they count down to something, and neither can the "could not be checked"
+item of a source that does not answer: nothing can be known about it. The routes are `POST /_attention/acknowledge`
+(`{"id", "ack_token", "expires_in_seconds"}`, up to 90 days, absent means until it changes) and
+`POST /_attention/unacknowledge` (`{"id", "ack_token"}`), for a named person only, never a tagged node, and only with
+`Content-Type: application/json`. `ack_token` is what the item said it was when the caller saw it, and a request naming
+an older one is refused (409), so nobody acknowledges a change they have not seen. An item offers a token only when it
+can be acknowledged.
+
+Activity records acknowledging and undoing, with the actor, the time and the item's title; an acknowledgement ending by
+itself is not recorded. Those entries are shown only to someone who can see the module that reported the item, which is
+asked just as the attention list asks it, so a module that hides itself from a caller hides them too.
+
+**Off without an enrolment store.** Acknowledgements live in the enrolment backend, next to the audit log: the
+`attention_acks` table in SQLite or the hash `<prefix>:acks` in Redis. With neither (`ENROLL_DB` and `ENROLL_REDIS` unset)
+there is nowhere to persist them, so no item offers it and no button shows. While the store cannot be read, every item
+is shown as not acknowledged and nothing can be acknowledged. They are not part of `enroll-export`, `enroll-import` or the
+backup script: after a restore every item is back in the queue.
+
 ### Activity: `ActivitySource`, `ActivityGate`
 
 `core.ActivitySource` is `Activity(ctx, login, limit) ([]ActivityEntry, error)`; an entry is `{at, actor, source,
@@ -559,7 +615,7 @@ item.
 With enrolment on, device and node actions (`device.create`, `device.link`, `device.revoke`, `device.delete`, `device.extend`, `device.rotate_secret`, `bridge.approve`, `bridge.unapprove`, and node start and stop) are recorded
 as `core.AuditEntry` (`at`, `actor`, `action`, `detail`) in the enrolment backend: the `audit` table in SQLite, or the
 list `<prefix>:audit` in Redis. It is capped at **1000** entries, newest first; older ones are dropped as new ones are
-written. The detail holds names and dates only, never a link, key or subscription URL, and each field is cut to a fixed
+written. Acknowledging attention items (`attention.acknowledge`, `attention.unacknowledge`) is recorded here too. The detail holds names and dates only, never a link, key or subscription URL, and each field is cut to a fixed
 length. A failure to write an entry is logged and never fails the action. The log is not part of `enroll-export`,
 `enroll-import` or the backup script: **restoring a backup does not bring the audit log back**, and a restored
 database starts with an empty one.
@@ -576,7 +632,7 @@ ended before the table existed has no record and is shown without an actor or ti
 `make demo SCENARIO=attention|clear|partial|minimal` (from this directory) runs `cmd/console-demo`: the whole console
 on `127.0.0.1:8099` with invented data and local fakes for headscale, the enrolment agent, the task runner, a provider
 and Redis. It listens on loopback only, refuses other addresses and is not part of the image. `attention` seeds one of
-every kind of problem, `clear` seeds none, `partial` is `clear` seen by a caller who is in none of the `*_ADMIN_USERS`
+every kind of problem and one acknowledged item, with `bridge-4` on machine `vm-4`, marked intermittent and unreachable; `clear` seeds none, `partial` is `clear` seen by a caller who is in none of the `*_ADMIN_USERS`
 lists (so the policy, tasks and funnel entries and systems are hidden), and `minimal` switches on the nodes module
 only, so the console is the compact one.
 

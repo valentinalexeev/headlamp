@@ -70,6 +70,13 @@ func TestTailnetAttentionAPIKeyExpiry(t *testing.T) {
 			if !strings.Contains(it.Detail, "rotate-headscale-api-key.sh") {
 				t.Errorf("the detail must carry the rotation hint: %q", it.Detail)
 			}
+			want := "tailnet-api-key|expiring" // however many days are left
+			if tc.wantTitle == "has expired" {
+				want = "tailnet-api-key|expired"
+			}
+			if it.AckKey != want {
+				t.Errorf("key %q, want %q", it.AckKey, want)
+			}
 		})
 	}
 }

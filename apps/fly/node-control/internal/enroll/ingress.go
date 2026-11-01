@@ -24,6 +24,10 @@ type Ingress struct {
 	TokenEnv  string `json:"token_env"`
 	// UUIDs is "base" (the stored device UUIDs) or "derived" (computed per ingress, see UUIDFor).
 	UUIDs string `json:"uuids"`
+	// Node is the tailnet name of the machine this bridge runs on, when that differs from Name. Optional.
+	Node string `json:"node,omitempty"`
+	// Intermittent says the bridge is expected to come and go: an unreachable agent is a notice, not a risk. Optional.
+	Intermittent bool `json:"intermittent,omitempty"`
 }
 
 // IngressConfig is the parsed ENROLL_CONFIG: one or more ingresses, the host that serves
@@ -208,12 +212,22 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 		return Ingress{}, fmt.Errorf("ENROLL_CONFIG: ingresses[%d] %s: uuids must be %q or %q", i, name, uuidsBase, uuidsDerived)
 	}
 	in.UUIDs = s
+	if v, present := raw["node"]; present {
+		if in.Node, ok = rawString(v); !ok || !validDNSName(in.Node) {
+			return fail("node must be a tailnet name (lowercase letters, digits, hyphens and dots)")
+		}
+	}
+	if v, present := raw["intermittent"]; present {
+		if json.Unmarshal(v, &in.Intermittent) != nil || string(v) == "null" {
+			return fail("intermittent must be true or false")
+		}
+	}
 	return in, nil
 }
 
 var (
 	newShapeTopKeys = []string{"profile_name", "link_host", "ingresses"}
-	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids"}
+	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids", "node", "intermittent"}
 	keyNameRe       = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,40}$`)
 )
 

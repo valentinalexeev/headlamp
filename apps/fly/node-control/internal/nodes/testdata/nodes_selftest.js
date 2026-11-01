@@ -126,6 +126,45 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(r.state, 'Online');
   }
 
+  // a bridge can name the machine it runs on
+  {
+    const rows = merge({ 'vm-7': cfg() }, { 'vm-7': { status: 'RUNNING' } }, { 'vm-7': tn('vm-7', true) }, [ing('bridge-2', { node: 'vm-7' })]);
+    assert.strictEqual(rows.length, 1, 'the bridge joins the node it names');
+    assert.strictEqual(rows[0].role, 'Bridge');
+    assert.strictEqual(rows[0].bridge, 'bridge-2');
+    // the node it names wins over another bridge that only shares the name, and over its own name
+    const two = merge({ 'vm-7': cfg() }, { 'vm-7': { status: 'RUNNING' } }, null, [ing('vm-7', {}), ing('bridge-2', { node: 'vm-7' })]);
+    assert.strictEqual(one(two, 'vm-7').bridge, 'bridge-2');
+    const own = merge({ 'bridge-2': cfg() }, { 'bridge-2': { status: 'RUNNING' } }, null, [ing('bridge-2', { node: 'vm-7' })]);
+    assert.strictEqual(own.length, 2, 'a node that only shares its name is another machine');
+    // a stopped machine it names is no risk
+    const stopped = merge({ 'vm-7': cfg() }, { 'vm-7': { status: 'STOPPED' } }, null,
+      [ing('bridge-2', { node: 'vm-7', sync: { pending: true, state: 'unreachable', since: null } })])[0];
+    assert.strictEqual(stopped.state, 'Stopped');
+  }
+
+  // an intermittent bridge whose agent is unreachable is no risk on its row; anything else stays one
+  {
+    const away = { pending: true, state: 'unreachable', since: Math.floor((NOW - 38 * 60000) / 1000) };
+    const n = { 'bridge-2': cfg() };
+    const s = { 'bridge-2': { status: 'RUNNING' } };
+    let r = merge(n, s, { 'bridge-2': tn('bridge-2', true) }, [ing('bridge-2', { intermittent: true, sync: away })])[0];
+    assert.strictEqual(r.state, 'Running');
+    assert.strictEqual(r.level, 'ok');
+    assert.strictEqual(r.detail, 'Sync pending');
+    assert.strictEqual(r.action, '');
+    assert.ok(/may not be in effect/.test(r.explain), r.explain);
+    r = merge({}, {}, null, [ing('bridge-2', { intermittent: true, online: false, sync: away })])[0];
+    assert.strictEqual(r.state, 'Offline');
+    assert.strictEqual(r.level, 'off');
+    assert.strictEqual(r.detail, 'Sync pending');
+    r = merge(n, s, null, [ing('bridge-2', { intermittent: true, sync: { pending: true, state: 'rejected', since: null } })])[0];
+    assert.strictEqual(r.state, 'Out of sync');
+    assert.strictEqual(r.level, 'crit');
+    r = merge(n, s, null, [ing('bridge-2', { sync: away })])[0];
+    assert.strictEqual(r.state, 'Out of sync', 'not marked intermittent');
+  }
+
   // outOfSyncBeatsRunning
   {
     const bad = { pending: true, state: 'unreachable', since: Math.floor((NOW - 38 * 60000) / 1000) };
@@ -236,6 +275,16 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     const els2 = mkEls();
     nodes.mount(els2).update(sample());
     assert.strictEqual(findAll(els2.rows, (n) => hasClass(n, 'name')).length, 3);
+    global.window.location.search = '';
+  }
+
+  // ?sel= with a bridge's name finds the row of the machine it runs on: that is what its Attention item links to
+  {
+    global.window.location.search = '?sel=bridge-2';
+    const els = mkEls();
+    nodes.mount(els).update({ nodes: { 'vm-7': cfg() }, status: { 'vm-7': { status: 'RUNNING' } }, tailnet: null, ingresses: [ing('bridge-2', { node: 'vm-7' })], sessions: null, now: NOW });
+    assert.strictEqual(findAll(els.rows, (n) => n.tag === 'tr' && hasClass(n, 'sel')).length, 1);
+    assert.ok(/vm-7/.test(els.panel.textContent));
     global.window.location.search = '';
   }
 

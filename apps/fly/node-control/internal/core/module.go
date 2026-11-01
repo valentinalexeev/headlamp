@@ -89,9 +89,19 @@ type AttentionItem struct {
 	Deadline    time.Time      `json:"deadline,omitzero"`     // set for "timed"
 	AppliedAt   time.Time      `json:"applied_at,omitzero"`   // set for a policy change
 	ChangeID    int64          `json:"change_id,omitempty"`   // set for a policy change
+	// AckKey is what the item means, for matching an acknowledgement: when it changes, the acknowledgement ends. A
+	// count or an age in the title is not part of it; a different reason for the same ID is. Empty means ID and level.
+	AckKey string `json:"-"`
+	// AckToken is set by the core when the caller can acknowledge the item: it says what the caller was shown, and a
+	// request naming an older meaning is refused. Acknowledged is set when the item is acknowledged.
+	AckToken     string           `json:"ack_token,omitempty"`
+	Acknowledged *Acknowledgement `json:"acknowledged,omitempty"`
+	module       string           // the module that reported it, set by the core with AckToken
 }
 
-// SystemLine is the one-line health of a module. State is "ok", "waiting", "critical", "unknown" or "off".
+// SystemLine is the one-line health of a module. State is "ok", "waiting", "critical", "unknown" or "off". A line that
+// is waiting or critical must be so because of its module's items: once those are acknowledged the core lowers it. A
+// line that reads "unknown" says the module could not fully look, so an item missing from its answer has not cleared.
 type SystemLine struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
@@ -145,6 +155,40 @@ type SearchSource interface {
 type AuditEntry struct {
 	At                    time.Time
 	Actor, Action, Detail string
+}
+
+// The audit actions of acknowledging an attention item. Their detail is "module/source: title": the core reads the
+// module back, to show the entry only to someone who can see that module.
+const (
+	ActionAcknowledge   = "attention.acknowledge"
+	ActionUnacknowledge = "attention.unacknowledge"
+)
+
+// Acknowledgement says that someone has seen an attention item and it can stop asking. Meaning is what the item meant
+// then (see AttentionItem.AckKey), hashed. A zero Until means no expiry.
+type Acknowledgement struct {
+	Module  string    `json:"-"`
+	ID      string    `json:"-"`
+	Meaning string    `json:"-"`
+	By      string    `json:"by"`
+	At      time.Time `json:"at"`
+	Until   time.Time `json:"until,omitzero"`
+}
+
+// AckStore persists acknowledgements, at most one per module and item id, and records acknowledging in its audit log.
+// DeleteAcknowledgement removes exactly the acknowledgement given (all its fields, times in whole seconds) and reports
+// whether it did, so whoever read an old one cannot remove a newer one.
+type AckStore interface {
+	Acknowledgements() ([]Acknowledgement, error)
+	PutAcknowledgement(a Acknowledgement) error
+	DeleteAcknowledgement(a Acknowledgement) (bool, error)
+	AuditLog
+}
+
+// AckSource is an optional interface for a module that offers somewhere to keep acknowledgements. It returns nil while
+// it has nowhere to keep them; with no store at all the feature is off.
+type AckSource interface {
+	AckStore() AckStore
 }
 
 // AuditLog is the bounded record of operator actions. AuditLog returns the newest entries first.

@@ -60,105 +60,110 @@ Put secrets in Fly secrets. Put plain settings in `fly.toml`.
 
 ## Tailscale state
 
-With `REDIS_URL` set, the embedded node keeps its identity in one Redis hash (field = tailscale state key,
-default hash `node-control:tsnet`) instead of a file, and the values are encrypted at rest with
-`NODE_CONTROL_STATE_KEY` (AES-256-GCM; the ciphertext is bound to the hash key and field, so a copy elsewhere does
-not decrypt). Starting with `REDIS_URL` and no key is an error unless you set `STATE_ALLOW_PLAINTEXT=1`.
+When `REDIS_URL` is set, the embedded node keeps its identity in one Redis hash, not in a file. Each field of the hash is a tailscale state key. The default hash is `node-control:tsnet`. `NODE_CONTROL_STATE_KEY` encrypts the values at rest (AES-256-GCM). The ciphertext is bound to the hash key and field, so a copy in a different location does not decrypt. A start with `REDIS_URL` and no key is an error, unless you set `STATE_ALLOW_PLAINTEXT=1`.
 
-Redis rules (shared instance): plain `redis://` on the private network, database 0 only, the code sends only
-`HELLO 2` (go-redis always opens with it; `HELLO 2 AUTH <user> <pass>` authenticates and keeps the connection on RESP2),
-`PING`, `HGET`, `HSET`, `HDEL`, `HLEN`, `HEXISTS` and, for `-force` only, `HKEYS` on the small state hash (never `CLIENT`, `SELECT`, `FLUSH*`, `KEYS` or `SCAN`; a test records
-every command), the key is prefixed with the app
-name (`<app>:`) and has no TTL, and nothing polls Redis (the node writes state rarely). The connection uses the normal
-OS dialer, not the tailnet. A Redis that is unreachable at start stops the app with a non-zero exit; error text never
-contains the URL, the password or the key.
+Redis rules (shared instance):
 
-Carrying over an existing identity (so the node keeps its tailnet address): either set `STATE_IMPORT_FROM` to the
-current state file for the first start (it is imported only while the Redis hash is empty, then ignored), or run it by
-hand from `fly ssh console`:
+- Use plain `redis://` on the private network and database 0 only.
+- The code sends only these commands: `HELLO 2`, `PING`, `HGET`, `HSET`, `HDEL`, `HLEN`, `HEXISTS` and, for `-force` only, `HKEYS` on the small state hash.
+- go-redis always opens with `HELLO 2`. `HELLO 2 AUTH <user> <pass>` does the authentication and keeps the connection on RESP2.
+- The code never sends `CLIENT`, `SELECT`, `FLUSH*`, `KEYS` or `SCAN`. A test records every command.
+- The key has the app name as its prefix (`<app>:`) and has no TTL.
+- Nothing polls Redis. The node writes state rarely.
+- The connection uses the normal OS dialer, not the tailnet.
+- If Redis is not reachable at start, the app stops with a non-zero exit code.
+- Error text never contains the URL, the password or the key.
+
+To move a current identity (so the node keeps its tailnet address), do one of these procedures:
+
+- Set `STATE_IMPORT_FROM` to the current state file for the first start. The app imports the file only while the Redis hash is empty, and then ignores the setting.
+- Run the import manually from `fly ssh console`:
 
 ```
 node-control state-import -from /var/lib/tailscale/tailscaled.state [-force]
 ```
 
-The importer reads the file's JSON (state key -> base64), writes every entry through the encryption layer, reads each
-back to verify, and prints only a count. It refuses when Redis already holds state unless `-force` is given, and never
-modifies the source file. After a successful import you can delete the old state file.
+The importer reads the JSON of the file (state key -> base64) and writes every entry through the encryption layer. It reads each entry back to verify it, and it prints only a count. It refuses when Redis already holds state, unless you give `-force`. It never changes the source file. After a successful import, you can delete the old state file.
 
-Interrupted import: before writing, the importer stores a marker field (`_node-control-import`, unencrypted, only the
-key names, never values) in the hash and removes it last. If an import fails it rolls back what it wrote. If the process
-dies midway (restart, kill), the marker stays; the next start (or `state-import`) sees it, deletes the listed keys and the
-marker, and then either redoes the import (when `STATE_IMPORT_FROM` names an existing file) or exits non-zero with a message
-saying the interrupted import was cleaned up. It never starts the node on partial state. To recover, set `STATE_IMPORT_FROM`
-to the old state file and restart, or run `node-control state-import -from <file>`. State written by the node itself has no
-marker and is always treated as complete.
+Interrupted import: before the importer writes, it keeps a marker field (`_node-control-import`) in the hash and removes it last. The marker is unencrypted and holds only the key names, never values. If an import fails, the importer rolls back what it wrote. If the process stops before the end (restart, kill), the marker stays.
 
-Moving from plaintext to encrypted Redis state: the encrypted store refuses plaintext values. Either export the state to a
-file in the JSON format above (field name -> base64 value) and run `state-import -from <file> -force` with the key set
-(`-force` replaces the whole identity: the marker lists the file's keys plus every key already in the hash, the old extra keys are deleted before the new ones are written, and a failed or interrupted forced import leaves no real keys at all; the previous identity is gone and the error says so), or delete the hash and let the node register
-again with `TAILSCALE_AUTH_KEY` (it then gets a new identity).
+The next start (or `state-import`) finds the marker and deletes the listed keys and the marker. It then does one of these:
 
-The enrolment data can live in Redis too (`ENROLL_REDIS=1`, below). Without it the SQLite database (`ENROLL_DB`) stays
-on the volume, because it is a database file and a Machine mounts one volume. The policy console history (`POLICY_DB`)
-is still a SQLite file on the volume.
+- It does the import again, when `STATE_IMPORT_FROM` names a file that exists.
+- It exits with a non-zero code and a message that says that it cleaned up the interrupted import.
+
+It never starts the node on partial state. To recover, set `STATE_IMPORT_FROM` to the old state file and restart. Alternatively, run `node-control state-import -from <file>`. State that the node itself wrote has no marker, and the app always treats it as complete.
+
+Move from plaintext to encrypted Redis state: the encrypted store refuses plaintext values.
+
+> **WARNING:** Use `-force` only if you accept the loss of the previous identity. `-force` replaces the whole identity. The marker lists the keys of the file plus every key already in the hash. The importer deletes the old extra keys before it writes the new keys. A failed or interrupted forced import leaves no real keys at all: the previous identity is gone, and the error says so.
+
+Do one of these procedures:
+
+- Export the state to a file in the JSON format above (field name -> base64 value). Then run `state-import -from <file> -force` with the key set.
+- Delete the hash and let the node register again with `TAILSCALE_AUTH_KEY`. The node then gets a new identity.
+
+The enrolment data can also be in Redis (`ENROLL_REDIS=1`, below). Without it, the SQLite database (`ENROLL_DB`) stays on the volume, because it is a database file and a Machine mounts one volume. The policy console history (`POLICY_DB`) is still a SQLite file on the volume.
 
 ### Enrolment in Redis
 
-`ENROLL_REDIS=1` replaces the SQLite file, so the machine needs no volume for enrolment. Environment: `REDIS_URL` and
-`NODE_CONTROL_STATE_KEY` (the same variables as the tailscale state; the records are encrypted with that key, and the
-store refuses to start without it unless `STATE_ALLOW_PLAINTEXT=1`), `ENROLL_SECRET_KEY` (unchanged: subscription
-secrets are derived from it, device id and epoch), optional `ENROLL_REDIS_KEY`.
+`ENROLL_REDIS=1` replaces the SQLite file, so the machine needs no volume for enrolment. Environment:
 
-Layout under the prefix `P` (all DB 0): `P:meta` (hash; `seq` is the last device id, never reused), `P:d:<id>` (one hash
-per device, no TTL: sealed name/owner/client/UUIDs plus plain `expires_at`, `revoked`, `epoch` and the activity numbers below, so revoke, extend and
-rotate are single atomic commands), `P:t:<hash>` (one hash per one-time link, **with a TTL**), `P:approvals` (sealed), `P:acks` (acknowledged attention items: a login, an item id and a hash, not sealed, like the audit log).
-A link's key expires through its TTL, and every spend also checks the stored expiry. Spending is one Lua script (link
-key and device key) that writes nothing unless both exist, the device is not revoked or expired, and the link has a use left
-and has not expired (a bare `HINCRBY` on an expired key would
-recreate it without a TTL). Commands sent: `EVAL` (never `EVALSHA`), `HGET`, `HGETALL`, `HINCRBY`, `HSET`, `HDEL`,
-`HEXISTS`; the scripts also use `EXISTS`, `HGET`, `HDEL`, `HSET`, `HINCRBY` and `PEXPIRE`. Nothing scans, selects a database or
-flushes. A Redis error is an error, never an empty set: the sync to the agents does not push when the store cannot be
-read.
+- `REDIS_URL` and `NODE_CONTROL_STATE_KEY`. These are the same variables as for the tailscale state. That key encrypts the records. The store refuses to start without the key, unless `STATE_ALLOW_PLAINTEXT=1`.
+- `ENROLL_SECRET_KEY` (unchanged). The app derives subscription secrets from it, the device id and the epoch.
+- `ENROLL_REDIS_KEY` (optional).
 
-Moving an existing SQLite database: set `ENROLL_IMPORT_FROM` to the file (a start with no enrolment data in Redis copies
-it once, verifies the copy and logs counts only), or run `node-control enroll-import -from <enroll.db> [-force]`. The
-file is opened read-only and never modified, so the previous release can still run against it. Ids, epochs, UUIDs and
-link hashes are carried over verbatim, so issued subscription secrets and one-time links keep working. `-force`
-overwrites records with the same ids and never deletes others. An interrupted import leaves no device counter, so the
-store still reads as empty and the import can simply be run again. A copy that fails the read-back verification removes the
-counter again (when the store was empty before), so the next start imports again instead of serving a copy that never
-verified.
+Layout under the prefix `P` (all in DB 0):
+
+- `P:meta` is a hash. `seq` is the last device id. The store never uses an id again.
+- `P:d:<id>` is one hash for each device, with no TTL. It holds the sealed name, owner, client and UUIDs. It also holds plain `expires_at`, `revoked`, `epoch` and the activity numbers below. Thus revoke, extend and rotate are single atomic commands.
+- `P:t:<hash>` is one hash for each one-time link, **with a TTL**.
+- `P:approvals` is sealed.
+- `P:acks` holds acknowledged attention items: a login, an item id and a hash. It is not sealed, like the audit log.
+
+The key of a link expires through its TTL, and every spend also checks the stored expiry. A spend is one Lua script (link key and device key). The script writes nothing unless all of these conditions are true:
+
+- Both keys exist.
+- The device is not revoked or expired.
+- The link has a use left and did not expire. (A bare `HINCRBY` on an expired key would create it again without a TTL.)
+
+Commands that the store sends: `EVAL` (never `EVALSHA`), `HGET`, `HGETALL`, `HINCRBY`, `HSET`, `HDEL`, `HEXISTS`. The scripts also use `EXISTS`, `HGET`, `HDEL`, `HSET`, `HINCRBY` and `PEXPIRE`. Nothing scans, selects a database or flushes. A Redis error is an error, never an empty set: the sync to the agents does not push when the store cannot read its data.
+
+Move a SQLite database that exists: do one of these procedures.
+
+- Set `ENROLL_IMPORT_FROM` to the file. A start with no enrolment data in Redis copies it one time, verifies the copy and logs counts only.
+- Run `node-control enroll-import -from <enroll.db> [-force]`.
+
+The import opens the file read-only and never changes it, so the previous release can still run against it. The import keeps ids, epochs, UUIDs and link hashes without change, so issued subscription secrets and one-time links continue to work. `-force` overwrites records with the same ids and never deletes others. An interrupted import leaves no device counter, so the store still reads as empty and you can run the import again. A copy that fails the read-back verification removes the counter again (when the store was empty before). The next start then imports again and does not serve a copy that was not verified.
+
+> **WARNING:** Encrypt the output of both exports before you keep it anywhere. Treat it as a secret, because it holds device names, owners and credentials.
 
 Backup and restore:
-- `node-control enroll-export [-to <file>]` writes the devices, UUIDs and approvals as JSON (stdout by default; one-time
-  links are not included: Redis cannot list them without a scan).
-- `node-control enroll-import -json <file|->` restores such a file into an empty Redis (`-` reads stdin, so an encrypted
-  backup can be piped in without a plaintext file) and verifies the copy. Exactly one of `-from` and `-json` is given;
-  the JSON is checked for shape first (unknown fields, duplicate ids, unknown modes, empty UUIDs are refused, and error
-  texts never echo the file).
-- `node-control enroll-export -format sqlite -to <new file>` writes a new SQLite enrolment database that the SQLite store
-  (and so a release without Redis support) opens as it is, with the id counter kept ahead of every id ever issued. It
-  refuses an existing file and creates it mode 0600. Use it to roll back.
 
-The output of both exports holds device names, owners and credentials: treat it as a secret and encrypt it before it is
-stored anywhere.
-
-`scripts/enroll-backup.sh` wraps both for a Fly deployment (needs `flyctl` logged in and `jq`):
+- `node-control enroll-export [-to <file>]` writes the devices, UUIDs and approvals as JSON (stdout by default). It does not include one-time links, because Redis cannot list them without a scan.
+- `node-control enroll-import -json <file|->` restores such a file into an empty Redis and verifies the copy. `-` reads stdin, so you can send an encrypted backup through a pipe with no plaintext file. Give exactly one of `-from` and `-json`. The command checks the shape of the JSON first. It refuses unknown fields, duplicate ids, unknown modes and empty UUIDs, and error texts never echo the file.
+- `node-control enroll-export -format sqlite -to <new file>` writes a new SQLite enrolment database. The SQLite store (and so a release without Redis support) opens it as it is. The id counter stays ahead of every id that the store ever issued. The command refuses a file that exists, and it creates the new file with mode 0600. Use it to roll back.
+`scripts/enroll-backup.sh` wraps both for a Fly deployment (it needs `flyctl` logged in and `jq`):
 
 ```sh
 scripts/enroll-backup.sh backup  <fly-app> backup.sops.json --sops           # or: --age <recipient>
 scripts/enroll-backup.sh restore <fly-app> backup.sops.json --sops [--force] # or: --age-identity <file>
 ```
 
-`backup` runs `enroll-export` in the machine, keeps the output in memory (no unencrypted file is ever written), checks the JSON
-shape and that it holds at least one device, encrypts it with `sops` or `age`, writes the result atomically (never over an
-existing file, mode 0600), checks that no device UUID is left in the encrypted result, and prints counts only. `--plaintext`
-exists for a throwaway file and must be given explicitly. With `--sops` the file name decides which `.sops.yaml` creation rule
-applies, and the key names of the JSON stay readable (sops encrypts values only). Export `SOPS_AGE_KEY` (or your sops key
-source) before running it. `restore` decrypts and pipes the data into `node-control enroll-import -json -` in the machine
-(stdin through `fly ssh console -C`), which checks the shape, writes and verifies the copy; without `--force` a store that
-already holds data refuses. Run a backup after enrolment changes; it is a manual step until an automatic one exists.
-`sh scripts/test_enroll_backup.sh` tests the script against a fake `fly` (real `age` and `jq` needed, no network).
+`backup` does these steps:
+
+1. It runs `enroll-export` in the machine and keeps the output in memory. It never writes an unencrypted file.
+2. It checks the JSON shape, and it checks that the JSON holds at least one device.
+3. It encrypts the output with `sops` or `age`.
+4. It writes the result atomically, never over a file that exists, with mode 0600.
+5. It checks that no device UUID is left in the encrypted result.
+6. It prints counts only.
+
+`--plaintext` is for a throwaway file, and you must give it explicitly. With `--sops`, the file name decides which `.sops.yaml` creation rule applies. The key names of the JSON stay readable, because sops encrypts values only. Export `SOPS_AGE_KEY` (or your sops key source) before you run the script.
+
+`restore` decrypts the data and sends it into `node-control enroll-import -json -` in the machine (stdin through `fly ssh console -C`). That command checks the shape, and writes and verifies the copy. Without `--force`, a store that already holds data refuses.
+
+Run a backup after enrolment changes. It is a manual step until an automatic one exists. `sh scripts/test_enroll_backup.sh` tests the script against a fake `fly` (it needs real `age` and `jq`, and no network).
 
 ## Node discovery
 

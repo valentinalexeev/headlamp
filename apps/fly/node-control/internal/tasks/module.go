@@ -56,7 +56,8 @@ type Module struct {
 	sessionsTag string
 	sess        *sessionAPI // set with sessionsTag
 
-	sessMu    sync.Mutex // guards the cached session attention
+	sessRead  core.SharedRead[sessionsRead] // polls share one read of the runners
+	sessMu    sync.Mutex                    // guards the cached session attention; never held across the read
 	sessAt    time.Time
 	sessItems []core.AttentionItem
 	sessLines []core.SystemLine

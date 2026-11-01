@@ -827,7 +827,12 @@
           });
         }).then(function () {
           dr.creating = false;
-          if (st.drawer === dr) { buildLink(dr); }
+          if (st.drawer === dr) {
+            buildLink(dr);
+            // The form (and the button that was focused) is gone: land on the first button of the result, the copy button.
+            var first = dr.body.querySelector ? dr.body.querySelector('button') : null;
+            if (first) { first.focus(); }
+          }
         }).catch(function (e) {
           dr.creating = false;
           var msg = hl.plain(e && e.message, 200);

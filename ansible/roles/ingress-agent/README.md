@@ -1,19 +1,21 @@
 # ingress-agent
 
-Deploys the Python bridge agent (`apps/ingress-agent/` in this repo) as the systemd service
-`ingress-agent.service` on the Reality bridge host. The agent holds opaque credentials pushed
-by the operator side over the tailnet, renders `/etc/xray/config.json` from
-`/etc/xray/config.base.json`, validates it with `xray run -test`, replaces it atomically and
+This role deploys the Python bridge agent (`apps/ingress-agent/` in this repo) as the systemd service
+`ingress-agent.service` on the Reality bridge host. The operator side pushes opaque credentials to the agent
+over the tailnet. The agent holds them and renders `/etc/xray/config.json` from
+`/etc/xray/config.base.json`. It validates the config with `xray run -test`, replaces it atomically and
 restarts `xray.service`. See `apps/ingress-agent/README.md` for its API.
 
 ## Relation to reality-ingress
 
-Run `reality-ingress` first (and the base `tailscale` role): it installs xray, creates the
+Run `reality-ingress` first (and the base `tailscale` role). It installs xray, creates the
 `xray` user and `/etc/xray` (mode 2750 root:xray, setgid) and writes `config.base.json`. The
 defaults here (`xray_bin`, `xray_unit`, `xray_api`, `xray_base_config`, `xray_config`,
-`xray_asset_dir`) match that role; override both together or neither. This role only warns if
-the xray binary or the base config is missing, because on a fresh host in check mode they do
-not exist yet. It never restarts xray itself: the agent does that when the credential set
+`xray_asset_dir`) match that role. Override both together or neither.
+
+This role only warns if
+the xray binary or the base config is missing. On a fresh host in check mode, they do
+not exist yet. The role never restarts xray itself. The agent restarts xray when the credential set
 changes. The unit is ordered `After=xray.service` but does not require it.
 
 ## Variables
@@ -31,10 +33,12 @@ changes. The unit is ordered `After=xray.service` but does not require it.
 
 ## Public parameters and discovery (`GET /v1/info`)
 
-The agent publishes how clients reach this bridge, so node-control can discover it and the operator can approve it
-(no copying of host, key and short id). Public values only; the endpoint never returns a secret and the agent has no
-variable for the Reality private key. Role variables (shared names with `reality-ingress`, defaults keep existing
-deployments valid):
+The agent publishes how clients reach this bridge. Node-control can then discover the bridge, and the operator can approve it
+(no copying of host, key and short id).
+
+The agent publishes public values only. The endpoint never returns a secret, and the agent has no
+variable for the Reality private key. These are the role variables. Some names are shared with `reality-ingress`. The defaults keep existing
+deployments valid:
 
 | Variable | Default | Env var in the agent |
 |---|---|---|
@@ -45,48 +49,55 @@ deployments valid):
 | `reality_short_id` | `""` | `INGRESS_SHORT_ID` |
 | `reality_public_key` | `""` | `INGRESS_PUBLIC_KEY`: the public half of the vaulted `reality_private_key`; derive it with `xray x25519 -i <private key>` and set it as a variable. The role does not run xray for this. |
 
-The six variables are exported only when `ingress_name`, `ingress_host`, `reality_public_key` and `reality_short_id`
-are all set; otherwise `/v1/info` answers `503` and everything else works as before. Preflight validates the six
-values only when `ingress_name` or `reality_public_key` is set (then all of them must be valid, so a partial
-configuration fails). Hosts that only have `ingress_host` and `reality_short_id` (required by `reality-ingress`) are
-unaffected, and `/v1/info` stays `503` there until the two new variables are set. Use a token per bridge host (`ingress_agent_token` differs on every host); the
-operator approves a discovered bridge in node-control before it is used.
+The role exports the six variables only when `ingress_name`, `ingress_host`, `reality_public_key` and `reality_short_id`
+are all set. Otherwise `/v1/info` answers `503` and everything else works as before.
+
+Preflight validates the six
+values only when `ingress_name` or `reality_public_key` is set. Then all of them must be valid, so a partial
+configuration fails. Hosts that only have `ingress_host` and `reality_short_id` (required by `reality-ingress`) are
+not affected. `/v1/info` stays `503` there until you set the two new variables.
+
+Use a token for each bridge host (`ingress_agent_token` differs on every host). The
+operator approves a discovered bridge in node-control before anyone uses it.
 
 ## Python dependencies
 
-Installed from the OS packages (`python3-fastapi`, `python3-uvicorn`, `python3-pydantic`),
-since hosts in restricted networks may not reach PyPI. `apps/ingress-agent/requirements.txt` asks for
-`fastapi>=0.110,<1.0` and `uvicorn>=0.30,<1.0`; the role runs
-`python3 -c "import fastapi, uvicorn, pydantic"`, prints the versions and fails with a clear
-message if the import fails or fastapi/uvicorn are older than the floors. A distro whose
-packages are older (e.g. Ubuntu 22.04) fails here by design; use a newer release.
-`httpx` is a test-only dependency and is not installed.
+The role installs the dependencies from the OS packages (`python3-fastapi`, `python3-uvicorn`, `python3-pydantic`),
+because hosts in restricted networks may not reach PyPI. `apps/ingress-agent/requirements.txt` asks for
+`fastapi>=0.110,<1.0` and `uvicorn>=0.30,<1.0`.
+
+The role runs
+`python3 -c "import fastapi, uvicorn, pydantic"` and prints the versions. It fails with a clear
+message if the import fails or if fastapi or uvicorn are older than the floors. A distro whose
+packages are older (for example Ubuntu 22.04) fails here by design. Use a newer release.
+`httpx` is a test-only dependency. The role does not install it.
 
 ## What it does
 
-1. Preflight (before anything is written): required variables, token length/charset, port
-   range, absolute paths, facts gathered, the source exists on the control host.
-2. Installs the packages, copies `app/*.py` (no `__pycache__`, no tests; root, 0755/0644;
-   anything else under the app directory on the host is removed; `ingress_agent_src` may contain `..`), installs the wrapper
-   `/usr/local/sbin/ingress-agent-run` and the unit.
-3. Writes the env file, applies handlers, enables and starts the service.
+1. Preflight, before the role writes anything. It checks required variables, token length and charset, port
+   range, absolute paths and gathered facts. It also checks that the source exists on the control host.
+2. Install the packages.
+3. Copy `app/*.py` (no `__pycache__`, no tests; root, 0755/0644).
+   The role removes anything else under the app directory on the host. `ingress_agent_src` can contain `..`.
+4. Install the wrapper `/usr/local/sbin/ingress-agent-run` and the unit.
+5. Write the env file, apply handlers, and enable and start the service.
 
-The wrapper waits up to 60 s for `tailscale ip -4` (the host's main tailscaled), exits 1 with
-a message if there is none, then `exec`s
+The wrapper waits up to 60 s for `tailscale ip -4` (the main tailscaled of the host). If there is none, it exits 1 with
+a message. Then it `exec`s
 `python3 -m uvicorn app.main:create_app_from_env --factory --host <tailnet ip> --port <port> --no-access-log`.
-It never binds 0.0.0.0. Check mode is safe: files are templated normally, package checks,
-handlers and the service start are skipped.
+It never binds 0.0.0.0. Check mode is safe: the role templates files normally. It skips package checks,
+handlers and the service start.
 
 ## Security notes
 
 - The token lives only in the 0600 env file. It is not in the unit, the wrapper or the process
-  arguments (so not in `ps`); every task that handles it has `no_log: true`.
-- The service runs as root because it must `systemctl restart xray`. Hardening:
+  arguments (so not in `ps`). Every task that handles it has `no_log: true`.
+- The service runs as root, because it must `systemctl restart xray`. These are the hardening settings:
   `NoNewPrivileges`, `ProtectSystem=strict` (writable: the state dir and `/etc/xray`),
   `ProtectHome`, `PrivateTmp`, `ProtectKernelTunables`, `ProtectControlGroups`,
-  `RestrictSUIDSGID`. **Verify on the live host that `systemctl restart xray` works from inside
-  this sandbox** (e.g. push credentials and check `journalctl -u ingress-agent`); if it does not,
-  relax the sandbox rather than the listener.
-- Reachability is limited by the tailnet ACL: allow `<port>` to this host from the operator
+  `RestrictSUIDSGID`. **Make sure on the live host that `systemctl restart xray` works from inside
+  this sandbox.** For example, push credentials and check `journalctl -u ingress-agent`. If it does not work,
+  relax the sandbox, not the listener.
+- The tailnet ACL limits reachability. Allow `<port>` to this host from the operator
   side (node-control) only.
 - `--no-access-log` keeps request details out of the journal.

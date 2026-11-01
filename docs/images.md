@@ -1,6 +1,6 @@
 # Container images and how they fit together
 
-CI publishes six images to `ghcr.io/valentinalexeev/headlamp/<image>`. Together with a few parts that run directly on hosts, they make up a self-hosted tailnet: a control server, exit nodes, an admin console and optional public ingress. This page says what each image does, where it runs and what it needs from you.
+CI publishes six images to `ghcr.io/valentinalexeev/headlamp/<image>`. A few more parts run directly on hosts. Together they make up a self-hosted tailnet: a control server, exit nodes, an admin console and optional public ingress. This page says what each image does, where it runs and what it needs from you.
 
 For tags and release rules, see [`VERSIONING.md`](../VERSIONING.md). The list CI builds from is [`.github/components.json`](../.github/components.json).
 

@@ -112,6 +112,8 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
     const nav = [{ label: 'Overview', path: '/' }, { label: 'Nodes', path: '/nodes' }, { label: 'Devices', path: '/enroll' }, { label: 'Policy', path: '/policy' }, { label: 'Activity', path: '/activity' }];
     assert.deepStrictEqual(act.sourcesFromNav(nav), ['Nodes', 'Devices', 'Policy']);
     assert.deepStrictEqual(act.sourcesFromNav(null), []);
+    // pages that never record under their own name get no chip
+    assert.deepStrictEqual(act.sourcesFromNav([{ label: 'Funnel' }, { label: 'Namespaces & keys' }, { label: 'Tasks' }, { label: 'Sessions' }]), ['Funnel', 'Tasks']);
     const params = [];
     let want = 'Funnel'; // a URL naming a source this console does not have
     const e = els();

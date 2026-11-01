@@ -8,8 +8,9 @@
   var URL_BASE = '/_activity.json';
   var POLL_MS = 30000;
   var LIMIT = 200;
-  // Pages in the nav that are not a source of activity entries.
-  var NOT_SOURCES = ['Overview', 'Activity'];
+  // Pages in the nav that are not a source of activity entries. Namespace and key changes are recorded under Funnel;
+  // Sessions adds none.
+  var NOT_SOURCES = ['Overview', 'Activity', 'Namespaces & keys', 'Sessions'];
   // The sentences are shared with the Overview page: /_ui/activity-text.js, loaded first.
   var describe = hl.activityText ? hl.activityText.describe : function (e) { return hl.plain(e && e.action, 100); };
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -26,8 +27,7 @@
     return list.indexOf(param) >= 0 ? param : 'All';
   }
 
-  // sourcesFromNav: the entries of /_nav.json that can have activity, in nav order. Overview and Activity
-  // are pages about the others, not sources.
+  // sourcesFromNav: the entries of /_nav.json that can have activity, in nav order.
   function sourcesFromNav(nav) {
     var out = [];
     arr(nav).forEach(function (it) {

@@ -1,17 +1,23 @@
 # exit-node-vm/selectel
 
-A tailnet exit node on a **Selectel** cloud server (OpenStack): key pair, private network + router, security group
-(inbound only tailscale's UDP port, optional SSH), port, bootable network volume, the server and a floating IP.
+A tailnet exit node on a **Selectel** cloud server (OpenStack). The module creates these resources:
+
+- key pair
+- private network and router
+- security group (inbound only tailscale's UDP port, optional SSH)
+- port
+- bootable network volume
+- the server and a floating IP
 
 **Status:** schema-validated against `terraform-provider-openstack/openstack` v3.4.0 (`terraform validate`). It has
-**not been applied against a live Selectel account**, so read the first `plan` carefully (flavor IDs, volume types and
-image names differ per pool).
+**not been applied against a live Selectel account**. Read the first `plan` carefully. Flavor IDs, volume types and
+image names differ for each pool.
 
 ## Provider
 
-Selectel's cloud is OpenStack, so the module only needs the `openstack` provider, configured in your root stack against
-Selectel's Keystone with a **service user** that is a member of your project (create the project and user in the control
-panel or with the `selectel` provider's `selectel_vpc_project_v2` / `selectel_iam_serviceuser_v1`):
+The cloud of Selectel is OpenStack, so the module needs only the `openstack` provider. Configure it in your root stack against
+the Keystone of Selectel. Use a **service user** that is a member of your project. Create the project and the user in the control
+panel, or with `selectel_vpc_project_v2` and `selectel_iam_serviceuser_v1` of the `selectel` provider:
 
 ```hcl
 provider "openstack" {
@@ -46,19 +52,21 @@ module "node" {
 
 ## Tailscale bootstrap
 
-`bootstrap_tailscale` defaults to **false**: hosts in restricted networks often cannot reach `tailscale.com` / `pkgs.tailscale.com`,
-so cloud-init does not try. Run the Ansible `tailscale` role instead (it downloads the `.deb` on the control host and
-copies it over) against `module.node.external_ip`; that first run needs SSH from `admin_ssh_cidr`, which you can drop once
-the node is on the tailnet.
+`bootstrap_tailscale` defaults to **false**. Hosts in restricted networks often cannot reach `tailscale.com` and `pkgs.tailscale.com`,
+so cloud-init does not try. Run the Ansible `tailscale` role instead against `module.node.external_ip`.
+The role downloads the `.deb` on the control host and copies it over. That first run needs SSH from `admin_ssh_cidr`.
+You can drop `admin_ssh_cidr` when the node is on the tailnet.
 
 ## Preemptible servers
 
-Selectel offers preemptible servers (about 70% cheaper, no SLA) that are **stopped at the latest 24 hours after creation**:
-the server goes to `EXPIRED`, network volumes are kept, and you restore it with `openstack server unshelve <server>` (it
-stays preemptible). That makes them a poor fit for a standing exit node unless you automate the restore.
+Selectel offers preemptible servers (about 70% cheaper, no SLA). Selectel **stops these servers at the latest 24 hours after creation**.
+The server goes to `EXPIRED`. Network volumes are kept. Restore the server with `openstack server unshelve <server>`.
+The server stays preemptible.
 
-`preemptible = true` adds the `preemptible` server tag. Selectel documents the tag together with compute API microversion
-2.72, while the OpenStack provider requests 2.52 for tags, so **check that the tag took** after the first apply:
+For this reason, they are a poor fit for a standing exit node, unless you automate the restore.
+
+`preemptible = true` adds the `preemptible` server tag. Selectel documents the tag with compute API microversion
+2.72. The OpenStack provider requests 2.52 for tags. After the first apply, **check that the tag exists**:
 
 ```bash
 openstack server show <name> -c tags --os-compute-api-version 2.72
@@ -66,9 +74,9 @@ openstack server show <name> -c tags --os-compute-api-version 2.72
 openstack server set --tag preemptible --os-compute-api-version 2.72 <name>
 ```
 
-(An existing server can be switched to preemptible once per 24 hours.)
+You can switch an existing server to preemptible once in 24 hours.
 
 ## Replacing the server
 
-`user_data` is ignored after creation (it only runs on first boot). Redeploy deliberately with
+Terraform ignores `user_data` after creation, because it runs only on first boot. Redeploy on purpose with
 `terraform apply -replace='module.<name>.openstack_compute_instance_v2.this'`.

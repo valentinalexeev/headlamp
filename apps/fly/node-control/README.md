@@ -1,50 +1,62 @@
 # node-control (Go)
 
-A small web UI and JSON API to start, stop and inspect your exit nodes, plus optional user enrolment for a
-REALITY bridge proxy. It is a single static Go binary that embeds a tailscale node (`tsnet`), joins your
-headscale tailnet and listens **only on its tailnet address**: `:80` admin, and `:8081` public enrolment when
-`ENROLL_DB` is set. Nothing is exposed through Fly's proxy (`fly.toml` has no `[[services]]`).
+node-control is a small web UI and JSON API. Use it to start, stop and inspect your exit nodes. It also gives optional user enrolment for a REALITY bridge proxy.
 
-A bridge is an entry host (xray/Reality front plus bridge agent) for clients on restrictive networks. For compatibility the code, the `ingresses` JSON key, the `tag:ingress` headscale tag, the `AGENT_*` variables, the `/enroll/ingresses` endpoint paths and the Ansible role/service names keep the historical name `ingress`.
+node-control is a single static Go binary that embeds a tailscale node (`tsnet`). The binary joins your headscale tailnet and listens **only on its tailnet address**:
 
-It replaces the earlier Python implementation with the same HTTP API and the same enrolment database format.
+- `:80` is the admin listener.
+- `:8081` is the public enrolment listener, when `ENROLL_DB` is set.
+
+node-control exposes nothing through the Fly proxy (`fly.toml` has no `[[services]]`).
+
+A bridge is an entry host (xray/Reality front plus bridge agent) for clients on restrictive networks. For compatibility, these items keep the historical name `ingress`:
+
+- The code.
+- The `ingresses` JSON key.
+- The `tag:ingress` headscale tag.
+- The `AGENT_*` variables.
+- The `/enroll/ingresses` endpoint paths.
+- The Ansible role and service names.
+
+node-control replaces the earlier Python implementation. It has the same HTTP API and the same enrolment database format.
+
 Providers: Yandex Compute, OCI Compute, Selectel Cloud, Fly Machines.
 
 ## Environment
 
-Secrets go in Fly secrets; plain settings in `fly.toml`.
+Put secrets in Fly secrets. Put plain settings in `fly.toml`.
 
 | variable | purpose |
 |---|---|
-| `HEADSCALE_LOGIN_SERVER` | headscale URL: control server for the embedded node and base of the node API |
-| `HEADSCALE_API_KEY` | secret; lists nodes for discovery and the tailnet status. Without it `/tailnet/status` answers `not_configured` and only explicitly configured nodes exist |
-| `TAILSCALE_AUTH_KEY` | secret; pre-auth key for this app's own tailnet identity (tags come from the key, not from the client) |
-| `TAILNET_HOSTNAME` | name on the tailnet, default `node-control` |
-| `TSNET_VERBOSE` | `1` forwards the embedded tailscale node's own logs (chatty); by default only user-facing messages such as the login URL are logged. At start the app waits up to 60 s for the node to join the tailnet and exits non-zero if it cannot (bad auth key, unreachable control server) |
-| `REDIS_URL` | secret (Fly secret only, never in `fly.toml`); plain `redis://` URL of the shared Redis on Fly's private network. When set, the tailscale state lives in Redis instead of a file (see "Tailscale state"). Unset: file state under `/var/lib/tailscale`, as before |
-| `REDIS_KEY` | optional hash key for the state, default `<FLY_APP_NAME or TAILNET_HOSTNAME>:tsnet` (for example `node-control:tsnet`). Must look like `<app>:<name>` and contain no `* ? [` |
-| `NODE_CONTROL_STATE_KEY` | secret; 32 random bytes, base64 (`openssl rand -base64 32`). Encrypts the Redis state (AES-256-GCM). Required with `REDIS_URL` unless `STATE_ALLOW_PLAINTEXT=1`; ignored (with a warning) without `REDIS_URL` |
-| `STATE_ALLOW_PLAINTEXT` | `1` stores the Redis state unencrypted. Explicit opt-out; not recommended, the state holds node private keys |
-| `STATE_IMPORT_FROM` | optional path of an existing tailscaled/tsnet state file (for example `/var/lib/tailscale/tailscaled.state`); imported once on start when the Redis hash is empty, otherwise ignored |
-| `NODES_CONFIG` | optional overrides file, default `/srv/app/nodes.json`; a missing file is fine, a malformed one stops startup |
-| `ENROLL_ALLOWED_HOSTS` | optional for the core, **required** by the policy module (`POLICY_DB`) and the tasks module (on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set); comma-separated Host values the admin listener accepts (anything else gets 400); set it to block DNS rebinding. `*` allows any host (those two modules refuse it) and `*.example.com` any host ending in `.example.com` (list `example.com` too for the bare name), as in the Python app |
-| `ENROLL_DB` | path of the SQLite database; enables enrolment. Put it on the state volume: `/var/lib/tailscale/enroll.db` |
-| `ENROLL_REDIS` | `1` keeps the enrolment data in Redis instead of SQLite: no volume needed (see "Enrolment in Redis"). Needs `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `ENROLL_SECRET_KEY`; `ENROLL_DB` is then not used |
-| `ENROLL_REDIS_KEY` | key prefix of the enrolment data, `<app>:<name>`. Default `<app>:enroll` |
-| `ENROLL_IMPORT_FROM` | with `ENROLL_REDIS=1`: path of an old enrolment SQLite file, copied into Redis once when Redis holds no enrolment data (the file is opened read-only and left untouched) |
-| `ENROLL_CONFIG` | enrolment bridge description, for example `/srv/app/enroll.json` (required with `ENROLL_DB`; shape under "Enrolment") |
-| `ENROLL_SECRET_KEY` | secret, at least 16 bytes; derives subscription secrets (required with `ENROLL_DB`) |
-| `AGENT_URL`, `AGENT_TOKEN` | address (dialled through the tailnet) and bearer token of the first bridge's agent. Required with `ENROLL_DB` only for the old single-host `enroll.json`; in the list shape they are the optional fallback of the FIRST entry (no `agent_url` / no `AGENT_TOKEN_<NAME>`) |
-| `AGENT_TOKEN_<NAME>` | one bearer token per bridge: `<NAME>` is the bridge name upper-cased with `-` as `_` (`ingress-2` reads `AGENT_TOKEN_INGRESS_2`). An entry's `token_env` names another variable instead |
-| `POLICY_DB` | path of the SQLite change history; enables the policy console (`/policy`). On the state volume: `/var/lib/tailscale/policy.db`. Needs `HEADSCALE_LOGIN_SERVER` and `HEADSCALE_API_KEY` |
-| `POLICY_ADMIN_USERS` | comma-separated tailnet logins allowed to use the console (required with `POLICY_DB`); tagged nodes are never allowed |
-| `POLICY_REVERT_SECONDS` | seconds to confirm a change before it is reverted automatically, 30 to 900, default 120 |
-| `POLICY_MAX_BYTES` | largest policy accepted, 1024 to 4194304, default 262144 |
-| `TASKS_*` | the scheduled-task module, on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set; variables and defaults under "Tasks module" |
-| `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | Yandex service account key; folder for the lookup by name (the account needs `compute.operator` and `compute.viewer`) |
-| `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | OCI credentials and the default region and compartment |
-| `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | Selectel (OpenStack) service user, default region, optional auth URL |
-| `FLY_API_TOKEN` | app-scoped deploy token for the controlled Fly app(s) |
+| `HEADSCALE_LOGIN_SERVER` | The headscale URL. It is the control server of the embedded node and the base of the node API. |
+| `HEADSCALE_API_KEY` | Secret. It lists nodes for discovery and for the tailnet status. Without it, `/tailnet/status` answers `not_configured` and only explicitly configured nodes exist. |
+| `TAILSCALE_AUTH_KEY` | Secret. The pre-auth key for the tailnet identity of this app. The tags come from the key, not from the client. |
+| `TAILNET_HOSTNAME` | The name on the tailnet. The default is `node-control`. |
+| `TSNET_VERBOSE` | `1` forwards the logs of the embedded tailscale node (a large quantity of log lines). By default, the app logs only messages for users, such as the login URL. At start, the app waits up to 60 s for the node to join the tailnet. If the node cannot join (bad auth key, control server not reachable), the app exits with a non-zero code. |
+| `REDIS_URL` | Secret (Fly secret only, never in `fly.toml`). The plain `redis://` URL of the shared Redis on the Fly private network. When it is set, the tailscale state is in Redis, not in a file (see "Tailscale state"). When it is not set, the state is in a file under `/var/lib/tailscale`, as before. |
+| `REDIS_KEY` | Optional hash key for the state. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:tsnet` (for example `node-control:tsnet`). It must have the form `<app>:<name>` and must not contain `* ? [`. |
+| `NODE_CONTROL_STATE_KEY` | Secret. 32 random bytes, base64 (`openssl rand -base64 32`). It encrypts the Redis state (AES-256-GCM). It is required with `REDIS_URL` unless `STATE_ALLOW_PLAINTEXT=1`. Without `REDIS_URL`, the app ignores it and logs a warning. |
+| `STATE_ALLOW_PLAINTEXT` | `1` keeps the Redis state unencrypted. This is an explicit opt-out. We do not recommend it, because the state holds node private keys. |
+| `STATE_IMPORT_FROM` | Optional path of a tailscaled or tsnet state file (for example `/var/lib/tailscale/tailscaled.state`). The app imports the file one time at start when the Redis hash is empty. In other conditions, the app ignores it. |
+| `NODES_CONFIG` | Optional overrides file. The default is `/srv/app/nodes.json`. If the file does not exist, the app continues. If the file is malformed, the app does not start. |
+| `ENROLL_ALLOWED_HOSTS` | Optional for the core. **Required** by the policy module (`POLICY_DB`) and the tasks module (on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set). Comma-separated Host values that the admin listener accepts. Any other value gets 400. Set it to block DNS rebinding. `*` allows any host (those two modules refuse it). `*.example.com` allows any host that ends in `.example.com` (list `example.com` too for the bare name), as in the Python app. |
+| `ENROLL_DB` | The path of the SQLite database. It enables enrolment. Put it on the state volume: `/var/lib/tailscale/enroll.db`. |
+| `ENROLL_REDIS` | `1` keeps the enrolment data in Redis, not in SQLite, so no volume is necessary (see "Enrolment in Redis"). It needs `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `ENROLL_SECRET_KEY`. The app then does not use `ENROLL_DB`. |
+| `ENROLL_REDIS_KEY` | The key prefix of the enrolment data, `<app>:<name>`. The default is `<app>:enroll`. |
+| `ENROLL_IMPORT_FROM` | With `ENROLL_REDIS=1`: the path of an old enrolment SQLite file. The app copies it into Redis one time, when Redis holds no enrolment data. The app opens the file read-only and does not change it. |
+| `ENROLL_CONFIG` | The description of the enrolment bridges, for example `/srv/app/enroll.json`. It is required with `ENROLL_DB`. "Enrolment" gives the shape. |
+| `ENROLL_SECRET_KEY` | Secret, at least 16 bytes. It derives subscription secrets. It is required with `ENROLL_DB`. |
+| `AGENT_URL`, `AGENT_TOKEN` | The address (dialled through the tailnet) and bearer token of the agent of the first bridge. They are required with `ENROLL_DB` only for the old single-host `enroll.json`. In the list shape, they are the optional fallback of the FIRST entry (no `agent_url`, no `AGENT_TOKEN_<NAME>`). |
+| `AGENT_TOKEN_<NAME>` | One bearer token for each bridge. `<NAME>` is the bridge name in upper case, with `-` as `_` (`ingress-2` reads `AGENT_TOKEN_INGRESS_2`). The `token_env` of an entry names another variable in its place. |
+| `POLICY_DB` | The path of the SQLite change history. It enables the policy console (`/policy`). Put it on the state volume: `/var/lib/tailscale/policy.db`. It needs `HEADSCALE_LOGIN_SERVER` and `HEADSCALE_API_KEY`. |
+| `POLICY_ADMIN_USERS` | Comma-separated tailnet logins that can use the console (required with `POLICY_DB`). Tagged nodes never have access. |
+| `POLICY_REVERT_SECONDS` | The time in seconds to confirm a change before the automatic revert. From 30 to 900. The default is 120. |
+| `POLICY_MAX_BYTES` | The largest policy that the console accepts. From 1024 to 4194304. The default is 262144. |
+| `TASKS_*` | The scheduled-task module. It is on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set. "Tasks module" gives the variables and defaults. |
+| `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | The Yandex service account key, and the folder for the lookup by name. The account needs `compute.operator` and `compute.viewer`. |
+| `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | The OCI credentials, and the default region and compartment. |
+| `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | The Selectel (OpenStack) service user, the default region and the optional auth URL. |
+| `FLY_API_TOKEN` | The app-scoped deploy token for the controlled Fly app or apps. |
 
 ## Tailscale state
 

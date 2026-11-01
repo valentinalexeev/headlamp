@@ -39,7 +39,7 @@
     "test": "make test-exit-node-state"
   },
   {
-    "image": "task-runner-session",
+    "image": "task-runner-browser",
     "context": "apps/task-runner/image",
     "dockerfile": "Containerfile",
     "paths": ["apps/task-runner/image"],

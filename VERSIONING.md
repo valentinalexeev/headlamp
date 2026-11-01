@@ -46,7 +46,7 @@ A published version never changes. If a release is wrong, fix it in a new one: n
 
 ## Images
 
-CI publishes `ghcr.io/valentinalexeev/headlamp/<image>`. The components are listed in `.github/components.json`.
+CI publishes `ghcr.io/valentinalexeev/headlamp/<image>`. The components are listed in `.github/components.json`, and [`docs/images.md`](docs/images.md) explains what each one does.
 
 | Tag | Meaning | Moves? |
 |---|---|---|

@@ -27,6 +27,10 @@ stacks, encrypted state, Ansible inventory/vars/vault, Fly configs and route lis
 **Start with [`CLAUDE.md`](CLAUDE.md)** (also readable by humans): the repo rules and a step-by-step
 bootstrap guide. [`examples/private-repo/`](examples/private-repo/) is the skeleton to copy.
 
+## Images and releases
+
+CI publishes the components that run as containers to GHCR. [`docs/images.md`](docs/images.md) explains what each image does and how they fit together, and [`VERSIONING.md`](VERSIONING.md) covers tags and release rules.
+
 ## Terraform state workflow
 
 State lives in your private repo as `terraform/terraform.tfstate.enc.json` (sops + age). Git has

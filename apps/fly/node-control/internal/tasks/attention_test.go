@@ -208,7 +208,7 @@ func TestTasksActivity(t *testing.T) {
 		for _, r := range []Run{
 			run("r1", RunSucceeded, -5*time.Minute, false, ""), // scheduled and passing: left out
 			run("r2", RunFailed, -4*time.Minute, false, "login rejected"),
-			run("r3", RunSucceeded, -3*time.Minute, true, ""),
+			run("r3", RunSucceeded, -3*time.Minute, true, ""), // from before the actor was recorded
 			run("r4", RunCancelled, -2*time.Minute, false, ""),
 			run("r5", RunFailed, -time.Minute, false, reasonShutdown), // a deploy, not a failure
 			{ID: "r6", Task: "job", State: RunRunning, Started: now},  // not finished
@@ -272,5 +272,15 @@ func TestTasksSearchListsTaskIDs(t *testing.T) {
 	}
 	if it := got[0]; it.Label != "job" || it.Kind != "Task" || it.Path != "/tasks?sel=job" {
 		t.Errorf("%+v", it)
+	}
+}
+
+func TestTasksActivityNamesWhoStartedAManualRun(t *testing.T) {
+	h, s := attentionHarness(t)
+	now := time.Now()
+	s.AppendRun(Run{ID: "r1", Task: "job", State: RunSucceeded, Started: now.Add(-time.Minute), Ended: now, Manual: true, Actor: "alice@"})
+	got, err := h.m.Activity(context.Background(), "alice@", 10)
+	if err != nil || len(got) != 1 || got[0].Actor != "alice@" || got[0].Action != "task.manual" {
+		t.Fatalf("%+v %v", got, err)
 	}
 }

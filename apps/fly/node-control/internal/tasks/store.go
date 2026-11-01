@@ -66,6 +66,8 @@ type Run struct {
 	NotifyOutcome  string
 	// Manual is set on an attempt that belongs to a sequence an operator started with Trigger.
 	Manual bool `json:"manual,omitempty"`
+	// Actor is who started that sequence, when the trigger came with a login.
+	Actor string `json:"actor,omitempty"`
 	// Where the run lives on the node, so a restarted engine can cancel a
 	// run its predecessor left behind.
 	RunnerID   string `json:"runner_id,omitempty"`

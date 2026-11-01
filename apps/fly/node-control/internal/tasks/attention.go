@@ -176,7 +176,8 @@ func timeLeft(end, now time.Time) string {
 // HasActivity reports whether the module keeps run history, which is when it is active.
 func (m *Module) HasActivity() bool { return m.on }
 
-// Activity lists finished runs, newest first, as "Tasks": every run an operator started by hand (as "operator"),
+// Activity lists finished runs, newest first, as "Tasks": every run an operator started by hand (by login, or
+// "operator" for one from before that was recorded),
 // every run an operator cancelled, and the scheduled runs that failed (as "system"). Scheduled runs that passed are
 // left out: they would bury everything else. The detail is the task id and the end state; the run's result and
 // reason are never part of it. Only TASKS_ADMIN_USERS see it. An inactive module reports nothing.
@@ -205,7 +206,10 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 			e := core.ActivityEntry{At: r.Ended, Source: "Tasks", Action: "task.run", Detail: id + ": " + string(r.State)}
 			switch {
 			case r.Manual:
-				e.Actor, e.Action = "operator", "task.manual"
+				e.Actor, e.Action = r.Actor, "task.manual"
+				if e.Actor == "" { // from before the actor was recorded
+					e.Actor = "operator"
+				}
 			case r.State == RunCancelled:
 				e.Actor = "operator"
 			case realFailure(r):

@@ -125,7 +125,7 @@
     var later = deps.later || function (fn, ms) { setTimeout(fn, ms); };
     var st = {
       state: null, loaded: false, failed: false, busy: false, open: null, tableSig: null, sel: '', keys: [], keysLoaded: false,
-      keysFailed: '', keyOpen: null, keySig: null, panel: null, minting: false, secret: null
+      keysFailed: '', keyOpen: null, keySig: null, panel: null, minting: false, secrets: []
     };
     var ctrl = {};
 
@@ -380,7 +380,7 @@
 
     function select(name) {
       if (name === st.sel) { return; }
-      clearSecret();
+      clearSecrets();
       closeMintPanel();
       st.sel = name;
       st.keys = [];
@@ -565,9 +565,9 @@
       ttl.focus();
     }
 
-    // showSecret puts the key in the side panel. It is the only place the text lives.
+    // showSecret adds the key to the side panel, the only place the text lives. A key is shown once, so another one
+    // arriving leaves it there; its own Done, choosing another namespace or leaving the page removes it.
     function showSecret(key, ns) {
-      clearSecret();
       var root = hl.el('div', 'panel');
       root.setAttribute('role', 'group');
       root.setAttribute('aria-label', 'New key');
@@ -594,19 +594,21 @@
         });
       });
       row.appendChild(cp);
-      row.appendChild(button('Done', null, 'quiet', clearSecret));
+      var secret = { root: root, box: box, ns: ns };
+      row.appendChild(button('Done', null, 'quiet', function () { clearSecret(secret); }));
       root.appendChild(row);
       els.side.appendChild(root);
-      st.secret = { root: root, box: box, ns: ns };
+      st.secrets.push(secret);
       cp.focus();
     }
 
-    function clearSecret() {
-      if (!st.secret) { return; }
-      st.secret.box.textContent = '';
-      st.secret.root.remove();
-      st.secret = null;
+    function clearSecret(secret) {
+      secret.box.textContent = '';
+      secret.root.remove();
+      st.secrets = st.secrets.filter(function (s) { return s !== secret; });
     }
+
+    function clearSecrets() { st.secrets.slice().forEach(clearSecret); }
 
     // ----- adding a namespace
 
@@ -693,10 +695,10 @@
       els.cols.hidden = !shown;
       els.sub.textContent = st.failed ? (st.loaded ? DEFAULT_SUB + ' The data may be out of date.' : 'Could not load the namespaces. Retrying.') : DEFAULT_SUB;
       // A key whose namespace is no longer active is removed with it.
-      if (st.secret) {
-        var sn = findNS(st.secret.ns);
-        if (!sn || sn.state !== 'active') { clearSecret(); }
-      }
+      st.secrets.slice().forEach(function (secret) {
+        var sn = findNS(secret.ns);
+        if (!sn || sn.state !== 'active') { clearSecret(secret); }
+      });
       renderAdd();
       renderWait();
       renderTable(force);
@@ -718,12 +720,12 @@
       }, function () { ctrl.setFailed(true); });
     };
     ctrl.select = select;
-    ctrl.clearSecret = clearSecret;
+    ctrl.clearSecrets = clearSecrets;
     ctrl.openAddPanel = openAddPanel;
     ctrl.state = st;
 
     // Leaving the page removes the key from it.
-    if (typeof window.addEventListener === 'function') { window.addEventListener('pagehide', clearSecret); }
+    if (typeof window.addEventListener === 'function') { window.addEventListener('pagehide', clearSecrets); }
     var wanted = hl.queryParam('ns');
     if (wanted && NAME_RE.test(wanted)) { st.sel = wanted; }
     render();

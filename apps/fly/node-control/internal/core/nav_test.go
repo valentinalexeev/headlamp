@@ -714,12 +714,35 @@ func TestShellOmitsActionWithoutProvider(t *testing.T) {
 		&actMod{navMod{stubModule{name: "a"}, richItems()}, []NavAction{{Label: "Enrol device", Path: "/enroll?enrol=1", Icon: "plus"}}},
 		&navMod{stubModule{name: "b"}, nil},
 	}
-	acts := CollectActions(mods)
-	if len(acts) != 1 || acts[0].Label != "Enrol device" {
-		t.Fatalf("actions %+v", acts)
+	acts, err := CollectActions(mods)
+	if err != nil || len(acts) != 1 || acts[0].Label != "Enrol device" {
+		t.Fatalf("actions %+v %v", acts, err)
 	}
-	if got := CollectActions([]Module{&navMod{stubModule{name: "b"}, nil}}); len(got) != 0 {
-		t.Fatalf("actions %+v", got)
+	if got, err := CollectActions([]Module{&navMod{stubModule{name: "b"}, nil}}); err != nil || len(got) != 0 {
+		t.Fatalf("actions %+v %v", got, err)
+	}
+}
+
+func TestCollectActionsValidates(t *testing.T) {
+	for name, a := range map[string]NavAction{
+		"blank label":    {Label: " ", Path: "/a"},
+		"long label":     {Label: strings.Repeat("x", 25), Path: "/a"},
+		"format char":    {Label: "a\u202eb", Path: "/a"},
+		"no path":        {Label: "A"},
+		"other scheme":   {Label: "A", Path: "javascript:alert(1)"},
+		"other host":     {Label: "A", Path: "//example.test/a"},
+		"quote in query": {Label: "A", Path: "/a?b=\"c"},
+		"fragment":       {Label: "A", Path: "/a?b#c"},
+		"unknown icon":   {Label: "A", Path: "/a", Icon: "no-such-icon"},
+	} {
+		mods := []Module{&actMod{navMod{stubModule{name: "a"}, nil}, []NavAction{a}}}
+		if got, err := CollectActions(mods); err == nil {
+			t.Errorf("%s: accepted %+v", name, got)
+		}
+	}
+	mods := []Module{&actMod{navMod{stubModule{name: "a"}, nil}, []NavAction{{Label: "Add", Path: "/a?new=1", Icon: "plus"}}}}
+	if _, err := CollectActions(mods); err != nil {
+		t.Errorf("a valid action was refused: %v", err)
 	}
 }
 

@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +27,10 @@ const (
 	maxSummaryRunes = 300
 	defaultActivity = 200
 	maxActivity     = 500
+	// A source's search entries are capped so one cannot crowd out the others, and the whole answer so the palette
+	// never has to filter an unbounded list. Both are far above what a console has.
+	maxSearchPerSource = 2000
+	maxSearchItems     = 5000
 )
 
 // cleanText removes control and format characters (bidi overrides, zero-width marks), repairs
@@ -81,6 +87,10 @@ func cleanItem(it AttentionItem, source string) AttentionItem {
 		it.Level = LevelInfo
 	}
 	it.Title = cleanText(it.Title, maxTitleRunes)
+	if it.ID == "" { // from the title, so that it holds from one poll to the next
+		sum := sha256.Sum256([]byte(it.Title))
+		it.ID = cleanText(it.Source, maxShortRunes-9) + "-" + hex.EncodeToString(sum[:4])
+	}
 	it.Detail = cleanText(it.Detail, maxDetailRunes)
 	it.ActionLabel = cleanText(it.ActionLabel, maxShortRunes)
 	if !safeLocalPath(it.ActionPath) {
@@ -330,17 +340,23 @@ func registerAttention(mux *http.ServeMux, mods []Module, nav []NavItem, tn Tail
 				return s.src.Search(c, login)
 			})
 			items := []SearchItem{}
-			for i := range srch {
+			for i, s := range srch {
 				if errs[i] != nil {
 					continue // a failing or hidden source contributes nothing, not even a placeholder
 				}
+				kept := 0
 				for _, it := range results[i] {
+					if kept == maxSearchPerSource || len(items) == maxSearchItems {
+						slog.Warn("console search cut short", "source", s.name, "offered", len(results[i]), "kept", kept)
+						break
+					}
 					it.Label = cleanText(it.Label, maxShortRunes)
 					it.Kind = cleanText(it.Kind, maxShortRunes)
 					if it.Label == "" || !safeLocalPath(it.Path) {
 						continue
 					}
 					items = append(items, it)
+					kept++
 				}
 			}
 			return map[string]any{"items": items}

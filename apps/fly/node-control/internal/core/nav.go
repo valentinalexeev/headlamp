@@ -104,16 +104,35 @@ func navActive(items []NavItem, reqPath string) int {
 	return best
 }
 
-// CollectActions gathers the top-bar actions of every module that implements ActionProvider.
+// ValidateNavAction checks a top-bar action like a bar entry, except that its path may carry a query.
+func ValidateNavAction(a NavAction) error {
+	base, _, _ := strings.Cut(a.Path, "?")
+	if err := ValidateNavItem(NavItem{Label: a.Label, Path: base, Icon: a.Icon}); err != nil {
+		return err
+	}
+	if !safeLocalPath(a.Path) {
+		return fmt.Errorf("action path %q has an unsafe query", a.Path)
+	}
+	return nil
+}
+
+// CollectActions gathers the top-bar actions of every module that implements ActionProvider and validates them.
 // Pass only modules whose Register succeeded.
-func CollectActions(mods []Module) []NavAction {
+func CollectActions(mods []Module) ([]NavAction, error) {
 	var out []NavAction
 	for _, m := range mods {
-		if p, ok := m.(ActionProvider); ok {
-			out = append(out, p.Actions()...)
+		p, ok := m.(ActionProvider)
+		if !ok {
+			continue
+		}
+		for _, a := range p.Actions() {
+			if err := ValidateNavAction(a); err != nil {
+				return nil, fmt.Errorf("module %s: %w", m.Name(), err)
+			}
+			out = append(out, a)
 		}
 	}
-	return out
+	return out, nil
 }
 
 var bodyTag = regexp.MustCompile(`^(?i)<body(?:\s(?:"[^"]*"|'[^']*'|[^>"'])*)?>`)

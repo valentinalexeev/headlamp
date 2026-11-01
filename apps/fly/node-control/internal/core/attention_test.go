@@ -379,3 +379,57 @@ func TestAttentionThatCannotBeEncodedIsAnError(t *testing.T) {
 		t.Fatalf("an empty 200 reads as nothing to report: %d %q", rec.Code, rec.Body.String())
 	}
 }
+
+func TestSearchIsCapped(t *testing.T) {
+	many := func(prefix string, n int) []SearchItem {
+		out := make([]SearchItem, n)
+		for i := range out {
+			out[i] = SearchItem{Label: prefix, Kind: "k", Path: "/p"}
+		}
+		return out
+	}
+	flood := &searchMod{stubModule: named("flood"), items: many("flood", maxSearchPerSource+50)}
+	quiet := &searchMod{stubModule: named("quiet"), items: many("quiet", 1)}
+	var r struct {
+		Items []SearchItem `json:"items"`
+	}
+	getJSON(t, attHandler(alice, nil, flood, quiet), "/_search.json", &r)
+	if len(r.Items) != maxSearchPerSource+1 || r.Items[len(r.Items)-1].Label != "quiet" {
+		t.Fatalf("one flooding source: %d items, last %+v", len(r.Items), r.Items[len(r.Items)-1])
+	}
+
+	var mods []Module
+	for i := 0; i <= maxSearchItems/maxSearchPerSource; i++ {
+		mods = append(mods, &searchMod{stubModule: named("m"), items: many("x", maxSearchPerSource)})
+	}
+	getJSON(t, attHandler(alice, nil, mods...), "/_search.json", &r)
+	if len(r.Items) != maxSearchItems {
+		t.Fatalf("many sources: %d items, want %d", len(r.Items), maxSearchItems)
+	}
+}
+
+func TestEmptyAttentionIDIsDefaulted(t *testing.T) {
+	m := &attMod{stubModule: named("mod"), items: []AttentionItem{
+		{Level: "info", Title: "one"},
+		{Level: "info", Title: "two"},
+		{ID: "​", Level: "info", Title: "only a format character"},
+		{ID: "given", Level: "info", Title: "three"},
+	}}
+	var first, again attResp
+	h := attHandler(alice, nil, m)
+	getJSON(t, h, "/_attention.json", &first)
+	getJSON(t, h, "/_attention.json", &again)
+	seen := map[string]bool{}
+	for i, it := range first.Items {
+		if it.ID == "" || seen[it.ID] {
+			t.Errorf("item %d: id %q is empty or repeated", i, it.ID)
+		}
+		seen[it.ID] = true
+		if it.ID != again.Items[i].ID {
+			t.Errorf("item %d: id changed between polls: %q, %q", i, it.ID, again.Items[i].ID)
+		}
+	}
+	if !seen["given"] {
+		t.Errorf("an id the module gave was replaced: %+v", first.Items)
+	}
+}

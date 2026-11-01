@@ -12,9 +12,6 @@
   var RANK = { crit: 0, warn: 1, ok: 2, off: 3 };
   var SOURCE_WORD = { registered: 'Registered', manual: 'Manual', none: 'Blocked name' };
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
-  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
   function label(v, n) { return hl.plain(v, n || 100); }
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
 
@@ -22,9 +19,9 @@
   // reports (registered by a node, or manual ones it serves), the manual routes in the store (also those the
   // ingress has not pulled yet) and the blocks (also those that match no route). A block wins over everything.
   function serviceRows(state) {
-    state = obj(state);
-    var ing = obj(state.ingress);
-    var rep = obj(ing.report);
+    state = hl.obj(state);
+    var ing = hl.obj(state.ingress);
+    var rep = hl.obj(ing.report);
     var stale = !!ing.stale;
     var domain = label(state.public_domain, 200);
     var map = {};
@@ -38,8 +35,8 @@
       }
       return map[k];
     }
-    arr(rep.routes).forEach(function (r) {
-      r = obj(r);
+    hl.arr(rep.routes).forEach(function (r) {
+      r = hl.obj(r);
       var ns = label(r.ns, 63), svc = label(r.service, 63);
       if (!ns || !svc) { return; }
       var row = slot(ns, svc);
@@ -53,8 +50,8 @@
         row.manual = true;
       }
     });
-    arr(state.routes).forEach(function (r) {
-      r = obj(r);
+    hl.arr(state.routes).forEach(function (r) {
+      r = hl.obj(r);
       var ns = label(r.ns, 63), svc = label(r.service, 63);
       if (!ns || !svc) { return; }
       var row = slot(ns, svc);
@@ -62,8 +59,8 @@
       row.registered = false;
       row.target = label(r.target, 200) + ':' + label(r.port, 6);
     });
-    arr(state.blocks).forEach(function (b) {
-      b = obj(b);
+    hl.arr(state.blocks).forEach(function (b) {
+      b = hl.obj(b);
       var ns = label(b.ns, 63), svc = label(b.service, 63);
       if (!ns || !svc) { return; }
       var row = slot(ns, svc);
@@ -106,32 +103,7 @@
     return 'all';
   }
 
-  function button(text, iconName, cls, onClick) {
-    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
-    b.setAttribute('type', 'button');
-    var ic = iconName ? hl.icon(iconName) : null;
-    if (ic) { b.appendChild(ic); }
-    b.appendChild(hl.el('span', null, text));
-    if (onClick) { b.addEventListener('click', onClick); }
-    return b;
-  }
 
-  function focusKey(box) {
-    var ae = typeof document !== 'undefined' ? document.activeElement : null;
-    for (var n = ae; n; n = n.parentNode) {
-      if (n === box) { return ae.getAttribute ? ae.getAttribute('data-fk') : null; }
-    }
-    return null;
-  }
-  function refocus(box, key) {
-    if (!key) { return; }
-    var stack = [box];
-    while (stack.length) {
-      var n = stack.pop();
-      if (n.getAttribute && n.getAttribute('data-fk') === key && !n.disabled) { n.focus(); return; }
-      (n.children ? Array.prototype.slice.call(n.children) : []).forEach(function (c) { stack.push(c); });
-    }
-  }
 
   function parsePort(text) {
     var s = String(text || '').trim();
@@ -154,18 +126,18 @@
     function setNotice(text) { els.notice.textContent = text; els.notice.hidden = !text; }
 
     function activeNamespaces() {
-      return arr(obj(st.state).namespaces).filter(function (n) { return obj(n).state === 'active'; }).map(function (n) { return label(n.name, 63); });
+      return hl.arr(hl.obj(st.state).namespaces).filter(function (n) { return hl.obj(n).state === 'active'; }).map(function (n) { return label(n.name, 63); });
     }
 
     // ----- the report note and the summary line
 
     function renderReport() {
       var box = els.reportnote;
-      clear(box);
-      var ing = st.state ? obj(st.state).ingress : null;
+      hl.clear(box);
+      var ing = st.state ? hl.obj(st.state).ingress : null;
       if (!ing) { box.hidden = true; return; }
-      var rep = obj(ing.report);
-      var errs = arr(rep.errors);
+      var rep = hl.obj(ing.report);
+      var errs = hl.arr(rep.errors);
       var stale = !!ing.stale;
       if (!stale && errs.length === 0) { box.hidden = true; return; }
       if (stale) {
@@ -185,10 +157,10 @@
       if (!st.loaded) { return st.failed ? 'Could not load the funnel. Retrying.' : ''; }
       var served = st.rows.filter(function (r) { return !r.blocked; }).length;
       var text = served + (served === 1 ? ' public route. ' : ' public routes. ');
-      var ing = obj(st.state).ingress;
+      var ing = hl.obj(st.state).ingress;
       if (!ing) { text += 'The ingress has not reported yet.'; }
       else {
-        var n = arr(obj(ing.report).errors).length;
+        var n = hl.arr(hl.obj(ing.report).errors).length;
         text += 'Ingress reported ' + hl.relTime(String(ing.received_at || ''), now()) + (n === 0 ? ' with no errors.' : ' with ' + n + (n === 1 ? ' error.' : ' errors.'));
       }
       if (st.failed) { text += ' The data may be out of date.'; }
@@ -293,8 +265,8 @@
       if (!force && st.open && st.open.el) { return; }
       if (!force && sig === st.tableSig) { return; }
       st.tableSig = sig;
-      var fk = focusKey(els.rows);
-      clear(els.rows);
+      var fk = hl.focusKey(els.rows);
+      hl.clear(els.rows);
       if (st.open) { st.open.cell = null; }
       if (rows.length === 0) {
         var tr0 = hl.el('tr');
@@ -316,7 +288,7 @@
         var act = hl.el('td', 'act');
         var box = hl.el('div', 'rowbtns');
         actionsOf(r).forEach(function (a) {
-          var b = keyed(button(a.label, a.icon, 'sm quiet', a.fn), 'act:' + r.key + ':' + a.key);
+          var b = keyed(hl.button(a.label, a.icon, 'sm quiet', a.fn), 'act:' + r.key + ':' + a.key);
           b.disabled = st.busy;
           box.appendChild(b);
         });
@@ -332,7 +304,7 @@
           st.open.cell = cell;
         }
       });
-      refocus(els.rows, fk);
+      hl.refocus(els.rows, fk);
     }
 
     function renderChips() {
@@ -342,7 +314,7 @@
       if (sig !== st.chipSig) {
         st.chipSig = sig;
         st.chips = {};
-        clear(els.chips);
+        hl.clear(els.chips);
         FILTERS.forEach(function (f) {
           var b = hl.el('button', 'chip', f[1]);
           b.setAttribute('type', 'button');
@@ -371,8 +343,8 @@
       var sig = spaces > 0 ? 'on' : 'off';
       if (st.addSig === sig) { return; }
       st.addSig = sig;
-      clear(els.addslot);
-      var b = keyed(button('Add route', 'plus', '', function () { openAddPanel(); }), 'add');
+      hl.clear(els.addslot);
+      var b = keyed(hl.button('Add route', 'plus', '', function () { openAddPanel(); }), 'add');
       b.disabled = spaces === 0;
       if (b.disabled) { b.setAttribute('title', 'Create and confirm a namespace first.'); }
       els.addslot.appendChild(b);
@@ -451,7 +423,7 @@
       var submit = hl.el('button', 'btn primary', 'Add route');
       submit.setAttribute('type', 'submit');
       btns.appendChild(submit);
-      btns.appendChild(button('Cancel', null, 'quiet', closeAddPanel));
+      btns.appendChild(hl.button('Cancel', null, 'quiet', closeAddPanel));
       form.appendChild(btns);
       p.root.appendChild(form);
       p.root.addEventListener('keydown', function (ev) { if (ev && ev.key === 'Escape') { closeAddPanel(); } });
@@ -495,7 +467,7 @@
       render(true);
     };
     ctrl.update = function (d) {
-      st.state = obj(d);
+      st.state = hl.obj(d);
       st.rows = serviceRows(st.state);
       st.loaded = true;
       render();

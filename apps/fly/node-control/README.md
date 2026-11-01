@@ -167,28 +167,32 @@ Run a backup after enrolment changes. It is a manual step until an automatic one
 
 ## Node discovery
 
-There is no per-node list to maintain. Each headscale node is looked at on every refresh (cached for 15 seconds, one
-headscale fetch shared by the node list and the tailnet status):
+You do not keep a list of nodes. node-control looks at each headscale node at every refresh. It caches the result for 15 seconds, and the node list and the tailnet status share one headscale fetch.
 
-1. A node is listed if it has the tag `tag:exit`. Its UI and API id is its reported `name`.
-2. If it also has `tag:cloud-<provider>` (`yandex`, `oci`, `selectel`, `fly`), that provider locates the VM whose name
-   equals the node name: OCI by name in the compartment, Selectel by name in the project and region, Yandex by name in
-   the folder, Fly by app name. Found means controllable; not found shows as `error` on that node only. Without a cloud
-   tag the node is status-only.
+1. node-control lists a node if the node has the tag `tag:exit`. The UI and API id of the node is its reported `name`.
+2. A node can also have `tag:cloud-<provider>` (`yandex`, `oci`, `selectel`, `fly`). That provider then finds the VM whose name equals the node name:
+   - OCI finds it by name in the compartment.
+   - Selectel finds it by name in the project and region.
+   - Yandex finds it by name in the folder.
+   - Fly finds it by app name.
+
+   If the provider finds the VM, the node is controllable. If not, `error` shows on that node only. Without a cloud tag, the node is status-only.
 3. Provider settings are per provider and come from the environment (table above), not from the node.
-4. Headscale keeps offline nodes, so a stopped VM stays listed and can be started. A node deleted from headscale
-   disappears.
-5. Duplicate registrations (`name-1` next to `name`) fold into one entry; the online one wins.
+4. Headscale keeps offline nodes, so a stopped VM stays in the list and you can start it. A node that you delete from headscale goes from the list.
+5. Duplicate registrations (`name-1` next to `name`) fold into one entry. The online entry wins.
 
 ### Optional overrides: `nodes.json`
 
-The file is optional. Existing Python-era files keep working. Start from
-[`testdata/nodes.example.json`](testdata/nodes.example.json); the image ships no `nodes.json` (the page then uses the default title); lay yours over `app/` at deploy time.
+The file is optional. Files from the Python version continue to work. Start from [`testdata/nodes.example.json`](testdata/nodes.example.json). The image has no `nodes.json` (the page then uses the default title). Lay your file over `app/` at deploy time.
 
-- `title`, `subtitle`: page heading.
-- `nodes.<id>`: an override for a discovered node, or an explicit node. Keys: `label` (UI text), `hidden` (`true`
-  removes it from the page and API), `tailnetName` (its headscale name, default the id), `provider` plus a block named
-  after the provider with connection details (explicit blocks win over discovery). Blocks:
+- `title`, `subtitle`: the page heading.
+- `nodes.<id>`: an override for a discovered node, or an explicit node. Explicit blocks win over discovery. Keys:
+  - `label`: the UI text.
+  - `hidden`: `true` removes the node from the page and API.
+  - `tailnetName`: its headscale name. The default is the id.
+  - `provider`, plus a block with the name of the provider, which holds connection details.
+
+  Blocks:
 
   | provider | block |
   |---|---|
@@ -196,15 +200,16 @@ The file is optional. Existing Python-era files keep working. Start from
   | `oci` | `{"region", "compartment_id", "instance_name"}` or `{"instance_id"}` |
   | `selectel` | `{"region", "instance_name"}` or `{"instance_id"}` |
   | `fly` | `{"app"}` |
-- `aliases`: `{"old-id": "node-name"}` so bookmarks and scripts using an old id keep working.
+- `aliases`: `{"old-id": "node-name"}`, so that bookmarks and scripts with an old id continue to work.
 - `tailnetTrack`: extra headscale names to include in `/tailnet/status`.
 
 ## API
 
-`GET /` (Overview) · `GET /nodes` (page) · `GET /activity` (page) · `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` ·
-`POST /nodes/{id}/stop` · `GET /tailnet/status` · `GET /healthz`. With `ENROLL_DB` also the `/enroll` admin pages and
-API on `:80` and the public `/e/<token>` and `/sub/<secret>` on `:8081`. Start and stop are idempotent; a provider failure
-shows up as `error` on that node only.
+`GET /` (Overview) · `GET /nodes` (page) · `GET /activity` (page) · `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` · `POST /nodes/{id}/stop` · `GET /tailnet/status` · `GET /healthz`.
+
+With `ENROLL_DB`, these are also available: the `/enroll` admin pages and API on `:80`, and the public `/e/<token>` and `/sub/<secret>` on `:8081`.
+
+Start and stop are idempotent. A provider failure shows as `error` on that node only.
 
 ## Enrolment (optional)
 

@@ -256,3 +256,90 @@ func TestReconcilePeriodMatchesTheRetryCopy(t *testing.T) {
 		t.Fatalf("the pages promise a retry every 5 minutes, the loop waits %v", reconcilePeriod)
 	}
 }
+
+// bridgeFx is the fixture with its one bridge configured by set.
+func bridgeFx(t *testing.T, set func(*Ingress)) *regFx {
+	t.Helper()
+	return newRegFx(t, func(rc *RegistryConfig) { set(&rc.Cfg.Ingresses[0]) })
+}
+
+func TestEnrollAttentionNodeNamesTheMachine(t *testing.T) {
+	f := bridgeFx(t, func(in *Ingress) { in.Node = "machine-9" })
+	f.reg.Current(context.Background(), true).Targets[0].State.Failed("unreachable")
+	m := attentionFor(f)
+
+	m.stopped = func(context.Context) map[string]bool { return map[string]bool{"machine-9": true} }
+	items, _, err := m.Attention(context.Background(), "alice@")
+	if err != nil || len(items) != 1 || items[0].Level != core.LevelInfo {
+		t.Fatalf("the machine it names is stopped: %+v %v", items, err)
+	}
+
+	// With a node named, a stopped machine that only shares the bridge's name is another machine.
+	m.stopped = func(context.Context) map[string]bool { return map[string]bool{"ingress-1": true} }
+	items, _, _ = m.Attention(context.Background(), "alice@")
+	if len(items) != 1 || items[0].Level != core.LevelCritical {
+		t.Fatalf("another machine is stopped: %+v", items)
+	}
+}
+
+func TestIngressViewCarriesNodeAndIntermittent(t *testing.T) {
+	f := bridgeFx(t, func(in *Ingress) { in.Node = "machine-9"; in.Intermittent = true })
+	n := ingressNodeID("machine-9", 9, true)
+	f.nodes.set(n)
+	v := f.view("ingress-1")
+	if v.Node != "machine-9" || !v.Intermittent {
+		t.Errorf("%+v", v)
+	}
+	if v.Online == nil || !*v.Online {
+		t.Errorf("online comes from the machine it names: %+v", v.Online)
+	}
+}
+
+func TestEnrollAttentionIntermittentBridge(t *testing.T) {
+	f := bridgeFx(t, func(in *Ingress) { in.Intermittent = true })
+	st := f.reg.Current(context.Background(), true).Targets[0].State
+	st.Failed("unreachable")
+	items, line := attentionOf(t, f)
+	if len(items) != 1 || line.State != "ok" || !strings.Contains(line.Summary, "1 bridge sync pending") {
+		t.Fatalf("%+v %+v", items, line)
+	}
+	it := items[0]
+	if it.Level != core.LevelInfo || it.ID != "bridge-sync-ingress-1" || it.Since.IsZero() ||
+		!strings.Contains(it.Title, "unreachable") || !strings.Contains(it.Detail, "may not be in effect") {
+		t.Errorf("%+v", it)
+	}
+	// A reachable agent that refuses is a real problem, intermittent or not.
+	for _, state := range []string{"unauthorized", "rejected", "conflict", "error"} {
+		st.Failed(state)
+		items, line = attentionOf(t, f)
+		if len(items) != 1 || items[0].Level != core.LevelCritical || line.State != "critical" {
+			t.Errorf("%s: %+v %+v", state, items, line)
+		}
+	}
+}
+
+func TestEnrollAttentionBridgeSyncMeaning(t *testing.T) {
+	keyFor := func(intermittent bool, state string, stopped bool) string {
+		f := bridgeFx(t, func(in *Ingress) { in.Intermittent = intermittent })
+		f.reg.Current(context.Background(), true).Targets[0].State.Failed(state)
+		m := attentionFor(f)
+		if stopped {
+			m.stopped = func(context.Context) map[string]bool { return map[string]bool{"ingress-1": true} }
+		}
+		items, _, err := m.Attention(context.Background(), "alice@")
+		if err != nil || len(items) != 1 || items[0].AckKey == "" {
+			t.Fatalf("%+v %v", items, err)
+		}
+		return items[0].AckKey
+	}
+	seen := map[string]bool{}
+	for _, k := range []string{keyFor(false, "unreachable", false), keyFor(false, "rejected", false), keyFor(true, "unreachable", false), keyFor(false, "unreachable", true)} {
+		if seen[k] {
+			t.Errorf("each of these means something else, key %q repeats", k)
+		}
+		seen[k] = true
+	}
+	if keyFor(false, "unreachable", false) != keyFor(false, "unreachable", false) {
+		t.Error("the same state must keep its key")
+	}
+}

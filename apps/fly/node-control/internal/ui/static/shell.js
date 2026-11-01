@@ -47,7 +47,7 @@
   // ---- attention data ----
   function timedItems(data) {
     var items = data && Array.isArray(data.items) ? data.items : [];
-    return items.filter(function (it) { return it && it.level === 'timed'; });
+    return items.filter(function (it) { return it && it.level === 'timed' && !it.acknowledged; });
   }
 
   // countsBySource: { source: { n, crit } } for the items that need a person.
@@ -55,7 +55,7 @@
     var out = Object.create(null);
     var items = data && Array.isArray(data.items) ? data.items : [];
     items.forEach(function (it) {
-      if (!it || !it.source || !COUNTED[it.level]) { return; }
+      if (!it || !it.source || !COUNTED[it.level] || it.acknowledged) { return; }
       var c = out[it.source] || (out[it.source] = { n: 0, crit: false });
       c.n += 1;
       if (it.level === 'critical') { c.crit = true; }
@@ -231,7 +231,7 @@
     function render() {
       if (parts.counts) { applyCounts(parts.counts, st.data); }
       if (parts.lamp) {
-        var any = st.data && Array.isArray(st.data.items) && st.data.items.some(function (it) { return it && COUNTED[it.level]; });
+        var any = st.data && Array.isArray(st.data.items) && st.data.items.some(function (it) { return it && COUNTED[it.level] && !it.acknowledged; });
         // A system whose state is unknown is not "all clear" either, even with no item to count.
         var unknown = st.data && Array.isArray(st.data.systems) && st.data.systems.some(function (sy) { return sy && sy.state === 'unknown'; });
         parts.lamp.className = any || unknown ? 'lamp' : 'lamp clear';

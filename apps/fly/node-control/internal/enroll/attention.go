@@ -29,8 +29,9 @@ var syncReason = map[string]string{
 	"error":        "The sync ended in an error.",
 }
 
-// Attention reports bridges that are out of sync (critical, or info for one stopped at its provider, as it serves
-// nobody and the sync retries once it is back), bridges whose approval changed (critical) or
+// Attention reports bridges that are out of sync (critical; info for one stopped at its provider, as it serves
+// nobody and the sync retries once it is back, and for an intermittent one whose agent is unreachable), bridges whose
+// approval changed (critical) or
 // waits (waiting), and devices that expire within seven days (waiting, one item with the count). Each bridge
 // is named in its own item. An inactive module reports nothing; an unreadable device list is an error.
 func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem, []core.SystemLine, error) {
@@ -57,17 +58,31 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		if stopped == nil && m.stopped != nil {
 			stopped = m.stopped(ctx)
 		}
+		id := "bridge-sync-" + row.Name
+		// What an acknowledgement of this item is about: another reason brings the item back.
+		meaning := func(level core.AttentionLevel, state string) string {
+			return id + "|" + string(level) + "|" + state
+		}
+		notice := core.AttentionItem{
+			ID: id, Source: bridgeSource, Level: core.LevelInfo,
+			ActionLabel: "Open bridge", ActionPath: "/nodes?sel=" + url.QueryEscape(row.Name),
+		}
+		if row.Sync.Since != nil {
+			notice.Since = time.Unix(*row.Sync.Since, 0)
+		}
 		if bridgeStopped(stopped, row.Name, cur.Views) {
-			it := core.AttentionItem{
-				ID: "bridge-sync-" + row.Name, Source: bridgeSource, Level: core.LevelInfo,
-				Title:       row.Name + " is stopped with a sync pending",
-				Detail:      "Revocations and extensions reach it when it is started again.",
-				ActionLabel: "Open bridge", ActionPath: "/nodes?sel=" + url.QueryEscape(row.Name),
-			}
-			if row.Sync.Since != nil {
-				it.Since = time.Unix(*row.Sync.Since, 0)
-			}
-			items = append(items, it)
+			notice.Title = row.Name + " is stopped with a sync pending"
+			notice.Detail = "Revocations and extensions reach it when it is started again."
+			notice.AckKey = meaning(core.LevelInfo, "stopped")
+			items = append(items, notice)
+			outOfSync++
+			continue
+		}
+		if row.Sync.State == "unreachable" && bridgeIntermittent(row.Name, cur.Views) {
+			notice.Title = row.Name + " is unreachable with a sync pending"
+			notice.Detail = "It is marked intermittent. Unreachable does not prove it stopped serving clients, so revocations and extensions may not be in effect on it. Retrying every 5 minutes."
+			notice.AckKey = meaning(core.LevelInfo, row.Sync.State)
+			items = append(items, notice)
 			outOfSync++
 			continue
 		}
@@ -76,7 +91,7 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 			reason = "The last sync did not succeed."
 		}
 		it := core.AttentionItem{
-			ID: "bridge-sync-" + row.Name, Source: bridgeSource, Level: core.LevelCritical,
+			ID: id, Source: bridgeSource, Level: core.LevelCritical, AckKey: meaning(core.LevelCritical, row.Sync.State),
 			Title:       row.Name + " is out of sync",
 			Detail:      "Revocations and extensions are not in effect there. " + reason + " Retrying every 5 minutes.",
 			ActionLabel: "Open bridge", ActionPath: "/nodes?sel=" + url.QueryEscape(row.Name),
@@ -156,14 +171,29 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 }
 
 // bridgeStopped reports whether the bridge is one of the stopped machines, matched as the Nodes page joins a bridge to
-// its node: by its given name or its name.
+// its node: by the node its entry names or, without one, by its given name or its name.
 func bridgeStopped(stopped map[string]bool, name string, views []IngressView) bool {
+	for _, v := range views {
+		if v.Name == name && v.Node != "" {
+			return stopped[strings.ToLower(v.Node)]
+		}
+	}
 	if stopped[strings.ToLower(name)] {
 		return true
 	}
 	for _, v := range views {
 		if v.Name == name && v.GivenName != "" && stopped[strings.ToLower(v.GivenName)] {
 			return true
+		}
+	}
+	return false
+}
+
+// bridgeIntermittent reports whether the bridge's entry marks it as expected to come and go.
+func bridgeIntermittent(name string, views []IngressView) bool {
+	for _, v := range views {
+		if v.Name == name {
+			return v.Intermittent
 		}
 	}
 	return false

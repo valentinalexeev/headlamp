@@ -66,6 +66,10 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 				break
 			}
 		}
+		it.AckKey = it.ID + "|overdue"
+		if v.Streak > 0 {
+			it.AckKey = it.ID + "|failing"
+		}
 		switch {
 		case v.Streak == 1:
 			it.Title = fmt.Sprintf("Task %s has failed 1 time in a row", id)

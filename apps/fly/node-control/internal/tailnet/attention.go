@@ -41,7 +41,7 @@ func (m *module) Attention(ctx context.Context, login string) ([]core.AttentionI
 			since := m.refused
 			m.mu.Unlock()
 			return []core.AttentionItem{{
-				ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting,
+				ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting, AckKey: "tailnet-api-key|refused",
 				Title:  "The headscale API key is refused",
 				Detail: "The tailnet status line stops until it is replaced. Rotate it with scripts/rotate-headscale-api-key.sh.",
 				Since:  since,
@@ -58,8 +58,9 @@ func (m *module) Attention(ctx context.Context, login string) ([]core.AttentionI
 	if left > keyWarn {
 		return nil, nil, nil
 	}
-	title := "The headscale API key has expired"
+	title, key := "The headscale API key has expired", "tailnet-api-key|expired"
 	if left > 0 {
+		key = "tailnet-api-key|expiring"
 		days := int(left / (24 * time.Hour))
 		title = fmt.Sprintf("The headscale API key expires in %d %s", days, plural(days, "day", "days"))
 		if days == 0 {
@@ -67,7 +68,7 @@ func (m *module) Attention(ctx context.Context, login string) ([]core.AttentionI
 		}
 	}
 	return []core.AttentionItem{{
-		ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting, Title: title,
+		ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting, Title: title, AckKey: key,
 		Detail: "The tailnet status line stops when it does. Rotate it with scripts/rotate-headscale-api-key.sh.",
 		Since:  at.Add(-keyWarn),
 	}}, nil, nil

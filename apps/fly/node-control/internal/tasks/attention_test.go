@@ -61,6 +61,9 @@ func TestTasksAttention(t *testing.T) {
 		if lines[0].State != "waiting" || !strings.Contains(lines[0].Summary, "0 of 1 passing") {
 			t.Errorf("lines: %+v", lines)
 		}
+		if it.AckKey != "task-job|failing" {
+			t.Errorf("a longer streak means the same, overdue does not: %q", it.AckKey)
+		}
 	})
 
 	t.Run("a single failure still states the streak", func(t *testing.T) {
@@ -79,7 +82,7 @@ func TestTasksAttention(t *testing.T) {
 		if err != nil || len(items) != 1 {
 			t.Fatalf("%+v %v", items, err)
 		}
-		if it := items[0]; it.Level != core.LevelWaiting || it.ActionPath != "/tasks?sel=job" || !strings.Contains(it.Title, "overdue") {
+		if it := items[0]; it.Level != core.LevelWaiting || it.ActionPath != "/tasks?sel=job" || !strings.Contains(it.Title, "overdue") || it.AckKey != "task-job|overdue" {
 			t.Errorf("%+v", it)
 		}
 	})

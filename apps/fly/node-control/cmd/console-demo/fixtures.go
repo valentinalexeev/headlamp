@@ -38,7 +38,7 @@ type scenario struct {
 	problems  bool   // seed the attention state
 }
 
-// scenarios: attention seeds one of every kind of problem, clear seeds none, minimal switches on the
+// scenarios: attention seeds one of every kind of problem and an acknowledged item, clear seeds none, minimal switches on the
 // nodes module only, partial is clear for a caller who is in no *_ADMIN_USERS list.
 var scenarios = map[string]scenario{
 	"attention": {login: "alice", problems: true},
@@ -49,8 +49,12 @@ var scenarios = map[string]scenario{
 
 const (
 	adminLogin = "alice"
-	// The invented host of the agent that cannot be reached in the attention scenario.
-	offlineBridgeHost = "bridge-2.demo.example.net"
+	// The invented hosts of the agents that cannot be reached in the attention scenario.
+	offlineBridgeHost      = "bridge-2.demo.example.net"
+	intermittentBridgeHost = "bridge-4.demo.example.net"
+	// The item the attention scenario leaves acknowledged, for 7 days.
+	acknowledgedItemInDemo  = "devices-expiring"
+	acknowledgedItemSeconds = 7 * 24 * 60 * 60
 	// The tailnet ports the fakes answer on (the agent port and the task runner port).
 	agentPort  = "9000"
 	runnerPort = "9100"
@@ -117,7 +121,7 @@ func (w *world) route(addr string) (string, error) {
 		return "", err
 	}
 	switch {
-	case host == offlineBridgeHost && w.sc.problems:
+	case (host == offlineBridgeHost || host == intermittentBridgeHost) && w.sc.problems:
 		return "", errors.New("demo: no route to host")
 	case port == agentPort:
 		return w.agent.Listener.Addr().String(), nil
@@ -153,6 +157,7 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			"AGENT_TOKEN_BRIDGE_1":   "demo-agent-token",
 			"AGENT_TOKEN_BRIDGE_2":   "demo-agent-token",
 			"AGENT_TOKEN_BRIDGE_3":   "demo-agent-token",
+			"AGENT_TOKEN_BRIDGE_4":   "demo-agent-token",
 			"POLICY_DB":              filepath.Join(w.dir, "policy.db"),
 			"POLICY_ADMIN_USERS":     adminLogin,
 			"POLICY_REVERT_SECONDS":  "900",
@@ -217,7 +222,8 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 	return append(mods, overview.New(func() []core.Module { return others })), env, nil
 }
 
-// enrollConfig lists two configured bridges; a third is discovered from the node list.
+// enrollConfig lists three configured bridges; another is discovered from the node list. bridge-4 runs on a machine
+// with another name and is marked intermittent.
 const enrollConfig = `{
   "profile_name": "tunnel",
   "link_host": "links.example.net",
@@ -225,7 +231,9 @@ const enrollConfig = `{
     {"name": "bridge-1", "host": "bridge-1.example.net", "public_key": "demo-public-key-1", "short_id": "a1b2c3d4",
      "agent_url": "http://bridge-1.demo.example.net:9000", "uuids": "base"},
     {"name": "bridge-2", "host": "bridge-2.example.net", "public_key": "demo-public-key-2", "short_id": "e5f6a7b8",
-     "agent_url": "http://bridge-2.demo.example.net:9000", "uuids": "derived"}
+     "agent_url": "http://bridge-2.demo.example.net:9000", "uuids": "derived"},
+    {"name": "bridge-4", "host": "bridge-4.example.net", "public_key": "demo-public-key-4", "short_id": "f1e2d3c4",
+     "agent_url": "http://bridge-4.demo.example.net:9000", "uuids": "derived", "node": "vm-4", "intermittent": true}
   ]
 }`
 
@@ -264,6 +272,7 @@ func newFakeHeadscale(sc scenario) *fakeHeadscale {
 		node(4, "bridge-1", true, "100.64.0.21", time.Minute, "tag:ingress"),
 		node(5, "bridge-2", true, "100.64.0.22", time.Minute, "tag:ingress"),
 		node(6, "bridge-3", true, "100.64.0.23", time.Minute, "tag:ingress"),
+		node(8, "vm-4", true, "100.64.0.24", time.Minute, "tag:exit", "tag:cloud-oci"), // the machine of bridge-4
 		// runner-1 also publishes into the two funnel namespaces, so manual routes can point at it.
 		node(7, "runner-1", true, "100.64.0.31", time.Minute, "tag:task-runner", "tag:browser-session", "tag:funnel", "tag:ns-demo", "tag:ns-lab"),
 	}
@@ -341,7 +350,7 @@ type fakeProvider struct {
 }
 
 func newFakeProvider() *fakeProvider {
-	return &fakeProvider{state: map[string]bool{"exit-a": true, "exit-b": true, "exit-c": false}}
+	return &fakeProvider{state: map[string]bool{"exit-a": true, "exit-b": true, "exit-c": false, "vm-4": true}}
 }
 
 func (p *fakeProvider) status(n nodes.Target) nodes.Status {
@@ -550,7 +559,36 @@ func (w *world) seed(ctx context.Context, admin string, ingress *http.Client) er
 	keep(w.seedFunnel(must))
 	keep(w.seedTasks(ctx, hc, admin, must))
 	keep(w.seedFunnelReport(ctx, ingress, admin))
+	keep(w.seedAcknowledged(must))
 	return firstErr
+}
+
+// seedAcknowledged acknowledges one item in the attention scenario, for 7 days, so the collapsed section has a row.
+func (w *world) seedAcknowledged(must mustFn) error {
+	if !w.sc.problems {
+		return nil
+	}
+	data, err := must("reading attention", 200, "GET", "/_attention.json", nil)
+	if err != nil {
+		return err
+	}
+	var att struct {
+		Items []struct {
+			ID       string `json:"id"`
+			AckToken string `json:"ack_token"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(data, &att); err != nil {
+		return fmt.Errorf("reading attention: %w", err)
+	}
+	for _, it := range att.Items {
+		if it.ID == acknowledgedItemInDemo {
+			_, err := must("acknowledging an item", 200, "POST", "/_attention/acknowledge",
+				map[string]any{"id": it.ID, "ack_token": it.AckToken, "expires_in_seconds": acknowledgedItemSeconds})
+			return err
+		}
+	}
+	return errors.New(acknowledgedItemInDemo + " is not in the attention list")
 }
 
 type mustFn func(what string, want int, method, path string, body any) ([]byte, error)

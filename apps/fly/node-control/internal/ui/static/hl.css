@@ -161,7 +161,15 @@ button.search:hover{border-color:var(--line2);color:var(--t2)}
 .hl .drawer{z-index:1002}
 .page.narrow{max-width:860px}
 /* an open row detail inside a table: wraps, and is not held to the row height */
+/* Cells wrap so a table fits beside a side column instead of scrolling. What must read as one piece stays whole: names,
+   actions, and mono values such as times and ports. A wrapped row grows from the 46px minimum (height acts as one). */
+.hl td{white-space:normal;padding-top:6px;padding-bottom:6px}
+.hl td.name,.hl td.act,.hl td.mono{white-space:nowrap}
+.hl td .st{white-space:normal}
 .hl td.detail{white-space:normal;height:auto;padding:12px 14px}
+/* a side column with nothing in it gives its room back, and tables in one are tighter */
+.colside:empty{display:none}
+.hl .colside th,.hl .colside td,.hl .colside td.detail{padding-left:10px;padding-right:10px}
 /* a cell whose text may wrap, in a narrow column (the recent activity beside Overview) */
 .hl td.wrap{white-space:normal;padding-top:8px;padding-bottom:8px}
 /* a status line that may run to two lines on a phone (the Overview headline) */
@@ -176,3 +184,7 @@ button.search:hover{border-color:var(--line2);color:var(--t2)}
 .input.area{height:auto;min-height:320px;padding:10px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.55;resize:vertical}
 /* a compact select in a table row (Browser sessions) */
 .input.sm{height:30px;width:auto;font-size:13px}
+/* the collapsed list of acknowledged attention items (Overview) */
+.acked summary{cursor:pointer;color:var(--t2);font-size:12.5px;font-weight:500;line-height:30px}
+.acked[open] summary{margin-bottom:9px}
+.ackchoices{display:flex;flex-wrap:wrap;align-items:center;gap:6px}

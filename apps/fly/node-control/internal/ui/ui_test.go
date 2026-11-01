@@ -225,3 +225,17 @@ func TestSearchBoxKeepsItsIconBesideTheText(t *testing.T) {
 		t.Error(".row wraps, so without this the icon drops above the text on a narrow screen")
 	}
 }
+
+// The wrap classes exist so that long text breaks onto a second line on a phone instead of running off the page. Each
+// is a rule that undoes the nowrap a table cell or status line has by default.
+func TestWrapClassesAllowTextToBreak(t *testing.T) {
+	css, err := os.ReadFile("static/hl.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{".hl td.wrap{white-space:normal", ".hl .st.wrap{white-space:normal"} {
+		if !strings.Contains(string(css), rule) {
+			t.Errorf("hl.css lacks %q", rule)
+		}
+	}
+}

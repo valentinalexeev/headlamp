@@ -178,7 +178,44 @@ func TestExportOmitsAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(snap)
-	if bytes.Contains(b, []byte("audit")) || bytes.Contains(b, []byte("device.create")) || bytes.Contains(b, []byte("operator@example.net")) {
+	// A key list, not a search for a word: a renamed field would pass a substring check. A new field has to be added here
+	// on purpose, which is the moment to ask whether it belongs in an export.
+	allowed := map[string][]string{
+		"":          {"seq", "devices", "links", "approvals"},
+		"devices":   {"id", "name", "owner", "client", "expires_at", "revoked", "epoch", "uuids", "enrolled_at", "enrol_count", "last_active"},
+		"links":     {"hash", "device_id", "expires", "max_uses", "uses"},
+		"approvals": {"name", "fingerprint", "approved_at", "node_id", "machine_key"},
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(b, &top); err != nil {
+		t.Fatal(err)
+	}
+	inList := func(list []string, k string) bool {
+		for _, a := range list {
+			if a == k {
+				return true
+			}
+		}
+		return false
+	}
+	for k, raw := range top {
+		if !inList(allowed[""], k) {
+			t.Errorf("snapshot has an unexpected top-level key %q", k)
+			continue
+		}
+		var rows []map[string]json.RawMessage
+		if json.Unmarshal(raw, &rows) != nil {
+			continue // seq
+		}
+		for _, row := range rows {
+			for rk := range row {
+				if !inList(allowed[k], rk) {
+					t.Errorf("snapshot %s row has an unexpected key %q", k, rk)
+				}
+			}
+		}
+	}
+	if bytes.Contains(b, []byte("device.create")) || bytes.Contains(b, []byte("operator@example.net")) {
 		t.Fatalf("snapshot holds the audit log: %s", b)
 	}
 }

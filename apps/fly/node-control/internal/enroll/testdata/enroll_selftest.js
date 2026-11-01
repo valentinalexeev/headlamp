@@ -21,6 +21,8 @@ class FakeNode {
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   focus() { this.focused = true; global.document.activeElement = this; }
   select() { this.selected = true; }
+  // a tag name only, which is all the page asks for
+  querySelector(tag) { return walk(this).slice(1).find((n) => n.tag === tag) || null; }
   set innerHTML(v) { throw new Error('innerHTML must not be used'); }
   set outerHTML(v) { throw new Error('outerHTML must not be used'); }
   click() { if (this.disabled) { return; } fire(this, 'click'); }
@@ -492,6 +494,8 @@ const fieldValue = (els, label) => {
     assert.strictEqual(created.owner, 'jo');
     assert.strictEqual(created.expires_at, devices.endOfDay(devices.defaultExpiry(NOW)));
     assert.deepStrictEqual(JSON.parse(sent('POST', '/enroll/devices/7/links')[0].body), { ttl: 86400, max_uses: 1 });
+    // the form and its focused button are gone: focus lands on the copy button, not on the page
+    assert.strictEqual(global.document.activeElement, buttonNamed(aside, 'Copy link'), 'focus is on Copy link');
     const secrets = findAll(aside, (n) => hasClass(n, 'secret'));
     assert.deepStrictEqual(secrets.map((n) => n.textContent), [LINK, SUB]);
     const manual = findAll(aside, (n) => n.tag === 'details');

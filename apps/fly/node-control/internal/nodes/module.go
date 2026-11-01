@@ -248,7 +248,7 @@ func (m *Module) record(req *http.Request, action, node, outcome string) {
 		return
 	}
 	if err := al.Audit(actor, action, detail); err != nil {
-		log.Error("audit log write failed", "actor", actor, "action", action, "detail", detail)
+		log.Error("audit log write failed", "actor", actor, "action", action, "detail", detail, "error_type", fmt.Sprintf("%T", err))
 	}
 }
 

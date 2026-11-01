@@ -9,18 +9,7 @@
   var hl = window.hl;
   if (!hl) { return; }
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
 
-  function button(label, iconName, cls, onClick) {
-    var b = hl.el('button', 'btn' + (cls ? ' ' + cls : ''));
-    b.setAttribute('type', 'button');
-    var ic = iconName ? hl.icon(iconName) : null;
-    if (ic) { b.appendChild(ic); }
-    b.appendChild(hl.el('span', null, label));
-    if (onClick) { b.addEventListener('click', onClick); }
-    return b;
-  }
 
   // approvable: a discovered bridge whose published parameters are known and which is not approved as they are.
   function approvable(v) {
@@ -104,7 +93,7 @@
     }
 
     function ask(opts) {
-      clear(els.confirm);
+      hl.clear(els.confirm);
       hl.confirmPanel({
         title: opts.title, object: opts.object, consequence: opts.consequence,
         confirmLabel: opts.confirmLabel, cancelLabel: 'Cancel', icon: opts.icon, into: els.confirm,
@@ -115,11 +104,11 @@
 
     function render() {
       var v = st.view;
-      clear(els.fields);
-      clear(els.confirm);
-      clear(els.actions);
+      hl.clear(els.fields);
+      hl.clear(els.confirm);
+      hl.clear(els.actions);
       els.changed.hidden = true;
-      clear(els.changed);
+      hl.clear(els.changed);
       els.info.hidden = true;
       els.review.hidden = true;
       els.actions.hidden = true;
@@ -168,7 +157,7 @@
           els.fields.appendChild(hl.el('dd', f[1] ? 'mono' : 'mono t3', f[1] || 'not reported'));
         });
         els.review.hidden = false;
-        var go1 = button(changed ? 'Approve ' + name + ' anyway' : 'Approve ' + name, 'check', changed ? 'danger' : 'primary', function () {
+        var go1 = hl.button(changed ? 'Approve ' + name + ' anyway' : 'Approve ' + name, 'check', changed ? 'danger' : 'primary', function () {
           if (!changed) { approve(); return; }
           ask({
             title: 'Approve a changed identity?', object: name,
@@ -188,7 +177,7 @@
       els.title.textContent = name;
       if (v.source === 'discovered' && v.approved && v.approval === 'approved') {
         els.sub.textContent = name + ' is approved. It receives device credentials and appears in every profile.';
-        var rm = button('Remove approval', 'ban', 'danger', function () {
+        var rm = hl.button('Remove approval', 'ban', 'danger', function () {
           ask({
             title: 'Remove the approval of ' + name + '?', object: name,
             consequence: 'It leaves the profiles and gets no more updates; it keeps the set it last received.',
@@ -210,7 +199,7 @@
       if (!keepError) { setError(''); }
       if (!st.name) { st.loaded = true; st.view = null; render(); return Promise.resolve(); }
       return hl.api('GET', '/enroll/ingresses').then(function (res) {
-        var list = arr(res && res.ingresses);
+        var list = hl.arr(res && res.ingresses);
         st.view = null;
         list.forEach(function (v) { if (v && v.name === st.name) { st.view = v; } });
         st.loaded = true;

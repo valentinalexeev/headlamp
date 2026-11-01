@@ -503,25 +503,23 @@ Differences from the Python app that this replaced:
 
 ## Console shell
 
-Every admin page is wrapped in one shell: a sidebar of the pages available in this deployment, a top bar with a
-search button, the top-bar actions and a freshness note, and a strip for changes that run against a deadline. The
-shell is added to the HTML responses of the admin listener, inside the Host guard. It is never added to the public
-listener, to JSON, to non-200 responses or to any request other than GET and HEAD. Its files (`hl.css`, `hl.js`,
-`shell.js`, `palette.js`, `theme.js`, the fonts) are served under `/_ui/` and nothing is loaded from another origin.
-With fewer than two visible entries the shell is compact: a header with the theme control and no sidebar. On a phone
-the sidebar becomes a menu; the theme control (System, Light, Dark) sits inside it.
+One shell wraps every admin page. The shell has these parts:
 
-`/` is Overview: what needs the operator now and the health of each system. The node list moved to `/nodes`; `/`
-shows Overview only when at least two other pages exist (with fewer, `/` goes straight to the one page). Activity is
-`/activity`. The enrolment page is listed as Devices (`/enroll`).
+- A sidebar of the pages that are available in this deployment.
+- A top bar with a search button, the top-bar actions and a freshness note.
+- A strip for changes that run against a deadline.
 
-`GET /_nav.json` returns the entries the caller may see as `[{"label","path","order","group","icon"},...]` with
-`Cache-Control: no-store`.
+The app adds the shell to the HTML responses of the admin listener, inside the Host guard. It never adds the shell to the public listener, to JSON, to non-200 responses or to any request other than GET and HEAD. The app serves the shell files (`hl.css`, `hl.js`, `shell.js`, `palette.js`, `theme.js`, the fonts) under `/_ui/` and loads nothing from another origin.
+
+With fewer than two visible entries, the shell is compact: a header with the theme control and no sidebar. On a phone, the sidebar becomes a menu, and the theme control (System, Light, Dark) is inside it.
+
+`/` is Overview: what needs the operator now and the health of each system. The node list moved to `/nodes`. `/` shows Overview only when at least two other pages exist. With fewer, `/` goes directly to the one page. Activity is `/activity`. The sidebar lists the enrolment page as Devices (`/enroll`).
+
+`GET /_nav.json` returns the entries that the caller can see, as `[{"label","path","order","group","icon"},...]` with `Cache-Control: no-store`.
 
 ### Sidebar entries: `Navigator`, `NavItem`, `Allow`
 
-A module with an admin page adds entries by implementing `core.Navigator`. The core collects them after every module
-registered, so a module that is switched off (return `nil`) or failed to register never appears:
+A module with an admin page adds entries when it implements `core.Navigator`. The core collects them after every module registered. Thus a module that is switched off (return `nil`) or that failed to register never shows:
 
 ```go
 func (m *Module) Nav() []core.NavItem {
@@ -532,136 +530,114 @@ func (m *Module) Nav() []core.NavItem {
 
 | `NavItem` field | meaning |
 |---|---|
-| `Label` | 1 to 24 printable characters (no control, bidi or zero-width characters) |
-| `Path` | a local absolute path (`/x`, not `//x`, `http://x`, `javascript:x`; no `?`, `#`, colon, space, quotes or angle brackets) |
-| `Order` | ascending; ties by label |
-| `Group` | `""` (top, ungrouped), `operate` or `configure` |
-| `Icon` | a name from `internal/ui/icons.go` (16 px line icon), or empty |
-| `Allow` | `func(login string) bool`; nil means anyone who can reach the listener. Entries are filtered per caller, both in the sidebar and in `/_nav.json`. A caller that cannot be identified (or a tagged node) sees only entries without `Allow` |
-| `Source` | the attention source (usually the module name) whose item count is shown beside the entry; empty means no count |
+| `Label` | 1 to 24 printable characters (no control, bidi or zero-width characters). |
+| `Path` | A local absolute path (`/x`, not `//x`, `http://x`, `javascript:x`; no `?`, `#`, colon, space, quotes or angle brackets). |
+| `Order` | Ascending. The label decides a tie. |
+| `Group` | `""` (top, ungrouped), `operate` or `configure`. |
+| `Icon` | A name from `internal/ui/icons.go` (16 px line icon), or empty. |
+| `Allow` | `func(login string) bool`. nil means anyone who can reach the listener. The app filters entries for each caller, in the sidebar and in `/_nav.json`. A caller that the app cannot identify (or a tagged node) sees only entries without `Allow`. |
+| `Source` | The attention source (usually the module name) whose item count shows next to the entry. Empty means no count. |
 
-The longest matching path is the current page. Invalid entries and duplicate paths stop the start-up with an error
-naming the module. `Allow` only decides what is shown: the module's own routes still check the caller.
+The longest matching path is the current page. Entries that are not valid and duplicate paths stop the start with an error that names the module.
+
+> **WARNING:** Do not use `Allow` as access control. `Allow` only decides what the page shows. The routes of the module must still check the caller.
 
 ### Top-bar actions: `ActionProvider`
 
-A module implements `core.ActionProvider` (`Actions() []core.NavAction`, each `{Label, Path, Icon}`) to add a button to
-the top bar, such as "Enrol device" (`/enroll?enrol=1`). An inactive module returns none. The actions also appear in
-the command palette.
+A module implements `core.ActionProvider` (`Actions() []core.NavAction`, each `{Label, Path, Icon}`) to add a button to the top bar, such as "Enrol device" (`/enroll?enrol=1`). An inactive module returns none. The actions also show in the command palette.
 
 ### Attention: `AttentionSource`
 
-`core.AttentionSource` is `Attention(ctx, login) ([]AttentionItem, []SystemLine, error)`. Items are things that need
-the operator; a system line is the one-line health of the module (`ok`, `waiting`, `critical`, `unknown`, `off`). Levels
-are `timed` (has a `Deadline`), `critical`, `waiting` and `info`, most urgent first. Hue is used for attention only:
-amber for waiting, red for at risk. `GET /_attention.json` merges all sources, sorts by level then age and returns
-`{"items","systems","hidden_systems","updated_at"}`. All text is scrubbed and limited by the core, action paths must be
-local, and no secret belongs in an item. A source that returns `core.ErrNotVisible` for this caller is left out and
-`hidden_systems` is set. A source that fails or does not answer in time becomes a critical "could not be checked"
-item, never its error text. Overview, the sidebar counts and the timed strip all read this one endpoint.
+`core.AttentionSource` is `Attention(ctx, login) ([]AttentionItem, []SystemLine, error)`. Items are things that need the operator. A system line is the one-line health of the module (`ok`, `waiting`, `critical`, `unknown`, `off`). Levels are `timed` (has a `Deadline`), `critical`, `waiting` and `info`, most urgent first. The console uses hue for attention only: amber for waiting, red for at risk.
 
-### Acknowledging an attention item
+`GET /_attention.json` merges all sources, sorts by level and then age, and returns `{"items","systems","hidden_systems","updated_at"}`. The core scrubs and limits all text, and action paths must be local. Do not put a secret in an item.
 
-Someone who has looked at an item can acknowledge it: "I know, stop asking". It leaves the queue, the sidebar counts and
-the lamp and no longer blocks "All clear", and sits in a collapsed "Acknowledged (N)" section on Overview with an Undo.
-It stays in `/_attention.json` with `acknowledged: {by, at, until}`, and the system line follows the items that are left,
-adding "N acknowledged" to its summary.
+The core leaves out a source that returns `core.ErrNotVisible` for this caller, and sets `hidden_systems`. A source that fails or does not answer in time becomes a critical "could not be checked" item, never its error text. Overview, the sidebar counts and the timed strip all read this one endpoint.
 
-**Acknowledging fixes nothing and changes no behaviour.** A bridge that is out of sync stays out of sync, and revocations
-stay not in effect there; the page just stops pointing at it, for everyone who can see the item (acknowledgements are
-shared, not per person). The Nodes page still shows the state of the row.
+### Acknowledge an attention item
 
-An acknowledgement ends by itself, and the item is back in the queue, when:
+A person who looked at an item can acknowledge it: "I know, stop asking". The item goes from the queue, the sidebar counts and the lamp, and no longer blocks "All clear". It stays in a collapsed "Acknowledged (N)" section on Overview with an Undo. It stays in `/_attention.json` with `acknowledged: {by, at, until}`. The system line follows the items that are left, and adds "N acknowledged" to its summary.
 
-- the item changes meaning: another level, or another reason (`AttentionItem.AckKey`, which a source sets to what the
-  item means; the default is the id and the level). A bridge going from `unreachable` to `rejected` comes back; a count
-  or an age changing in a title does not;
-- its optional expiry passes (the page offers until it changes, 1 day and 7 days);
-- the item clears: its source answered, without it. A source that errored or is hidden from the caller never ends one,
-  nor does a module with a system line that reads `unknown`, as it could not fully look. This is only noticed while a
-  console is open: an item that clears and returns while nobody is looking keeps its acknowledgement, if it means the same.
+> **WARNING:** Do not acknowledge an item to correct a problem. **An acknowledgement fixes nothing and changes no behaviour.** A bridge that is out of sync stays out of sync, and revocations stay not in effect there. The page only stops to point at it, for everyone who can see the item (acknowledgements are shared, not per person). The Nodes page still shows the state of the row.
 
-Who may do what: only someone who sees the item in their own attention list right now may acknowledge it or undo that.
-`timed` items cannot be acknowledged, since they count down to something, and neither can the "could not be checked"
-item of a source that does not answer: nothing can be known about it. The routes are `POST /_attention/acknowledge`
-(`{"id", "ack_token", "expires_in_seconds"}`, up to 90 days, absent means until it changes) and
-`POST /_attention/unacknowledge` (`{"id", "ack_token"}`), for a named person only, never a tagged node, and only with
-`Content-Type: application/json`. `ack_token` is what the item said it was when the caller saw it, and a request naming
-an older one is refused (409), so nobody acknowledges a change they have not seen. An item offers a token only when it
-can be acknowledged.
+An acknowledgement ends by itself, and the item goes back in the queue, when one of these occurs:
 
-Activity records acknowledging and undoing, with the actor, the time and the item's title; an acknowledgement ending by
-itself is not recorded. Those entries are shown only to someone who can see the module that reported the item, which is
-asked just as the attention list asks it, so a module that hides itself from a caller hides them too.
+- The item changes meaning: another level or another reason. `AttentionItem.AckKey` holds the meaning, which a source sets. The default is the id and the level. A bridge that goes from `unreachable` to `rejected` comes back. A change of a count or an age in a title does not bring it back.
+- Its optional expiry passes (the page offers until it changes, 1 day and 7 days).
+- The item clears: its source answered, without it. A source that sent an error or is hidden from the caller never ends an acknowledgement. A module with a system line that reads `unknown` also never ends one, because it could not fully look. The app notices a clear only while a console is open. An item that clears and returns while nobody looks keeps its acknowledgement, if it has the same meaning.
 
-**Off without an enrolment store.** Acknowledgements live in the enrolment backend, next to the audit log: the
-`attention_acks` table in SQLite or the hash `<prefix>:acks` in Redis. With neither (`ENROLL_DB` and `ENROLL_REDIS` unset)
-there is nowhere to persist them, so no item offers it and no button shows. While the store cannot be read, every item
-is shown as not acknowledged and nothing can be acknowledged. They are not part of `enroll-export`, `enroll-import` or the
-backup script: after a restore every item is back in the queue.
+Permissions:
+
+- Only a person who sees the item in their own attention list at that time can acknowledge it or undo that.
+- You cannot acknowledge `timed` items, because they count down to something.
+- You cannot acknowledge the "could not be checked" item of a source that does not answer, because nothing can be known about it.
+- `POST /_attention/acknowledge` takes `{"id", "ack_token", "expires_in_seconds"}`. The expiry is up to 90 days. If it is absent, the acknowledgement stays until the item changes.
+- `POST /_attention/unacknowledge` takes `{"id", "ack_token"}`.
+- These routes are for a named person only, never a tagged node, and only with `Content-Type: application/json`.
+- `ack_token` is what the item said it was when the caller saw it. The app refuses a request with an older token (409), so nobody acknowledges a change that they did not see.
+- An item offers a token only when you can acknowledge it.
+
+Activity records each acknowledgement and undo, with the actor, the time and the title of the item. Activity does not record an acknowledgement that ends by itself. The app shows those entries only to a person who can see the module that reported the item. It asks the module in the same way as the attention list does, so a module that hides itself from a caller hides them too.
+
+**Off without an enrolment store.** Acknowledgements are in the enrolment backend, next to the audit log: the `attention_acks` table in SQLite or the hash `<prefix>:acks` in Redis. With neither (`ENROLL_DB` and `ENROLL_REDIS` not set), the app has no location to keep them, so no item offers an acknowledgement and no button shows.
+
+While the app cannot read the store, it shows every item as not acknowledged, and you cannot acknowledge anything. Acknowledgements are not part of `enroll-export`, `enroll-import` or the backup script. After a restore, every item is back in the queue.
 
 ### Activity: `ActivitySource`, `ActivityGate`
 
-`core.ActivitySource` is `Activity(ctx, login, limit) ([]ActivityEntry, error)`; an entry is `{at, actor, source,
-action, detail}`. `GET /_activity.json?limit=N&source=NAME` merges the sources newest first (default and maximum limits
-are set in the core; `partial` is true when a source failed). The Activity page at `/activity` and the recent-activity
-panel on Overview show it, with sentences from the one shared `activity-text.js`.
+`core.ActivitySource` is `Activity(ctx, login, limit) ([]ActivityEntry, error)`. An entry is `{at, actor, source, action, detail}`. `GET /_activity.json?limit=N&source=NAME` merges the sources, newest first. The core sets the default and maximum limits. `partial` is true when a source failed. The Activity page at `/activity` and the recent-activity panel on Overview show it, with sentences from the one shared `activity-text.js`.
 
-A source can also implement `core.ActivityGate` (`HasActivity() bool`) to say, without being asked for entries,
-whether it keeps a log at all (it is active and has somewhere to read from). The Activity page and its sidebar entry
-exist only when some source has a log; a source without the method counts as having one. Without the enrolment
-backend, for example, node actions are not kept anywhere that can be read back, so the nodes module reports none.
+A source can also implement `core.ActivityGate` (`HasActivity() bool`). This tells, without a request for entries, if the source keeps a log at all (it is active and has a location to read from). The Activity page and its sidebar entry exist only when a source has a log. A source without the method counts as a source with a log. For example, without the enrolment backend, the app keeps node actions nowhere that it can read back, so the nodes module reports none.
 
-Recorded actions come from: the enrolment audit log (device and bridge actions, node start and stop), the policy
-`outcomes` table, the funnel audit log and the task run history.
+Recorded actions come from these sources:
+
+- The enrolment audit log (device and bridge actions, node start and stop).
+- The policy `outcomes` table.
+- The funnel audit log.
+- The task run history.
 
 ### Search: `SearchSource`
 
-`core.SearchSource` is `Search(ctx, login) ([]SearchItem, error)`; an item is `{label, kind, path}` (a device name, a
-node id, a task id, a namespace). `GET /_search.json` merges them. A failing or hidden source contributes nothing, and
-items with an empty label or a non-local path are dropped. The command palette (`Ctrl/Cmd+K`, or the search button)
-filters the pages from `/_nav.json`, the top-bar actions and these items in the browser. No secret is ever a search
-item.
+`core.SearchSource` is `Search(ctx, login) ([]SearchItem, error)`. An item is `{label, kind, path}` (a device name, a node id, a task id, a namespace). `GET /_search.json` merges them. A source that fails or is hidden gives nothing. The app drops items with an empty label or a non-local path.
+
+The command palette (`Ctrl/Cmd+K`, or the search button) filters these in the browser: the pages from `/_nav.json`, the top-bar actions and these items. A secret is never a search item.
 
 ### The enrolment audit log
 
-With enrolment on, device and node actions (`device.create`, `device.link`, `device.revoke`, `device.delete`, `device.extend`, `device.rotate_secret`, `bridge.approve`, `bridge.unapprove`, and node start and stop) are recorded
-as `core.AuditEntry` (`at`, `actor`, `action`, `detail`) in the enrolment backend: the `audit` table in SQLite, or the
-list `<prefix>:audit` in Redis. It is capped at **1000** entries, newest first; older ones are dropped as new ones are
-written. Acknowledging attention items (`attention.acknowledge`, `attention.unacknowledge`) is recorded here too. The detail holds names and dates only, never a link, key or subscription URL, and each field is cut to a fixed
-length. A failure to write an entry is logged and never fails the action. The log is not part of `enroll-export`,
-`enroll-import` or the backup script: **restoring a backup does not bring the audit log back**, and a restored
-database starts with an empty one.
+With enrolment on, the app records device and node actions as `core.AuditEntry` (`at`, `actor`, `action`, `detail`) in the enrolment backend. The actions are `device.create`, `device.link`, `device.revoke`, `device.delete`, `device.extend`, `device.rotate_secret`, `bridge.approve`, `bridge.unapprove`, and node start and stop. The backend location is the `audit` table in SQLite, or the list `<prefix>:audit` in Redis.
+
+The log has a limit of **1000** entries, newest first. The app drops older entries when it writes new ones. It also records acknowledgements here (`attention.acknowledge`, `attention.unacknowledge`). The detail holds names and dates only, never a link, key or subscription URL. The app cuts each field to a fixed length. A failure to write an entry goes to the log and never fails the action.
+
+> **CAUTION:** Do not expect a restore to give back the audit log. The log is not part of `enroll-export`, `enroll-import` or the backup script. **A restore of a backup does not bring the audit log back**, and a restored database starts with an empty log.
 
 ### Policy outcomes
 
-The policy console records how each applied change ended in the `outcomes` table of its SQLite database: `confirmed`,
-`reverted` (by the watcher at the deadline) or `reverted_on_request` (by an operator before it), with the actor
-(`system` for the automatic revert) and the time. It holds no policy text. Activity and Overview read it. A change that
-ended before the table existed has no record and is shown without an actor or time.
+The policy console records how each applied change ended, in the `outcomes` table of its SQLite database. The values are `confirmed`, `reverted` (by the watcher at the deadline) or `reverted_on_request` (by an operator before the deadline). The record has the actor (`system` for the automatic revert) and the time. It holds no policy text. Activity and Overview read it. A change that ended before the table existed has no record, and shows without an actor or time.
 
 ### Demo
 
-`make demo SCENARIO=attention|clear|partial|minimal` (from this directory) runs `cmd/console-demo`: the whole console
-on `127.0.0.1:8099` with invented data and local fakes for headscale, the enrolment agent, the task runner, a provider
-and Redis. It listens on loopback only, refuses other addresses and is not part of the image. `attention` seeds one of
-every kind of problem and one acknowledged item, with `bridge-4` on machine `vm-4`, marked intermittent and unreachable; `clear` seeds none, `partial` is `clear` seen by a caller who is in none of the `*_ADMIN_USERS`
-lists (so the policy, tasks and funnel entries and systems are hidden), and `minimal` switches on the nodes module
-only, so the console is the compact one.
+`make demo SCENARIO=attention|clear|partial|minimal` (from this directory) runs `cmd/console-demo`. This is the whole console on `127.0.0.1:8099`, with invented data and local fakes for headscale, the enrolment agent, the task runner, a provider and Redis. It listens on loopback only, refuses other addresses and is not part of the image.
+
+- `attention` seeds one of every kind of problem and one acknowledged item. `bridge-4` is on machine `vm-4`, marked intermittent and unreachable.
+- `clear` seeds none.
+- `partial` is `clear` as a caller sees it who is in none of the `*_ADMIN_USERS` lists. The policy, tasks and funnel entries and systems are hidden.
+- `minimal` switches on the nodes module only, so the console is the compact one.
 
 ## Policy console (optional)
 
-Setting `POLICY_DB` serves `/policy` on the admin listener for the logins in `POLICY_ADMIN_USERS`: edit the headscale
-policy, preview the diff, apply, and confirm. An applied change reverts by itself after `POLICY_REVERT_SECONDS` unless
-it is confirmed, which also covers a restart of this app mid-window. Every route is refused (403) for other users and
-for tagged nodes; policy text is never logged. Headscale must run its policy in database mode.
-`ENROLL_ALLOWED_HOSTS` is required with `POLICY_DB` and must not contain a bare `*` (a `*.example.com` suffix is fine):
-the core's Host guard is what protects the console from DNS rebinding. Confirm names the pending change and succeeds
-only while headscale still serves that change's policy. "Revert now" in the pending banner undoes the pending change at once instead of
-waiting for its deadline (the history "Revert" buttons restore an older policy as a new change, so they are disabled while one is pending). If the automatic revert keeps failing, the page shows a warning;
-Confirm is then the way out, keeping the change.
-The console adds a "Policy" entry to the sidebar. Its Content-Security-Policy (`ui.PageCSP`, like every admin page) allows
-scripts and styles only from the page's own files: no inline script and no style attributes.
+Set `POLICY_DB` to serve `/policy` on the admin listener for the logins in `POLICY_ADMIN_USERS`. Use the console to edit the headscale policy, preview the diff, apply and confirm. An applied change reverts by itself after `POLICY_REVERT_SECONDS` unless you confirm it. This also covers a restart of this app during that time.
+
+The console refuses every route (403) for other users and for tagged nodes. It never logs policy text. Headscale must run its policy in database mode.
+
+`ENROLL_ALLOWED_HOSTS` is required with `POLICY_DB` and must not contain a bare `*` (a `*.example.com` suffix is permitted). The Host guard of the core protects the console from DNS rebinding.
+
+Confirm names the pending change. It succeeds only while headscale still serves the policy of that change.
+
+"Revert now" in the pending banner undoes the pending change immediately, without a wait for its deadline. The "Revert" buttons in the history restore an older policy as a new change, so they are disabled while a change is pending.
+
+> **WARNING:** If the page shows a warning that the automatic revert continues to fail, use Confirm as the way out. Confirm keeps the change.
+
+The console adds a "Policy" entry to the sidebar. Its Content-Security-Policy (`ui.PageCSP`, like every admin page) allows scripts and styles only from the files of the page: no inline script and no style attributes.
 
 ## Funnel module (optional)
 

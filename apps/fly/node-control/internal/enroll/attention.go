@@ -171,7 +171,7 @@ func bridgeStopped(stopped map[string]bool, name string, views []IngressView) bo
 
 // activityPrefixes are the audit actions this module owns. The shared log also holds node actions, which the nodes
 // module reports.
-var activityPrefixes = []string{"device.", "bridge."}
+var activityPrefixes = []string{"device.", "bridge.", "audit."}
 
 // auditRead is how many log entries Activity reads before filtering by prefix: the whole bounded log.
 const auditRead = 1000

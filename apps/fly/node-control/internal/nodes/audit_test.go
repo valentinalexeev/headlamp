@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -116,5 +117,14 @@ func TestNodeActionsWithoutLogUseStructuredLine(t *testing.T) {
 				t.Errorf("%s: %q lacks %q", name, out, frag)
 			}
 		}
+	}
+}
+
+func TestFailureClassDoesNotBlameTheProviderForACancelledRequest(t *testing.T) {
+	if got := failureClass(fmt.Errorf("calling the provider: %w", context.Canceled)); got != "failed (cancelled)" {
+		t.Errorf("got %q", got)
+	}
+	if got := failureClass(errors.New("nope")); got != "failed (provider_error)" {
+		t.Errorf("got %q", got)
 	}
 }

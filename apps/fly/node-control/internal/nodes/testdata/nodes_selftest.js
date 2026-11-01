@@ -382,7 +382,7 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
 
   // Start and Stop are offered only where they make sense
   {
-    for (const [status, want] of [['RUNNING', ['Stop']], ['STOPPED', ['Start']], ['STOPPING', []], ['error', []], ['unknown', []]]) {
+    for (const [status, want] of [['RUNNING', ['Stop']], ['STOPPED', ['Start']], ['STOPPING', ['Start', 'Stop']], ['error', ['Start', 'Stop']], ['unknown', []]]) {
       global.window.location.search = '?sel=x';
       const els = mkEls();
       nodes.mount(els).update({ nodes: { x: cfg() }, status: { x: { status } }, tailnet: null, ingresses: null, sessions: null, statusFresh: true });
@@ -426,6 +426,41 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(ctrl.busyOf('exit-a'), null);
     assert.ok(els.error.hidden);
     fetchReply = () => ({ ok: true, status: 200, body: '{}' });
+    global.window.location.search = '';
+  }
+
+  // Refresh does not forget a wait while its request is still out, so it cannot lead to a second click
+  {
+    global.window.location.search = '?sel=exit-a';
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    ctrl.update(Object.assign(sample(), { status: { 'exit-a': { status: 'STOPPED' }, 'exit-b': { status: 'RUNNING' } } }));
+    const realFetch = global.fetch;
+    let answer;
+    global.fetch = () => new Promise((r) => { answer = () => r({ ok: true, status: 200, text: async () => '{}' }); });
+    buttonNamed(els.panel, 'Start').click();
+    assert.strictEqual(ctrl.busyOf('exit-a'), 'start');
+    ctrl.refresh();
+    assert.strictEqual(ctrl.busyOf('exit-a'), 'start', 'the request has not answered');
+    assert.ok(buttonNamed(els.panel, 'Start').disabled);
+    global.fetch = realFetch;
+    answer();
+    await flush();
+    assert.strictEqual(ctrl.busyOf('exit-a'), 'start', 'still waiting for the status to show it');
+    ctrl.refresh();
+    assert.strictEqual(ctrl.busyOf('exit-a'), null, 'answered, so Refresh is the way out again');
+    global.window.location.search = '';
+  }
+
+  // a node in error or changing state can still be started or stopped: that is when it is needed
+  for (const status of ['ERROR', 'STARTING']) {
+    global.window.location.search = '?sel=exit-a';
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    ctrl.update(Object.assign(sample(), { status: { 'exit-a': { status }, 'exit-b': { status: 'RUNNING' } } }));
+    assert.ok(buttonNamed(els.panel, 'Start'), status + ' offers Start');
+    buttonNamed(els.panel, 'Stop').click();
+    assert.ok(buttonNamed(els.panel, 'Stop exit-a'), status + ': Stop still asks first');
     global.window.location.search = '';
   }
 

@@ -83,4 +83,21 @@ cancel.listeners.click();
 assert.strictEqual(cancelled, 1);
 assert.ok(panel.removed);
 
-console.log('ok');
+// api gives up on a request that never ends, and says it may still have gone through
+(async () => {
+  const pending = (url, opts) => new Promise((_, reject) => {
+    opts.signal.addEventListener('abort', () => { const e = new Error('aborted'); e.name = 'AbortError'; reject(e); });
+  });
+  global.fetch = pending;
+  const err = await hl.api('POST', '/x', { a: 1 }, 5).then(() => null, (e) => e);
+  assert.ok(err && err.timeout === true, 'rejects as a timeout');
+  assert.ok(/timed out/.test(err.message) && /may still have gone through/.test(err.message), err.message);
+
+  // a request that fails by itself keeps its own error, and one that succeeds leaves no timer behind
+  const boom = new Error('network down');
+  global.fetch = async () => { throw boom; };
+  assert.strictEqual(await hl.api('GET', '/x').then(() => null, (e) => e), boom);
+  global.fetch = async () => ({ ok: true, status: 200, text: async () => '{"v":1}' });
+  assert.deepStrictEqual(await hl.api('GET', '/x'), { v: 1 });
+  console.log('ok');
+})().catch((e) => { console.error(e); process.exit(1); });

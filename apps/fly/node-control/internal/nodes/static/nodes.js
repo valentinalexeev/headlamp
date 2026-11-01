@@ -280,7 +280,7 @@
   // clicks exactly like an unresolved status does.
   function mount(els) {
     var st = {
-      rows: [], loaded: false, failed: false, error: '', busy: {}, confirming: null,
+      rows: [], loaded: false, failed: false, error: '', busy: {}, posting: {}, confirming: null,
       role: plainRole(hl.queryParam('role')), sel: hl.queryParam('sel') || null,
       tableSig: null, panelSig: null, chipSig: null, chips: {}
     };
@@ -344,6 +344,7 @@
     function act(id, action) {
       if (st.busy[id]) { return; }
       st.busy[id] = action;
+      st.posting[id] = true;
       setError('');
       render();
       hl.api('POST', '/nodes/' + encodeURIComponent(id) + '/' + action).then(function () {
@@ -353,6 +354,7 @@
         setError(hl.plain(id, 60) + ' ' + action + ' failed: ' + hl.plain(err && err.message, 200));
         st.errorId = id;
       }).then(function () {
+        delete st.posting[id];
         if (typeof ctrl.onAction === 'function') { ctrl.onAction(); }
       });
     }
@@ -464,14 +466,15 @@
           });
         } else {
           var btns = hl.el('div', 'rowbtns');
-          // Only what makes sense: Start for a stopped node, Stop for a running one, neither while the
-          // provider's state is unknown, in error or changing.
-          if (row.kind === 'stopped') {
+          // Only what makes sense: Start for a stopped node, Stop for a running one, both while it is in error or
+          // changing, which may be stuck and is when they are needed, and neither while its state is unknown.
+          var unsettled = row.kind === 'error' || row.kind === 'transition';
+          if (row.kind === 'stopped' || unsettled) {
             var start = keyed(button('Start', 'play', 'primary', function () { act(row.id, 'start'); }), 'panel:start');
             start.disabled = !!busy;
             btns.appendChild(start);
           }
-          if (row.kind === 'running') {
+          if (row.kind === 'running' || unsettled) {
             var stop = keyed(button('Stop', 'stop', '', function () { st.confirming = row.id; renderPanel(true); }), 'panel:stop');
             stop.disabled = !!busy;
             btns.appendChild(stop);
@@ -529,9 +532,12 @@
     ctrl.setFailed = function (f) { st.failed = !!f; render(); };
     ctrl.busyOf = function (id) { return st.busy[id] || null; };
     ctrl.isBusy = function () { return Object.keys(st.busy).length > 0; };
-    // refresh is the way out of a busy state that never resolves: it forgets the waits and reads again.
+    // refresh is the way out of a busy state that never resolves: it forgets the waits and reads again. A wait whose
+    // request is still out stays, as that request can yet succeed; a second click would repeat it.
     ctrl.refresh = function () {
-      st.busy = {};
+      Object.keys(st.busy).forEach(function (id) {
+        if (!st.posting[id]) { delete st.busy[id]; }
+      });
       setError('');
       render();
       if (typeof ctrl.onAction === 'function') { ctrl.onAction(); }

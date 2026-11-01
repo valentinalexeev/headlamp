@@ -535,9 +535,24 @@ const cellText = (tr, i) => tr.children[i].textContent;
     buttonNamed(els.side, 'Done').click();
     assert.strictEqual(els.side.children.length, 0);
     assert.ok(!els.side.textContent.includes(KEY));
-    assert.strictEqual(ctrl.state.secret, null);
+    assert.strictEqual(ctrl.state.secrets.length, 0);
     await ctrl.reload();
     assert.ok(!walk(els.cols).some((n) => n.textContent.includes(KEY)), 'it does not come back');
+
+    // keyNotLost: minting again leaves a key on screen until its own Done
+    const mintOne = async () => {
+      buttonNamed(els.keyaddslot, 'Mint key').click();
+      fire(els.keyform.children[0], 'submit');
+      await flush();
+    };
+    await mintOne();
+    await mintOne();
+    assert.strictEqual(ctrl.state.secrets.length, 2, 'a second key does not replace the first');
+    assert.strictEqual(buttonsNamed(els.side, 'Done').length, 2);
+    buttonsNamed(els.side, 'Done')[0].click();
+    assert.strictEqual(ctrl.state.secrets.length, 1, 'Done removes only its own key');
+    buttonNamed(els.side, 'Done').click();
+    assert.strictEqual(els.side.children.length, 0);
 
     // ... and so does leaving the page
     buttonNamed(els.keyaddslot, 'Mint key').click();
@@ -629,7 +644,7 @@ const cellText = (tr, i) => tr.children[i].textContent;
     // the namespace stops being active: the secret goes with it
     ctrl2.update(cfgState({ namespaces: [ns('lab', { state: 'failed' })] }));
     assert.ok(!els2.side.textContent.includes(KEY), 'gone when its namespace is no longer active');
-    assert.strictEqual(ctrl2.state.secret, null);
+    assert.strictEqual(ctrl2.state.secrets.length, 0);
     // and when the namespace is deleted from the list
     ctrl2.update(cfgState());
     ctrl2.select('lab');

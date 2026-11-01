@@ -1075,3 +1075,25 @@ func TestStopClosesRedisOnlyAfterEngineStopped(t *testing.T) {
 	}
 	<-stopped
 }
+
+func TestTriggerRecordsTheCaller(t *testing.T) {
+	h := newModHarness(t, nil)
+	s := h.waitOpen()
+	h.pushSimple()
+	if rec := h.alice("POST", "/tasks/job/run", ""); rec.Code != 202 {
+		t.Fatalf("trigger: %d %s", rec.Code, rec.Body)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if rs := s.Runs("job"); len(rs) > 0 && rs[0].Actor != "" {
+			if !strings.HasPrefix(rs[0].Actor, "alice") {
+				t.Fatalf("actor = %q", rs[0].Actor)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no run with an actor: %+v", s.Runs("job"))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

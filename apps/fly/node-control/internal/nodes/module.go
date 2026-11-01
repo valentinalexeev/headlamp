@@ -259,6 +259,8 @@ func failureClass(err error) string {
 		return "failed (not_configured)"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "failed (timeout)"
+	case errors.Is(err, context.Canceled): // the caller went away; nothing says the provider failed
+		return "failed (cancelled)"
 	default:
 		return "failed (provider_error)"
 	}

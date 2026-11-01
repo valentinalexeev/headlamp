@@ -177,7 +177,7 @@ func (a *api) trigger(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, err := e.Trigger(r.PathValue("id"))
+	id, err := e.TriggerBy(r.PathValue("id"), authz.LoginFrom(r.Context()))
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": id})

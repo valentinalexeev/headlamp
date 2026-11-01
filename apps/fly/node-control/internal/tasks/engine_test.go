@@ -1320,6 +1320,21 @@ func TestShutdownDefaultsFitCoreStopContext(t *testing.T) {
 	}
 }
 
+func TestEngineRecordsWhoStartedAManualRun(t *testing.T) {
+	f := newEngFixture(t, oneTask(nil))
+	f.runner.status = func(context.Context, string, int) (RunStatus, error) {
+		return RunStatus{State: "succeeded", Result: map[string]any{}}, nil
+	}
+	if _, err := f.e.TriggerBy("job", "alice@"); err != nil {
+		t.Fatal(err)
+	}
+	f.e.wait()
+	rs := f.runs("job")
+	if len(rs) != 1 || rs[0].Actor != "alice@" || !rs[0].Manual {
+		t.Fatalf("runs = %+v", rs)
+	}
+}
+
 func TestEngineMarksAManualRunAsManual(t *testing.T) {
 	f := newEngFixture(t, oneTask(nil))
 	f.runner.status = func(context.Context, string, int) (RunStatus, error) {

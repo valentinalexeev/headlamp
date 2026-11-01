@@ -87,14 +87,18 @@ func (m *module) keyExpiry(ctx context.Context) (time.Time, error) {
 	}
 	m.mu.Unlock()
 
-	at, err := m.expiry(ctx) // the network call runs without the lock
-	m.mu.Lock()
-	m.expAt, m.expSet, m.expV, m.expErr = m.now(), true, at, err
-	if err == nil {
-		m.lastKey = at
-	}
-	m.mu.Unlock()
-	return at, err
+	// The network call runs without the lock, once for all who wait. A caller that leaves is not a failed read, so
+	// its leaving is not cached.
+	return m.expRead.Do(ctx, "", func(c context.Context) (time.Time, error) {
+		at, err := m.expiry(c)
+		m.mu.Lock()
+		m.expAt, m.expSet, m.expV, m.expErr = m.now(), true, at, err
+		if err == nil {
+			m.lastKey = at
+		}
+		m.mu.Unlock()
+		return at, err
+	})
 }
 
 func plural(n int, one, many string) string {

@@ -21,8 +21,9 @@ type module struct {
 	viewers func(login string) bool // who sees the key warning; nil means anyone who can reach the console
 	now     func() time.Time
 
-	mu      sync.Mutex // guards the cached read; never held across the read itself
-	expAt   time.Time  // when it was read
+	expRead core.SharedRead[time.Time] // polls share one read of the expiry
+	mu      sync.Mutex                 // guards the cached read; never held across the read itself
+	expAt   time.Time                  // when it was read
 	expSet  bool
 	expV    time.Time
 	expErr  error

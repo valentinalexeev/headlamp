@@ -1,7 +1,7 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
 .PHONY: hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e lint \
-  test-tasks-cli test-task-runner test-node-control test-headscale-tag-node
+  test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release
 
 hooks:
 	@git config core.hooksPath .githooks
@@ -26,6 +26,9 @@ test-tasks-cli:
 
 test-task-runner:
 	cd apps/task-runner && go vet ./... && go test -race -count=1 ./...
+
+test-release:
+	./scripts/test/release/run_tests.sh
 
 test-node-control:
 	cd apps/fly/node-control && go vet ./... && go test -race -count=1 ./...

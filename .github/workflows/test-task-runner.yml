@@ -1,0 +1,23 @@
+# The runner binary is not an image: it runs on the host, and Ansible builds and installs it. Only its tests run here. The
+# session image it starts is in .github/components.json.
+name: test-task-runner
+on:
+  push:
+    branches: [main]
+    paths: ['apps/task-runner/**', '.github/workflows/test-task-runner.yml']
+  pull_request:
+    branches: [main, develop]
+    paths: ['apps/task-runner/**', '.github/workflows/test-task-runner.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/task-runner/go.mod
+          cache: false
+      - name: Test
+        run: make test-task-runner

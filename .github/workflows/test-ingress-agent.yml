@@ -1,0 +1,22 @@
+# The agent is not an image: it drives xray on its host through systemd, and Ansible installs it. Only its tests run here.
+name: test-ingress-agent
+on:
+  push:
+    branches: [main]
+    paths: ['apps/ingress-agent/**', '.github/workflows/test-ingress-agent.yml']
+  pull_request:
+    branches: [main, develop]
+    paths: ['apps/ingress-agent/**', '.github/workflows/test-ingress-agent.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test
+        working-directory: apps/ingress-agent
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet -r requirements.txt httpx
+          "$RUNNER_TEMP/venv/bin/python" -m unittest discover -s tests

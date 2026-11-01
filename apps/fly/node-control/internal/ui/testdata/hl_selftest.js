@@ -20,7 +20,7 @@ global.window = {};
 require(path.resolve(process.argv[2]));
 const hl = global.window.hl;
 assert.ok(hl, 'window.hl is defined');
-for (const k of ['el', 'icon', 'relTime', 'fmtBytes', 'plain', 'api', 'poll', 'status', 'queryParam', 'setQueryParam', 'confirmPanel']) {
+for (const k of ['el', 'icon', 'relTime', 'fmtBytes', 'plain', 'api', 'poll', 'status', 'queryParam', 'setQueryParam', 'confirmPanel', 'arr', 'obj', 'clear', 'button', 'focusKey', 'refocus']) {
   assert.strictEqual(typeof hl[k], 'function', k);
 }
 

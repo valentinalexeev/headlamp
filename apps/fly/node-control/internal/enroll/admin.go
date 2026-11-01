@@ -89,6 +89,9 @@ func NewAdminFor(store Backend, reg *Registry) *Admin {
 }
 
 // SetTailnet gives the API the tailnet that names the caller of each change in the audit log.
+// maxLinkUses is the most times one enrolment link can be used.
+const maxLinkUses = 100
+
 func (a *Admin) SetTailnet(tn core.Tailnet) { a.tn = tn }
 
 // State is the sync state of the first configured ingress.
@@ -518,7 +521,7 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 	}
 	var v validator
 	ttl := v.integer(obj, "ttl", 60, 604800)
-	uses := v.integer(obj, "max_uses", 1, 100)
+	uses := v.integer(obj, "max_uses", 1, maxLinkUses)
 	if len(v.errs) > 0 {
 		invalid(w, v.errs...)
 		return
@@ -537,8 +540,9 @@ func (a *Admin) newLink(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusConflict, "the device is revoked or expired; a link would not work")
 		return
 	}
-	if uses > math.MaxInt32 { // already limited to 100 above; the explicit bound keeps the int conversion provably safe
-		uses = math.MaxInt32
+	if uses < 1 || uses > maxLinkUses { // checked above; here too, so the conversion below is plainly in range
+		detail(w, http.StatusUnprocessableEntity, "max_uses is out of range")
+		return
 	}
 	tok, err := a.store.NewLink(id, time.Duration(ttl)*time.Second, int(uses))
 	if err != nil {

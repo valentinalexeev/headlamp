@@ -12,8 +12,8 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/headscale"
 )
 
-// statusTTL is how long a provider status is reused by Attention, so polling Overview does not multiply
-// provider calls.
+// statusTTL is how long a provider status, read for Attention or for /status, is reused by Attention, so polling
+// Overview does not multiply provider calls.
 const statusTTL = 20 * time.Second
 
 type cachedStatus struct {
@@ -52,21 +52,35 @@ func (m *Module) attentionStatuses(ctx context.Context, ts []Target) map[string]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			fetched[i] = m.statusOf(ctx, t)
+			fetched[i] = m.readStatus(ctx, t)
 		}()
 	}
 	wg.Wait()
-
-	m.stMu.Lock()
-	defer m.stMu.Unlock()
-	if m.stCache == nil {
-		m.stCache = map[string]cachedStatus{}
-	}
 	for i, t := range stale {
-		m.stCache[t.ID] = cachedStatus{at: now, st: fetched[i]}
 		out[t.ID] = fetched[i]
 	}
 	return out
+}
+
+// readStatus asks the provider now, sharing a call already running for the node, and leaves the answer for Attention.
+// A caller that leaves says nothing about the node: it gets an error status and nothing is cached for it.
+func (m *Module) readStatus(ctx context.Context, t Target) Status {
+	st, err := m.stRead.Do(ctx, t.ID, func(c context.Context) (Status, error) {
+		st := m.statusOf(c, t)
+		if t.Provider != "" {
+			m.stMu.Lock()
+			if m.stCache == nil {
+				m.stCache = map[string]cachedStatus{}
+			}
+			m.stCache[t.ID] = cachedStatus{at: m.clock(), st: st}
+			m.stMu.Unlock()
+		}
+		return st, nil
+	})
+	if err != nil {
+		return Status{"status": "error", "detail": "timed out: " + err.Error()}
+	}
+	return st
 }
 
 func isRunning(st Status) bool {

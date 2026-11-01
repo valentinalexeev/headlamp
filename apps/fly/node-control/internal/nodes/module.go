@@ -34,6 +34,7 @@ type Module struct {
 	now     func() time.Time // nil means time.Now (tests)
 	stMu    sync.Mutex       // guards stCache
 	stCache map[string]cachedStatus
+	stRead  core.SharedRead[Status] // reads of one node's status share a provider call
 
 	audit func() core.AuditLog // nil, or returning nil, when there is no audit log
 	tn    core.Tailnet         // names the caller in audit entries
@@ -205,7 +206,7 @@ func (m *Module) status(w http.ResponseWriter, req *http.Request) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out[i] = m.statusOf(req.Context(), t)
+			out[i] = m.readStatus(req.Context(), t)
 		}()
 	}
 	wg.Wait()
@@ -221,7 +222,7 @@ func (m *Module) nodeStatus(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, 200, m.statusOf(req.Context(), t))
+	writeJSON(w, 200, m.readStatus(req.Context(), t))
 }
 
 // record writes the audit entry of a node action: to the audit log, or as one structured line when there is none or

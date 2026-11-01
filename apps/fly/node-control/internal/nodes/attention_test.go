@@ -3,7 +3,9 @@ package nodes
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -157,6 +159,92 @@ func TestNodesAttentionCachesProviderCalls(t *testing.T) {
 	m.Attention(context.Background(), "alice@")
 	if got := calls.Load(); got != 6 {
 		t.Fatalf("after the cache expired: %d calls, want 6", got)
+	}
+}
+
+// What /status has just read is what Attention needs, so the provider is not asked again for it.
+func TestNodesAttentionReusesWhatStatusRead(t *testing.T) {
+	var calls atomic.Int32
+	src := fakeSrc{ns: []headscale.Node{hsNode("exit-a", true), hsNode("exit-b", true), hsNode("exit-c", false)}}
+	m := attentionModule(t, src, map[string]string{"exit-a": "RUNNING", "exit-b": "RUNNING", "exit-c": "STOPPED"}, &calls)
+	rec := httptest.NewRecorder()
+	m.status(rec, httptest.NewRequest("GET", "/status", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"RUNNING"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if _, _, err := m.Attention(context.Background(), "alice@"); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("/status then Attention called the providers %d times, want 3 (once per node)", got)
+	}
+	// /status itself stays fresh: the page shows a start or stop as soon as the provider does.
+	m.status(httptest.NewRecorder(), httptest.NewRequest("GET", "/status", nil))
+	if got := calls.Load(); got != 6 {
+		t.Fatalf("a second /status called the providers %d times in all, want 6", got)
+	}
+}
+
+// slowStatusModule has one node whose provider holds every call until release is closed or its context ends.
+func slowStatusModule(t *testing.T) (m *Module, calls *atomic.Int32, entered, release chan struct{}) {
+	t.Helper()
+	calls = &atomic.Int32{}
+	entered, release = make(chan struct{}, 16), make(chan struct{})
+	p := &fakeProvider{stat: func(ctx context.Context, _ Target) (Status, error) {
+		calls.Add(1)
+		entered <- struct{}{}
+		select {
+		case <-release:
+			return Status{"status": "RUNNING"}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}}
+	cfg, err := ParseConfig([]byte(`{"nodes":{"exit-a":{"provider":"yandex","yandex":{"instance_id":"X"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(cfg, nil, map[string]Provider{"yandex": p}).(*Module), calls, entered, release
+}
+
+// A poll that goes away mid-read says nothing about the node, so the next poll must not inherit an error.
+func TestNodesAttentionCancelledReadIsNotCached(t *testing.T) {
+	m, _, entered, release := slowStatusModule(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		m.Attention(ctx, "alice@")
+		close(done)
+	}()
+	<-entered
+	cancel()
+	<-done
+	close(release)
+
+	_, lines, err := m.Attention(context.Background(), "alice@")
+	if err != nil || len(lines) != 1 || lines[0].State != "ok" {
+		t.Fatalf("the node reads as unchecked after a cancelled read: %+v %v", lines, err)
+	}
+}
+
+func TestNodesConcurrentReadsShareOneProviderCall(t *testing.T) {
+	m, calls, entered, release := slowStatusModule(t)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		m.Attention(context.Background(), "alice@")
+	}()
+	go func() {
+		defer wg.Done()
+		m.status(httptest.NewRecorder(), httptest.NewRequest("GET", "/status", nil))
+	}()
+	<-entered
+	time.Sleep(50 * time.Millisecond) // let the other arrive
+	close(release)
+	wg.Wait()
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("concurrent reads called the provider %d times, want 1", n)
 	}
 }
 

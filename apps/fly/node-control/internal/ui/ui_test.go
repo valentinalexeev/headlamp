@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -45,6 +46,17 @@ func TestHandlerServesAssets(t *testing.T) {
 	for _, path := range []string{"/_ui/nothing.js", "/_ui/", "/_ui/fonts/", "/_ui/../ui.go", "/_ui/fonts/OFL.txt/x"} {
 		if rec := get(path); rec.Code != http.StatusNotFound {
 			t.Errorf("%s = %d, want 404", path, rec.Code)
+		}
+	}
+}
+
+func TestHeadCarriesContentLength(t *testing.T) {
+	for _, path := range []string{"/_ui/hl.js", "/_ui/fonts/ibm-plex-sans-latin-400-normal.woff2"} {
+		size := strconv.Itoa(get(path).Body.Len())
+		rec := httptest.NewRecorder()
+		Handler().ServeHTTP(rec, httptest.NewRequest("HEAD", path, nil))
+		if rec.Code != 200 || rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != size {
+			t.Errorf("%s: %d, %d bytes of body, Content-Length %q, want %s", path, rec.Code, rec.Body.Len(), rec.Header().Get("Content-Length"), size)
 		}
 	}
 }

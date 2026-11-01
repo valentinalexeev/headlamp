@@ -278,6 +278,16 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     global.window.location.search = '';
   }
 
+  // ?sel= with a bridge's name finds the row of the machine it runs on: that is what its Attention item links to
+  {
+    global.window.location.search = '?sel=bridge-2';
+    const els = mkEls();
+    nodes.mount(els).update({ nodes: { 'vm-7': cfg() }, status: { 'vm-7': { status: 'RUNNING' } }, tailnet: null, ingresses: [ing('bridge-2', { node: 'vm-7' })], sessions: null, now: NOW });
+    assert.strictEqual(findAll(els.rows, (n) => n.tag === 'tr' && hasClass(n, 'sel')).length, 1);
+    assert.ok(/vm-7/.test(els.panel.textContent));
+    global.window.location.search = '';
+  }
+
   // ?sel= selects the row and fills the panel
   {
     global.window.location.search = '?sel=bridge-3';

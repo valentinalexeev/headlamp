@@ -527,6 +527,10 @@
     ctrl.update = function (d) {
       st.loaded = true;
       st.rows = mergeNodes(d.nodes, d.status, d.tailnet, d.ingresses, d.sessions, typeof d.now === 'number' ? { now: d.now } : undefined);
+      // An Attention item links by the bridge's name; the row of the machine it runs on has the machine's.
+      if (st.sel && !find(st.sel)) {
+        st.rows.forEach(function (r) { if (r.bridge && r.bridge === st.sel) { st.sel = r.id; } });
+      }
       if (d.statusFresh) {
         Object.keys(st.busy).forEach(function (id) {
           var row = find(id);

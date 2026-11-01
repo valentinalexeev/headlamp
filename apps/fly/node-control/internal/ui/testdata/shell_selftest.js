@@ -80,6 +80,12 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     assert.strictEqual(await lampOf({ items: [], systems: [{ name: 'Nodes', state: 'ok' }] }), 'lamp clear');
     assert.strictEqual(await lampOf({ items: [], systems: [{ name: 'Nodes', state: 'ok' }, { name: 'Policy', state: 'unknown' }] }), 'lamp');
     assert.strictEqual(await lampOf({ items: [] }), 'lamp clear');
+    // an acknowledged item does not light the lamp, an unacknowledged one does
+    const acked = { acknowledged: { by: 'alice', at: '2026-01-01T00:00:00Z' } };
+    assert.strictEqual(await lampOf({ items: [Object.assign({ id: 'a', source: 'nodes', level: 'critical' }, acked)] }), 'lamp clear');
+    assert.strictEqual(await lampOf({ items: [Object.assign({ id: 'a', source: 'nodes', level: 'critical' }, acked), { id: 'b', source: 'nodes', level: 'waiting' }] }), 'lamp');
+    const counts = shell.countsBySource({ items: [Object.assign({ id: 'a', source: 'nodes', level: 'critical' }, acked), { id: 'b', source: 'nodes', level: 'waiting' }] });
+    assert.deepStrictEqual({ n: counts.nodes.n, crit: counts.nodes.crit }, { n: 1, crit: false }, 'the sidebar counts ignore it');
   }
 
   // stripShowsOnlyTimedItems

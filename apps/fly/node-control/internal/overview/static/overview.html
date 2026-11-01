@@ -16,6 +16,14 @@
     </div>
 
     <section aria-label="Attention queue" class="queue" id="queue" hidden></section>
+    <p class="small t2" id="ack-error" role="alert" hidden></p>
+
+    <section aria-label="Acknowledged items" id="acked" hidden>
+      <details class="acked">
+        <summary id="acked-summary">Acknowledged</summary>
+        <div class="queue" id="acked-rows"></div>
+      </details>
+    </section>
 
     <div class="cols">
       <section class="colmain">

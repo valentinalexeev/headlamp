@@ -12,6 +12,11 @@
   var COUNTED = { timed: 1, critical: 1, waiting: 1 };
   var GLYPH = { timed: 'warn', critical: 'crit', waiting: 'warn', info: 'ok' };
   var WORD = { timed: 'Waiting', critical: 'At risk', waiting: 'Waiting', info: 'Notice' };
+  var ACK_URL = '/_attention/acknowledge';
+  var UNACK_URL = '/_attention/unacknowledge';
+  var ACK_CHOICES = [
+    { label: 'Until it changes', seconds: 0 }, { label: '1 day', seconds: 86400 }, { label: '7 days', seconds: 604800 }
+  ];
   var LINE_STATUS = {
     ok: ['ok', 'Normal'], waiting: ['warn', 'Needs you'], critical: ['crit', 'At risk'],
     unknown: ['off', 'Unknown'], off: ['off', 'Off']
@@ -35,18 +40,37 @@
     return two(Math.floor(s / 60)) + ':' + two(s % 60);
   }
 
+  // splitItems: what asks for someone now, and what someone has acknowledged.
+  function splitItems(items) {
+    var out = { active: [], acked: [] };
+    arr(items).forEach(function (it) {
+      if (it) { (it.acknowledged ? out.acked : out.active).push(it); }
+    });
+    return out;
+  }
+
+  // ackedText: the line under an acknowledged item: what it is, who said they saw it, and when that ends.
+  function ackedText(it, nowMs) {
+    var a = it.acknowledged || {};
+    var level = COUNTED[it.level] || it.level === 'info' ? it.level : 'info';
+    var ends = a.until ? hl.relTime(a.until, nowMs) : '';
+    return WORD[level] + '. Acknowledged by ' + hl.plain(a.by, 100) +
+      (a.at ? ' ' + hl.relTime(a.at, nowMs) : '') + (ends ? ', ends ' + ends : ', until it changes') + '.';
+  }
+
   // model: what the heading and the sentence under it say. opts: { lastIssue: ms or null, now: ms }.
   // kind is "attention", "unknown" or "clear". Unknown is never clear: a system that cannot be read
   // blocks "All clear", whatever else is true.
   function model(data, opts) {
     opts = opts || {};
-    var items = arr(data && data.items);
+    var split = splitItems(data && data.items);
+    var items = split.active;
     var systems = arr(data && data.systems);
     var hidden = !!(data && data.hidden_systems);
     var counted = items.filter(function (it) { return it && COUNTED[it.level]; }).length;
     var risk = items.filter(function (it) { return it && it.level === 'critical'; }).length;
     var unknown = systems.filter(function (s) { return s && s.state === 'unknown'; });
-    var m = { kind: 'clear', heading: '', sub: '', counted: counted, risk: risk, unknown: unknown.length, hidden: hidden };
+    var m = { kind: 'clear', heading: '', sub: '', counted: counted, risk: risk, unknown: unknown.length, hidden: hidden, acked: split.acked.length };
 
     if (counted > 0) {
       m.kind = 'attention';
@@ -96,7 +120,8 @@
     return {
       id: hl.plain(it.id, 100), level: level, glyph: GLYPH[level], word: WORD[level],
       title: hl.plain(it.title, 200), detail: hl.plain(it.detail, 500),
-      age: ageText(it, nowMs), actions: actions
+      age: ageText(it, nowMs), actions: actions,
+      ackToken: level !== 'timed' && typeof it.ack_token === 'string' ? it.ack_token : ''
     };
   }
 
@@ -133,14 +158,79 @@
     var $ = function (id) { return document.getElementById(id); };
     var els = {
       heading: $('heading'), sub: $('sub'), glyph: $('glyph'), queue: $('queue'), systems: $('systems'),
-      activity: $('activity'), rows: $('activity-rows')
+      activity: $('activity'), rows: $('activity-rows'),
+      acked: $('acked'), ackedSummary: $('acked-summary'), ackedRows: $('acked-rows'), ackError: $('ack-error')
     };
-    var st = { data: null, activity: [], failed: false, ages: [], sig: null };
+    var st = { data: null, activity: [], failed: false, ages: [], sig: null, ackedSig: null, ackedTexts: [], choosing: null, busy: false, ackError: '', refocus: null, focusEl: null };
+
+    function actionButton(label, iconName, name) {
+      var b = hl.el('button', 'btn sm');
+      b.setAttribute('type', 'button');
+      var ic = iconName ? hl.icon(iconName) : null;
+      if (ic) { b.appendChild(ic); }
+      b.appendChild(document.createTextNode(label));
+      if (name) { b.setAttribute('aria-label', name); }
+      b.disabled = st.busy;
+      return b;
+    }
+
+    // send posts one acknowledge or undo. The item's token says what the operator was looking at; the answer, good or
+    // bad, is followed by a fresh read, as the item may have moved on.
+    function send(url, body) {
+      st.busy = true;
+      st.ackError = '';
+      render();
+      return hl.api('POST', url, body).then(function () {
+        st.choosing = null;
+      }, function (err) {
+        st.ackError = err && err.message ? err.message : 'That did not work. Try again.';
+      }).then(function () {
+        st.busy = false;
+        return refresh();
+      });
+    }
+
+    function ackControls(row, it, r) {
+      if (!r.ackToken) { return; }
+      if (st.choosing !== it.id) {
+        var open = actionButton('Acknowledge', 'check', 'Acknowledge: ' + r.title);
+        open.addEventListener('click', function () {
+          st.choosing = it.id;
+          st.refocus = 'choice';
+          render();
+        });
+        if (st.refocus === 'open:' + it.id) { st.refocus = null; st.focusEl = open; }
+        row.appendChild(open);
+        return;
+      }
+      var box = hl.el('div', 'ackchoices');
+      box.setAttribute('role', 'group');
+      box.setAttribute('aria-label', 'Acknowledge ' + r.title);
+      ACK_CHOICES.forEach(function (c, i) {
+        var b = actionButton(c.label, null, null);
+        b.addEventListener('click', function () {
+          var body = { id: it.id, ack_token: r.ackToken };
+          if (c.seconds) { body.expires_in_seconds = c.seconds; }
+          send(ACK_URL, body);
+        });
+        if (i === 0 && st.refocus === 'choice') { st.refocus = null; st.focusEl = b; }
+        box.appendChild(b);
+      });
+      var cancel = actionButton('Cancel', null, null);
+      cancel.className = 'btn sm quiet';
+      cancel.addEventListener('click', function () {
+        st.choosing = null;
+        st.refocus = 'open:' + it.id;
+        render();
+      });
+      box.appendChild(cancel);
+      row.appendChild(box);
+    }
 
     function renderQueue(items, now) {
-      var sig = JSON.stringify(items.map(function (it) {
-        return [it.id, it.level, it.title, it.detail, it.action_label, it.action_path];
-      }));
+      var sig = JSON.stringify([items.map(function (it) {
+        return [it.id, it.level, it.title, it.detail, it.action_label, it.action_path, it.ack_token];
+      }), st.choosing, st.busy]);
       st.ages = [];
       if (sig !== st.sig) {
         st.sig = sig;
@@ -166,6 +256,7 @@
             link.setAttribute('href', a.path);
             row.appendChild(link);
           });
+          ackControls(row, it, r);
           els.queue.appendChild(row);
           st.ages.push({ el: age, item: it });
         });
@@ -177,6 +268,45 @@
         });
       }
       st.ages.forEach(function (a) { a.el.textContent = ageText(a.item, now); });
+      if (st.focusEl) { st.focusEl.focus(); st.focusEl = null; }
+    }
+
+    // renderAcked keeps the section's open or closed state: only the rows are rebuilt, and only when they change.
+    function renderAcked(items, now) {
+      els.acked.hidden = items.length === 0;
+      els.ackedSummary.textContent = 'Acknowledged (' + items.length + ')';
+      var sig = JSON.stringify([items.map(function (it) {
+        return [it.id, it.level, it.title, it.detail, it.action_label, it.action_path, it.ack_token, it.acknowledged];
+      }), st.busy]);
+      if (sig !== st.ackedSig) {
+        st.ackedSig = sig;
+        clear(els.ackedRows);
+        st.ackedTexts = [];
+        items.forEach(function (it) {
+          var r = rowModel(it, now);
+          var row = hl.el('div', 'qrow');
+          var g = hl.el('span', 'g off');
+          g.setAttribute('aria-hidden', 'true');
+          row.appendChild(g);
+          var body = hl.el('div', 'qbody');
+          body.appendChild(hl.el('div', 'qtitle', r.title));
+          var says = hl.el('div', 't2 small', ackedText(it, now));
+          body.appendChild(says);
+          st.ackedTexts.push({ el: says, item: it });
+          row.appendChild(body);
+          r.actions.forEach(function (a) {
+            var link = hl.el('a', 'btn sm', a.label);
+            link.setAttribute('href', a.path);
+            row.appendChild(link);
+          });
+          var undo = actionButton('Undo', 'undo', 'Undo acknowledging: ' + r.title);
+          undo.addEventListener('click', function () { send(UNACK_URL, { id: it.id, ack_token: r.ackToken }); });
+          if (!r.ackToken) { undo.disabled = true; }
+          row.appendChild(undo);
+          els.ackedRows.appendChild(row);
+        });
+      }
+      st.ackedTexts.forEach(function (a) { a.el.textContent = ackedText(a.item, now); });
     }
 
     function renderSystems(systems, showStatus) {
@@ -222,14 +352,18 @@
         if (st.failed) { els.sub.textContent = 'Could not load the status. Retrying.'; }
         return;
       }
-      var items = arr(data.items);
+      var split = splitItems(data.items);
       var last = readLastIssue();
       var m = model(data, { lastIssue: last, now: now });
       if (m.counted > 0) { writeLastIssue(now); }
       els.heading.textContent = m.heading;
       els.sub.textContent = m.sub + (st.failed ? ' The data may be out of date.' : '');
       els.glyph.hidden = m.kind !== 'clear';
-      renderQueue(items, now);
+      if (st.choosing !== null && !split.active.some(function (it) { return it.id === st.choosing && it.ack_token; })) { st.choosing = null; }
+      els.ackError.textContent = st.ackError;
+      els.ackError.hidden = !st.ackError;
+      renderQueue(split.active, now);
+      renderAcked(split.acked, now);
       renderSystems(arr(data.systems).filter(function (s) { return s; }), m.kind !== 'clear');
       renderActivity(now);
     }
@@ -259,6 +393,7 @@
     }, 1000);
   }
 
-  hl.overview = { describe: describe, model: model, rowModel: rowModel, ageText: ageText, fmtWhen: fmtWhen, countdown: countdown, init: init };
+  hl.overview = { describe: describe, model: model, rowModel: rowModel, ageText: ageText, fmtWhen: fmtWhen, countdown: countdown,
+    splitItems: splitItems, ackedText: ackedText, ACK_CHOICES: ACK_CHOICES, init: init };
   init();
 })();

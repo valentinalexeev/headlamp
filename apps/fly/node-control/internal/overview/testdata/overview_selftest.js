@@ -29,6 +29,39 @@ const line = (state, name) => ({ name: name || 'Sys', path: '/sys', state, summa
   assert.strictEqual(ov.model({ items: [item('info'), item('waiting')], systems: [] }, { now: NOW }).heading, '1 item needs you');
 }
 
+// acknowledged items ask nothing of anyone
+{
+  const ack = (level) => item(level, { acknowledged: { by: 'alice', at: new Date(NOW - 7200000).toISOString() } });
+  let m = ov.model({ items: [ack('critical'), ack('waiting'), item('waiting')], systems: [] }, { now: NOW });
+  assert.strictEqual(m.heading, '1 item needs you');
+  assert.strictEqual(m.risk, 0);
+  assert.strictEqual(m.sub, '');
+  assert.strictEqual(m.acked, 2);
+  m = ov.model({ items: [ack('critical')], systems: [line('ok')] }, { now: NOW });
+  assert.strictEqual(m.kind, 'clear', 'an acknowledged item never blocks All clear');
+  assert.strictEqual(m.heading, 'All clear');
+  // an unknown system still does
+  assert.strictEqual(ov.model({ items: [ack('critical')], systems: [line('unknown')] }, { now: NOW }).kind, 'unknown');
+
+  const split = ov.splitItems([ack('critical'), item('waiting'), null, ack('info')]);
+  assert.strictEqual(split.active.length, 1);
+  assert.strictEqual(split.acked.length, 2);
+
+  assert.strictEqual(ov.ackedText(ack('critical'), NOW), 'At risk. Acknowledged by alice 2 h 0 min ago, until it changes.');
+  const until = item('waiting', { acknowledged: { by: 'bob\u202e', at: new Date(NOW - 60000).toISOString(), until: new Date(NOW + 86400000).toISOString() } });
+  assert.strictEqual(ov.ackedText(until, NOW), 'Waiting. Acknowledged by bob 1 min ago, ends in 1 d 0 h.');
+
+  // the choices the page offers, and a row offers them only when the server said it can be acknowledged
+  assert.deepStrictEqual(ov.ACK_CHOICES.map((c) => [c.label, c.seconds]), [['Until it changes', 0], ['1 day', 86400], ['7 days', 604800]]);
+  assert.strictEqual(ov.rowModel(item('waiting', { ack_token: 'abc' }), NOW).ackToken, 'abc');
+  assert.strictEqual(ov.rowModel(item('waiting'), NOW).ackToken, '');
+  assert.strictEqual(ov.rowModel(item('timed', { ack_token: 'abc' }), NOW).ackToken, '', 'never for what counts down');
+}
+
+// the Activity sentences for acknowledging
+assert.strictEqual(ov.describe({ action: 'attention.acknowledge', detail: 'bridge-2 is out of sync' }), 'Acknowledged: bridge-2 is out of sync');
+assert.strictEqual(ov.describe({ action: 'attention.unacknowledge', detail: 'bridge-2 is out of sync' }), 'Acknowledgement undone: bridge-2 is out of sync');
+
 // riskLine
 {
   const three = [item('critical'), item('critical'), item('critical'), item('waiting')];

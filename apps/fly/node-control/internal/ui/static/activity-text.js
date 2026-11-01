@@ -69,6 +69,10 @@
       case 'block.delete':
         m = /^([^/\s]+)\/(\S+)$/.exec(detail);
         return m ? m[2] + '.' + m[1] + ' unblocked' : 'Service unblocked';
+      case 'attention.acknowledge':
+        return 'Acknowledged: ' + detail;
+      case 'attention.unacknowledge':
+        return 'Acknowledgement undone: ' + detail;
       case 'audit.unreadable':
         return 'An audit entry could not be read';
       case 'change.applied':

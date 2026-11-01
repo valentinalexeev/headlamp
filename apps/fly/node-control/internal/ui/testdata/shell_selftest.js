@@ -74,6 +74,14 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     shell.pickTheme('system');
   }
 
+  // unknownSystemLightsTheLamp
+  {
+    const lampOf = async (data) => { const p = parts(); await ctl(p, async () => data).poll(); return p.lamp.className; };
+    assert.strictEqual(await lampOf({ items: [], systems: [{ name: 'Nodes', state: 'ok' }] }), 'lamp clear');
+    assert.strictEqual(await lampOf({ items: [], systems: [{ name: 'Nodes', state: 'ok' }, { name: 'Policy', state: 'unknown' }] }), 'lamp');
+    assert.strictEqual(await lampOf({ items: [] }), 'lamp clear');
+  }
+
   // stripShowsOnlyTimedItems
   {
     const p = parts();

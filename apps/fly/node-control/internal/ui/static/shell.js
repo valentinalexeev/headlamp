@@ -232,7 +232,9 @@
       if (parts.counts) { applyCounts(parts.counts, st.data); }
       if (parts.lamp) {
         var any = st.data && Array.isArray(st.data.items) && st.data.items.some(function (it) { return it && COUNTED[it.level]; });
-        parts.lamp.className = any ? 'lamp' : 'lamp clear';
+        // A system whose state is unknown is not "all clear" either, even with no item to count.
+        var unknown = st.data && Array.isArray(st.data.systems) && st.data.systems.some(function (sy) { return sy && sy.state === 'unknown'; });
+        parts.lamp.className = any || unknown ? 'lamp' : 'lamp clear';
       }
       renderStrip();
       renderFresh();

@@ -25,7 +25,6 @@
   // The same sentences as the Activity page (/_ui/activity-text.js, loaded first).
   var describe = hl.activityText ? hl.activityText.describe : function (e) { return hl.plain(e && e.action, 100); };
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
 
   function localPath(p) {
     return typeof p === 'string' && p.charAt(0) === '/' && p.charAt(1) !== '/' && p.indexOf('\\') < 0;
@@ -43,7 +42,7 @@
   // splitItems: what asks for someone now, and what someone has acknowledged.
   function splitItems(items) {
     var out = { active: [], acked: [] };
-    arr(items).forEach(function (it) {
+    hl.arr(items).forEach(function (it) {
       if (it) { (it.acknowledged ? out.acked : out.active).push(it); }
     });
     return out;
@@ -81,7 +80,7 @@
     opts = opts || {};
     var split = splitItems(data && data.items);
     var items = split.active;
-    var systems = arr(data && data.systems);
+    var systems = hl.arr(data && data.systems);
     var hidden = !!(data && data.hidden_systems);
     var counted = items.filter(function (it) { return it && COUNTED[it.level]; }).length;
     var risk = items.filter(function (it) { return it && it.level === 'critical'; }).length;
@@ -153,9 +152,6 @@
     return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][t.getMonth()] + ' ' + t.getDate();
   }
 
-  function clear(node) {
-    while (node.firstChild) { node.removeChild(node.firstChild); }
-  }
 
   function readLastIssue() {
     try {
@@ -255,7 +251,7 @@
       st.ages = [];
       if (sig !== st.sig) {
         st.sig = sig;
-        clear(els.queue);
+        hl.clear(els.queue);
         els.queue.hidden = items.length === 0;
         items.forEach(function (it) {
           var r = rowModel(it, now);
@@ -301,7 +297,7 @@
       }), st.busy]);
       if (sig !== st.ackedSig) {
         st.ackedSig = sig;
-        clear(els.ackedRows);
+        hl.clear(els.ackedRows);
         st.ackedTexts = [];
         items.forEach(function (it) {
           var r = rowModel(it, now);
@@ -372,7 +368,7 @@
     }
 
     function renderSystems(systems, showStatus) {
-      clear(els.systems);
+      hl.clear(els.systems);
       systems.forEach(function (s) {
         var tr = hl.el('tr');
         var name = hl.el('td', 'name');
@@ -398,7 +394,7 @@
     function renderActivity(now) {
       var entries = st.activity;
       els.activity.hidden = entries.length === 0;
-      clear(els.rows);
+      hl.clear(els.rows);
       entries.forEach(function (e) {
         var tr = hl.el('tr');
         tr.appendChild(hl.el('td', 'mono t3', fmtWhen(e.at, now)));
@@ -429,7 +425,7 @@
       renderQueue(split.active, now);
       renderAcked(split.acked, now);
       placeFocus(kept, split.active);
-      renderSystems(arr(data.systems).filter(function (s) { return s; }), m.kind !== 'clear');
+      renderSystems(hl.arr(data.systems).filter(function (s) { return s; }), m.kind !== 'clear');
       renderActivity(now);
     }
 
@@ -441,7 +437,7 @@
         if (!(err && err.status === 404)) { st.failed = true; }
       });
       var activity = hl.api('GET', ACTIVITY_URL).then(function (data) {
-        st.activity = arr(data && data.entries);
+        st.activity = hl.arr(data && data.entries);
       }, function () { /* the section stays as it was */ });
       return Promise.all([attention, activity]).then(render);
     }

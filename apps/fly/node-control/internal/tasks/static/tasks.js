@@ -21,6 +21,18 @@
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
   function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
+  // alertWord: what a run's notify outcome ("alert=<outcome> ping=<outcome>", either part optional) says about its
+  // alert, in words. Empty when the run had no alert to send: "alert=none", or only a healthcheck ping.
+  function alertWord(outcome) {
+    var m = /^alert=([\s\S]*?)(?: ping=[\s\S]*)?$/.exec(typeof outcome === 'string' ? outcome : '');
+    var a = m ? m[1] : '';
+    if (!a || a === 'none') { return ''; }
+    if (a === 'sent') { return 'Sent'; }
+    if (a === 'suppressed') { return 'Held back by the cooldown'; }
+    if (a.indexOf('failed: ') === 0) { return 'Failed: ' + hl.plain(a.slice(8), 100); }
+    return hl.plain(a, 100);
+  }
+
   function fmtDuration(ms) {
     if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) { return ''; }
     if (ms < 1000) { return Math.round(ms) + ' ms'; }
@@ -272,9 +284,16 @@
       fact('Schedule', sel.every ? 'Every ' + sel.every : '-');
       fact('Failure streak', String(sel.streak));
       fact('Next run', sel.nextRun ? cap(when(sel.nextRun)) : (sel.running ? 'Running now' : 'Not scheduled'));
-      var alertOutcome = '';
-      (runs || []).some(function (r) { r = obj(r); if (r.notify_outcome) { alertOutcome = label(r.notify_outcome, 100); return true; } return false; });
-      if (alertOutcome) { fact('Last alert', alertOutcome); }
+      var lastAlert = '';
+      (runs || []).some(function (r) {
+        r = obj(r);
+        var word = alertWord(r.notify_outcome);
+        if (!word) { return false; }
+        var at = when(String(r.ended || r.started || ''));
+        lastAlert = word + (at ? ', ' + at : '');
+        return true;
+      });
+      if (lastAlert) { fact('Last alert', lastAlert); }
       fact('Last result', resultNode(sel.result));
       panel.appendChild(kv);
 

@@ -135,6 +135,11 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(r.state, 'Out of sync');
     assert.strictEqual(r.level, 'crit');
     assert.ok(/Agent unreachable/.test(r.detail));
+    assert.ok(/first failed 38 min ago/.test(r.detail), r.detail);
+    assert.strictEqual(r.explain, 'Revocations and extensions made since 38 min ago are not in effect on this bridge. Retrying every 5 minutes.');
+    // a failure this fresh has no "ago" to quote
+    const fresh = merge(n, s, { 'bridge-2': tn('bridge-2', true) }, [ing('bridge-2', { sync: Object.assign({}, bad, { since: Math.floor(NOW / 1000) }) })])[0];
+    assert.strictEqual(fresh.explain, 'Revocations and extensions made recently are not in effect on this bridge. Retrying every 5 minutes.');
     r = merge(n, s, { 'bridge-2': tn('bridge-2', false) }, [ing('bridge-2', { sync: bad })])[0];
     assert.strictEqual(r.state, 'Out of sync', 'beats running-but-offline');
     // stopped at the provider it serves nobody, so the wait is no risk; the same machine running is
@@ -144,6 +149,7 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(stopped.level, 'off');
     assert.strictEqual(stopped.detail, 'Sync pending');
     assert.ok(stopped.explain.includes('when it is started again'));
+    assert.ok(!/Retrying/.test(stopped.explain), 'a stopped machine waits for its start, as far as anyone needs to know');
     assert.strictEqual(merge({ 'b-1': cfg() }, { 'b-1': { status: 'RUNNING' } }, null, [ing('b-1', waiting)])[0].state, 'Out of sync');
     // and beats a waiting approval
     r = merge({}, {}, null, [ing('bridge-3', { approval: 'pending', sync: bad })])[0];

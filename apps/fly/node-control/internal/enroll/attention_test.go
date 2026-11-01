@@ -55,6 +55,7 @@ func TestEnrollAttentionBridgeOutOfSync(t *testing.T) {
 	}
 	if it.Level != core.LevelCritical || it.Source != "nodes" || !strings.Contains(it.Title, "ingress-1") ||
 		!strings.Contains(it.Detail, "Revocations and extensions are not in effect there") ||
+		!strings.Contains(it.Detail, "Retrying every 5 minutes.") ||
 		it.ActionPath != "/nodes?sel=ingress-1" || it.Since.IsZero() {
 		t.Errorf("%+v", *it)
 	}
@@ -246,5 +247,12 @@ func TestEnrollSearchListsDeviceNames(t *testing.T) {
 		if it.Kind != "Device" || it.Path != "/enroll" || it.Label == "" {
 			t.Errorf("%+v", it)
 		}
+	}
+}
+
+// The Attention item, the Devices page and the Nodes page all say "Retrying every 5 minutes": change them with it.
+func TestReconcilePeriodMatchesTheRetryCopy(t *testing.T) {
+	if reconcilePeriod != 5*time.Minute {
+		t.Fatalf("the pages promise a retry every 5 minutes, the loop waits %v", reconcilePeriod)
 	}
 }

@@ -223,3 +223,47 @@ func TestTailnetAttentionHidesTheKeyFromOtherViewers(t *testing.T) {
 		t.Fatalf("anyone else must not: %+v %+v %v", items, lines, err)
 	}
 }
+
+func TestTailnetAttentionRefusedKeyKeepsItsSince(t *testing.T) {
+	first := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	now := first
+	refuse := true
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		if refuse {
+			return time.Time{}, &headscale.APIError{Status: 401, Message: "Unauthorized"}
+		}
+		return now.Add(90 * 24 * time.Hour), nil
+	})).(*module)
+	m.now = func() time.Time { return now }
+	since := func() time.Time {
+		t.Helper()
+		items, _, _ := m.Attention(context.Background(), "a")
+		if len(items) != 1 || !strings.Contains(items[0].Title, "is refused") {
+			t.Fatalf("want a refused item, got %+v", items)
+		}
+		return items[0].Since
+	}
+	if got := since(); !got.Equal(first) {
+		t.Fatalf("since %v, want the first refusal %v", got, first)
+	}
+	now = now.Add(30 * time.Second) // a poll, on the cached refusal
+	if got := since(); !got.Equal(first) {
+		t.Fatalf("a poll moved since to %v", got)
+	}
+	now = now.Add(5 * time.Minute) // past the cache, refused again
+	if got := since(); !got.Equal(first) {
+		t.Fatalf("another refused read moved since to %v", got)
+	}
+
+	// a key that works again ends it: the next refusal is a new one
+	refuse = false
+	now = now.Add(5 * time.Minute)
+	if items, _, _ := m.Attention(context.Background(), "a"); len(items) != 0 {
+		t.Fatalf("a working key raises nothing: %+v", items)
+	}
+	refuse = true
+	now = now.Add(11 * time.Minute)
+	if got := since(); !got.Equal(now) {
+		t.Fatalf("since %v, want the new refusal %v", got, now)
+	}
+}

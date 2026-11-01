@@ -181,6 +181,27 @@ const setSearch = (s) => { global.window.location.search = s; global.window.loca
     setSearch('');
   }
 
+  // lastAlertInWords: the notify outcome is read, not printed; a run with no alert does not count as one
+  {
+    const lastAlert = async (runs) => {
+      fetchReply = (url) => (url.includes('/runs') ? json(runs) : json(list()));
+      const els = tasksEls();
+      tasks.mount(els, { now: () => NOW }).update(list());
+      await flush();
+      const dts = findAll(els.panel, (n) => n.tag === 'dt');
+      const dt = dts.find((n) => n.textContent === 'Last alert');
+      return dt ? dt.parentNode.children[dt.parentNode.children.indexOf(dt) + 1].textContent : null;
+    };
+    assert.strictEqual(await lastAlert(runsFor()), 'Sent, 1 h 9 min ago');
+    assert.strictEqual(await lastAlert([run('a', 'succeeded', 660, { notify_outcome: 'alert=sent ping=sent' })]), 'Sent, 10 min ago');
+    assert.strictEqual(await lastAlert([run('a', 'succeeded', 660, { notify_outcome: 'alert=suppressed' })]), 'Held back by the cooldown, 10 min ago');
+    assert.strictEqual(await lastAlert([run('a', 'failed', 660, { notify_outcome: 'alert=failed: secret not configured ping=sent' })]), 'Failed: secret not configured, 10 min ago');
+    assert.strictEqual(await lastAlert([run('a', 'succeeded', 60, { notify_outcome: 'alert=none ping=sent' }), run('b', 'succeeded', 660, { notify_outcome: 'ping=sent' }), run('c', 'succeeded', 1260, { notify_outcome: 'alert=sent' })]),
+      'Sent, 20 min ago', 'runs where no alert was due are passed over');
+    assert.strictEqual(await lastAlert([run('a', 'succeeded', 60, { notify_outcome: 'alert=none' }), run('b', 'succeeded', 660, { notify_outcome: 'ping=sent' })]), null, 'no alert, no line');
+    assert.strictEqual(await lastAlert([run('a', 'succeeded', 660, { notify_outcome: 'alert=later' })]), 'later, 10 min ago', 'an outcome this page does not know is still shown');
+  }
+
   // lastErrorShown + recentRunsTable
   {
     fetchReply = (url) => (url.includes('/runs') ? json(runsFor()) : json(list()));

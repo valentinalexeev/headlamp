@@ -27,6 +27,7 @@ type module struct {
 	expV    time.Time
 	expErr  error
 	lastKey time.Time // the last expiry read successfully (zero: none, or the key never expires)
+	refused time.Time // when headscale first refused the key since the last good read (zero: it has not)
 }
 
 // Option configures the module.

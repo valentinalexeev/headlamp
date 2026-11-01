@@ -210,7 +210,7 @@
       entries.forEach(function (e) {
         var tr = hl.el('tr');
         tr.appendChild(hl.el('td', 'mono t3', fmtWhen(e.at, now)));
-        tr.appendChild(hl.el('td', null, describe(e)));
+        tr.appendChild(hl.el('td', 'wrap', describe(e)));
         els.rows.appendChild(tr);
       });
     }

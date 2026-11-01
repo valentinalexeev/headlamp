@@ -157,6 +157,8 @@ button.search:hover{border-color:var(--line2);color:var(--t2)}
 .page.narrow{max-width:860px}
 /* an open row detail inside a table: wraps, and is not held to the row height */
 .hl td.detail{white-space:normal;height:auto;padding:12px 14px}
+/* a cell whose text may wrap, in a narrow column (the recent activity beside Overview) */
+.hl td.wrap{white-space:normal;padding-top:8px;padding-bottom:8px}
 /* beside a fixed-size block (a QR code): takes the rest of the row, wraps under it when narrow */
 .beside{flex:1 1 160px;min-width:0}
 .rowbtns.start{justify-content:flex-start;flex-wrap:wrap}

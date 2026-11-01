@@ -97,6 +97,23 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.strictEqual(u.canPower, false);
   }
 
+  // a runner that no node claims but whose id is a node's id gets its own row, suffixed
+  {
+    const n = { a: cfg({ tailnetName: 'real' }) };
+    const s = { a: { status: 'RUNNING' } };
+    // matched by neither id nor name against the node (its tailnet name is "real"), and carrying no id of its own
+    const rows = merge(n, s, null, null, [{ name: 'a', available: true }]);
+    assert.deepStrictEqual(rows.map((r) => r.id).sort(), ['a', 'a (runner)']);
+    const extra = one(rows, 'a (runner)');
+    assert.strictEqual(extra.canPower, false, 'a runner row cannot be powered');
+    assert.strictEqual(one(rows, 'a').canPower, true, 'the node keeps its own row');
+    // two such runners and a bridge: every id stays distinct, the second runner taking the suffix twice
+    const many = merge(n, s, null, [ing('a', { given_name: 'nope' })], [{ name: 'a' }, { name: 'a' }]);
+    assert.deepStrictEqual(many.map((r) => r.id).sort(), ['a', 'a (bridge)', 'a (runner)', 'a (runner) (runner)']);
+    // an unclaimed runner whose id is free keeps it as it is
+    assert.deepStrictEqual(merge({}, {}, null, null, [{ id: 'r1', name: 'r1' }]).map((r) => r.id), ['r1']);
+  }
+
   // bridgeMatchesByGivenName
   {
     const n = { 'exit-x': cfg({ tailnetName: 'bridge-1' }) };

@@ -217,15 +217,19 @@ func TestPolicyActivity(t *testing.T) {
 		if _, err := svc.store.db.Exec("DELETE FROM outcomes"); err != nil { // as if it ended before the table existed
 			t.Fatal(err)
 		}
-		for _, advance := range []time.Duration{0, 3 * time.Hour} {
-			clk.Advance(advance)
+		applied := clk.Now().Add(-5 * time.Second)
+		for _, tc := range []struct {
+			advance time.Duration
+			want    time.Time
+		}{{0, applied}, {3 * time.Hour, deadline}} { // a deadline still ahead is no time for something that has happened
+			clk.Advance(tc.advance)
 			got, err := m.Activity(ctx, "alice@", 20)
 			if err != nil {
 				t.Fatal(err)
 			}
 			r := byAction(got, "change.reverted_earlier")
-			if len(r) != 1 || r[0].Actor != "alice" || r[0].Detail != fmt.Sprint(id) || !r[0].At.Equal(deadline) {
-				t.Fatalf("%+v, want actor alice at %v", got, deadline)
+			if len(r) != 1 || r[0].Actor != "" || r[0].Detail != fmt.Sprint(id) || !r[0].At.Equal(tc.want) {
+				t.Fatalf("%+v, want no actor, since nothing records who, at %v", got, tc.want)
 			}
 			if len(byAction(got, "change.confirmed")) != 0 {
 				t.Errorf("%+v", got)

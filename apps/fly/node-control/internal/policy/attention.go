@@ -78,7 +78,8 @@ func (m *Module) HasActivity() bool { return m.store != nil }
 // Activity lists the change history, newest first: each change when it was applied (by whoever applied it) and, from
 // the recorded outcomes, each confirmation and each revert with its actor and time: "system" for the automatic revert
 // at the deadline, the operator for a revert on request. A reverted change from before outcomes were recorded has
-// no record; it reads as a plain revert (change.reverted_earlier) by the actor of the change, at its deadline.
+// no record; it reads as a plain revert (change.reverted_earlier) with no actor, since nothing says who, at its
+// deadline, or when the change was applied if that deadline is still ahead.
 // An old confirmation is not listed: nothing says when it happened. The policy text is never part of an entry.
 // Only POLICY_ADMIN_USERS see it.
 func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.ActivityEntry, error) {
@@ -96,6 +97,10 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 	if err != nil {
 		return nil, fmt.Errorf("policy store: %w", err)
 	}
+	now := time.Now
+	if m.svc != nil {
+		now = m.svc.clock
+	}
 	var out []core.ActivityEntry
 	for _, e := range hist {
 		detail := fmt.Sprintf("%d", e.ID)
@@ -111,7 +116,11 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 				out = append(out, core.ActivityEntry{At: r.At, Actor: r.Actor, Source: "Policy", Action: action, Detail: id})
 			}
 		} else if e.State == OutcomeReverted {
-			out = append(out, core.ActivityEntry{At: e.Deadline, Actor: e.Actor, Source: "Policy", Action: "change.reverted_earlier", Detail: id})
+			at := e.Deadline
+			if at.After(now()) {
+				at = e.At
+			}
+			out = append(out, core.ActivityEntry{At: at, Source: "Policy", Action: "change.reverted_earlier", Detail: id})
 		}
 	}
 	return out, nil

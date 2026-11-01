@@ -2,6 +2,7 @@ package enroll
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode"
@@ -113,6 +114,9 @@ func (s *RedisStore) Audit(actor, action, detail string) error {
 	return nil
 }
 
+// ActionAuditUnreadable marks an entry of the log that could not be read, so a gap shows where it is.
+const ActionAuditUnreadable = "audit.unreadable"
+
 func (s *RedisStore) AuditLog(limit int) ([]core.AuditEntry, error) {
 	limit = min(max(limit, 1), auditKeep)
 	ctx, cancel := opCtx()
@@ -125,9 +129,23 @@ func (s *RedisStore) AuditLog(limit int) ([]core.AuditEntry, error) {
 	for _, r := range raw {
 		var a redisAudit
 		if json.Unmarshal([]byte(r), &a) != nil {
+			// Nothing of it is repeated: it could be anything. The time comes from its neighbours, below.
+			slog.Warn("an audit entry in redis could not be read")
+			out = append(out, core.AuditEntry{Action: ActionAuditUnreadable})
 			continue
 		}
 		out = append(out, core.AuditEntry{At: time.Unix(a.T, 0), Actor: a.Actor, Action: a.Action, Detail: a.Detail})
+	}
+	// Newest first, so a gap takes the time of the entry after it, or failing that of the one before it.
+	for i := 1; i < len(out); i++ {
+		if out[i].At.IsZero() {
+			out[i].At = out[i-1].At
+		}
+	}
+	for i := len(out) - 2; i >= 0; i-- {
+		if out[i].At.IsZero() {
+			out[i].At = out[i+1].At
+		}
 	}
 	return out, nil
 }

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/core"
@@ -179,5 +180,26 @@ func TestExportOmitsAudit(t *testing.T) {
 	b, _ := json.Marshal(snap)
 	if bytes.Contains(b, []byte("audit")) || bytes.Contains(b, []byte("device.create")) || bytes.Contains(b, []byte("operator@example.net")) {
 		t.Fatalf("snapshot holds the audit log: %s", b)
+	}
+}
+
+func TestRedisAuditShowsAnEntryItCannotRead(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1000, 0)}
+	s, mr := newTestRedisStore(t, clock, testCipher(t))
+	if err := s.Audit("alice", "device.create", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mr.Lpush(s.auditKey(), "not json"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.AuditLog(10)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got[0].Action != "audit.unreadable" || got[0].Detail != "" || !got[0].At.Equal(got[1].At) {
+		t.Errorf("a gap shows where it is, dated by its neighbour, and repeats nothing of the entry: %+v", got[0])
+	}
+	if got[1].Action != "device.create" {
+		t.Errorf("%+v", got[1])
 	}
 }

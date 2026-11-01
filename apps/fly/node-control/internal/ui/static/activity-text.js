@@ -69,6 +69,8 @@
       case 'block.delete':
         m = /^([^/\s]+)\/(\S+)$/.exec(detail);
         return m ? m[2] + '.' + m[1] + ' unblocked' : 'Service unblocked';
+      case 'audit.unreadable':
+        return 'An audit entry could not be read';
       case 'change.applied':
         m = /^(\d+)(?:: (.*))?$/.exec(detail);
         if (m) { return 'Change #' + m[1] + ' applied' + (m[2] ? ': ' + m[2] : ''); }

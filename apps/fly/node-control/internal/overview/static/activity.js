@@ -15,9 +15,7 @@
   var describe = hl.activityText ? hl.activityText.describe : function (e) { return hl.plain(e && e.action, 100); };
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  function arr(v) { return Array.isArray(v) ? v : []; }
   function two(n) { return (n < 10 ? '0' : '') + n; }
-  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
 
   // sourceOf: the filter named by the URL, or "All" for anything that is not one of the sources. Without a list
   // (the nav has not answered yet) a plain name is taken provisionally and checked once the list is known.
@@ -30,7 +28,7 @@
   // sourcesFromNav: the entries of /_nav.json that can have activity, in nav order.
   function sourcesFromNav(nav) {
     var out = [];
-    arr(nav).forEach(function (it) {
+    hl.arr(nav).forEach(function (it) {
       var label = it && typeof it.label === 'string' ? hl.plain(it.label, 40) : '';
       if (label && NOT_SOURCES.indexOf(label) < 0 && out.indexOf(label) < 0) { out.push(label); }
     });
@@ -75,7 +73,7 @@
     var now = opts.now || function () { return Date.now(); };
     var getParam = opts.getParam || function (k) { return hl.queryParam(k); };
     var setParam = opts.setParam || function (k, v) { hl.setQueryParam(k, v); };
-    var st = { source: sourceOf(getParam('source'), opts.sources), sources: arr(opts.sources).slice(), seen: [],
+    var st = { source: sourceOf(getParam('source'), opts.sources), sources: hl.arr(opts.sources).slice(), seen: [],
       data: null, failed: false, navFailed: false, token: 0, chips: [], shown: '' };
 
     // names: the chips that would match something: the sources the nav lists, plus any source an entry has
@@ -95,7 +93,7 @@
         var ae = typeof document !== 'undefined' ? document.activeElement : null;
         var focused = null;
         st.chips.forEach(function (c) { if (ae && c.el === ae) { focused = c.name; } });
-        clear(els.chips);
+        hl.clear(els.chips);
         st.chips = list.map(function (name) {
           var b = hl.el('button', 'chip', name);
           b.setAttribute('type', 'button');
@@ -114,7 +112,7 @@
 
     function render() {
       var data = st.data;
-      var entries = arr(data && data.entries).filter(function (e) { return e; });
+      var entries = hl.arr(data && data.entries).filter(function (e) { return e; });
       entries.forEach(function (e) {
         var src = hl.plain(e.source, 100);
         if (src && st.seen.indexOf(src) < 0) { st.seen.push(src); }
@@ -135,7 +133,7 @@
         els.emptytext.textContent = t[1];
       }
       els.table.hidden = entries.length === 0;
-      clear(els.rows);
+      hl.clear(els.rows);
       var at = now();
       entries.forEach(function (e) {
         var tr = hl.el('tr');
@@ -181,7 +179,7 @@
       },
       // setSources gives the sources the nav lists. A source chosen by the URL that is not one of them is dropped.
       setSources: function (list) {
-        st.sources = arr(list).slice();
+        st.sources = hl.arr(list).slice();
         if (st.source !== 'All' && names().indexOf(st.source) >= 0 && st.sources.indexOf(st.source) < 0 && st.seen.indexOf(st.source) < 0) {
           st.source = 'All';
           setParam('source', '');

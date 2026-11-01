@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -233,6 +235,32 @@ func TestPolicyActivity(t *testing.T) {
 			}
 			if len(byAction(got, "change.confirmed")) != 0 {
 				t.Errorf("%+v", got)
+			}
+		}
+	})
+
+	t.Run("reading fewer changes never hides a newer entry", func(t *testing.T) {
+		m, svc, _, clk := attentionModule(t)
+		for _, text := range []string{"a", "b", "c", "d"} {
+			id := applyOK(t, svc, text)
+			clk.Advance(time.Minute)
+			if err := svc.RevertPending(ctx, "bob@", id); err != nil {
+				t.Fatal(err)
+			}
+			clk.Advance(time.Minute)
+		}
+		newest := func(limit int) []core.ActivityEntry {
+			got, err := m.Activity(ctx, "alice@", limit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sort.SliceStable(got, func(a, b int) bool { return got[a].At.After(got[b].At) })
+			return got[:limit] // what the console cuts it to
+		}
+		all := newest(8)
+		for limit := 1; limit <= 4; limit++ {
+			if got := newest(limit); !reflect.DeepEqual(got, all[:limit]) {
+				t.Errorf("limit %d: %+v, want %+v", limit, got, all[:limit])
 			}
 		}
 	})

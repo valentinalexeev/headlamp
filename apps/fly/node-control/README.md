@@ -673,11 +673,9 @@ The ingress reaches two machine endpoints on the admin listener: `GET /ingress/v
 
 ## Tasks module (optional)
 
-Scheduled checks that drive a browser script on one of your nodes, with retries, alerts and observability. A task
-names a script, a node (or a set of tags), a schedule and what to do with the result. node-control picks an eligible
-node, hands the script and its secrets to the [`task-runner`](../../task-runner/README.md) on that node, follows the run
-to its end, and applies the retry, alert and notification rules. The script is generic: it opens pages, reads a value
-and returns a small JSON object. Nothing about what is checked lives in this repository.
+The module gives scheduled checks that drive a browser script on one of your nodes, with retries, alerts and observability. A task names a script, a node (or a set of tags), a schedule and what to do with the result.
+
+node-control selects an eligible node and gives the script and its secrets to the [`task-runner`](../../task-runner/README.md) on that node. It follows the run to its end and applies the retry, alert and notification rules. The script is generic: it opens pages, reads a value and returns a small JSON object. This repository holds nothing about what the task checks.
 
 ```
  operator ──tasks.sh / /tasks page──▶ node-control (tasks module) ──── HGET/HSET ────▶ Redis
@@ -689,75 +687,67 @@ and returns a small JSON object. Nothing about what is checked lives in this rep
                                    node (tailnet) ── task-runner :9100 ── rootless container: Chromium + script
 ```
 
-The module lives in `internal/tasks`. The admin API and page are served on the admin listener (`:80`), gated by the
-caller's tailnet identity. Redis being down never stops node-control: the tasks routes answer `503` until the store
-opens (it is retried in the background, after 30 s, then 1, 2 and every 5 minutes), while scheduling keeps running from
-memory once it is open.
+The module is in `internal/tasks`. The admin listener (`:80`) serves the admin API and page, gated by the tailnet identity of the caller. A Redis failure never stops node-control. The tasks routes answer `503` until the store opens. The module tries again in the background, after 30 s, then 1, 2 and every 5 minutes. After the store opens, the schedule continues from memory.
 
 ### Activation and environment
 
-The module is on only when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are all set; otherwise it logs
-`tasks module inactive: not set: ...` naming the missing ones and stays off (no routes, no top-bar entry). Once on,
-a bad value stops startup with a message that names the variable and never a secret. `REDIS_URL` and
-`NODE_CONTROL_STATE_KEY` are the same ones as for the Tailscale state (see above); the tasks data is always encrypted,
-`STATE_ALLOW_PLAINTEXT` does not apply to it.
+The module is on only when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are all set. Otherwise, it logs `tasks module inactive: not set: ...` with the names of the absent variables, and stays off (no routes, no top-bar entry). When the module is on, a bad value stops startup with a message that names the variable and never a secret. `REDIS_URL` and `NODE_CONTROL_STATE_KEY` are the same as for the Tailscale state (see above). The tasks data is always encrypted, and `STATE_ALLOW_PLAINTEXT` does not apply to it.
 
 | variable | default | purpose |
 |---|---|---|
-| `REDIS_URL` | | secret; the shared Redis (see the table above) |
-| `NODE_CONTROL_STATE_KEY` | | secret; encrypts every stored value (AES-256-GCM, each value bound to its Redis field name) |
-| `TASKS_RUNNER_TOKEN` | | secret; bearer token the node runners accept (their `RUNNER_TOKEN`) |
-| `TASKS_ADMIN_USERS` | | comma-separated tailnet logins allowed to use the page and API. Required once the module is on; tagged nodes are never allowed |
-| `TASKS_RUNNER_TAG` | `tag:task-runner` | headscale tag a node must carry to run any task (matches `^tag:[a-z0-9][a-z0-9-]{0,62}$`). Nodes without it are never probed and never receive the runner token or a task's secrets |
-| `SESSIONS_TAG` | unset | headscale tag of the nodes that offer interactive browser sessions (same form as `TASKS_RUNNER_TAG`, for example `tag:browser-session`). Unset: no page, no routes, no nav item. Needs the tasks module to be on |
-| `TASKS_RUNNER_PORT` | `9100` | port of the runner on the nodes, 1 to 65535 |
-| `TASKS_NTFY_URL` | `https://ntfy.sh` | base URL of the ntfy server used for alerts and failure messages |
-| `TASKS_POLL_SECONDS` | `5` | how often a running attempt asks its runner for the status, 1 to 60 |
-| `TASKS_METRICS_ADDR` | unset | `host:port` of the metrics listener, for example `:9091` (host may be empty, port numeric). Unset: no listener |
-| `TASKS_HEARTBEAT_SECRET` | unset | NAME of a stored secret (letters, digits, `_`, at most 64) whose value is a heartbeat ping URL. Unset: no heartbeat |
+| `REDIS_URL` | | Secret. The shared Redis (see the table above). |
+| `NODE_CONTROL_STATE_KEY` | | Secret. It encrypts every stored value (AES-256-GCM, each value bound to its Redis field name). |
+| `TASKS_RUNNER_TOKEN` | | Secret. The bearer token that the node runners accept (their `RUNNER_TOKEN`). |
+| `TASKS_ADMIN_USERS` | | Comma-separated tailnet logins that can use the page and API. Required when the module is on. Tagged nodes never have access. |
+| `TASKS_RUNNER_TAG` | `tag:task-runner` | The headscale tag that a node must have to run any task (matches `^tag:[a-z0-9][a-z0-9-]{0,62}$`). The module never probes nodes without it, and they never receive the runner token or the secrets of a task. |
+| `SESSIONS_TAG` | unset | The headscale tag of the nodes that offer interactive browser sessions (same form as `TASKS_RUNNER_TAG`, for example `tag:browser-session`). Unset: no page, no routes, no nav item. It needs the tasks module to be on. |
+| `TASKS_RUNNER_PORT` | `9100` | The port of the runner on the nodes, 1 to 65535. |
+| `TASKS_NTFY_URL` | `https://ntfy.sh` | The base URL of the ntfy server for alerts and failure messages. |
+| `TASKS_POLL_SECONDS` | `5` | How often an attempt that runs asks its runner for the status, 1 to 60. |
+| `TASKS_METRICS_ADDR` | unset | `host:port` of the metrics listener, for example `:9091` (host can be empty, port numeric). Unset: no listener. |
+| `TASKS_HEARTBEAT_SECRET` | unset | The NAME of a stored secret (letters, digits, `_`, at most 64) whose value is a heartbeat ping URL. Unset: no heartbeat. |
 
-The module requires the admin listener's Host guard, like the policy console: once it is on, `ENROLL_ALLOWED_HOSTS`
-must list the host names the admin listener answers to, and an unset, empty or `*` value stops startup. The guard
-protects the page and API from DNS rebinding.
+The module requires the Host guard of the admin listener, like the policy console. When the module is on, `ENROLL_ALLOWED_HOSTS` must list the host names that the admin listener answers to. An unset, empty or `*` value stops startup. The guard protects the page and API from DNS rebinding.
 
-Rollout: give every runner node the runner tag in headscale and write the tailnet ACL rule that opens the runner port
-with that tag as the destination. A node without the tag is ignored even when a task names it.
+Rollout:
 
-The tag is what node-control trusts with the runner token and the task secrets. It is trusted because the policy's
-`tagOwners` decides who may have it when a node registers (`tailscale up --advertise-tags` is checked against it), and
-on 0.28 and later only an admin changes a node's tags afterwards (`headscale nodes tag` or the API). How headscale stores tags depends on
-the version, and node-control reads both forms:
+1. Give every runner node the runner tag in headscale.
+2. Write the tailnet ACL rule that opens the runner port, with that tag as the destination.
 
-- headscale 0.28 and later (unified model): a node has one `tags` list. Tags and user ownership exclude each other:
-  tagging a user-owned (tag-less) node removes its user ownership, and only re-authenticating it with empty tags undoes
-  that.
-- Older headscale (legacy model): forced tags, which an admin sets, plus valid tags, which a node can request at any
-  time with `--advertise-tags` and gets when `tagOwners` lets its user own them.
+The module ignores a node without the tag, even when a task names it.
 
-So the trust boundary for the runner tag is the policy's `tagOwners` entry: list ONLY the admin/service identity as
-owner of the runner tag, never human users whose devices are not runners. The safest way to tag a node is as an admin
-(`headscale nodes tag`, `scripts/headscale-tag-node.sh` below, or a pre-auth key created with that tag as its ACL tag);
-a node that merely advertises the tag gets it only if the policy lets its user own it.
+The tag is what node-control trusts with the runner token and the task secrets. It is trusted because the `tagOwners` of the policy decides who can have it when a node registers (`tailscale up --advertise-tags` is checked against it). On 0.28 and later, only an admin changes the tags of a node after that (`headscale nodes tag` or the API). The storage of tags depends on the headscale version, and node-control reads both forms:
 
-With the helper (needs `HEADSCALE_URL` and `HEADSCALE_API_KEY`, or `HEADSCALE_API_KEY_CMD` printing the key): first run
-`scripts/headscale-tag-node.sh show --node <given-name>` and read the model it prints (`unified` or `legacy`), then
-`scripts/headscale-tag-node.sh add --node <given-name> --tag tag:task-runner` without `--yes` to see the plan
-(`tags: [...] -> [...]`, or `forced: [...] -> [...]` on a legacy server). The same command with `--yes` applies it,
-keeping the node's other tags (the API replaces the whole set: `tags` on the unified model, the forced tags on the
-legacy one), and checks the result by reading the node again. On the unified model, tagging a node that has no tags yet
-removes its user ownership, so the helper also requires `--allow-ownership-change` there. Run `show` again afterwards:
-the runner tag is listed under `tags` (unified) or `forced` (legacy).
+- headscale 0.28 and later (unified model): a node has one `tags` list. Tags and user ownership exclude each other. A tag on a user-owned (tag-less) node removes its user ownership, and only a new authentication with empty tags undoes that.
+- Older headscale (legacy model): forced tags, which an admin sets, plus valid tags. A node can request valid tags at any time with `--advertise-tags`, and gets them when `tagOwners` lets its user own them.
 
-A given name follows the node's reported hostname until it is set with `headscale nodes rename` (see "Names in
-headscale" above), so rename the runner nodes if `node` targets should not depend on what a runner reports.
+> **WARNING:** List ONLY the admin or service identity as owner of the runner tag in `tagOwners`, never human users whose devices are not runners. The `tagOwners` entry of the policy is the trust boundary for the runner tag.
+
+The safest way to tag a node is as an admin. Use `headscale nodes tag`, `scripts/headscale-tag-node.sh` below, or a pre-auth key with that tag as its ACL tag. A node that only advertises the tag gets it only if the policy lets its user own it.
+
+The helper needs `HEADSCALE_URL` and `HEADSCALE_API_KEY`, or `HEADSCALE_API_KEY_CMD` that prints the key. To use the helper, do these steps:
+
+1. Run `scripts/headscale-tag-node.sh show --node <given-name>`.
+2. Read the model that it prints (`unified` or `legacy`).
+3. Run `scripts/headscale-tag-node.sh add --node <given-name> --tag tag:task-runner` without `--yes` to see the plan.
+
+   The plan is `tags: [...] -> [...]`, or `forced: [...] -> [...]` on a legacy server.
+
+4. Run the same command with `--yes` to apply it.
+
+   The command keeps the other tags of the node. It must do this because the API replaces the whole set: `tags` on the unified model, the forced tags on the legacy model. It then reads the node again to check the result.
+
+5. Run `show` again. The runner tag shows under `tags` (unified) or `forced` (legacy).
+
+> **WARNING:** On the unified model, a tag on a node with no tags removes its user ownership. For this reason, the helper also requires `--allow-ownership-change` there.
+
+A given name follows the reported hostname of the node until you set it with `headscale nodes rename` (see "Names in headscale" above). Thus rename the runner nodes if `node` targets must not depend on what a runner reports.
 
 ### Task configuration
 
-The configuration is one JSON object, `{"tasks": {"<id>": {...}}}`. It is decoded strictly: unknown fields, trailing
-data, a duplicate task id and a bad value are all errors, and every problem is reported with its task and field. A task
-id matches `^[a-z0-9][a-z0-9._-]{0,63}$` (`config` and `secrets` are reserved: they would clash with the API paths;
-`scheduler` is reserved too: it is the heartbeat's label in metrics and logs).
-Durations are Go duration strings (`"90s"`, `"12h"`); a bare number is refused because its unit would be a guess.
+The configuration is one JSON object, `{"tasks": {"<id>": {...}}}`. The decode is strict: unknown fields, trailing data, a duplicate task id and a bad value are all errors. The module reports every problem with its task and field.
+
+A task id matches `^[a-z0-9][a-z0-9._-]{0,63}$`. `config` and `secrets` are reserved, because they would clash with the API paths. `scheduler` is also reserved, because it is the label of the heartbeat in metrics and logs. Durations are Go duration strings (`"90s"`, `"12h"`). The module refuses a bare number, because its unit would be a guess.
 
 ```json
 {
@@ -794,49 +784,42 @@ Durations are Go duration strings (`"90s"`, `"12h"`); a bare number is refused b
 }
 ```
 
-A complete placeholder file is in
-[`examples/private-repo/fly/node-control/tasks/tasks.example.json`](../../../examples/private-repo/fly/node-control/tasks/tasks.example.json).
+A complete placeholder file is in [`examples/private-repo/fly/node-control/tasks/tasks.example.json`](../../../examples/private-repo/fly/node-control/tasks/tasks.example.json).
 
 | field | required | default and rules |
 |---|---|---|
-| `script` | yes | file name of a stored script: no `/`, `\` or `..`. A push also needs the name to match `^[A-Za-z0-9._-]{1,64}$` |
-| `params` | no | JSON object handed to the script as `params` |
-| `target` | yes | either `node` (the node's headscale **given name**, exactly; the host name a node reports is never matched, since any node can claim any host name) or `tags` (a node must carry all of them), never both. Two nodes with the same given name make the target ambiguous: the attempt fails with `ambiguous target` and nothing is contacted. Either way only nodes with the runner tag (`TASKS_RUNNER_TAG`) are candidates. `online: true` skips nodes headscale reports offline |
-| `schedule.every` | yes | at least `1m` |
-| `schedule.jitter` | no | `0s`. The next run is `now + every ± jitter` (uniform), never sooner than `every / 2` |
-| `timeout` | no | `3m`; from `1s` to `30m` (the runner counts whole seconds). Enforced by the runner |
-| `retry.attempts` | no | `1`; 1 to 10 attempts per sequence |
-| `retry.backoff` | with attempts > 1 | list of positive durations; entry *n* is the wait after failed attempt *n*, the last entry repeats |
-| `secrets` | no | names of stored secrets passed to the script as `secrets.<NAME>`. The runner hands secrets and params to the container in environment variables, so a push is refused when the JSON of a task's secret values plus its params JSON exceeds 100000 bytes |
-| `healthcheck` | no | NAME of a secret holding a healthchecks-style ping URL |
-| `alert.when` | with `alert` | `field` (a numeric result field), `op` (one of `<` `<=` `>` `>=` `==` `!=`) and `value` (number) |
-| `alert.cooldown` | no | `24h`; must be positive |
-| `alert.notify`, `on_failure.notify` | with the block | `topic` (a secret NAME: the ntfy topic is never in the config; `ntfy.sh` is a public service where the topic name is the only access control, so store a long random topic as the secret), `priority` (`min`, `low`, `high`, `max`; anything else is ntfy's default), `title`, `message` |
-| `on_failure.cooldown` | no | `24h`; must be positive |
+| `script` | yes | The file name of a stored script: no `/`, `\` or `..`. A push also needs the name to match `^[A-Za-z0-9._-]{1,64}$`. |
+| `params` | no | A JSON object that the script gets as `params`. |
+| `target` | yes | Either `node` or `tags`, never both. `node` is the headscale **given name** of the node, exactly. The module never matches the host name that a node reports, because any node can claim any host name. With `tags`, a node must have all of them. If two nodes have the same given name, the target is ambiguous: the attempt fails with `ambiguous target` and the module contacts nothing. In both cases, only nodes with the runner tag (`TASKS_RUNNER_TAG`) are candidates. `online: true` skips nodes that headscale reports offline. |
+| `schedule.every` | yes | At least `1m`. |
+| `schedule.jitter` | no | `0s`. The next run is `now + every ± jitter` (uniform), never sooner than `every / 2`. |
+| `timeout` | no | `3m`. From `1s` to `30m` (the runner counts whole seconds). The runner enforces it. |
+| `retry.attempts` | no | `1`. 1 to 10 attempts for each sequence. |
+| `retry.backoff` | with attempts > 1 | A list of positive durations. Entry *n* is the wait after failed attempt *n*. The last entry repeats. |
+| `secrets` | no | The names of stored secrets that the script gets as `secrets.<NAME>`. The runner gives secrets and params to the container in environment variables. Thus the module refuses a push when the JSON of the secret values of a task plus its params JSON is more than 100000 bytes. |
+| `healthcheck` | no | The NAME of a secret that holds a healthchecks-style ping URL. |
+| `alert.when` | with `alert` | `field` (a numeric result field), `op` (one of `<` `<=` `>` `>=` `==` `!=`) and `value` (number). |
+| `alert.cooldown` | no | `24h`. It must be positive. |
+| `alert.notify`, `on_failure.notify` | with the block | `topic` (a secret NAME: the ntfy topic is never in the config. `ntfy.sh` is a public service where the topic name is the only access control, so keep a long random topic as the secret), `priority` (`min`, `low`, `high`, `max`; any other value is the ntfy default), `title`, `message`. |
+| `on_failure.cooldown` | no | `24h`. It must be positive. |
 
-`{name}` in a title or message is replaced by the scalar result field of that name (alert) or by `task` and `reason`
-(failure); an unknown name stays as written so a typo is visible. `{task}` is also available in alert text. A
-placeholder with a colon is refused.
+The module replaces `{name}` in a title or message. In an alert, it uses the scalar result field of that name. In a failure message, it uses `task` and `reason`. An unknown name stays as written, so a typing error is visible. `{task}` is also available in alert text. The module refuses a placeholder with a colon.
 
-Which node runs a task: the nodes with the runner tag that match `target` (and are online when `online` is set), whose
-runner answers its health check as reachable and idle. Among them the node that last ran the task successfully is preferred, then the least
-busy one, then the lowest name. A candidate node must also have a tailnet IPv4 address. None eligible makes the attempt fail with `no eligible node`.
-A runner that refuses the token (`401`) counts as unhealthy; node-control logs `runner rejected the token` with the
-node's name once per process start.
+A candidate node for a task has the runner tag and matches `target` (and is online when `online` is set). Its runner must answer its health check as reachable and idle. A candidate node must also have a tailnet IPv4 address. Among the candidates, the module prefers the node that last ran the task successfully, then the least busy node, then the lowest name. If none is eligible, the attempt fails with `no eligible node`. A runner that refuses the token (`401`) counts as unhealthy. node-control logs `runner rejected the token` with the name of the node, one time for each process start.
 
 ### Script contract
 
-A script is a CommonJS module exporting `run` (`module.exports = { run }` or `module.exports = fn`). It is called as
-`run({ page, params, secrets, log })`: `page` is a Playwright page of a fresh headless Chromium context (nothing is
-shared between runs), `params` and `secrets` are objects, and `log(msg)` writes a line to the run's log tail. That tail is visible only
-from the runner's own `GET /v1/runs/{id}` (`log_tail`); node-control neither stores nor shows it. It returns a
-small JSON object. The runner refuses a result that is not an object or is larger than 4096 bytes (the run fails and says
-why). Throw, or return a rejected promise, to fail the run. Details and the isolation of the container are in the
-task-runner README. A commented example is in
-[`examples/private-repo/fly/node-control/tasks/scripts/check-balance.example.js`](../../../examples/private-repo/fly/node-control/tasks/scripts/check-balance.example.js).
+A script is a CommonJS module that exports `run` (`module.exports = { run }` or `module.exports = fn`). The call is `run({ page, params, secrets, log })`:
 
-Secret values are scrubbed (replaced by `***`) from the run's reason and from the result before they are stored or shown.
-A script should still never return a secret.
+- `page` is a Playwright page of a new headless Chromium context (runs share nothing).
+- `params` and `secrets` are objects.
+- `log(msg)` writes a line to the log tail of the run. That tail is visible only from `GET /v1/runs/{id}` (`log_tail`) of the runner itself. node-control does not keep or show it.
+
+The script returns a small JSON object. The runner refuses a result that is not an object or is larger than 4096 bytes (the run fails and says why). To fail the run, throw or return a rejected promise. The task-runner README gives details and the isolation of the container. A commented example is in [`examples/private-repo/fly/node-control/tasks/scripts/check-balance.example.js`](../../../examples/private-repo/fly/node-control/tasks/scripts/check-balance.example.js).
+
+The module scrubs secret values (replaced by `***`) from the reason and the result of the run before it keeps or shows them.
+
+> **WARNING:** Do not return a secret from a script, even though the module scrubs secret values.
 
 ### HTTP API
 

@@ -417,7 +417,7 @@
         state.appendChild(hl.status(r.level, r.state));
         tr.appendChild(state);
         tr.appendChild(hl.el('td', 't2', r.detail));
-        tr.appendChild(hl.el('td', 'mono t3', r.provider));
+        tr.appendChild(hl.el('td', 'mono t3 wrap', r.provider));
         var actCell = hl.el('td', 'act');
         if (raw.action) {
           // Start starts the node (it is not destructive) under the same busy rule; Open and Compare select.

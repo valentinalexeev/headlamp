@@ -195,6 +195,17 @@ func TestIconPathsUseAbsoluteMoves(t *testing.T) {
 }
 
 // The browser's default body margin shows white around every page, whichever theme is on.
+// Table text wraps, or a table beside a side column scrolls sideways with room to spare.
+func TestTableCellsWrap(t *testing.T) {
+	css, err := os.ReadFile("static/hl.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), ".hl td{white-space:normal") {
+		t.Error("hl.css must let table cells wrap")
+	}
+}
+
 func TestBodyMarginIsReset(t *testing.T) {
 	css, err := os.ReadFile("static/hl.css")
 	if err != nil {

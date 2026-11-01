@@ -32,8 +32,9 @@ type Module struct {
 	timeout   time.Duration
 
 	now     func() time.Time // nil means time.Now (tests)
-	stMu    sync.Mutex       // guards stCache
+	stMu    sync.Mutex       // guards stCache and stGen
 	stCache map[string]cachedStatus
+	stGen   map[string]uint64       // per node, how many power actions have ended
 	stRead  core.SharedRead[Status] // reads of one node's status share a provider call
 
 	audit func() core.AuditLog // nil, or returning nil, when there is no audit log
@@ -292,6 +293,7 @@ func (m *Module) act(action string) http.HandlerFunc {
 			fn = p.Stop
 		}
 		prev, cur, err := safeAct(ctx, fn, t)
+		m.forgetStatus(t.ID) // a failed action may have taken effect all the same
 		if err != nil {
 			m.record(req, audit, t.ID, failureClass(err))
 		} else {

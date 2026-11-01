@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,16 +64,22 @@ func (m *Module) attentionStatuses(ctx context.Context, ts []Target) map[string]
 }
 
 // readStatus asks the provider now, sharing a call already running for the node, and leaves the answer for Attention.
-// A caller that leaves says nothing about the node: it gets an error status and nothing is cached for it.
+// A caller that leaves says nothing about the node: it gets an error status and nothing is cached for it. The
+// generation is part of the key, so a read older than a power action is neither joined nor cached after it.
 func (m *Module) readStatus(ctx context.Context, t Target) Status {
-	st, err := m.stRead.Do(ctx, t.ID, func(c context.Context) (Status, error) {
+	m.stMu.Lock()
+	gen := m.stGen[t.ID]
+	m.stMu.Unlock()
+	st, err := m.stRead.Do(ctx, t.ID+"#"+strconv.FormatUint(gen, 10), func(c context.Context) (Status, error) {
 		st := m.statusOf(c, t)
 		if t.Provider != "" {
 			m.stMu.Lock()
-			if m.stCache == nil {
-				m.stCache = map[string]cachedStatus{}
+			if m.stGen[t.ID] == gen {
+				if m.stCache == nil {
+					m.stCache = map[string]cachedStatus{}
+				}
+				m.stCache[t.ID] = cachedStatus{at: m.clock(), st: st}
 			}
-			m.stCache[t.ID] = cachedStatus{at: m.clock(), st: st}
 			m.stMu.Unlock()
 		}
 		return st, nil
@@ -81,6 +88,17 @@ func (m *Module) readStatus(ctx context.Context, t Target) Status {
 		return Status{"status": "error", "detail": "timed out: " + err.Error()}
 	}
 	return st
+}
+
+// forgetStatus drops what is known of a node after a power action, and makes any read still running older than it.
+func (m *Module) forgetStatus(id string) {
+	m.stMu.Lock()
+	defer m.stMu.Unlock()
+	if m.stGen == nil {
+		m.stGen = map[string]uint64{}
+	}
+	m.stGen[id]++
+	delete(m.stCache, id)
 }
 
 func isRunning(st Status) bool {

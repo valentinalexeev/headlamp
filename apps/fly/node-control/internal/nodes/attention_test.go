@@ -248,6 +248,94 @@ func TestNodesConcurrentReadsShareOneProviderCall(t *testing.T) {
 	}
 }
 
+// powerModule has one node, online on the tailnet, whose provider answers with stat and fails actions with actErr.
+func powerModule(t *testing.T, stat func(ctx context.Context) (Status, error), actErr error) *Module {
+	t.Helper()
+	p := &fakeProvider{
+		stat: func(ctx context.Context, _ Target) (Status, error) { return stat(ctx) },
+		act:  func(string, Target) (string, string, error) { return "RUNNING", "STOPPED", actErr },
+	}
+	cfg, err := ParseConfig([]byte(`{"nodes":{"exit-a":{"provider":"yandex","yandex":{"instance_id":"X"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(cfg, fakeSrc{ns: []headscale.Node{hsNode("exit-a", true)}}, map[string]Provider{"yandex": p}).(*Module)
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now } // the clock stands still: everything here is within the cache's TTL
+	return m
+}
+
+func postStop(m *Module) {
+	req := httptest.NewRequest("POST", "/nodes/exit-a/stop", nil)
+	req.SetPathValue("id", "exit-a")
+	m.act("stop")(httptest.NewRecorder(), req)
+}
+
+// A node stopped from the console goes offline at once; a remembered "running" must not call that a failure. A failed
+// action may have taken effect all the same, so it drops the remembered status too.
+func TestNodesAttentionForgetsStatusAfterPowerAction(t *testing.T) {
+	for name, actErr := range map[string]error{"succeeded": nil, "failed": errors.New("provider down")} {
+		t.Run(name, func(t *testing.T) {
+			var word atomic.Value
+			word.Store("RUNNING")
+			m := powerModule(t, func(context.Context) (Status, error) { return Status{"status": word.Load().(string)}, nil }, actErr)
+			if items, _, err := m.Attention(context.Background(), "alice@"); err != nil || len(items) != 0 {
+				t.Fatalf("%+v %v", items, err)
+			}
+			word.Store("STOPPED")
+			postStop(m)
+			m.src = fakeSrc{ns: []headscale.Node{hsNode("exit-a", false)}}
+			if items, _, err := m.Attention(context.Background(), "alice@"); err != nil || len(items) != 0 {
+				t.Fatalf("a stopped node raised %+v %v", items, err)
+			}
+		})
+	}
+}
+
+// A read that began before the action may end after it: nobody may be given its answer from then on.
+func TestNodesAttentionIgnoresReadOlderThanPowerAction(t *testing.T) {
+	var calls atomic.Int32
+	entered, release := make(chan struct{}), make(chan struct{})
+	m := powerModule(t, func(context.Context) (Status, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+			return Status{"status": "RUNNING"}, nil
+		}
+		return Status{"status": "STOPPED"}, nil
+	}, nil)
+	old := make(chan struct{})
+	go func() {
+		m.status(httptest.NewRecorder(), httptest.NewRequest("GET", "/status", nil))
+		close(old)
+	}()
+	<-entered
+	postStop(m)
+	m.src = fakeSrc{ns: []headscale.Node{hsNode("exit-a", false)}}
+
+	done := make(chan []core.AttentionItem, 1)
+	go func() {
+		items, _, _ := m.Attention(context.Background(), "alice@")
+		done <- items
+	}()
+	select {
+	case items := <-done:
+		if len(items) != 0 {
+			t.Errorf("after the action: %+v", items)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("Attention joined the read older than the action")
+	}
+	close(release)
+	<-old
+	if items, _, err := m.Attention(context.Background(), "alice@"); err != nil || len(items) != 0 {
+		t.Fatalf("the older read went back into the cache: %+v %v", items, err)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("%d provider calls, want 2", n)
+	}
+}
+
 var (
 	_ core.ActivitySource = (*Module)(nil)
 	_ core.SearchSource   = (*Module)(nil)

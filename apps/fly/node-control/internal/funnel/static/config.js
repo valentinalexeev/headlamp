@@ -2,7 +2,7 @@
 // from the network goes in through textContent only; markup is never built from strings.
 //
 // Secrets: a publisher key exists only in the "New key" panel, right after it was minted. It is never put in a
-// URL, storage, an anchor or a table row; Done, choosing another namespace and leaving the page remove it.
+// URL, storage, an anchor or a table row; Done, its namespace going away and leaving the page remove it.
 (function () {
   'use strict';
   var hl = window.hl;
@@ -380,7 +380,6 @@
 
     function select(name) {
       if (name === st.sel) { return; }
-      clearSecrets();
       closeMintPanel();
       st.sel = name;
       st.keys = [];
@@ -566,7 +565,8 @@
     }
 
     // showSecret adds the key to the side panel, the only place the text lives. A key is shown once, so another one
-    // arriving leaves it there; its own Done, choosing another namespace or leaving the page removes it.
+    // arriving or a change of selection leaves it there, and its panel names its namespace. Its own Done, its namespace
+    // going away or leaving the page removes it.
     function showSecret(key, ns) {
       var root = hl.el('div', 'panel');
       root.setAttribute('role', 'group');

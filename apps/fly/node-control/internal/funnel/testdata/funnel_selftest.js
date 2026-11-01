@@ -569,8 +569,11 @@ const cellText = (tr, i) => tr.children[i].textContent;
     await flush();
     assert.ok(els.side.textContent.includes(KEY));
     ctrl.select('');
-    assert.ok(!els.side.textContent.includes(KEY), 'gone when the selection changes');
+    assert.ok(els.side.textContent.includes(KEY), 'choosing another namespace keeps it: it is shown only once');
+    assert.ok(/for lab/.test(els.side.textContent), 'and it names its namespace');
     assert.strictEqual(els.keys.hidden, true);
+    buttonNamed(els.side, 'Done').click();
+    assert.ok(!els.side.textContent.includes(KEY));
 
     // expiring a key asks first
     ctrl.select('lab');

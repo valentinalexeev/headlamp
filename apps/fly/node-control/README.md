@@ -246,7 +246,10 @@ active bridge and the phone profile lists them all.
   `short_id`, `uuids` (required, see below). Optional: `sni` (default `host`), `port` (default 443),
   `agent_url` (`http(s)://host:port`; without it the first entry uses `AGENT_URL` and the others are found through
   headscale as the `tag:ingress` node carrying the entry's name, agent port 9000), `token_env` (name of the token
-  variable, `^[A-Z][A-Z0-9_]{0,63}$`; default `AGENT_TOKEN_<NAME>`, and for the first entry also `AGENT_TOKEN`).
+  variable, `^[A-Z][A-Z0-9_]{0,63}$`; default `AGENT_TOKEN_<NAME>`, and for the first entry also `AGENT_TOKEN`),
+  `node` (tailnet name of the machine the bridge runs on, a lowercase DNS name; needed when it differs from `name`,
+  because the stopped check, the online flag and the Nodes page otherwise match the bridge by name), `intermittent`
+  (`true` or `false`, default `false`; see "Intermittent bridges").
   `sni`, `short_id` and `public_key` must equal the `reality-ingress` role's `reality_sni`, `reality_short_id` and
   the public half of `reality_private_key` (`xray x25519 -i <private>`); `port` must equal its `ingress_listen_port`.
 - `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>`
@@ -257,6 +260,19 @@ active bridge and the phone profile lists them all.
 - The old single-host file (`host`, `public_key`, `short_id`, `sni`, `port` at the top level, no `ingresses`) still
   loads as one bridge named `default` with `"uuids": "base"`, and uses `AGENT_TOKEN`. Mixing the two shapes is an
   error.
+
+### Intermittent bridges
+
+`"intermittent": true` is for a bridge that is expected to come and go. While its agent is `unreachable`, Attention
+shows an info item instead of a critical one, and its row on the Nodes page has no At risk state and does not count
+towards the lamp. Every other sync failure (`unauthorized`, `rejected`, `conflict`, `error`) stays critical, since a
+reachable agent that refuses credentials is a real problem.
+
+**The risk:** unreachable over the tailnet does not prove the bridge stopped serving clients. Its tailnet connection
+can be down while its front still accepts connections, and then revocations and extensions made meanwhile are not in
+effect on it: a revoked device may keep working there until the agent answers again. Only mark a bridge intermittent
+if you accept that for it. A bridge stopped at its provider needs no such setting: it serves nobody, and it is
+already an info item.
 
 ### Credentials per bridge (`uuids`)
 
@@ -362,7 +378,7 @@ Adding a bridge, step by step:
 
 - `GET /enroll/ingresses` returns one row per bridge (`name`, `host`, `source`, `approval`, `active`, `approved`,
   `fingerprint`, the key, short id and machine key prefixes, `node_id`, `address`, `hostname`, `given_name`, `online`,
-  `sync`, `detail`, `aliases`) and, for a discovered bridge that has an approval, what that approval pinned:
+  `sync`, `detail`, `aliases`, `node`, `intermittent`) and, for a discovered bridge that has an approval, what that approval pinned:
   `approved_fingerprint`, `approved_node_id` and `approved_machine_key_prefix`. The review page (`/enroll/approve`)
   compares these with the values the bridge publishes now, so a `changed` bridge shows exactly what differs before it
   is approved again. The store keeps only these three, so nothing else can be compared.

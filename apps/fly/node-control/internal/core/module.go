@@ -89,6 +89,9 @@ type AttentionItem struct {
 	Deadline    time.Time      `json:"deadline,omitzero"`     // set for "timed"
 	AppliedAt   time.Time      `json:"applied_at,omitzero"`   // set for a policy change
 	ChangeID    int64          `json:"change_id,omitempty"`   // set for a policy change
+	// AckKey is what the item means, for matching an acknowledgement: when it changes, the acknowledgement ends. A
+	// count or an age in the title is not part of it; a different reason for the same ID is. Empty means ID and level.
+	AckKey string `json:"-"`
 }
 
 // SystemLine is the one-line health of a module. State is "ok", "waiting", "critical", "unknown" or "off".

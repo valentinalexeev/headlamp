@@ -85,7 +85,8 @@
   // buildRow: one machine. s: { id, cfg, st, tn, ing, run }; cfg is null for a machine that is not in
   // nodes.json. Precedence of the state: out of sync, then running but offline, then an approval that
   // waits, then what the provider and the tailnet say. A sync waiting for a machine that is not running at its
-  // provider is no risk, as the Attention item of the bridge says too.
+  // provider is no risk, as the Attention item of the bridge says too, nor is an intermittent bridge whose agent is
+  // unreachable.
   function buildRow(s, now) {
     var managed = !!s.cfg;
     var cfg = s.cfg || {};
@@ -118,8 +119,9 @@
     }
 
     var syncWaits = !!sync && !!sync.pending && (kind === 'stopped' || kind === 'transition');
+    var syncAway = !!sync && !!sync.pending && !syncWaits && ing.intermittent === true && sync.state === 'unreachable';
     var level, state, detail = '', explain = '';
-    if (sync && sync.pending && !syncWaits) {
+    if (sync && sync.pending && !syncWaits && !syncAway) {
       var since = unixIso(sync.since);
       var failed = since ? hl.relTime(since, now) : '';
       level = 'crit'; state = 'Out of sync';
@@ -160,6 +162,11 @@
     }
 
     if (syncWaits) { explain = 'Revocations and extensions reach it when it is started again.'; }
+    if (syncAway && (level === 'ok' || level === 'off')) {
+      detail = 'Sync pending';
+      explain = 'Marked intermittent. Its agent is unreachable, which does not prove it stopped serving clients, so ' +
+        'revocations and extensions may not be in effect on it. Retrying every 5 minutes.';
+    }
 
     var cloud = 'Not managed here';
     if (managed) {
@@ -199,8 +206,8 @@
   // mergeNodes: nodes is the "nodes" object of /nodes.json, status is /status, tailnet is /tailnet/status
   // (null when it could not be read), ingresses the list from /enroll/ingresses (null when enrolment is
   // off) and sessions the "nodes" list of /sessions.json (null when there are no runners). A bridge joins
-  // the node whose tailnet name its given_name or name equals; one without such a node is a row of its
-  // own that cannot be powered. opts.now is for tests.
+  // the node its entry names or, without one, the node whose tailnet name its given_name or name equals; one
+  // without such a node is a row of its own that cannot be powered. opts.now is for tests.
   function mergeNodes(nodes, status, tailnet, ingresses, sessions, opts) {
     var now = opts && typeof opts.now === 'number' ? opts.now : Date.now();
     nodes = obj(nodes); status = obj(status);
@@ -223,8 +230,11 @@
       var cfg = obj(nodes[id]);
       var tname = str(cfg.tailnetName) || id;
       var ing = null, run = null;
+      for (var n = 0; n < ings.length && !ing; n++) {
+        if (!usedIng[n] && str(ings[n].node) && ings[n].node === tname.toLowerCase()) { usedIng[n] = true; ing = ings[n]; }
+      }
       for (var i = 0; i < ings.length && !ing; i++) {
-        if (!usedIng[i] && (ings[i].given_name === tname || ings[i].name === tname)) { usedIng[i] = true; ing = ings[i]; }
+        if (!usedIng[i] && !str(ings[i].node) && (ings[i].given_name === tname || ings[i].name === tname)) { usedIng[i] = true; ing = ings[i]; }
       }
       for (var j = 0; j < runs.length && !run; j++) {
         if (!usedRun[j] && (runs[j].id === tname || runs[j].name === tname || runs[j].id === id)) { usedRun[j] = true; run = runs[j]; }

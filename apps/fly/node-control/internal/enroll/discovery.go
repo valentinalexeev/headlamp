@@ -96,6 +96,8 @@ type IngressView struct {
 	Sync           *SyncSnapshot `json:"sync"`
 	Detail         string        `json:"detail,omitempty"`
 	Aliases        []string      `json:"aliases,omitempty"` // other names of the same machine: its discovered node
+	Node           string        `json:"node,omitempty"`    // the machine this bridge runs on, when its entry names one
+	Intermittent   bool          `json:"intermittent,omitempty"`
 	// What the stored approval pinned, for a discovered bridge that has one. The store keeps these three only
 	// (not the key or short id), so a review of a changed identity can compare these and no more.
 	ApprovedFingerprint    string `json:"approved_fingerprint,omitempty"`
@@ -711,8 +713,13 @@ func (r *Registry) buildLocked() Current {
 		cur.Targets = append(cur.Targets, t)
 		hosts[t.Ingress.Host] = true
 		snap := t.State.Snapshot()
+		onNode := t.Name
+		if t.Ingress.Node != "" {
+			onNode = t.Ingress.Node
+		}
 		cur.Views = append(cur.Views, IngressView{Name: t.Name, Host: t.Ingress.Host, Source: "configured",
-			Approval: stConfigured, Active: true, Online: r.onlineLocked(t.Name), Sync: &snap})
+			Approval: stConfigured, Active: true, Online: r.onlineLocked(onNode), Sync: &snap,
+			Node: t.Ingress.Node, Intermittent: t.Ingress.Intermittent})
 	}
 	cur.SyncTargets = cur.Targets
 	if r.discoveryOff != "" {

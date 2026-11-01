@@ -87,9 +87,9 @@
     return v.toFixed(1) + ' ' + units[i];
   }
 
-  // plain: a label from outside, safe to show. Control, bidi-override, zero-width and line
+  // plain: a label from outside, safe to show. Control, soft-hyphen, bidi-override, zero-width and line
   // separator characters are dropped, then the text is cut to n characters.
-  var UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+  var UNSAFE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
   function plain(s, n) {
     if (s === undefined || s === null) { return ''; }
     var chars = Array.from(String(s).replace(UNSAFE, ''));

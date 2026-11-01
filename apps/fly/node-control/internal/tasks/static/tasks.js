@@ -70,7 +70,7 @@
       if (t.running && rank < 2) { word += ' (running)'; }
       rows.push({
         id: t.id, rank: rank, level: level, word: word, streak: streak, running: !!t.running, stale: !!t.stale,
-        passing: streak === 0 && !t.stale, script: label(t.script, 100), target: targetText(t.target),
+        passing: streak === 0 && !t.stale && !!t.last_success, script: label(t.script, 100), target: targetText(t.target),
         every: label(t.every, 40), lastSuccess: t.last_success ? String(t.last_success) : '',
         nextRun: t.next_run ? String(t.next_run) : '', result: t.last_result
       });

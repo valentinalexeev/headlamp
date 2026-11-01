@@ -54,7 +54,9 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 		runs := st.Runs(id)
 		v := buildTaskView(now, id, cfg.Tasks[id], st.State(id), runs, active)
 		if v.Streak == 0 && !v.Stale {
-			passing++
+			if v.LastSuccess != nil { // a task with no success yet has not passed, nor failed
+				passing++
+			}
 			continue
 		}
 		it := core.AttentionItem{ID: "task-" + id, Source: "tasks", Level: core.LevelWaiting, ActionLabel: "Open task", ActionPath: taskPath(id)}

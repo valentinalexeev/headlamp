@@ -57,6 +57,13 @@
     return out;
   }
 
+  // differsText: the values of differences(v) as words: "a different node", "a different fingerprint and node".
+  function differsText(diffs) {
+    var names = diffs.map(function (d) { return d[0].toLowerCase(); });
+    var last = names.pop();
+    return 'a different ' + (names.length ? names.join(', ') + ' and ' : '') + last;
+  }
+
   // mount wires the page's elements. deps.go(url) leaves the page after an approval.
   function mount(els, deps) {
     deps = deps || {};
@@ -135,8 +142,9 @@
         if (changed) {
           var head = hl.status('crit', name + ' changed its host identity');
           els.changed.appendChild(head);
-          els.changed.appendChild(hl.el('p', 't2 small', name + ' was approved with a different fingerprint. If you did not rebuild this host, treat it as compromised and do not approve. The changed values are listed next to the approved ones.'));
           var diffs = differences(v);
+          els.changed.appendChild(hl.el('p', 't2 small', name + (diffs.length ? ' was approved with ' + differsText(diffs) : ' no longer matches what was approved') +
+            '. If you did not rebuild this host, treat it as compromised and do not approve.' + (diffs.length ? ' The changed values are listed next to the approved ones.' : '')));
           if (diffs.length) {
             var dl = hl.el('dl', 'kv');
             diffs.forEach(function (d) {

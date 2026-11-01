@@ -183,6 +183,28 @@ const fieldValue = (els, label) => {
     assert.deepStrictEqual(went, ['/nodes']);
   }
 
+  // changedIdentityNamesWhatDiffers: the sentence says which values differ, not always the fingerprint
+  {
+    const sentence = async (extra) => {
+      fetchReply = () => json({ ingresses: [bridge(Object.assign({ approval: 'changed', approved: true, approved_fingerprint: '7e3b91c40fa2d86e15b7c3409a1d62ef', approved_node_id: 21, approved_machine_key_prefix: 'mkey:4f1a9c02e7' }, extra))] });
+      const els = approveEls();
+      await approve.mount(els, {}).load('bridge-3');
+      return els.changed.textContent;
+    };
+    const FP = { approved_fingerprint: '1111aaaa' }, NODE = { approved_node_id: 18 }, MK = { approved_machine_key_prefix: 'mkey:0000000000' };
+    assert.ok(/bridge-3 was approved with a different node\. /.test(await sentence(NODE)));
+    assert.ok(/bridge-3 was approved with a different machine key\. /.test(await sentence(MK)));
+    assert.ok(/bridge-3 was approved with a different fingerprint\. /.test(await sentence(FP)));
+    assert.ok(/a different node and machine key\. /.test(await sentence(Object.assign({}, NODE, MK))));
+    assert.ok(/a different fingerprint, node and machine key\. /.test(await sentence(Object.assign({}, FP, NODE, MK))));
+    assert.ok(!/different fingerprint/.test(await sentence(NODE)), 'the fingerprint did not change');
+    // an approval from before node pinning has nothing to compare: nothing is claimed to differ or to be listed
+    const old = await sentence({ approved_node_id: 0, approved_machine_key_prefix: '', detail: 'approval predates node pinning, approve again' });
+    assert.ok(/bridge-3 no longer matches what was approved\. /.test(old), old);
+    assert.ok(!/was approved with a different/.test(old) && !/listed next to/.test(old), old);
+    assert.ok(/treat it as compromised/.test(old));
+  }
+
   // not found, approved and not approvable
   {
     fetchReply = () => json({ ingresses: [bridge()] });

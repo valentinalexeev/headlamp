@@ -102,10 +102,21 @@
     return 'request failed (HTTP ' + status + ')';
   }
 
+  // API_TIMEOUT_MS is past the server's own 60 s write limit, so only a request the server can no longer answer ends here.
+  var API_TIMEOUT_MS = 70000;
+
   // api resolves with the parsed JSON body (null when empty) and rejects with an Error that
-  // carries .status and a readable message. Cookies of this origin only; no secrets in the URL.
-  function api(method, url, body) {
+  // carries .status and a readable message, or .timeout when the request never ended. Cookies of this
+  // origin only; no secrets in the URL. timeoutMs is for tests.
+  function api(method, url, body, timeoutMs) {
     var opts = { method: method, credentials: 'same-origin', headers: { Accept: 'application/json' } };
+    var abort = typeof AbortController === 'function' ? new AbortController() : null;
+    var timedOut = false;
+    var timer = null;
+    if (abort) {
+      opts.signal = abort.signal;
+      timer = setTimeout(function () { timedOut = true; abort.abort(); }, timeoutMs || API_TIMEOUT_MS);
+    }
     if (body !== undefined && body !== null) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
@@ -122,6 +133,15 @@
         }
         return data;
       });
+    }).then(function (data) {
+      clearTimeout(timer);
+      return data;
+    }, function (e) {
+      clearTimeout(timer);
+      if (!timedOut) { throw e; }
+      var err = new Error('The request timed out. It may still have gone through, so check before trying again.');
+      err.timeout = true;
+      throw err;
     });
   }
 

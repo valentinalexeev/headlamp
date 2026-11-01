@@ -8,7 +8,8 @@
   var URL_BASE = '/_activity.json';
   var POLL_MS = 30000;
   var LIMIT = 200;
-  var SOURCES = ['All', 'Nodes', 'Devices', 'Funnel', 'Tasks', 'Policy'];
+  // Pages in the nav that are not a source of activity entries.
+  var NOT_SOURCES = ['Overview', 'Activity'];
   // The sentences are shared with the Overview page: /_ui/activity-text.js, loaded first.
   var describe = hl.activityText ? hl.activityText.describe : function (e) { return hl.plain(e && e.action, 100); };
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -17,9 +18,23 @@
   function two(n) { return (n < 10 ? '0' : '') + n; }
   function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
 
-  // sourceOf: the filter named by the URL, or "All" for anything that is not one of the chips.
-  function sourceOf(param) {
-    return SOURCES.indexOf(param) > 0 ? param : 'All';
+  // sourceOf: the filter named by the URL, or "All" for anything that is not one of the sources. Without a list
+  // (the nav has not answered yet) a plain name is taken provisionally and checked once the list is known.
+  function sourceOf(param, list) {
+    if (typeof param !== 'string' || param === '' || param === 'All') { return 'All'; }
+    if (!Array.isArray(list)) { return param.length <= 40 ? param : 'All'; }
+    return list.indexOf(param) >= 0 ? param : 'All';
+  }
+
+  // sourcesFromNav: the entries of /_nav.json that can have activity, in nav order. Overview and Activity
+  // are pages about the others, not sources.
+  function sourcesFromNav(nav) {
+    var out = [];
+    arr(nav).forEach(function (it) {
+      var label = it && typeof it.label === 'string' ? hl.plain(it.label, 40) : '';
+      if (label && NOT_SOURCES.indexOf(label) < 0 && out.indexOf(label) < 0) { out.push(label); }
+    });
+    return out;
   }
 
   // fmtWhen: "Today 14:31", "Yesterday 18:40", else "Oct 29 16:22" (with the year when it is not this one). Local time.
@@ -60,16 +75,29 @@
     var now = opts.now || function () { return Date.now(); };
     var getParam = opts.getParam || function (k) { return hl.queryParam(k); };
     var setParam = opts.setParam || function (k, v) { hl.setQueryParam(k, v); };
-    var st = { source: sourceOf(getParam('source')), data: null, failed: false, token: 0, chips: [] };
+    var st = { source: sourceOf(getParam('source'), opts.sources), sources: arr(opts.sources).slice(), seen: [],
+      data: null, failed: false, token: 0, chips: [], shown: '' };
+
+    // names: the chips that would match something: the sources the nav lists, plus any source an entry has
+    // come from, plus the one chosen now.
+    function names() {
+      var out = ['All'];
+      st.sources.concat(st.seen).forEach(function (n) { if (out.indexOf(n) < 0) { out.push(n); } });
+      if (out.indexOf(st.source) < 0) { out.push(st.source); }
+      return out;
+    }
 
     function renderChips() {
-      if (!st.chips.length) {
-        SOURCES.forEach(function (name) {
+      var list = names();
+      if (list.join('\n') !== st.shown) {
+        st.shown = list.join('\n');
+        clear(els.chips);
+        st.chips = list.map(function (name) {
           var b = hl.el('button', 'chip', name);
           b.setAttribute('type', 'button');
           b.addEventListener('click', function () { ctl.pick(name); });
           els.chips.appendChild(b);
-          st.chips.push({ name: name, el: b });
+          return { name: name, el: b };
         });
       }
       st.chips.forEach(function (c) {
@@ -80,9 +108,13 @@
     }
 
     function render() {
-      renderChips();
       var data = st.data;
       var entries = arr(data && data.entries).filter(function (e) { return e; });
+      entries.forEach(function (e) {
+        var src = hl.plain(e.source, 100);
+        if (src && st.seen.indexOf(src) < 0) { st.seen.push(src); }
+      });
+      renderChips();
       var notes = notices(data);
       els.notice.hidden = notes.length === 0;
       els.notice.textContent = notes.join(' ');
@@ -130,8 +162,21 @@
           render();
         });
       },
+      // setSources gives the sources the nav lists. A source chosen by the URL that is not one of them is dropped.
+      setSources: function (list) {
+        st.sources = arr(list).slice();
+        if (st.source !== 'All' && names().indexOf(st.source) >= 0 && st.sources.indexOf(st.source) < 0 && st.seen.indexOf(st.source) < 0) {
+          st.source = 'All';
+          setParam('source', '');
+          st.data = null;
+          render();
+          return ctl.refresh();
+        }
+        render();
+        return Promise.resolve();
+      },
       pick: function (name) {
-        var next = sourceOf(name);
+        var next = sourceOf(name, names());
         if (next === st.source) { return Promise.resolve(); }
         st.source = next;
         st.data = null;
@@ -152,10 +197,13 @@
       emptytext: $('emptytext'), table: $('table'), rows: $('rows')
     });
     ctl.render();
+    // The chips follow the nav: a source the console does not have gets none. If the nav does not answer, the
+    // chips come from the entries that arrive.
+    hl.api('GET', '/_nav.json').then(function (nav) { return ctl.setSources(sourcesFromNav(nav)); }, function () {});
     var poller = hl.poll(function () { return ctl.refresh(); }, POLL_MS);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) { poller.now(); } });
   }
 
-  hl.activity = { describe: describe, fmtWhen: fmtWhen, sourceOf: sourceOf, notices: notices, emptyText: emptyText, create: create, init: init };
+  hl.activity = { describe: describe, fmtWhen: fmtWhen, sourceOf: sourceOf, sourcesFromNav: sourcesFromNav, notices: notices, emptyText: emptyText, create: create, init: init };
   init();
 })();

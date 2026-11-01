@@ -73,13 +73,15 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
 
   // sourceFilterInURL
   {
-    assert.strictEqual(act.sourceOf('Funnel'), 'Funnel');
-    assert.strictEqual(act.sourceOf('All'), 'All');
-    assert.strictEqual(act.sourceOf('Bogus'), 'All');
-    assert.strictEqual(act.sourceOf(null), 'All');
+    const LIST = ['Nodes', 'Devices', 'Funnel', 'Tasks', 'Policy'];
+    assert.strictEqual(act.sourceOf('Funnel', LIST), 'Funnel');
+    assert.strictEqual(act.sourceOf('All', LIST), 'All');
+    assert.strictEqual(act.sourceOf('Bogus', LIST), 'All');
+    assert.strictEqual(act.sourceOf(null, LIST), 'All');
+    assert.strictEqual(act.sourceOf('Funnel'), 'Funnel', 'taken provisionally until the nav answers');
     const calls = [], params = [];
     const e = els();
-    const ctl = act.create(e, { now: () => NOW, getParam: () => 'Devices', setParam: (k, v) => params.push([k, v]),
+    const ctl = act.create(e, { now: () => NOW, sources: LIST, getParam: () => 'Devices', setParam: (k, v) => params.push([k, v]),
       api: async (m, u) => { calls.push(m + ' ' + u); return { entries: [] }; } });
     assert.strictEqual(ctl.state.source, 'Devices');
     await ctl.refresh();
@@ -97,12 +99,35 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
     let release;
     const gate = new Promise((r) => { release = r; });
     let n = 0;
-    const slow = act.create(els(), { now: () => NOW, getParam: () => null, setParam() {},
+    const slow = act.create(els(), { now: () => NOW, sources: LIST, getParam: () => null, setParam() {},
       api: async () => { n += 1; if (n === 1) { await gate; return { entries: [{ at: at(31, 9, 0), actor: 'a', source: 'Nodes', action: 'x', detail: '' }] }; } return { entries: [] }; } });
     const first = slow.refresh();
     await slow.pick('Tasks');
     release(); await first;
     assert.strictEqual(slow.state.data.entries.length, 0);
+  }
+
+  // chips only for what would match something
+  {
+    const nav = [{ label: 'Overview', path: '/' }, { label: 'Nodes', path: '/nodes' }, { label: 'Devices', path: '/enroll' }, { label: 'Policy', path: '/policy' }, { label: 'Activity', path: '/activity' }];
+    assert.deepStrictEqual(act.sourcesFromNav(nav), ['Nodes', 'Devices', 'Policy']);
+    assert.deepStrictEqual(act.sourcesFromNav(null), []);
+    const params = [];
+    let want = 'Funnel'; // a URL naming a source this console does not have
+    const e = els();
+    const ctl = act.create(e, { now: () => NOW, getParam: () => want, setParam: (k, v) => params.push([k, v]), api: async () => ({ entries: [] }) });
+    assert.strictEqual(ctl.state.source, 'Funnel');
+    await ctl.setSources(act.sourcesFromNav(nav));
+    assert.strictEqual(ctl.state.source, 'All');
+    assert.deepStrictEqual(params, [['source', '']]);
+    assert.deepStrictEqual(ctl.state.chips.map((c) => c.name), ['All', 'Nodes', 'Devices', 'Policy']);
+    // no nav: chips come from the entries seen
+    const f = els();
+    const c2 = act.create(f, { now: () => NOW, getParam: () => null, setParam() {}, api: async () => ({ entries: [{ at: at(31, 1, 0), actor: 'a', source: 'Tasks', action: 'x', detail: '' }] }) });
+    c2.render();
+    assert.deepStrictEqual(c2.state.chips.map((c) => c.name), ['All']);
+    await c2.refresh();
+    assert.deepStrictEqual(c2.state.chips.map((c) => c.name), ['All', 'Tasks']);
   }
 
   // rows
@@ -151,7 +176,7 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
   // emptyState
   {
     const e = els();
-    const ctl = act.create(e, { now: () => NOW, getParam: () => null, setParam() {}, api: async () => ({ entries: [], partial: false }) });
+    const ctl = act.create(e, { now: () => NOW, sources: ['Funnel'], getParam: () => null, setParam() {}, api: async () => ({ entries: [], partial: false }) });
     ctl.render();
     assert.strictEqual(e.empty.hidden, true, 'nothing is claimed before the first answer');
     await ctl.refresh();

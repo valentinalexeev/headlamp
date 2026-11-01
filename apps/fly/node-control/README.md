@@ -213,39 +213,26 @@ Start and stop are idempotent. A provider failure shows as `error` on that node 
 
 ## Enrolment (optional)
 
-Setting `ENROLL_DB` turns on user enrolment for a REALITY bridge proxy. The binary then serves a second, public
-enrolment listener next to the admin app. Both bind to the tailnet address only:
+Set `ENROLL_DB` to turn on user enrolment for a REALITY bridge proxy. The binary then serves a second, public enrolment listener next to the admin app. Both bind to the tailnet address only:
 
 | port | serves | reachable by |
 |---|---|---|
 | 80 | admin app, including the `/enroll` admin pages | operators on the tailnet |
 | 8081 | public enrolment | the bridge proxy only (restrict it in the tailnet ACL) |
 
-Environment (secrets via Fly secrets, the rest in `fly.toml`):
+Environment (secrets through Fly secrets, the rest in `fly.toml`):
 
-- `ENROLL_DB`: path of the SQLite database: `/var/lib/tailscale/enroll.db`. It must live on a Fly volume or it is
-  lost on deploy, and a Fly Machine mounts only one volume, so use the existing `tailscale_state` volume (mounted
-  at `/var/lib/tailscale`, see above); do not create a second one. That volume's snapshots then also hold the
-  enrolment database (device names and owners, not the subscription secrets, which are derived from
-  `ENROLL_SECRET_KEY`); treat them accordingly. Back it up with `sqlite3 ... .backup` before risky changes.
-- `ENROLL_REDIS=1`: store the enrolment data in Redis instead (next subsection). `ENROLL_DB` is then not used.
-- `ENROLL_CONFIG`: path of a JSON file describing the bridge nodes (shape below). Keep the real file in your
-  private repo and overlay it.
-- `ENROLL_SECRET_KEY`: at least 16 bytes; derives the subscription secrets and the per-bridge credentials. Changing
-  it invalidates both (see "Credentials per bridge").
-- `AGENT_URL`, `AGENT_TOKEN`: address and bearer token of the first bridge's agent (the old single-host setup).
-  Further bridges use `agent_url` in their entry (or are found through headscale) and `AGENT_TOKEN_<NAME>`.
+- `ENROLL_DB`: the path of the SQLite database: `/var/lib/tailscale/enroll.db`. It must be on a Fly volume, or a deploy removes it. A Fly Machine mounts only one volume, so use the current `tailscale_state` volume (mounted at `/var/lib/tailscale`, see above). Do not create a second volume. The snapshots of that volume then also hold the enrolment database. The database holds device names and owners, but not the subscription secrets, which the app derives from `ENROLL_SECRET_KEY`. Treat the snapshots accordingly. Back up the database with `sqlite3 ... .backup` before risky changes.
+- `ENROLL_REDIS=1`: keep the enrolment data in Redis (next subsection). The app then does not use `ENROLL_DB`.
+- `ENROLL_CONFIG`: the path of a JSON file that describes the bridge nodes (shape below). Keep the real file in your private repo and overlay it.
+- `ENROLL_SECRET_KEY`: at least 16 bytes. It derives the subscription secrets and the per-bridge credentials. A change to it invalidates both (see "Credentials per bridge").
+- `AGENT_URL`, `AGENT_TOKEN`: the address and bearer token of the agent of the first bridge (the old single-host setup). Further bridges use `agent_url` in their entry (or node-control finds them through headscale) and `AGENT_TOKEN_<NAME>`.
 
-- `ENROLL_ALLOWED_HOSTS` (optional for the core; required, and must not be a bare `*`, when the policy or tasks module
-  is on): comma-separated Host header values the admin app accepts, for example
-  `node-control.<tailnet-domain>,<tailnet-ip>`. Any other Host gets `400` (the same rules as Starlette's `TrustedHostMiddleware`, applied
-  to the whole admin app on port 80). Set it: it stops a malicious web page from reaching the admin API through DNS
-  rebinding in an operator's browser. List every name/IP you open the page with.
+- `ENROLL_ALLOWED_HOSTS` is optional for the core. It is required, and must not be a bare `*`, when the policy or tasks module is on. It holds comma-separated Host header values that the admin app accepts, for example `node-control.<tailnet-domain>,<tailnet-ip>`. Any other Host gets `400`. These are the same rules as `TrustedHostMiddleware` of Starlette, applied to the whole admin app on port 80. Set it: it stops a malicious web page from access to the admin API through DNS rebinding in the browser of an operator. List every name and IP that you use to open the page.
 
 ### `enroll.json`
 
-One or more bridge nodes. Each entry is a bridge host with its own agent; a device gets a credential on every
-active bridge and the phone profile lists them all.
+The file gives one or more bridge nodes. Each entry is a bridge host with its own agent. A device gets a credential on every active bridge, and the phone profile lists them all.
 
 ```json
 {
@@ -261,109 +248,107 @@ active bridge and the phone profile lists them all.
 }
 ```
 
-- Top level: `ingresses` (1 to 8 entries, required), `link_host` (required with more than one bridge; with one it
-  defaults to that bridge's `host`), `profile_name` (label of the imported profile, default `tunnel`). Unknown keys
-  are an error.
-- Per entry: `name` (`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`, unique), `host` (unique DNS name), `public_key`,
-  `short_id`, `uuids` (required, see below). Optional: `sni` (default `host`), `port` (default 443),
-  `agent_url` (`http(s)://host:port`; without it the first entry uses `AGENT_URL` and the others are found through
-  headscale as the `tag:ingress` node carrying the entry's name, agent port 9000), `token_env` (name of the token
-  variable, `^[A-Z][A-Z0-9_]{0,63}$`; default `AGENT_TOKEN_<NAME>`, and for the first entry also `AGENT_TOKEN`),
-  `node` (tailnet name of the machine the bridge runs on, a lowercase DNS name; needed when it differs from `name`,
-  because the stopped check, the online flag and the Nodes page otherwise match the bridge by name), `intermittent`
-  (`true` or `false`, default `false`; see "Intermittent bridges").
-  `sni`, `short_id` and `public_key` must equal the `reality-ingress` role's `reality_sni`, `reality_short_id` and
-  the public half of `reality_private_key` (`xray x25519 -i <private>`); `port` must equal its `ingress_listen_port`.
-- `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>`
-  and `/e/<token>`, so the name must resolve to a bridge whose front serves it and proxies to node-control's
-  `:8081`, with a certificate for it. Prerequisite: DNS for `link_host` and a working certificate on whichever
-  bridge it points at, before the first device is enrolled. Every bridge's front must be able to serve it, so
-  moving the name to another bridge is enough to fail over.
-- The old single-host file (`host`, `public_key`, `short_id`, `sni`, `port` at the top level, no `ingresses`) still
-  loads as one bridge named `default` with `"uuids": "base"`, and uses `AGENT_TOKEN`. Mixing the two shapes is an
-  error.
+- Top level:
+  - `ingresses`: 1 to 8 entries, required.
+  - `link_host`: required with more than one bridge. With one bridge, the default is the `host` of that bridge.
+  - `profile_name`: the label of the imported profile. The default is `tunnel`.
+  - Unknown keys are an error.
+- Required keys of each entry:
+  - `name`: `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`, unique.
+  - `host`: a unique DNS name.
+  - `public_key`.
+  - `short_id`.
+  - `uuids`: see below.
+- Optional keys of each entry:
+  - `sni`: the default is `host`.
+  - `port`: the default is 443.
+  - `agent_url`: `http(s)://host:port`. Without it, the first entry uses `AGENT_URL`. For the others, the app uses headscale to find the `tag:ingress` node with the name of the entry, agent port 9000.
+  - `token_env`: the name of the token variable, `^[A-Z][A-Z0-9_]{0,63}$`. The default is `AGENT_TOKEN_<NAME>`, and for the first entry also `AGENT_TOKEN`.
+  - `node`: the tailnet name of the machine that runs the bridge, a lowercase DNS name. It is necessary when it is different from `name`. Otherwise, the stopped check, the online flag and the Nodes page match the bridge by name.
+  - `intermittent`: `true` or `false`. The default is `false`. See "Intermittent bridges".
+- `sni`, `short_id` and `public_key` must equal these values of the `reality-ingress` role: `reality_sni`, `reality_short_id` and the public half of `reality_private_key` (`xray x25519 -i <private>`). `port` must equal its `ingress_listen_port`.
+- `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>` and `/e/<token>`. Thus the name must resolve to a bridge whose front serves it and proxies to `:8081` of node-control, with a certificate for it. Prerequisite: before you enrol the first device, make DNS for `link_host` available, and a working certificate on the bridge that it points at. The front of every bridge must be able to serve it, so you can fail over if you move the name to another bridge.
+- The old single-host file has `host`, `public_key`, `short_id`, `sni` and `port` at the top level, and no `ingresses`. It still loads as one bridge with the name `default` and `"uuids": "base"`, and uses `AGENT_TOKEN`. A file with both shapes is an error.
 
 ### Intermittent bridges
 
-`"intermittent": true` is for a bridge that is expected to come and go. While its agent is `unreachable`, Attention
-shows an info item instead of a critical one, and its row on the Nodes page has no At risk state and does not count
-towards the lamp. Every other sync failure (`unauthorized`, `rejected`, `conflict`, `error`) stays critical, since a
-reachable agent that refuses credentials is a real problem.
+`"intermittent": true` is for a bridge that you expect to come and go. While its agent is `unreachable`, Attention shows an info item in place of a critical one. Its row on the Nodes page has no At risk state, and the lamp does not count it. Every other sync failure (`unauthorized`, `rejected`, `conflict`, `error`) stays critical, because a reachable agent that refuses credentials is a real problem.
 
-**The risk:** unreachable over the tailnet does not prove the bridge stopped serving clients. Its tailnet connection
-can be down while its front still accepts connections, and then revocations and extensions made meanwhile are not in
-effect on it: a revoked device may keep working there until the agent answers again. Only mark a bridge intermittent
-if you accept that for it. A bridge stopped at its provider needs no such setting: it serves nobody, and it is
-already an info item.
+> **WARNING:** Mark a bridge as intermittent only if you accept this risk for it. `unreachable` over the tailnet does not prove that the bridge stopped to serve clients. Its tailnet connection can be down while its front still accepts connections. Revocations and extensions that you make during that time are then not in effect on it. A revoked device can continue to work there until the agent answers again.
+
+A bridge that you stopped at its provider does not need this setting. It serves nobody, and it is already an info item.
 
 ### Credentials per bridge (`uuids`)
 
-`uuids` is required on every bridge in the list shape; there is no default, because a value that depended on
-the other entries would change meaning when one is added or removed.
+`uuids` is required on every bridge in the list shape. There is no default, because a value that depends on the other entries would change meaning when you add or remove one.
 
-- `"base"`: the device's stored UUIDs are the credential on this bridge. At most one bridge may use it, the one that
-  exists today.
-- `"derived"`: the credential is computed per bridge and device mode with HMAC-SHA256 keyed by
-  `ENROLL_SECRET_KEY`, so a credential taken from one bridge is useless on the others, and a compromised bridge
-  cannot compute any other bridge's values.
+- `"base"`: the stored UUIDs of the device are the credential on this bridge. At most one bridge can use it: the bridge that exists today.
+- `"derived"`: node-control computes the credential for each bridge and device mode with HMAC-SHA256, with `ENROLL_SECRET_KEY` as the key. Thus a credential from one bridge is useless on the others. A compromised bridge cannot compute the values of any other bridge.
 
-Migration from the single-host file: write the list shape with the existing bridge as an entry with
-`"uuids": "base"` (its name does not matter for `base`, `default` or any other) and every new bridge as `"derived"`.
-Existing phones keep working untouched, because their credential on the old bridge did not change.
+Migration from the single-host file: write the list shape as follows.
+
+1. Write the bridge that exists as an entry with `"uuids": "base"`. Its name does not matter for `base`: use `default` or any other name.
+2. Write every new bridge as `"derived"`.
+
+Phones continue to work without change, because their credential on the old bridge did not change.
 
 Consequences to plan for:
 
-- The bridge NAME is part of a derived credential. Renaming a `derived` bridge rotates its credentials: phones need a
-  new profile. Reordering entries does not change any credential, but the FIRST entry owns the `AGENT_URL` /
-  `AGENT_TOKEN` fallback and the link view (key, short id and sni used for import links), so moving another entry to
-  the top changes which agent those variables reach.
-- Rotating `ENROLL_SECRET_KEY` invalidates the subscription secrets AND every derived credential. Re-publish
-  and re-enrol the profiles. `base` credentials survive.
-- Removing an entry from the file stops syncing to it: that bridge keeps its last credential set, and a later
-  revocation does not reach it. Take the host down or wipe its agent first.
+- The bridge NAME is part of a derived credential. If you rename a `derived` bridge, you rotate its credentials, and phones need a new profile.
+- If you change the order of entries, no credential changes. But the FIRST entry owns the `AGENT_URL` / `AGENT_TOKEN` fallback and the link view (key, short id and sni for import links). Thus, if you move another entry to the top, those variables reach a different agent.
+- A rotation of `ENROLL_SECRET_KEY` invalidates the subscription secrets AND every derived credential. Publish the profiles again and enrol them again. `base` credentials survive.
+- If you remove an entry from the file, the sync to it stops. That bridge keeps its last credential set, and a later revocation does not reach it. Take the host down or wipe its agent first.
 
 ### Sync with the bridge host
 
-Every create/revoke/extend pushes the full credential set to the agent; a reconcile loop retries every 5 minutes.
+Every create, revoke or extend pushes the full credential set to the agent. A reconcile loop tries again every 5 minutes.
 
-Activity (no connection log, no client addresses): each device row shows **Enrolled** (when a one-time link of the device was
-last spent, and how often) and **Last active** (when its traffic last grew). Spending a link marks the device in the same
-step as the spend (one SQLite transaction; one script on Redis). Last active is derived from the traffic totals the agents
-already report: node-control looks every 5 minutes (and at each page load) and records the time when a device's total grew
-since the previous look. The counters reset when xray restarts (the agent restarts it whenever the credential set changes),
-so a total that fell but is above zero also counts as activity since the reset. The first look at a device only seeds the
-baseline, and a look at which a bridge did not answer is skipped (its missing counters would read as a reset). The
-resolution is therefore about 5 minutes, and a device that was active only while node-control was down shows nothing for that
-time. `GET /enroll/devices` rows carry `enrolled_at`, `enrol_count` and `last_active` (unix seconds, 0 = never). SQLite databases
-gain the three columns on open; Redis device records without them read as 0. JSON and SQLite exports and imports carry them.
+Activity (no connection log, no client addresses): each device row shows two values.
 
-Which buttons a row offers depends on its state, so nothing useless is shown: a revoked device only has Delete; an expired
-one has Extend and Revoke; an active one that has never been enrolled has New link, Extend and Revoke; an active one that
-is already enrolled has Extend and Revoke (it has its profile). `POST /enroll/devices/{id}/links` answers `409` for a revoked
-or expired device, because a link for it would be created and never work.
+- **Enrolled** shows when a one-time link of the device was last spent, and how often.
+- **Last active** shows when its traffic last increased.
 
-Deleting: `DELETE /enroll/devices/{id}` (JSON content type, like the other changes) removes a **revoked** device with its
-UUIDs and links for good. An active or merely expired device is refused with `409` ("revoke the device before deleting
-it"), an unknown id with `404`. The id is never issued again. Nothing is pushed to an agent (only active devices are ever
-sent). The `/enroll` page hides revoked devices by default ("Show revoked devices (N)", remembered in the browser) and
-offers only a Delete button on a revoked row. On Redis the delete is one guarded script (`DEL` on the device key only when
-it exists and is revoked); links of the device expire on their own TTL and can no longer be spent.
-A failed push is logged (exception class, and the HTTP status for HTTP failures; never payloads or credentials) and
-classified, per bridge: `unreachable` (no connection), `unauthorized` (401/403, `AGENT_TOKEN` mismatch), `rejected` (other
-non-2xx, typically 503: xray refused the generated config), `conflict` (409), `error` (unexpected exception in the
-loop). `GET /enroll/devices` returns `{"devices": [...], "sync": {"pending": bool, "state": "...", "since": <unix>|null}}`;
-create/revoke/extend responses carry `sync_pending` and `sync`. While `pending`, the `/enroll` page shows a banner
-"bridge host out of sync since <time>: <state>": until it clears, revocations and extensions are not in effect on
-the bridge host. A store with no devices at all is never pushed (state `empty`): the agent would refuse an
-unconfirmed empty set, and an empty store must never wipe the agent.
+A link spend marks the device in the same step as the spend (one SQLite transaction, one script on Redis). The app derives Last active from the traffic totals that the agents already report. It looks every 5 minutes (and at each page load) and records the time when the total of a device increased since the previous look.
 
-Every bridge has its own sync state and gets its own credential set (the derived ones for a `derived` bridge). A
-failure on one bridge never fails the operation: a create, revoke or extend is recorded first and answers success,
-the response and the page show the bridge that is behind (`sync` aggregates, `GET /enroll/ingresses` has one row per
-bridge), and the reconcile loop retries it. Revoking therefore never blocks on an unreachable bridge; until that
-bridge is back, the revoked credential still works there. The banner and the per-bridge rows tell which one.
-Traffic figures are merged per device across the bridges; when a bridge with a pending sync answered nothing,
-`stats_partial` is `true` and the page marks the column `Traffic*`: the numbers are a lower bound.
+The counters reset when xray restarts (the agent restarts it whenever the credential set changes). Thus a total that fell but is above zero also counts as activity since the reset. The first look at a device only gives the baseline. The app skips a look at which a bridge did not answer, because the absent counters would read as a reset. The resolution is therefore about 5 minutes. A device that was active only while node-control was down shows nothing for that time.
+
+`GET /enroll/devices` rows carry `enrolled_at`, `enrol_count` and `last_active` (unix seconds, 0 = never). SQLite databases get the three columns on open. Redis device records without them read as 0. JSON and SQLite exports and imports carry them.
+
+The buttons of a row depend on its state, so the page shows no useless button:
+
+- A revoked device has only Delete.
+- An expired device has Extend and Revoke.
+- An active device that was never enrolled has New link, Extend and Revoke.
+- An active device that is already enrolled has Extend and Revoke (it has its profile).
+
+`POST /enroll/devices/{id}/links` answers `409` for a revoked or expired device, because a link for it would exist and never work.
+
+Delete: `DELETE /enroll/devices/{id}` (JSON content type, like the other changes) permanently removes a **revoked** device with its UUIDs and links.
+
+- node-control refuses an active or merely expired device with `409` ("revoke the device before deleting it").
+- It refuses an unknown id with `404`.
+- It never issues the id again.
+- It pushes nothing to an agent (it only ever sends active devices).
+- The `/enroll` page hides revoked devices by default ("Show revoked devices (N)", remembered in the browser). It offers only a Delete button on a revoked row.
+- On Redis, the delete is one guarded script (`DEL` on the device key only when the key exists and the device is revoked). Links of the device expire on their own TTL and cannot be spent after the delete.
+
+node-control logs a failed push (exception class, and the HTTP status for HTTP failures, never payloads or credentials). It classifies the failure for each bridge:
+
+- `unreachable`: no connection.
+- `unauthorized`: 401/403, `AGENT_TOKEN` mismatch.
+- `rejected`: other non-2xx, typically 503, because xray refused the generated config.
+- `conflict`: 409.
+- `error`: an unexpected exception in the loop.
+
+`GET /enroll/devices` returns `{"devices": [...], "sync": {"pending": bool, "state": "...", "since": <unix>|null}}`. Create, revoke and extend responses carry `sync_pending` and `sync`.
+
+While `pending`, the `/enroll` page shows a banner: "bridge host out of sync since <time>: <state>". Until it clears, revocations and extensions are not in effect on the bridge host. node-control never pushes a store with no devices (state `empty`). The agent would refuse an unconfirmed empty set, and an empty store must never wipe the agent.
+
+Every bridge has its own sync state and gets its own credential set (the derived credentials for a `derived` bridge). A failure on one bridge never fails the operation. node-control records a create, revoke or extend first and answers success. The response and the page show the bridge that is behind (`sync` aggregates, and `GET /enroll/ingresses` has one row for each bridge). The reconcile loop tries that bridge again.
+
+> **WARNING:** Do not think that a revocation is complete while a bridge is behind. A revocation never blocks on an unreachable bridge. Until that bridge is back, the revoked credential still works there. The banner and the per-bridge rows tell you which bridge.
+
+node-control merges traffic figures for each device across the bridges. When a bridge with a pending sync answered nothing, `stats_partial` is `true` and the page marks the column `Traffic*`: the numbers are a lower bound.
 
 ### Discovered bridges, approval and slow agents
 

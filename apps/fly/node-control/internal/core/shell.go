@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"html"
+	"html/template"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/ui"
@@ -56,9 +58,19 @@ func searchBox(actions []NavAction) string {
 		list = append(list, act{a.Label, a.Path, a.Icon})
 	}
 	data, _ := json.Marshal(list)
-	return `<button type="button" class="search" data-palette aria-haspopup="dialog" data-actions="` + esc(string(data)) + `">` +
-		`<span class="row nowrap">` + ui.Icon("search") + `<span>Search or run a command</span></span><span class="kbd" data-palette-keys>⌘K</span></button>`
+	var b strings.Builder
+	if err := searchBoxTmpl.Execute(&b, struct {
+		Actions string
+		Icon    template.HTML
+	}{string(data), template.HTML(ui.Icon("search"))}); err != nil { // ui.Icon is markup from this binary
+		return ""
+	}
+	return b.String()
 }
+
+// searchBoxTmpl escapes for where each value goes, so the JSON cannot leave its attribute.
+var searchBoxTmpl = template.Must(template.New("search").Parse(`<button type="button" class="search" data-palette aria-haspopup="dialog" data-actions="{{.Actions}}">` +
+	`<span class="row nowrap">{{.Icon}}<span>Search or run a command</span></span><span class="kbd" data-palette-keys>⌘K</span></button>`))
 
 func navLink(b *bytes.Buffer, it NavItem, active bool) {
 	b.WriteString(`<a class="navitem`)

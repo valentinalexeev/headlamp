@@ -66,6 +66,8 @@ type world struct {
 	runner *httptest.Server
 	redis  *miniredis.Miniredis
 
+	wg sync.WaitGroup // background loops started by the seeding
+
 	hsState *fakeHeadscale
 	prov    *fakeProvider
 	run     *fakeRunner
@@ -521,7 +523,7 @@ func call(ctx context.Context, hc *http.Client, base, method, path string, body 
 }
 
 // seed fills the modules through their own public APIs, the way an operator would.
-func (w *world) seed(ctx context.Context, admin string, asIngress func(bool)) error {
+func (w *world) seed(ctx context.Context, admin string, ingress *http.Client) error {
 	if w.sc.nodesOnly {
 		return nil
 	}
@@ -547,7 +549,7 @@ func (w *world) seed(ctx context.Context, admin string, asIngress func(bool)) er
 	keep(w.seedBridges(must))
 	keep(w.seedFunnel(must))
 	keep(w.seedTasks(ctx, hc, admin, must))
-	keep(w.seedFunnelReport(ctx, hc, admin, asIngress))
+	keep(w.seedFunnelReport(ctx, ingress, admin))
 	return firstErr
 }
 
@@ -593,12 +595,8 @@ func (w *world) seedBridges(must mustFn) error {
 	var out struct {
 		Ingresses []enroll.IngressView `json:"ingresses"`
 	}
-	if json.Unmarshal(data, &out) != nil {
-		var list []enroll.IngressView
-		if err := json.Unmarshal(data, &list); err != nil {
-			return errors.New("listing bridges: undecodable answer")
-		}
-		out.Ingresses = list
+	if err := json.Unmarshal(data, &out); err != nil {
+		return fmt.Errorf("listing bridges: %w", err)
 	}
 	for _, v := range out.Ingresses {
 		if v.Name == "bridge-3" && v.Fingerprint != "" {
@@ -736,7 +734,7 @@ func waitFor(ctx context.Context, d time.Duration, ok func() bool) error {
 
 // seedFunnelReport posts the ingress's state report once and then every 30 s, as the real ingress does, so
 // the funnel reads as fresh for as long as the demo runs.
-func (w *world) seedFunnelReport(ctx context.Context, hc *http.Client, admin string, asIngress func(bool)) error {
+func (w *world) seedFunnelReport(ctx context.Context, hc *http.Client, admin string) error {
 	// What the ingress reports: registered services owned by a node, one manual route (no owner) and a blocked
 	// name. In the attention scenario one target is offline.
 	route := func(ns, service string, port int, owner string, online bool) map[string]any {
@@ -754,8 +752,6 @@ func (w *world) seedFunnelReport(ctx context.Context, hc *http.Client, admin str
 		route("lab", "test", 9205, "runner-1", true),
 	}
 	post := func() error {
-		asIngress(true)
-		defer asIngress(false)
 		code, _, err := call(ctx, hc, admin, "POST", "/ingress/v1/state", map[string]any{
 			"applied_version": "demo", "sent_at": time.Now().UTC().Format(time.RFC3339), "snapshot_loaded": true,
 			"peer_count": 3, "routes": routes, "errors": []string{}})
@@ -770,7 +766,9 @@ func (w *world) seedFunnelReport(ctx context.Context, hc *http.Client, admin str
 	if err := post(); err != nil {
 		return err
 	}
+	w.wg.Add(1)
 	go func() {
+		defer w.wg.Done()
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()
 		for {

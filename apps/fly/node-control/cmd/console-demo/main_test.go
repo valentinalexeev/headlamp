@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -266,5 +267,51 @@ func TestFunnelSeededInBothFullScenarios(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The attention scenario shows the bridge settings and an acknowledged item; clear has neither problem.
+func TestAttentionScenarioShowsIntermittentBridgeAndAcknowledgedItem(t *testing.T) {
+	addr := startDemo(t, "attention")
+	_, body := get(t, addr, "/_attention.json")
+	var att struct {
+		Items []struct {
+			ID           string `json:"id"`
+			Level        string `json:"level"`
+			AckToken     string `json:"ack_token"`
+			Acknowledged *struct {
+				By string `json:"by"`
+			} `json:"acknowledged"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &att); err != nil {
+		t.Fatal(err)
+	}
+	levels := map[string]string{}
+	acked := map[string]string{}
+	for _, it := range att.Items {
+		levels[it.ID] = it.Level
+		if it.Acknowledged != nil {
+			acked[it.ID] = it.Acknowledged.By
+		}
+	}
+	if levels["bridge-sync-bridge-4"] != "info" {
+		t.Errorf("the intermittent bridge is a notice: %v", levels)
+	}
+	if levels["bridge-sync-bridge-2"] != "critical" {
+		t.Errorf("the other unreachable bridge is a risk: %v", levels)
+	}
+	if acked["devices-expiring"] != "alice" || len(acked) != 1 {
+		t.Errorf("one acknowledged item: %v", acked)
+	}
+
+	_, body = get(t, addr, "/_activity.json")
+	if !strings.Contains(string(body), `"action":"attention.acknowledge"`) || !strings.Contains(string(body), "within 7 days") {
+		t.Errorf("the acknowledgement is in Activity: %s", body)
+	}
+
+	_, body = get(t, addr, "/enroll/ingresses")
+	if !strings.Contains(string(body), `"node":"vm-4"`) || !strings.Contains(string(body), `"intermittent":true`) {
+		t.Errorf("%s", body)
 	}
 }

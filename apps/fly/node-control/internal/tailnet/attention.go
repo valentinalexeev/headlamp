@@ -16,8 +16,8 @@ const keyWarn = 30 * 24 * time.Hour
 // Attention warns when the headscale API key is about to expire. A key that never expires raises nothing. A read
 // that fails keeps reporting from the last expiry read successfully, so the item does not vanish when the key
 // finally expires (an expired key is what makes the read fail); with no earlier read it raises nothing, as a
-// failed read must not look like a problem with the tailnet. Headscale refusing the key (401 or 403) says so.
-// The module has no line of its own; its status is part of Nodes.
+// failed read must not look like a problem with the tailnet. Headscale refusing the key (401 or 403) says so, unless
+// the last read shows the key has simply run out. The module has no line of its own; its status is part of Nodes.
 func (m *module) Attention(ctx context.Context, _ string) ([]core.AttentionItem, []core.SystemLine, error) {
 	if m.expiry == nil {
 		return nil, nil, nil
@@ -29,15 +29,15 @@ func (m *module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		known := m.lastKey
 		m.mu.Unlock()
 		switch {
-		case !known.IsZero():
-			at = known
-		case errors.As(err, &ae) && (ae.Status == 401 || ae.Status == 403):
+		case errors.As(err, &ae) && (ae.Status == 401 || ae.Status == 403) && (known.IsZero() || known.After(m.now())):
 			return []core.AttentionItem{{
 				ID: "tailnet-api-key", Source: "tailnet", Level: core.LevelWaiting,
 				Title:  "The headscale API key is refused",
 				Detail: "The tailnet status line stops until it is replaced. Rotate it with scripts/rotate-headscale-api-key.sh.",
 				Since:  m.now(),
 			}}, nil, nil
+		case !known.IsZero():
+			at = known
 		default:
 			return nil, nil, nil
 		}

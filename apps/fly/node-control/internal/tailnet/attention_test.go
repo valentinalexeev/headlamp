@@ -182,3 +182,29 @@ func TestTailnetAttentionNamesARefusedKey(t *testing.T) {
 		t.Fatalf("a 500 is not a refusal: %+v", items)
 	}
 }
+
+func TestTailnetAttentionNamesAKeyRefusedAfterAGoodRead(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	refuse := false
+	m := New(fakeSrc{}, nil, WithKeyExpiry(func(context.Context) (time.Time, error) {
+		if refuse {
+			return time.Time{}, &headscale.APIError{Status: 401, Message: "Unauthorized"}
+		}
+		return now.Add(90 * 24 * time.Hour), nil
+	})).(*module)
+	m.now = func() time.Time { return now }
+	if items, _, _ := m.Attention(context.Background(), "a"); len(items) != 0 {
+		t.Fatalf("a key with 90 days left raises nothing: %+v", items)
+	}
+	refuse = true
+	now = now.Add(11 * time.Minute) // the good read is stale; the next read is refused
+	items, _, _ := m.Attention(context.Background(), "a")
+	if len(items) != 1 || !strings.Contains(items[0].Title, "is refused") {
+		t.Fatalf("a key refused before its expiry was revoked, so it must be named: %+v", items)
+	}
+	now = now.Add(91 * 24 * time.Hour) // past the known expiry, the refusal is the expiry
+	items, _, _ = m.Attention(context.Background(), "a")
+	if len(items) != 1 || !strings.Contains(items[0].Title, "has expired") {
+		t.Fatalf("want an expired item, got %+v", items)
+	}
+}

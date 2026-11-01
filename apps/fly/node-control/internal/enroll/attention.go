@@ -29,7 +29,8 @@ var syncReason = map[string]string{
 	"error":        "The sync ended in an error.",
 }
 
-// Attention reports bridges that are out of sync (critical), bridges whose approval changed (critical) or
+// Attention reports bridges that are out of sync (critical, or info for one stopped at its provider, as it serves
+// nobody and the sync retries once it is back), bridges whose approval changed (critical) or
 // waits (waiting), and devices that expire within seven days (waiting, one item with the count). Each bridge
 // is named in its own item. An inactive module reports nothing; an unreadable device list is an error.
 func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem, []core.SystemLine, error) {
@@ -48,8 +49,26 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 
 	var items []core.AttentionItem
 	critical, outOfSync := false, 0
+	var stopped map[string]bool // asked only when a sync is pending: it can call the providers
 	for _, row := range rowsOf(cur, cur.SyncTargets, snapshotsOf(cur.SyncTargets)) {
 		if !row.Sync.Pending {
+			continue
+		}
+		if stopped == nil && m.stopped != nil {
+			stopped = m.stopped(ctx)
+		}
+		if bridgeStopped(stopped, row.Name, cur.Views) {
+			it := core.AttentionItem{
+				ID: "bridge-sync-" + row.Name, Source: bridgeSource, Level: core.LevelInfo,
+				Title:       row.Name + " is stopped with a sync pending",
+				Detail:      "Revocations and extensions reach it when it is started again.",
+				ActionLabel: "Open bridge", ActionPath: "/nodes?sel=" + url.QueryEscape(row.Name),
+			}
+			if row.Sync.Since != nil {
+				it.Since = time.Unix(*row.Sync.Since, 0)
+			}
+			items = append(items, it)
+			outOfSync++
 			continue
 		}
 		reason, ok := syncReason[row.Sync.State]
@@ -134,6 +153,20 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		line.Summary += fmt.Sprintf(". %d bridge sync pending", outOfSync)
 	}
 	return items, []core.SystemLine{line}, nil
+}
+
+// bridgeStopped reports whether the bridge is one of the stopped machines, matched as the Nodes page joins a bridge to
+// its node: by its given name or its name.
+func bridgeStopped(stopped map[string]bool, name string, views []IngressView) bool {
+	if stopped[strings.ToLower(name)] {
+		return true
+	}
+	for _, v := range views {
+		if v.Name == name && v.GivenName != "" && stopped[strings.ToLower(v.GivenName)] {
+			return true
+		}
+	}
+	return false
 }
 
 // activityPrefixes are the audit actions this module owns. The shared log also holds node actions, which the nodes

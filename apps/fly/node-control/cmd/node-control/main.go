@@ -51,20 +51,30 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		"selectel": nodes.NewSelectel(env, hc),
 		"fly":      nodes.NewFly(env, hc),
 	}
+	// Nodes takes the audit log from enrolment, and enrolment asks Nodes what is stopped: hence nm is declared first.
+	var nm interface {
+		core.Module
+		Targets(context.Context) []nodes.Target
+		StoppedNames(context.Context) map[string]bool
+	}
 	// The audit log lives in the enrolment store, which opens at Register, after nodes.New: hence a function.
-	enr := enroll.New(env, enroll.WithNodeSource(src))
+	enr := enroll.New(env, enroll.WithNodeSource(src), enroll.WithStoppedNodes(func(ctx context.Context) map[string]bool {
+		return nm.StoppedNames(ctx)
+	}))
 	audit := func() core.AuditLog {
 		if p, ok := enr.(interface{ AuditLog() core.AuditLog }); ok {
 			return p.AuditLog()
 		}
 		return nil
 	}
-	nm, ok := nodes.New(cfg, src, providers, nodes.WithAudit(audit)).(interface {
+	var ok bool
+	nm, ok = nodes.New(cfg, src, providers, nodes.WithAudit(audit)).(interface {
 		core.Module
 		Targets(context.Context) []nodes.Target
+		StoppedNames(context.Context) map[string]bool
 	})
 	if !ok {
-		return nil, errors.New("nodes module does not expose Targets")
+		return nil, errors.New("nodes module does not expose Targets and StoppedNames")
 	}
 
 	tracked := func(ctx context.Context) map[string]bool {

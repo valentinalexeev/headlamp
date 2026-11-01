@@ -137,6 +137,14 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     assert.ok(/Agent unreachable/.test(r.detail));
     r = merge(n, s, { 'bridge-2': tn('bridge-2', false) }, [ing('bridge-2', { sync: bad })])[0];
     assert.strictEqual(r.state, 'Out of sync', 'beats running-but-offline');
+    // stopped at the provider it serves nobody, so the wait is no risk; the same machine running is
+    const waiting = { sync: { pending: true, state: 'unreachable', since: null } };
+    const stopped = merge({ 'b-1': cfg() }, { 'b-1': { status: 'STOPPED' } }, null, [ing('b-1', waiting)])[0];
+    assert.strictEqual(stopped.state, 'Stopped');
+    assert.strictEqual(stopped.level, 'off');
+    assert.strictEqual(stopped.detail, 'Sync pending');
+    assert.ok(stopped.explain.includes('when it is started again'));
+    assert.strictEqual(merge({ 'b-1': cfg() }, { 'b-1': { status: 'RUNNING' } }, null, [ing('b-1', waiting)])[0].state, 'Out of sync');
     // and beats a waiting approval
     r = merge({}, {}, null, [ing('bridge-3', { approval: 'pending', sync: bad })])[0];
     assert.strictEqual(r.state, 'Out of sync');

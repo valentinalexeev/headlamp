@@ -84,7 +84,8 @@
 
   // buildRow: one machine. s: { id, cfg, st, tn, ing, run }; cfg is null for a machine that is not in
   // nodes.json. Precedence of the state: out of sync, then running but offline, then an approval that
-  // waits, then what the provider and the tailnet say.
+  // waits, then what the provider and the tailnet say. A sync waiting for a machine that is not running at its
+  // provider is no risk, as the Attention item of the bridge says too.
   function buildRow(s, now) {
     var managed = !!s.cfg;
     var cfg = s.cfg || {};
@@ -116,8 +117,9 @@
       return managed ? formatDetail(cfg, st) : '';
     }
 
+    var syncWaits = !!sync && !!sync.pending && (kind === 'stopped' || kind === 'transition');
     var level, state, detail = '', explain = '';
-    if (sync && sync.pending) {
+    if (sync && sync.pending && !syncWaits) {
       var since = unixIso(sync.since);
       var failed = since ? hl.relTime(since, now) : '';
       level = 'crit'; state = 'Out of sync';
@@ -142,9 +144,9 @@
     } else if (kind === 'running') {
       level = 'ok'; state = 'Running'; detail = runningDetail();
     } else if (kind === 'stopped') {
-      level = 'off'; state = 'Stopped'; detail = lastSeen ? 'Last seen ' + lastSeen : '';
+      level = 'off'; state = 'Stopped'; detail = syncWaits ? 'Sync pending' : (lastSeen ? 'Last seen ' + lastSeen : '');
     } else if (kind === 'transition') {
-      level = 'ok'; state = sentence(st.status); detail = formatDetail(cfg, st);
+      level = 'ok'; state = sentence(st.status); detail = syncWaits ? 'Sync pending' : formatDetail(cfg, st);
     } else if (kind === 'error') {
       level = 'warn'; state = 'Provider error'; detail = hl.plain(st.detail, 200);
     } else if (kind === 'notconfigured') {
@@ -156,6 +158,8 @@
     } else {
       level = 'off'; state = 'Unknown'; detail = ing ? hl.plain(ing.detail, 200) : '';
     }
+
+    if (syncWaits) { explain = 'Revocations and extensions reach it when it is started again.'; }
 
     var cloud = 'Not managed here';
     if (managed) {

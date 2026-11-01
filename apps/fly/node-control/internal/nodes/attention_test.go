@@ -225,3 +225,16 @@ func TestNodesSearchListsNodeIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestNodesStoppedNames(t *testing.T) {
+	var calls atomic.Int32
+	m := attentionModule(t, nil, map[string]string{"exit-a": "STOPPED", "exit-b": "RUNNING", "exit-c": "not_configured"}, &calls)
+	got := m.StoppedNames(context.Background())
+	if len(got) != 1 || !got["exit-a"] {
+		t.Fatalf("only what the provider says is stopped: %v", got)
+	}
+	m = attentionModule(t, nil, map[string]string{"exit-b": "RUNNING"}, &calls) // exit-a and exit-c do not answer
+	if got := m.StoppedNames(context.Background()); len(got) != 0 {
+		t.Fatalf("no answer is not stopped: %v", got)
+	}
+}

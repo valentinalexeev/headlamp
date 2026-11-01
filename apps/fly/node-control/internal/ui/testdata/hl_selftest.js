@@ -127,4 +127,95 @@ assert.ok(panel.removed);
   global.fetch = async () => ({ ok: true, status: 200, text: async () => '{"v":1}' });
   assert.deepStrictEqual(await hl.api('GET', '/x'), { v: 1 });
   console.log('ok');
-})().catch((e) => { console.error(e); process.exit(1); });
+})().then(() => pollTests()).catch((e) => { console.error(e); process.exit(1); });
+
+// poll: runs now, again ms after each run finishes (never overlapping), pauses while the tab is hidden.
+// Runs after the api checks, as it swaps the timers.
+const pollTests = async () => {
+  const realSet = global.setTimeout, realClear = global.clearTimeout;
+  let timers = [], nextId = 1;
+  global.setTimeout = (f, ms) => { const id = nextId++; timers.push({ id, f, ms }); return id; };
+  global.clearTimeout = (id) => { timers = timers.filter((t) => t.id !== id); };
+  const fire = () => { const t = timers.shift(); assert.ok(t, 'a timer is waiting'); t.f(); };
+  const tick = () => new Promise((r) => setImmediate(r));
+  try {
+    // a synchronous fn: runs at once, then is scheduled ms later, and each run schedules the next
+    {
+      let n = 0;
+      const p = hl.poll(() => { n++; }, 1500);
+      assert.strictEqual(n, 1, 'runs at once');
+      assert.deepStrictEqual(timers.map((t) => t.ms), [1500]);
+      fire(); assert.strictEqual(n, 2);
+      assert.strictEqual(timers.length, 1, 'one timer waits, never two');
+      p.stop();
+      assert.strictEqual(timers.length, 0, 'stop clears the timer');
+      p.now(); assert.strictEqual(n, 2, 'a stopped poll stays stopped');
+    }
+    // the delay counts from when a slow run finishes, not from when it began
+    {
+      let release, n = 0;
+      const p = hl.poll(() => { n++; return new Promise((r) => { release = r; }); }, 100);
+      assert.strictEqual(n, 1);
+      assert.strictEqual(timers.length, 0, 'nothing is scheduled while the run is out');
+      release(); await tick();
+      assert.deepStrictEqual(timers.map((t) => t.ms), [100]);
+      p.stop();
+    }
+    // now() during a run does not overlap: it asks for one more run when this one ends
+    {
+      let release, n = 0, live = 0, most = 0;
+      const p = hl.poll(() => { n++; live++; most = Math.max(most, live); return new Promise((r) => { release = () => { live--; r(); }; }); }, 100);
+      p.now(); p.now();
+      assert.strictEqual(n, 1, 'still the first run');
+      release(); await tick();
+      assert.strictEqual(n, 2, 'one more run, not two');
+      release(); await tick();
+      assert.strictEqual(most, 1, 'never two at once');
+      assert.strictEqual(timers.length, 1);
+      p.stop();
+    }
+    // now() drops the timer that was waiting, so a run it starts is not followed by a second one at once
+    {
+      let release, n = 0;
+      const p = hl.poll(() => { n++; return n === 1 ? undefined : new Promise((r) => { release = r; }); }, 100);
+      assert.strictEqual(timers.length, 1, 'the next run is waiting');
+      p.now();
+      assert.strictEqual(n, 2);
+      assert.strictEqual(timers.length, 0, 'the waiting timer is gone while the run is out');
+      release(); await tick();
+      assert.strictEqual(timers.length, 1);
+      p.stop();
+    }
+    // a run that throws or rejects does not end the poll
+    {
+      let n = 0;
+      const p = hl.poll(() => { n++; throw new Error('boom'); }, 50);
+      assert.strictEqual(timers.length, 1, 'scheduled after a throw');
+      fire(); assert.strictEqual(n, 2);
+      p.stop();
+      let m = 0;
+      const q = hl.poll(() => { m++; return Promise.reject(new Error('no')); }, 50);
+      await tick();
+      assert.strictEqual(timers.length, 1, 'scheduled after a rejection');
+      fire(); await tick(); assert.strictEqual(m, 2);
+      q.stop();
+    }
+    // while the tab is hidden a tick skips fn and waits again; shown, now() runs at once
+    {
+      let n = 0;
+      global.document.hidden = true;
+      const p = hl.poll(() => { n++; }, 70);
+      assert.strictEqual(n, 0, 'a hidden tab does not run it');
+      assert.strictEqual(timers.length, 1);
+      fire(); assert.strictEqual(n, 0); assert.strictEqual(timers.length, 1, 'waits again');
+      global.document.hidden = false;
+      p.now(); assert.strictEqual(n, 1, 'shown: runs at once');
+      assert.strictEqual(timers.length, 1, 'and the old timer was replaced, not kept');
+      p.stop();
+      global.document.hidden = false;
+    }
+  } finally {
+    global.setTimeout = realSet; global.clearTimeout = realClear; delete global.document.hidden;
+  }
+  console.log('ok');
+};

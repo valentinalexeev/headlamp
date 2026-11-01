@@ -87,11 +87,13 @@ func (s *Service) start(ctx context.Context, actor, reason, before, after string
 	if err := s.api.SetPolicy(wctx, after); err != nil {
 		if err := s.settleWriteError(id, before, after, err); err != nil {
 			if errors.Is(err, ErrUncertain) {
+				s.markApplied(id)
 				return id, deadline, err
 			}
 			return 0, time.Time{}, err
 		}
 	}
+	s.markApplied(id)
 	slog.Info("policy change applied", "actor", actor, "id", id, "reason", reasonClass(reason),
 		"before_bytes", len(before), "after_bytes", len(after), "deadline", deadline.Unix())
 	return id, deadline, nil
@@ -136,6 +138,14 @@ func (s *Service) settleWriteError(id int64, before, after string, err error) er
 func (s *Service) record(id int64, action, actor string) {
 	if err := s.store.RecordOutcome(id, action, actor); err != nil {
 		slog.Error("policy outcome record failed", "id", id, "action", action, "cause", errCause(err))
+	}
+}
+
+// markApplied stamps the end of the write attempt. A failing write is logged and never fails the change; the
+// change then has no applied time and pages fail closed to "Reload to confirm".
+func (s *Service) markApplied(id int64) {
+	if err := s.store.MarkApplied(id); err != nil {
+		slog.Error("policy applied-time record failed", "id", id, "cause", errCause(err))
 	}
 }
 

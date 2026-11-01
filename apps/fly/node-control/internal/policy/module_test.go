@@ -929,9 +929,40 @@ func TestStatePendingCarriesAppliedAt(t *testing.T) {
 	if at.Before(before.Truncate(time.Second)) || at.After(time.Now().Add(time.Second)) {
 		t.Errorf("applied_at %v is not the apply time", at)
 	}
+}
+
+// A page loaded while the write was in flight must not count as fresh: applied_at is the end of the write
+// attempt, not the start recorded in the history.
+func TestStateAppliedAtIsTheEndOfTheWrite(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.apply(t, "second")
+	m := h.mod.(*Module)
+	p, _, err := m.store.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
 	hist := h.state(t)["history"].([]any)[0].(map[string]any)
-	if hist["at"] != p["applied_at"] {
-		t.Errorf("history at %v != applied_at %v", hist["at"], p["applied_at"])
+	begun, _ := time.Parse(time.RFC3339, hist["at"].(string))
+	end := begun.Add(20 * time.Second)
+	if _, err := m.store.db.Exec("UPDATE applied SET ts = ? WHERE change_id = ?", end.Unix(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	got := h.state(t)["pending"].(map[string]any)["applied_at"]
+	if got != end.UTC().Format(time.RFC3339) {
+		t.Errorf("applied_at %v, want the end of the write %v (begin %v)", got, end.UTC().Format(time.RFC3339), hist["at"])
+	}
+}
+
+func TestStateOmitsAppliedAtWhenNotRecorded(t *testing.T) {
+	h := newHarness(t, baseEnv(t))
+	h.apply(t, "second")
+	m := h.mod.(*Module)
+	if _, err := m.store.db.Exec("DELETE FROM applied"); err != nil {
+		t.Fatal(err)
+	}
+	p := h.state(t)["pending"].(map[string]any)
+	if _, ok := p["applied_at"]; ok {
+		t.Errorf("applied_at present without a record: %v", p)
 	}
 }
 

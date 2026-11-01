@@ -179,18 +179,17 @@ func (c *console) state(w http.ResponseWriter, r *http.Request) {
 	}
 	if pending {
 		left := max(int(time.Until(p.Deadline).Seconds()), 0)
-		// applied_at is when the change went live: a page rendered before it cannot show that the
-		// console is still reachable through the new rules. diff is what the change did, for review.
-		applied := ""
-		for _, e := range hist {
-			if e.ID == p.ID {
-				applied = e.At.UTC().Format(time.RFC3339)
-			}
-		}
-		out["pending"] = map[string]any{"id": p.ID, "actor": p.Actor, "reason": p.Reason,
+		// applied_at is when the write attempt ended: a page rendered before it cannot show that the
+		// console is still reachable through the new rules. It is omitted when not recorded, so the
+		// shell and the page fail closed. diff is what the change did, for review.
+		pm := map[string]any{"id": p.ID, "actor": p.Actor, "reason": p.Reason,
 			"deadline": p.Deadline.UTC().Format(time.RFC3339), "seconds_left": left,
 			"attempts": p.Attempts, "overdue": time.Now().After(p.Deadline),
-			"applied_at": applied, "diff": policyDiff(p.Before, p.After)}
+			"diff": policyDiff(p.Before, p.After)}
+		if !p.AppliedAt.IsZero() {
+			pm["applied_at"] = p.AppliedAt.UTC().Format(time.RFC3339)
+		}
+		out["pending"] = pm
 	}
 	writeJSON(w, http.StatusOK, out)
 }

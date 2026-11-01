@@ -48,6 +48,9 @@ type Pending struct {
 	After    string
 	Deadline time.Time
 	Attempts int // failed revert attempts so far
+	// AppliedAt is when the write attempt ended; zero when it was not recorded (a change begun
+	// before the record existed), which callers treat as unknown.
+	AppliedAt time.Time
 }
 
 // Entry is one history row. It carries no policy text.
@@ -77,6 +80,10 @@ CREATE TABLE IF NOT EXISTS outcomes (
     change_id INTEGER NOT NULL,
     action TEXT NOT NULL,
     actor TEXT NOT NULL,
+    ts INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS applied (
+    change_id INTEGER PRIMARY KEY,
     ts INTEGER NOT NULL
 );
 `
@@ -149,8 +156,10 @@ func (s *Store) Abort(id int64) error {
 func (s *Store) Pending() (Pending, bool, error) {
 	var p Pending
 	var dl int64
-	err := s.db.QueryRow(`SELECT id, actor, reason, before, after, deadline, attempts
-		FROM changes WHERE state = 'pending'`).Scan(&p.ID, &p.Actor, &p.Reason, &p.Before, &p.After, &dl, &p.Attempts)
+	var ap sql.NullInt64
+	err := s.db.QueryRow(`SELECT c.id, c.actor, c.reason, c.before, c.after, c.deadline, c.attempts, a.ts
+		FROM changes c LEFT JOIN applied a ON a.change_id = c.id WHERE c.state = 'pending'`).
+		Scan(&p.ID, &p.Actor, &p.Reason, &p.Before, &p.After, &dl, &p.Attempts, &ap)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Pending{}, false, nil
 	}
@@ -158,7 +167,17 @@ func (s *Store) Pending() (Pending, bool, error) {
 		return Pending{}, false, err
 	}
 	p.Deadline = time.Unix(dl, 0)
+	if ap.Valid {
+		p.AppliedAt = time.Unix(ap.Int64, 0)
+	}
 	return p, true, nil
+}
+
+// MarkApplied records, at the store's clock, that the write attempt for change id has ended. A
+// page loaded before this instant cannot show the console is reachable under the new rules.
+func (s *Store) MarkApplied(id int64) error {
+	_, err := s.db.Exec("INSERT OR REPLACE INTO applied (change_id, ts) VALUES (?, ?)", id, s.clock().Unix())
+	return err
 }
 
 func (s *Store) settle(id int64, state Outcome) error {

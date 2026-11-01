@@ -43,15 +43,15 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 		return nil, []core.SystemLine{line}, nil
 	}
 
-	var applied time.Time
+	since := p.AppliedAt
 	for _, e := range hist {
-		if e.ID == p.ID {
-			applied = e.At
+		if e.ID == p.ID && since.IsZero() {
+			since = e.At
 		}
 	}
 	it := core.AttentionItem{
 		ID: fmt.Sprintf("policy-pending-%d", p.ID), Source: "policy", ActionPath: "/policy",
-		Since: applied, AppliedAt: applied, Deadline: p.Deadline, ChangeID: p.ID,
+		Since: since, AppliedAt: p.AppliedAt, Deadline: p.Deadline, ChangeID: p.ID,
 	}
 	if now().After(p.Deadline) && p.Attempts > 0 {
 		it.Level = core.LevelCritical

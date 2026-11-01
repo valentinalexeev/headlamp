@@ -877,3 +877,46 @@ func TestAFailedOutcomeRecordNeverFailsTheAction(t *testing.T) {
 		t.Fatalf("the automatic revert must still happen: %v", svc.store.Outcome(id))
 	}
 }
+
+func TestAppliedAtIsStampedWhenTheWriteEnds(t *testing.T) {
+	api := newFakeAPI("old")
+	api.entered = make(chan struct{}, 1)
+	api.block = make(chan struct{})
+	svc, clk, _ := newTestService(t, api)
+	_, upd, _ := svc.Current(context.Background())
+	begun := clk.Now()
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := svc.Apply(context.Background(), "alice", "new", upd, "edit")
+		done <- err
+	}()
+	<-api.entered
+	clk.Advance(20 * time.Second)
+	close(api.block)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	p, ok, _ := svc.store.Pending()
+	if !ok {
+		t.Fatal("not pending")
+	}
+	if !p.AppliedAt.Equal(begun.Add(20 * time.Second)) {
+		t.Errorf("AppliedAt %v, want the end of the write %v", p.AppliedAt, begun.Add(20*time.Second))
+	}
+}
+
+func TestAppliedAtIsStampedOnAnUncertainWrite(t *testing.T) {
+	api := newFakeAPI("old")
+	api.fail(errors.New("timeout"))
+	api.breakGet = true
+	svc, clk, _ := newTestService(t, api)
+	_, upd, _ := svc.Current(context.Background())
+	_, _, err := svc.Apply(context.Background(), "alice", "new", upd, "edit")
+	if !errors.Is(err, ErrUncertain) {
+		t.Fatalf("err %v", err)
+	}
+	p, ok, _ := svc.store.Pending()
+	if !ok || !p.AppliedAt.Equal(clk.Now()) {
+		t.Errorf("pending %v AppliedAt %v", ok, p.AppliedAt)
+	}
+}

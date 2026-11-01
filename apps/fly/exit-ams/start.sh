@@ -29,7 +29,7 @@ TAILSCALED_PID=""
 WATCH_PID=""
 # Installed right after restore so a stop during boot still pushes. On stop: store the final
 # state, stop the watcher, then stop tailscaled. The idle loop backgrounds `sleep` and waits on it so the trap runs promptly. The watcher is not waited on
-# (it may only act on TERM after its poll interval); the container exits right after.
+# (it acts on TERM at once, but the container exits right after anyway).
 shutdown() {
     trap '' TERM INT
     /app/state-sync.sh push || echo "final state push failed"

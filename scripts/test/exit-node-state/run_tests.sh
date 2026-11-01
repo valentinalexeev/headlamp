@@ -17,11 +17,12 @@ fail() { echo "FAIL - $1"; fails=$((fails + 1)); }
 mkdir -p "$tmp/bin" "$tmp/redis"
 cat > "$tmp/bin/redis-cli" <<'STUB'
 #!/usr/bin/env bash
-# args: -u URL --no-auth-warning [-x] CMD [key]
+# args: -u URL [--user NAME] --no-auth-warning [-x] CMD [key]; the password may only arrive as REDISCLI_AUTH
 echo "$*" >> "$TESTTMP/redis_calls.log"
+echo "${REDISCLI_AUTH-<unset>}" >> "$TESTTMP/redis_auth.log"
 x=0
 while [ $# -gt 0 ]; do
-  case "$1" in -u) shift;; --no-auth-warning) ;; -x) x=1;; *) break;; esac
+  case "$1" in -u|--user) shift;; --no-auth-warning) ;; -x) x=1;; *) break;; esac
   shift
 done
 cmd="$1"; key="${2:-}"; f="$TESTTMP/redis/${key//:/_}"
@@ -38,6 +39,7 @@ STUB
 cat > "$tmp/bin/age-keygen" <<'STUB'
 #!/usr/bin/env bash
 [ "$1" = -y ] || exit 2
+ls -l "$2" | cut -c1-10 >> "$TESTTMP/idfile_mode.log"; echo "$2" >> "$TESTTMP/idfile_path.log"
 echo "pub-$(tr -d '\n' < "$2")"
 STUB
 cat > "$tmp/bin/age" <<'STUB'
@@ -55,6 +57,7 @@ STUB
 chmod +x "$tmp/bin/"*
 real_age="$(command -v age || true)"; real_keygen="$(command -v age-keygen || true)" # before the stubs shadow them
 export TESTTMP="$tmp"
+unset REDISCLI_AUTH
 PATH="$tmp/bin:$PATH"
 export REDIS_URL=redis://default:pw@redis.example:6379 STATE_AGE_IDENTITY=SECRET-A
 export STATE_REDIS_KEY=app:state STATE_POLL_SECONDS=1 BOOT_WAIT_SECONDS=2
@@ -65,7 +68,7 @@ rkey="$tmp/redis/app_state"; setlog="$tmp/redis/set.log"
 await_watch() { i=0; while ! grep -q "state-sync: watching" "$1" 2>/dev/null && [ "$i" -lt 40 ]; do sleep 0.5; i=$((i + 1)); done; }
 # wait (max 15 s) until set.log has at least $1 lines
 await_sets() { i=0; while [ "$(nsets)" -lt "$1" ] && [ "$i" -lt 30 ]; do sleep 0.5; i=$((i + 1)); done; }
-reset() { rm -rf "$tmp/state" "$tmp/redis" "$tmp/redis_down" "$tmp/redis_slow" "$tmp/timeout.log" "$tmp/ping_reply" "$tmp/exists_reply" "$tmp/redis_calls.log"; mkdir -p "$tmp/state" "$tmp/redis"; }
+reset() { rm -rf "$tmp/state" "$tmp/redis" "$tmp/redis_down" "$tmp/redis_slow" "$tmp/timeout.log" "$tmp/ping_reply" "$tmp/exists_reply" "$tmp/redis_calls.log" "$tmp/redis_auth.log" "$tmp/idfile_mode.log" "$tmp/idfile_path.log"; mkdir -p "$tmp/state" "$tmp/redis"; }
 # put an "encrypted" value into the fake Redis, as identity $1 would have produced it
 seed_redis() { printf '%s' "$2" | PATH="$tmp/bin:$PATH" age -r "pub-$1" -a > "$rkey"; }
 nsets() { if [ -f "$setlog" ]; then wc -l < "$setlog" | tr -d ' '; else echo 0; fi; }
@@ -206,5 +209,89 @@ reset; touch "$tmp/redis_down" "$tmp/redis_slow"
 t0="$(date +%s)"; "$sync" restore >/dev/null 2>&1; rc=$?; t1="$(date +%s)"
 [ "$rc" = 1 ] && [ $((t1 - t0)) -le 5 ] && ok "boot wait is wall-clock (3 s calls, BOOT_WAIT_SECONDS=2 -> gives up within 5 s)" || fail "wall-clock wait: rc=$rc took $((t1 - t0))s"
 rm -f "$tmp/redis_slow"
+
+# --- credentials: the password reaches redis-cli only as REDISCLI_AUTH (decoded), never in its arguments
+# run restore (seeded) + push with URL $1; the expected decoded password is $2, user $3 (empty = none)
+check_url() {
+  reset; seed_redis SECRET-A "$doc"; echo old > "$state"
+  REDIS_URL="$1" "$sync" restore >"$tmp/o.txt" 2>&1; r1=$?
+  REDIS_URL="$1" "$sync" push >>"$tmp/o.txt" 2>&1; r2=$?
+  calls="$(cat "$tmp/redis_calls.log")"
+  bad=0
+  [ "$r1" = 0 ] && [ "$r2" = 0 ] && [ "$(cat "$state")" = "$doc" ] || bad=1
+  [ "$(sort -u "$tmp/redis_auth.log")" = "$2" ] || bad=1
+  [ "$(wc -l < "$tmp/redis_auth.log" | tr -d ' ')" = "$(wc -l < "$tmp/redis_calls.log" | tr -d ' ')" ] || bad=1
+  # nothing secret (raw or percent-encoded form) in any argument
+  case "$calls" in *"$2"*|*%[0-9A-F][0-9A-F]*) [ -z "$2" ] || bad=1 ;; esac
+  [ -z "$3" ] || { echo "$calls" | grep -qF -- "--user $3 " || bad=1; }
+  [ -n "$3" ] || { echo "$calls" | grep -q -- "--user" && bad=1; }
+  echo "$calls" | grep -qF -- "-u ${4} " || bad=1
+  return $bad
+}
+check_url 'redis://default:p%40ss%3Aw%2Frd%2541@redis.example:6379/1' 'p@ss:w/rd%41' default 'redis://redis.example:6379/1' \
+  && ok "redis url: percent-encoded password -> REDISCLI_AUTH decoded, user via --user, no secret in arguments" || fail "redis url encoded: $calls auth=$(sort -u "$tmp/redis_auth.log")"
+check_url 'rediss://u1:a@b@c:d%7Ee%60%24%22%27%5C@[::1]:6380' 'a@b@c:d~e`$"'"'"'\' u1 'rediss://[::1]:6380' \
+  && ok "redis url: '@', ':', quotes, backslash and TLS scheme/IPv6 host survive the split" || fail "redis url unusual: $calls auth=$(sort -u "$tmp/redis_auth.log")"
+check_url 'redis://:onlypw@redis.example:6379' 'onlypw' '' 'redis://redis.example:6379' \
+  && ok "redis url: empty user -> no --user" || fail "redis url empty user: $calls"
+check_url 'redis://pw%25@redis.example:6379' 'pw%' '' 'redis://redis.example:6379' \
+  && ok "redis url: userinfo without ':' is the password (as redis-cli reads it)" || fail "redis url bare pw: $calls"
+check_url 'redis://u:50%zz%41@redis.example:6379' '50%zzA' u 'redis://redis.example:6379' \
+  && ok "redis url: a '%' not followed by two hex digits is kept literally" || fail "redis url bad escape: $calls"
+check_url 'redis://redis.example:6379' '<unset>' '' 'redis://redis.example:6379' \
+  && ok "redis url: no credentials -> URL untouched, REDISCLI_AUTH not set" || fail "redis url no creds: $calls"
+
+# --- the identity file: mode 600 while it exists, gone after every exit path
+reset; echo local-state > "$state"
+"$sync" push >/dev/null 2>&1; "$sync" restore >/dev/null 2>&1
+ip="$(sed -n 1p "$tmp/idfile_path.log")"
+[ "$(sort -u "$tmp/idfile_mode.log")" = "-rw-------" ] && [ "$(wc -l < "$tmp/idfile_path.log" | tr -d ' ')" = 2 ] && [ -n "$ip" ] && [ ! -e "$ip" ] && [ ! -e "$(sed -n 2p "$tmp/idfile_path.log")" ] \
+  && ok "identity file: mode 600 when written, removed after push and after restore" || fail "identity file: modes=$(cat "$tmp/idfile_mode.log") exists=$([ -e "$ip" ] && echo yes || echo no)"
+reset; seed_redis SECRET-B "$doc"; echo local-state > "$state"
+"$sync" restore >/dev/null 2>&1
+[ "$(wc -l < "$tmp/idfile_path.log" | tr -d ' ')" = 1 ] && [ ! -e "$(cat "$tmp/idfile_path.log")" ] && ok "identity file: removed after a failed restore" || fail "identity file after failure"
+reset
+"$sync" watch >"$tmp/w.out" 2>&1 & wpid=$!; bgpids="$bgpids $wpid"
+await_watch "$tmp/w.out"; ip="$(cat "$tmp/idfile_path.log")"; mode_live="$(ls -l "$ip" | cut -c1-10)"; present=$([ -e "$ip" ] && echo yes || echo no)
+kill -TERM "$wpid"; wait "$wpid" 2>/dev/null; wrc=$?
+[ "$present" = yes ] && [ "$mode_live" = "-rw-------" ] && [ "$wrc" = 143 ] && [ ! -e "$ip" ] && ok "identity file: present with mode 600 while watching, removed on TERM (exit 143)" || fail "identity file watch: present=$present mode=$mode_live rc=$wrc left=$([ -e "$ip" ] && echo yes || echo no)"
+
+# --- no output line contains a secret value (identity, password, state content)
+reset; seed_redis SECRET-A "$doc"; echo local-state > "$state"
+export REDIS_URL=redis://default:Hunter2pw@redis.example:6379
+{
+  "$sync" restore; "$sync" push
+  seed_redis SECRET-B "$doc"; "$sync" restore
+  touch "$tmp/redis_down"; "$sync" push; "$sync" restore
+  rm -f "$tmp/redis_down"; env -u STATE_AGE_IDENTITY "$sync" restore
+} >"$tmp/all.out" 2>&1
+export REDIS_URL=redis://default:pw@redis.example:6379
+leaks=0; for secret in SECRET-A SECRET-B Hunter2pw '"Profile"' local-state; do grep -qF -- "$secret" "$tmp/all.out" && { leaks=1; echo "leaked: $secret"; }; done
+[ -s "$tmp/all.out" ] && [ "$leaks" = 0 ] && ok "no output line (stdout or stderr) contains the identity, the password or state content" || fail "secret in output (leaks=$leaks, lines=$(wc -l < "$tmp/all.out"))"
+
+# --- empty decrypt result
+reset; seed_redis SECRET-A ""; echo local-state > "$state"; before="$(cksum < "$state")"
+err="$("$sync" restore 2>&1 >/dev/null)"; rc=$?
+[ "$rc" = 1 ] && [ "$(cksum < "$state")" = "$before" ] && echo "$err" | grep -q "decrypted state is empty" && [ "$(ls "$tmp/state" | wc -l | tr -d ' ')" = 1 ] \
+  && ok "restore: Redis value decrypts to nothing -> exit 1, file untouched, no scratch left" || fail "restore empty decrypt: rc=$rc err=$err files=$(ls "$tmp/state")"
+
+# --- watcher shutdown is immediate, not after the poll interval, and leaves no sleep behind
+reset; poll=$((2000 + $$ % 1000)) # unique, so pgrep below cannot match another run's sleep
+STATE_POLL_SECONDS=$poll "$sync" watch >"$tmp/w2.out" 2>&1 & wpid=$!; bgpids="$bgpids $wpid"
+await_watch "$tmp/w2.out"; sleep 1
+t0="$(date +%s)"; kill -TERM "$wpid"; wait "$wpid" 2>/dev/null; wrc=$?; t1="$(date +%s)"
+sleep 0.5; if pgrep -f "sleep $poll" >/dev/null 2>&1; then stray=1; else stray=0; fi
+[ "$wrc" = 143 ] && [ $((t1 - t0)) -le 2 ] && [ "$stray" = 0 ] && ok "watch: TERM during a long poll exits at once (143) and leaves no sleep behind" || fail "watch shutdown: rc=$wrc took $((t1 - t0))s stray=$stray"
+
+# --- scratch files exist only during an operation; stale ones from a killed run are removed at restore
+reset
+"$sync" watch >"$tmp/w3.out" 2>&1 & wpid=$!; bgpids="$bgpids $wpid"
+await_watch "$tmp/w3.out"; none="$(ls "$tmp/state" | wc -l | tr -d ' ')"
+echo v1 > "$state"; await_sets 1; sleep 0.5; after="$(ls "$tmp/state" | tr '\n' ' ')"
+kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null
+[ "$none" = 0 ] && [ "$after" = "tailscaled.state " ] && ok "watch: no scratch files while idle or after a push (only the state file)" || fail "watch scratch: idle=$none after=$after"
+reset; seed_redis SECRET-A "$doc"; : > "$state.sync.AbC123"; : > "$state.sync.AbC123.enc"; echo keep > "$state.backup"
+"$sync" restore >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && [ "$(ls "$tmp/state" | tr '\n' ' ')" = "tailscaled.state tailscaled.state.backup " ] && ok "restore: stale scratch files removed, other files next to the state file kept" || fail "stale scratch: rc=$rc files=$(ls "$tmp/state" | tr '\n' ' ')"
 
 exit "$fails"

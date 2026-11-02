@@ -37,7 +37,8 @@ describe() { # REV: every component, with its hash and build arguments
 		done < <(jq -r '(.args_from_files // {}) | keys[]' <<<"$entry")
 		hash=$(hash_at "$rev" "$image" "${paths[@]}")
 		jq -c --arg h "$hash" --arg a "$args" \
-			'{image, context, dockerfile, go: (.go // false), test: (.test // ""), hash: $h, build_args: $a}' <<<"$entry"
+			'{image, context, dockerfile, go: (.go // false), test: (.test // ""), platforms: (.platforms // "linux/amd64"),
+				hash: $h, build_args: $a}' <<<"$entry"
 	done | jq -cs .
 }
 

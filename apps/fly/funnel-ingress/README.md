@@ -198,6 +198,9 @@ The Kubernetes operator depends on hosted-control-plane features. It is not supp
 `tailscaled`). It listens on its tailnet address for each declared service. It forwards TCP to the pod or an in-cluster target
 and registers `(ns, service, port)`.
 
+CI publishes the image as `ghcr.io/valentinalexeev/headlamp/funnel-sidecar` for `linux/amd64` and `linux/arm64`.
+[VERSIONING.md](../../../VERSIONING.md#images) lists the tags.
+
 It re-asserts every `FUNNEL_REREGISTER_INTERVAL` (default `5m`). It retries with
 backoff (also on `403` and `409`). It is ready (`/readyz` on `FUNNEL_READY_ADDR`) only while every service is registered. It
 deletes its routes on SIGTERM.

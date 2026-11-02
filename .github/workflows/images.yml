@@ -109,6 +109,8 @@ jobs:
         env:
           TEST: ${{ matrix.c.test }}
         run: bash -c "$TEST"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        if: matrix.c.platforms != 'linux/amd64'
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         if: github.event_name != 'pull_request'
@@ -127,7 +129,7 @@ jobs:
           context: ${{ matrix.c.context }}
           file: ${{ matrix.c.context }}/${{ matrix.c.dockerfile }}
           build-args: ${{ matrix.c.build_args }}
-          platforms: linux/amd64
+          platforms: ${{ matrix.c.platforms }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.name.outputs.ref }}
           labels: |

@@ -7,6 +7,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Added
 
 - Image publishing to GHCR for each component, rebuilt only when its source changes.
+- A `linux/arm64` build of the `funnel-sidecar` image. The Kubernetes examples use the published image.
 - A release policy with checks on PR titles and release tags.
 - A redesigned node-control admin console, with an audit log of device, bridge and node actions.
 - Acknowledging an attention item in the node-control console: it leaves the queue, counts and lamp until it changes meaning, expires or clears, and Activity records who did it. Needs the enrolment store.

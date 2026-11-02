@@ -130,7 +130,7 @@ same 'an older patch moves nothing' "$(git tag v1.0.2; "$tags" tag v1.0.1)" '1.0
 mkdir -p .github a b scripts
 cat >.github/components.json <<'JSON'
 [{"image":"one","context":"a","dockerfile":"Dockerfile","paths":["a"]},
- {"image":"two","context":"b","dockerfile":"Dockerfile","paths":["b","shared"],"args":{"K":"V"},"args_from_files":{"W":"shared"},"go":true,"test":"true"}]
+ {"image":"two","context":"b","dockerfile":"Dockerfile","paths":["b","shared"],"args":{"K":"V"},"args_from_files":{"W":"shared"},"go":true,"test":"true","platforms":"linux/amd64,linux/arm64"}]
 JSON
 echo 1 >a/f
 echo 1 >b/f
@@ -141,6 +141,8 @@ base=$(git rev-parse HEAD)
 listed=$("$comp" list)
 same 'list has both' "$(jq -c '[.[].image]' <<<"$listed")" '["one","two"]'
 same 'build args combine' "$(jq -r '.[1].build_args' <<<"$listed")" $'K=V\nW=7'
+same 'platforms default to amd64' "$(jq -r '.[0].platforms' <<<"$listed")" 'linux/amd64'
+same 'platforms come from the entry' "$(jq -r '.[1].platforms' <<<"$listed")" 'linux/amd64,linux/arm64'
 same 'nothing changed' "$("$comp" changed "$base")" '[]'
 echo 2 >a/f
 git add -A

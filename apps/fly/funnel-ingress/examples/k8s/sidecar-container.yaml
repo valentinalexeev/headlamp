@@ -21,7 +21,7 @@ spec:
           image: example.com/demo:latest
           ports: [{ containerPort: 3000 }]
         - name: funnel-sidecar
-          image: example.com/funnel-sidecar:latest # built from Dockerfile.sidecar
+          image: ghcr.io/valentinalexeev/headlamp/funnel-sidecar:main # pin a release (X.Y.Z) or a digest
           env:
             - { name: FUNNEL_NS, value: demo }
             - { name: FUNNEL_SERVICES, value: "admin=8080@127.0.0.1:3000" } # tailnet port 8080 -> the app on 3000

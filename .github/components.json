@@ -20,6 +20,7 @@
     "context": "apps/fly/funnel-ingress",
     "dockerfile": "Dockerfile.sidecar",
     "paths": ["apps/fly/funnel-ingress"],
+    "platforms": "linux/amd64,linux/arm64",
     "go": true,
     "test": "cd apps/fly/funnel-ingress && go vet ./... && go test -count=1 ./..."
   },

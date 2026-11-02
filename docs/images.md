@@ -49,7 +49,7 @@ Every node, image or not, joins the tailnet through headscale. `exit-node`, `nod
 | `exit-node` | A tailnet exit node, with routes for chosen hostnames that always leave through it | A Fly machine | No, if VM exit nodes are enough |
 | `node-control` | The admin console and API: start and stop nodes, enrol devices, manage policy, Funnel config and tasks | One machine, reachable only over the tailnet | Strongly recommended, and required by `funnel-ingress` and task-runner |
 | `funnel-ingress` | Publishes tailnet services under public names, as a reverse proxy | A public Fly machine | Only for public ingress |
-| `funnel-sidecar` | Registers one service with `funnel-ingress` from Kubernetes, with no special privileges | Beside your workload | Only for Kubernetes services |
+| `funnel-sidecar` | Registers one service with `funnel-ingress` from Kubernetes, with no special privileges. Published for `linux/amd64` and `linux/arm64` | Beside your workload | Only for Kubernetes services |
 | `task-runner-browser` | The Chromium and Playwright container each scheduled browser check runs in | On a VM, started by task-runner under rootless podman | Only for tasks and browser sessions |
 
 ### What each one needs

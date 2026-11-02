@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: forwarder
-          image: example.com/funnel-sidecar:latest
+          image: ghcr.io/valentinalexeev/headlamp/funnel-sidecar:main # pin a release (X.Y.Z) or a digest
           env:
             - { name: FUNNEL_NS, value: demo }
             - { name: FUNNEL_SERVICES, value: "web=8080@web.demo.svc:80" } # name=tailnet-port@service-host:port

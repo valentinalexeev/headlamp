@@ -36,7 +36,7 @@ color-scheme:dark;background:var(--bg);color:var(--text);font-family:"IBM Plex S
 .fresh{margin-left:auto;color:var(--t3);font-size:12.5px}
 .strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:10px 24px;background:var(--warnbg);border-bottom:1px solid var(--warnline)}
 .strip .count{font-family:"IBM Plex Mono",monospace;color:var(--warn);font-weight:500;font-size:14px}
-.page{padding:24px;display:flex;flex-direction:column;gap:24px;max-width:1240px;width:100%}
+.page{padding:24px;display:flex;flex-direction:column;gap:24px;width:100%}
 .head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
 h1{font-size:22px;line-height:1.25;font-weight:600;letter-spacing:-.015em;margin:0}
 h2{font-size:14px;font-weight:600;margin:0}

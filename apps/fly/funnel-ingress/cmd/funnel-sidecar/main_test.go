@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -59,5 +61,41 @@ func TestWatchTailnetLogsOnlyChanges(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "coordination server") || !strings.Contains(lines[3], "NeedsLogin") {
 		t.Fatalf("lines = %q", lines)
+	}
+}
+
+func TestReadyzReportsRegistrationAge(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	var st readiness
+	h := st.handler(func() time.Time { return now })
+
+	get := func() (int, map[string]any) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("body %q: %v", rec.Body.String(), err)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+			t.Fatalf("content type %q", ct)
+		}
+		return rec.Code, body
+	}
+
+	code, body := get()
+	if code != 503 || body["ready"] != false || body["last_registered"] != nil || body["age_seconds"] != nil {
+		t.Fatalf("before any registration: %d %v", code, body)
+	}
+
+	st.set(now.Add(-90*time.Second), true)
+	code, body = get()
+	if code != 200 || body["ready"] != true || body["last_registered"] != "2026-01-01T11:58:30Z" || body["age_seconds"] != float64(90) {
+		t.Fatalf("registered: %d %v", code, body)
+	}
+
+	st.set(now, false) // a failed round keeps the time of the last success
+	code, body = get()
+	if code != 503 || body["ready"] != false || body["age_seconds"] != float64(90) {
+		t.Fatalf("after a failed round: %d %v", code, body)
 	}
 }

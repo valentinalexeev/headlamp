@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,7 +15,7 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"syscall"
 	"time"
 
@@ -67,16 +68,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	defer srv.Close()
 
-	// /readyz answers 200 only while every service is registered, and nothing else.
-	var isReady atomic.Bool
+	// /readyz answers 200 only while every service is registered; the body also gives the age of the last
+	// successful registration round.
+	var ready readiness
 	mux := http.NewServeMux()
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if isReady.Load() {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		w.WriteHeader(http.StatusServiceUnavailable)
-	})
+	mux.Handle("/readyz", ready.handler(time.Now))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) })
 	readySrv := &http.Server{Addr: cfg.ReadyAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	readyLn, err := net.Listen("tcp", cfg.ReadyAddr)
@@ -115,7 +111,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		Transport: &http.Transport{DialContext: srv.Dial, DisableKeepAlives: true},
 	}
 	slog.Info("funnel-sidecar running", "ns", cfg.NS, "services", len(svcs))
-	return sidecar.Run(ctx, cfg, svcs, srv.Listen, sidecar.NewHTTPRegistrar(cfg.APIURL, client), isReady.Store)
+	return sidecar.Run(ctx, cfg, svcs, srv.Listen, sidecar.NewHTTPRegistrar(cfg.APIURL, client), func(ok bool) { ready.set(time.Now(), ok) })
 }
 
 // watchTailnet reads the node's backend state and health warnings every period and logs them when they change.
@@ -152,4 +148,48 @@ func watchTailnet(ctx context.Context, status func(context.Context) (string, []s
 		case <-t.C:
 		}
 	}
+}
+
+// readiness holds the result of the last registration round and the time of the last successful one.
+type readiness struct {
+	mu     sync.Mutex
+	ready  bool
+	lastOK time.Time
+}
+
+func (r *readiness) set(at time.Time, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ready = ok
+	if ok {
+		r.lastOK = at
+	}
+}
+
+// handler answers 200 while ready and 503 otherwise, with a JSON body:
+// {"ready":bool,"last_registered":RFC 3339 time,"age_seconds":int}; the last two are absent before the first
+// successful round. The age lets a probe or an operator see how long registration has been failing.
+func (r *readiness) handler(now func() time.Time) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		r.mu.Lock()
+		ready, lastOK := r.ready, r.lastOK
+		r.mu.Unlock()
+		body := struct {
+			Ready          bool    `json:"ready"`
+			LastRegistered *string `json:"last_registered,omitempty"`
+			AgeSeconds     *int64  `json:"age_seconds,omitempty"`
+		}{Ready: ready}
+		if !lastOK.IsZero() {
+			ts := lastOK.UTC().Format(time.RFC3339)
+			age := int64(now().Sub(lastOK) / time.Second)
+			body.LastRegistered, body.AgeSeconds = &ts, &age
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if ready {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		json.NewEncoder(w).Encode(body)
+	})
 }

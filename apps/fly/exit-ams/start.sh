@@ -60,7 +60,7 @@ until /app/tailscale up \
     --reset \
     --login-server=${HEADSCALE_LOGIN_SERVER} \
     --authkey=${TAILSCALE_AUTH_KEY} \
-    --hostname=ams \
+    --hostname="${EXIT_NODE_HOSTNAME:-ams}" \
     --advertise-exit-node
 #    --advertise-tags=tag:exit
 do

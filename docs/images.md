@@ -58,9 +58,9 @@ The images are generic. Where a site's settings belong they hold placeholders, o
 
 | Image | You supply | State it keeps |
 |---|---|---|
-| `headscale` | `headscale.yaml` and `acl.json`, replacing the placeholders in the image | Its database, on a volume |
-| `exit-node` | Auth key, `direct-hosts.txt`, and optional state encryption settings | Tailscale identity, on a volume or encrypted in Redis |
-| `node-control` | Environment settings, cloud credentials, `headscale` API key, and optional `app/nodes.json` and `app/enroll.json` | Enrolment, policy and tasks data, in files or Redis depending on what you enable |
+| `headscale` | `headscale.yaml` and `acl.json`: mount them and set `HEADSCALE_CONFIG`, or replace the placeholders in the image | Its database, on a volume |
+| `exit-node` | Auth key, `direct-hosts.txt` (mount it and set `DIRECT_HOSTS_FILE`), and optional state encryption settings | Tailscale identity, on a volume or encrypted in Redis |
+| `node-control` | Environment settings, cloud credentials, `headscale` API key, and optional `nodes.json` and `enroll.json` (mount them and set `NODES_CONFIG` and `ENROLL_CONFIG`) | Enrolment, policy and tasks data, in files or Redis depending on what you enable |
 | `funnel-ingress` | Environment settings and an auth key | Its tailnet identity and registered routes; namespaces and blocks come from node-control |
 | `funnel-sidecar` | Environment settings naming the namespace and service | None: its node is ephemeral |
 | `task-runner-browser` | Nothing: the caller sends each script | None: each container is thrown away |
@@ -90,14 +90,41 @@ CI still runs the tests for `ingress-agent` and `task-runner`.
 
 ## Using the images
 
-Your settings stay in your private repo, as with any other part of this project, and are added on top of the image. A thin Dockerfile does this and keeps the deployment pinned:
+Your settings stay in your private repo, as with any other part of this project. There are two ways to give them to an
+image.
+
+### Mount the settings at runtime
+
+Use the published image without a change. Mount your files read-only and set the variable that names each file:
+
+| Image | Variable | Default (the placeholder in the image) |
+|---|---|---|
+| `headscale` | `HEADSCALE_CONFIG` | `/etc/headscale/config.yaml` |
+| `headscale` | `HEADSCALE_POLICY_PATH` (optional, overrides `policy.path` in the config) | `/etc/headscale/acl.json` |
+| `exit-node` | `DIRECT_HOSTS_FILE` | `/app/direct-hosts.txt` |
+| `node-control` | `NODES_CONFIG`, `ENROLL_CONFIG` | `/srv/app/nodes.json`, no default |
+
+Example:
+
+```bash
+docker run -d --name headscale \
+  -v ./config:/config:ro -v headscale-data:/data \
+  -e HEADSCALE_CONFIG=/config/headscale.yaml -e HEADSCALE_POLICY_PATH=/config/acl.json \
+  ghcr.io/valentinalexeev/headlamp/headscale:0.9.0@sha256:<digest> headscale serve
+```
+
+Pin the digest as well as the version. If you do not set a variable, the image uses its placeholder.
+
+### Add the settings in a thin image
+
+A thin Dockerfile copies your files on top of the image and keeps the deployment pinned:
 
 ```dockerfile
 FROM ghcr.io/valentinalexeev/headlamp/node-control:1.2.3@sha256:<digest>
 COPY app ./app
 ```
 
-Pin the digest as well as the version. Before the first release, only the `main` and `sha-<commit>` tags exist.
+Pin the digest as well as the version.
 
 Two things do not use the published images yet:
 

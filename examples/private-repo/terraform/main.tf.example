@@ -13,8 +13,8 @@ module "node1" {
   tailscale_authkey      = var.node1_tailscale_authkey
 }
 
-# module "node4" {   # Selectel (OpenStack): see the module's README (service user, flavor ID, preemptible caveats)
-#   source = "../vendor/headlamp/terraform/modules/exit-node-vm/selectel"
+# module "node4" {   # OpenStack, e.g. Selectel: see the module's README (service user, flavor ID, preemptible caveats)
+#   source = "../vendor/headlamp/terraform/modules/exit-node-vm/openstack"
 #   name = "node4"  availability_zone = "<zone>"  flavor_id = "<flavor-id>"  volume_type = "<volume-type>"
 #   ssh_public_key = var.ssh_public_key  admin_ssh_cidr = "<your-ip>/32"
 # }

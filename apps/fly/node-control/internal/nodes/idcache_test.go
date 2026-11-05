@@ -80,7 +80,7 @@ func TestYandexResolvedIDCachedWithinTTLAndDroppedOnNotFound(t *testing.T) {
 func TestSelectelResolvedIDCachedWithinTTLAndDroppedOnNotFound(t *testing.T) {
 	ctx := context.Background()
 	f := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}}
-	p, c := newSelectel(t, f, selEnv)
+	p, c := newOpenStack(t, f, selEnv)
 	for i := 0; i < 2; i++ {
 		if _, err := p.Status(ctx, selTarget); err != nil {
 			t.Fatal(err)

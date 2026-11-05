@@ -13,6 +13,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Changed
 
 - funnel-ingress ignores a client-address header that arrives twice and uses the peer address, where it used the first value before. A correct edge sets the header once, so only a forged request sees the difference.
+- The wiki also publishes every component, Ansible role and Terraform module manual (for example the funnel-ingress manual as `funnel-ingress`), with a sidebar that lists all pages.
 
 ## 0.9.0 - 2026-11-05
 

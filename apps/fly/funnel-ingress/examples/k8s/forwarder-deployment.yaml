@@ -19,7 +19,7 @@ spec:
           image: ghcr.io/valentinalexeev/headlamp/funnel-sidecar:main # pin a release (X.Y.Z) or a digest
           env:
             - { name: FUNNEL_NS, value: demo }
-            - { name: FUNNEL_SERVICES, value: "web=8080@web.demo.svc:80" } # name=tailnet-port@service-host:port
+            - { name: FUNNEL_SERVICES, value: "web=8080@web.demo.svc:80" } # name=tailnet-port@service-host:port; add more, comma separated
             - { name: FUNNEL_API_URL, value: "http://funnel-ingress:9100" }
             - { name: FUNNEL_CONTROL_URL, value: "https://headscale.example.com" }
             - name: TS_AUTHKEY

@@ -243,9 +243,11 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   on every PR that changes a manual. Agent rules (this section, `AGENTS.md`), the changelog and code comments use
   normal technical English.
 - **Wiki.** The documentation is published to the GitHub wiki by the `wiki` workflow when a release tag is pushed, so
-  the wiki shows the released docs, not work in progress on `main`: `README.md` → Home, `docs/<name>.md` → `<name>`, plus `VERSIONING.md` and
-  `CHANGELOG.md` (`scripts/wiki-render.sh`). The repository is the source: never edit the wiki by hand, its next sync
-  overwrites it. Wiki pages are public too, so the rules of section 1 apply to everything in `docs/`. To preview:
+  the wiki shows the released docs, not work in progress on `main`: `README.md` → Home, `docs/<name>.md` → `<name>`,
+  `VERSIONING.md`, `CHANGELOG.md`, and every component, role and module `README.md` (for example
+  `apps/fly/funnel-ingress/README.md` → `funnel-ingress`), with a generated `_Sidebar` (`scripts/wiki-render.sh`). A new
+  manual is published without a script change. The repository is the source: never edit the wiki by hand, its next sync
+  overwrites it. Wiki pages are public too, so the rules of section 1 apply to every manual. To preview:
   `scripts/wiki-render.sh "$(mktemp -d)" valentinalexeev/headlamp`.
 
 ### CI

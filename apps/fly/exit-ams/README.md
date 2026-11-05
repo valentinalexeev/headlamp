@@ -5,12 +5,14 @@ extra `/32` routes for the hostnames in `direct-hosts.txt`. The script `update-d
 Those services use this node, whichever exit node a client selected. This app is derived from patte/fly-tailscale-exit. See `THIRD_PARTY.md`.
 
 - `fly.toml` and `direct-hosts.txt` here are placeholders. Keep the real ones in your private
-  repo. Copy them over before you deploy (see `CLAUDE.md`, "overlay procedure").
+  repo. Copy them over before you deploy (see `CLAUDE.md`, "overlay procedure"). Or mount your list in the published
+  image and set `DIRECT_HOSTS_FILE` to its path (see `docs/images.md`).
 - State: `flyctl volumes create tailscale_state -a <app> -r <region> -n 1`. With the volume, the node keeps its
   identity across deploys. Without the volume, every deploy registers a new node.
 - Secrets: `flyctl secrets set TAILSCALE_AUTH_KEY=<reusable, non-ephemeral key>` and
   `HEADSCALE_LOGIN_SERVER=https://<your-headscale-url>`. Use a reusable non-ephemeral key.
   Ephemeral keys are IPv6-only on Tailscale and work poorly for exit nodes.
+- Name: the node joins the tailnet as `ams`. To use a different name, set `EXIT_NODE_HOSTNAME`.
 - Deploy: `flyctl deploy [--build-arg TSVERSION=<x.y.z>]`. The node advertises itself as an exit
   node. Approve it (or use the ACL `autoApprovers.exitNode`) before clients can use it.
 

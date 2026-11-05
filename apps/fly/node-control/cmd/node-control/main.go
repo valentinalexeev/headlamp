@@ -46,12 +46,13 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	}, headscale.DefaultTTL)
 
 	providers := map[string]nodes.Provider{
-		"yandex":   nodes.NewYandex(env, hc),
-		"oci":      nodes.NewOCI(env, hc),
-		"selectel": nodes.NewSelectel(env, hc),
-		// "openstack" is the generic name of the same provider (#101): tag:cloud-openstack, "provider": "openstack"
-		// and an "openstack" block. Its default cloud is still SELECTEL_*; other clouds come from OPENSTACK_CLOUDS.
-		"openstack": nodes.NewSelectel(env, hc),
+		"yandex": nodes.NewYandex(env, hc),
+		"oci":    nodes.NewOCI(env, hc),
+		// One OpenStack implementation (#101). A provider name names an organisation: "selectel" is the default cloud
+		// (SELECTEL_*), and "openstack" is the same provider under a generic name. Further clouds are declared in
+		// OPENSTACK_CLOUDS and picked with a node block's "cloud".
+		"selectel":  nodes.NewOpenStack(env, hc),
+		"openstack": nodes.NewOpenStack(env, hc),
 		"fly":       nodes.NewFly(env, hc),
 	}
 	// Nodes takes the audit log from enrolment, and enrolment asks Nodes what is stopped: hence nm is declared first.

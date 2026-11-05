@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/clientip"
 	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
 	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
@@ -438,5 +439,37 @@ func TestRouteChangesTakeEffectWithoutRestart(t *testing.T) {
 	}
 	if resp, body := get(t, srv, "late.pdl.example.com", "/", nil); resp.StatusCode != 200 || body != "ok" {
 		t.Fatalf("after: %d %q", resp.StatusCode, body)
+	}
+}
+
+// Behind a load balancer that appends X-Forwarded-For, only a trusted peer's header counts, and the client is the
+// right-most untrusted hop. An untrusted peer gets neither its claimed address nor its claimed scheme.
+func TestTrustedProxyForwardedFor(t *testing.T) {
+	b := newBackend(t, nil)
+	table, _ := routes.NewTable(nopPersister{}, 10)
+	table.SetStatic([]routes.Route{route("admin", "pdl", "100.64.0.5", 9000)})
+	d := &dialRecorder{to: b.srv.Listener.Addr().String()}
+	cfg := testCfg()
+	for _, c := range []struct {
+		trusted, wantFor, wantProto string
+	}{
+		{"127.0.0.0/8", "203.0.113.7", "https"}, // the test client is the trusted load balancer
+		{"10.0.0.0/8", "127.0.0.1", "http"},     // the direct peer is not trusted
+	} {
+		var err error
+		if cfg.ClientIP, err = clientip.New("X-Forwarded-For", c.trusted); err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(NewHandler(table, d.dial, func() string { return domain }, cfg))
+		get(t, srv, "admin.pdl.example.com", "/", map[string]string{
+			"X-Forwarded-For": "6.6.6.6, 203.0.113.7", "X-Forwarded-Proto": "https", "Fly-Client-IP": "198.51.100.1"})
+		srv.Close()
+		seen, _ := b.last()
+		if got := seen.Header.Get("X-Forwarded-For"); got != c.wantFor {
+			t.Errorf("trusted %s: X-Forwarded-For = %q, want %q", c.trusted, got, c.wantFor)
+		}
+		if got := seen.Header.Get("X-Forwarded-Proto"); got != c.wantProto {
+			t.Errorf("trusted %s: X-Forwarded-Proto = %q, want %q", c.trusted, got, c.wantProto)
+		}
 	}
 }

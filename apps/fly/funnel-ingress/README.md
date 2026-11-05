@@ -30,7 +30,13 @@ Host `<service>.<namespace>.<public domain>` maps to a route. There are exactly 
 The proxy normalises case, a port and one trailing dot. Any other host gets a bare `404`.
 
 The proxy forwards the original `Host`. It rebuilds `X-Forwarded-For/Host/Proto` from scratch. It drops client-supplied forwarding headers.
-The client address is the `Fly-Client-IP` that the edge of Fly sets.
+The proxy reads the client address from one header. By default, this is the `Fly-Client-IP` header that the edge of Fly sets.
+Behind a different load balancer, set `FUNNEL_CLIENT_IP_HEADER` and `FUNNEL_TRUSTED_PROXIES` (see the table).
+The proxy reads the header and `X-Forwarded-Proto` only from a trusted peer. For `X-Forwarded-For`, the client is the
+right-most address that is not a trusted proxy. If the header is missing or not valid, the proxy uses the address of the peer.
+
+**WARNING:** if `FUNNEL_TRUSTED_PROXIES` is empty, the proxy reads the header from all peers. Use an empty value only if
+the load balancer is the only route to the listener. Otherwise, a client can set a false address.
 
 The proxy strips hop-by-hop headers. WebSocket upgrades work.
 Connect, idle and response-header timeouts and a request-body limit apply.
@@ -112,6 +118,8 @@ process settings. They arrive through the configuration source.
 | `FUNNEL_RECONCILE_INTERVAL`, `FUNNEL_MISSING_CHECKS` | see Lifecycle |
 | `FUNNEL_MAX_ROUTES_PER_NODE`, `FUNNEL_MAX_BODY_BYTES` | defaults `20`, `33554432` |
 | `FUNNEL_CONNECT_TIMEOUT`, `FUNNEL_IDLE_TIMEOUT`, `FUNNEL_REQUEST_TIMEOUT` | defaults `10s`, `120s`, `300s` |
+| `FUNNEL_CLIENT_IP_HEADER` | header with the client address, default `Fly-Client-IP`. `X-Forwarded-For` is read as a chain. `none` uses the peer address only |
+| `FUNNEL_TRUSTED_PROXIES` | comma-separated CIDRs or addresses of the load balancer. Only these peers can set the client header and `X-Forwarded-Proto`. Empty: all peers (see the warning above) |
 | `REDIS_URL`, `REDIS_KEY`, `FUNNEL_STATE_KEY`, `STATE_ALLOW_PLAINTEXT`, `STATE_IMPORT_FROM` | state store, see below |
 | `FUNNEL_STATE_DIR` | file state only (no `REDIS_URL`), default `/var/lib/tailscale` (as in node-control; the image creates it for the app user) |
 

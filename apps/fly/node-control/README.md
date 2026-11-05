@@ -54,6 +54,7 @@ Put secrets in Fly secrets. Put plain settings in `fly.toml`.
 | `POLICY_MAX_BYTES` | The largest policy that the console accepts. From 1024 to 4194304. The default is 262144. |
 | `TASKS_*` | The scheduled-task module. It is on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set. "Tasks module" gives the variables and defaults. |
 | `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | The Yandex service account key, and the folder for the lookup by name. The account needs `compute.operator` and `compute.viewer`. |
+| `YANDEX_API_ENDPOINT`, `YANDEX_IAM_ENDPOINT` | Optional. The compute API and IAM API of a separate cloud installation, for all Yandex nodes, for example `https://compute.api.<domain>` and `https://iam.api.<domain>`. Both must be https URLs. If they are not set, the app uses the public endpoints. |
 | `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | The OCI credentials, and the default region and compartment. |
 | `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | The service user, the default region and the optional auth URL of the default OpenStack cloud (Selectel). |
 | `OPENSTACK_CLOUDS` | Optional. Other OpenStack-compatible clouds, as `NAME=https://<keystone>/v3`, comma separated. `NAME` is upper case. The credentials of each cloud are `NAME_ACCOUNT_ID`, `NAME_PROJECT_ID`, `NAME_USER`, `NAME_PASSWORD` and `NAME_REGION`. Only this variable sets where these credentials go, so `nodes.json` cannot send them to a different URL. |
@@ -240,7 +241,7 @@ The file is optional. Files from the Python version continue to work. Start from
 
   | provider | block |
   |---|---|
-  | `yandex` | `{"instance_id"}` |
+  | `yandex` | `{"instance_name"}` or `{"instance_id"}`, with optional `"folder_id"`, and `"endpoint"` with `"iam_endpoint"` (both, https only) for a node in a separate installation |
   | `oci` | `{"region", "compartment_id", "instance_name"}` or `{"instance_id"}` |
   | `openstack` (or the old name `selectel`) | `{"region", "instance_name"}` or `{"instance_id"}`. For a node in a different OpenStack cloud, add `"cloud": "NAME"`, with a `NAME` from `OPENSTACK_CLOUDS` |
   | `aws` | `{"region", "instance_name"}` (the `Name` tag), `{"region", "instance_id"}` or `{"region", "asg"}` |

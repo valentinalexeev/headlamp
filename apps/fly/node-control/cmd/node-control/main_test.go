@@ -482,3 +482,27 @@ func TestKeyViewers(t *testing.T) {
 		}
 	}
 }
+
+// A deployment that runs the published image mounts nodes.json anywhere and points NODES_CONFIG at it (#97). Without
+// the variable the image's default path is used, and a missing file there is not an error.
+func TestNodesConfigFromAMountedPath(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "mounted-nodes.json")
+	if err := os.WriteFile(p, []byte(`{"nodes": [1, 2`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A broken file at the mounted path proves that path is the one read.
+	if _, err := buildModules(core.MapEnv(map[string]string{"NODES_CONFIG": p}), http.DefaultClient); err == nil ||
+		!strings.Contains(err.Error(), p) {
+		t.Fatalf("NODES_CONFIG not read: %v", err)
+	}
+	if defaultNodesConfig != "/srv/app/nodes.json" {
+		t.Fatalf("default path changed to %q: deployments that overlay app/ would break", defaultNodesConfig)
+	}
+	if _, err := os.Stat(defaultNodesConfig); err == nil {
+		t.Skip("a real file exists at the default path on this machine")
+	}
+	if _, err := buildModules(core.MapEnv(nil), http.DefaultClient); err != nil {
+		t.Fatalf("without NODES_CONFIG and without a file at the default path: %v", err)
+	}
+}

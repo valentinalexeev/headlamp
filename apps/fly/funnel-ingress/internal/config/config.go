@@ -171,6 +171,7 @@ type SidecarConfig struct {
 	APIURL                                             string        // funnel-ingress registration API, e.g. http://funnel-ingress:9100
 	ControlURL, AuthKey, Hostname, StateDir, ReadyAddr string        // ControlURL optional; StateDir is scratch space for the ephemeral node
 	ReregisterInterval                                 time.Duration // how often registrations are re-asserted
+	UnreachableExit                                    time.Duration // exit after the API gave no answer this long; 0 never exits
 }
 
 // LoadSidecar builds a SidecarConfig from getenv. Like Load, errors name settings, never values.
@@ -200,6 +201,15 @@ func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
 			fail("FUNNEL_REREGISTER_INTERVAL must be a duration of at least 10s")
 		} else {
 			c.ReregisterInterval = d
+		}
+	}
+	c.UnreachableExit = 5 * time.Minute
+	if v := strings.TrimSpace(getenv("FUNNEL_UNREACHABLE_EXIT")); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || (d != 0 && d < time.Minute) {
+			fail("FUNNEL_UNREACHABLE_EXIT must be 0 or a duration of at least 1m")
+		} else {
+			c.UnreachableExit = d
 		}
 	}
 	if c.NS == "" {

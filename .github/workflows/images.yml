@@ -7,7 +7,7 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   workflow_dispatch:
     inputs:
       rebuild_all:

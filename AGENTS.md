@@ -12,3 +12,5 @@ The non-negotiables, in case you read nothing else:
 - Do not apply, deploy, destroy, or push unless the operator asked for exactly that.
 - Never print secret values; never delete a leftover plaintext `terraform.tfstate` (run
   `make tf-save`).
+- Work flows through GitHub issues and PRs as `valentinalexeev-bot`: only issues assigned to the bot, branches
+  from `main`, merge only on an owner approval of the current head. See CLAUDE.md section 1a.

@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths: ['apps/task-runner/**', '.github/workflows/test-task-runner.yml']
   pull_request:
-    branches: [main, develop]
+    branches: [main]
     paths: ['apps/task-runner/**', '.github/workflows/test-task-runner.yml']
 permissions:
   contents: read

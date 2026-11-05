@@ -157,7 +157,7 @@ func TestLoadSidecarDefaultsAndOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.NS != "pdl" || c.Services != "admin=8080" || c.APIURL != "http://funnel-ingress:9100" || c.Hostname != "funnel-sidecar" ||
-		c.StateDir != "/tmp/funnel-sidecar" || c.ReadyAddr != ":8081" || c.ReregisterInterval != 5*time.Minute {
+		c.StateDir != "/tmp/funnel-sidecar" || c.ReadyAddr != ":8081" || c.ReregisterInterval != 5*time.Minute || c.UnreachableExit != 5*time.Minute {
 		t.Fatalf("defaults: %+v", c)
 	}
 	m := sidecarBase()
@@ -172,6 +172,12 @@ func TestLoadSidecarDefaultsAndOverrides(t *testing.T) {
 	m["FUNNEL_HOSTNAME"] = "explicit"
 	if c, _ = LoadSidecar(env(m)); c.Hostname != "explicit" {
 		t.Fatalf("FUNNEL_HOSTNAME must win over HOSTNAME: %q", c.Hostname)
+	}
+	for v, want := range map[string]time.Duration{"0": 0, "2m": 2 * time.Minute} {
+		m["FUNNEL_UNREACHABLE_EXIT"] = v
+		if c, err = LoadSidecar(env(m)); err != nil || c.UnreachableExit != want {
+			t.Fatalf("FUNNEL_UNREACHABLE_EXIT=%s: %v %v", v, c.UnreachableExit, err)
+		}
 	}
 }
 
@@ -188,6 +194,8 @@ func TestLoadSidecarRejects(t *testing.T) {
 		"control url":      {"FUNNEL_CONTROL_URL", "headscale"},
 		"interval short":   {"FUNNEL_REREGISTER_INTERVAL", "1s"},
 		"interval garbage": {"FUNNEL_REREGISTER_INTERVAL", "often"},
+		"exit too short":   {"FUNNEL_UNREACHABLE_EXIT", "30s"},
+		"exit garbage":     {"FUNNEL_UNREACHABLE_EXIT", "soon"},
 	} {
 		m := sidecarBase()
 		m[kv[0]] = kv[1]

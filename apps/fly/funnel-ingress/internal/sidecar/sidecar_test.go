@@ -228,6 +228,7 @@ type harness struct {
 	ready *readyLog
 	waits []time.Duration
 	lns   []net.Listener
+	clock time.Time // fake time: starts at an arbitrary instant, each wait advances it by the requested delay
 }
 
 func newHarness() *harness {
@@ -239,7 +240,7 @@ func newHarness() *harness {
 	}
 }
 
-// run executes Run until the nth wait, with a fake clock that only records the requested delays.
+// run executes Run until the nth wait, with a fake clock that records the requested delays and advances by them.
 func (h *harness) run(t *testing.T, waitsBeforeStop int) error {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -249,14 +250,17 @@ func (h *harness) run(t *testing.T, waitsBeforeStop int) error {
 		h.lns = append(h.lns, ln)
 		return ln, err
 	}
+	h.clock = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	wait := func(c context.Context, d time.Duration) bool {
 		h.waits = append(h.waits, d)
+		h.clock = h.clock.Add(d)
 		if len(h.waits) >= waitsBeforeStop {
 			cancel()
 		}
 		return c.Err() == nil
 	}
-	return run(ctx, h.cfg, h.svcs, listen, h.reg, h.ready.set, wait, realDial)
+	now := func() time.Time { return h.clock }
+	return run(ctx, h.cfg, h.svcs, listen, h.reg, h.ready.set, wait, now, realDial)
 }
 
 func TestRunRegistersEveryServiceOnStart(t *testing.T) {
@@ -287,7 +291,7 @@ func TestRunListenFailureIsAnError(t *testing.T) {
 		}
 		return net.Listen("tcp", "127.0.0.1:0")
 	}
-	err := run(context.Background(), h.cfg, h.svcs, listen, h.reg, h.ready.set, nil, realDial)
+	err := run(context.Background(), h.cfg, h.svcs, listen, h.reg, h.ready.set, nil, time.Now, realDial)
 	if err == nil || !strings.Contains(err.Error(), "api") {
 		t.Fatalf("got %v", err)
 	}
@@ -442,5 +446,63 @@ func TestHTTPRegistrarMapsStatus(t *testing.T) {
 		t.Fatal("network failure reported as success")
 	} else if errors.As(err, new(*APIError)) {
 		t.Fatal("network failure reported as an API error")
+	}
+}
+
+func TestRunExitsWhenTheAPIStaysUnreachable(t *testing.T) {
+	h := newHarness()
+	h.cfg.UnreachableExit = 5 * time.Minute
+	h.reg.putErr = func(int) error { return context.DeadlineExceeded }
+	err := h.run(t, 1000)
+	if !errors.Is(err, ErrUnreachable) {
+		t.Fatalf("got %v, want ErrUnreachable", err)
+	}
+	var total time.Duration
+	for _, w := range h.waits {
+		total += w
+	}
+	if total < 5*time.Minute || total > 5*time.Minute+maxBackoff {
+		t.Fatalf("exited after %v of waiting, want about 5m", total)
+	}
+	if _, dels := h.reg.counts(); dels != len(h.svcs) {
+		t.Fatalf("deletes = %d, want a best-effort withdrawal before the exit", dels)
+	}
+	if v := h.ready.get(); v[len(v)-1] {
+		t.Fatal("still ready after the exit")
+	}
+}
+
+func TestRunUnreachableTimerRestartsAfterASuccess(t *testing.T) {
+	h := newHarness()
+	h.svcs = h.svcs[:1]
+	h.cfg.UnreachableExit = 5 * time.Minute
+	h.cfg.ReregisterInterval = 4 * time.Minute
+	// Seven failures (waits 1..60s, 123s in all), one success, the 4m interval, then failures again. The second
+	// failure round comes 363s after the start but only 240s after the success: Run must count from the success.
+	h.reg.putErr = func(n int) error {
+		if n == 8 {
+			return nil
+		}
+		return context.DeadlineExceeded
+	}
+	if err := h.run(t, 10); err != nil {
+		t.Fatalf("Run exited although the API answered within the limit: %v", err)
+	}
+}
+
+func TestRunAPIErrorsDoNotCountAsUnreachable(t *testing.T) {
+	h := newHarness()
+	h.cfg.UnreachableExit = time.Minute
+	h.reg.putErr = func(int) error { return &APIError{Status: 403} }
+	if err := h.run(t, 50); err != nil {
+		t.Fatalf("a 403 means the ingress answered; Run must keep retrying, got %v", err)
+	}
+}
+
+func TestRunUnreachableExitZeroNeverExits(t *testing.T) {
+	h := newHarness()
+	h.reg.putErr = func(int) error { return context.DeadlineExceeded }
+	if err := h.run(t, 200); err != nil {
+		t.Fatalf("UnreachableExit 0 must disable the exit, got %v", err)
 	}
 }

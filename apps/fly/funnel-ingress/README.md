@@ -205,12 +205,27 @@ It re-asserts every `FUNNEL_REREGISTER_INTERVAL` (default `5m`). It retries with
 backoff (also on `403` and `409`). It is ready (`/readyz` on `FUNNEL_READY_ADDR`) only while every service is registered. It
 deletes its routes on SIGTERM.
 
+`/readyz` gives `200` when the last registration round was successful, and `503` when it was not. The JSON body
+contains `ready`, `last_registered` (the time of the last successful round, RFC 3339) and `age_seconds` (the seconds since
+that round). Before the first successful round, the body does not contain `last_registered` and `age_seconds`.
+
+If the registration API gives no answer for `FUNNEL_UNREACHABLE_EXIT` (default `5m`), the sidecar deletes its routes
+and stops with an error. A `403` or `409` is an answer, so it does not start this timer. The usual cause is that headscale
+removed the ephemeral node. The tsnet node does not log in again, so only a new process recovers. Set `0` to disable the
+exit.
+
+Kubernetes restarts the container and the new process logs in again with `TS_AUTHKEY`. Thus the key must be reusable (an
+ephemeral key is reusable). The sidecar also logs each change of the tailnet node state and its health
+warnings (`tailnet: node status`).
+
 | variable | purpose |
 |---|---|
 | `FUNNEL_NS`, `FUNNEL_SERVICES` | namespace; `name=port` (forward to `127.0.0.1:port`) or `name=port@host:port2`, comma separated |
 | `FUNNEL_API_URL` | the ingress node's API, for example `http://funnel-ingress:9100` |
 | `FUNNEL_CONTROL_URL`, `TS_AUTHKEY`, `FUNNEL_HOSTNAME` | control server, key, node name (default `$HOSTNAME`) |
 | `FUNNEL_STATE_DIR`, `FUNNEL_READY_ADDR` | scratch dir (`/tmp/funnel-sidecar`), readiness listener (`:8081`) |
+| `FUNNEL_REREGISTER_INTERVAL` | interval between registrations (`5m`, minimum `10s`) |
+| `FUNNEL_UNREACHABLE_EXIT` | stop after the API gives no answer for this time (`5m`, minimum `1m`, `0` disables) |
 
 - Use **one ephemeral pre-auth key for each namespace**. The key carries `tag:funnel` and `tag:ns-<ns>`. A leaked key can publish only
   inside that namespace.

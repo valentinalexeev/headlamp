@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -18,6 +19,11 @@ const (
 	registerTimeout = 15 * time.Second
 )
 
+// ErrUnreachable ends Run when the registration API gave no answer for cfg.UnreachableExit. The usual cause is
+// that the control server removed this ephemeral node: tsnet does not log in again by itself, so only a new
+// process (a pod restart) recovers.
+var ErrUnreachable = errors.New("the registration API gave no answer for too long; exiting so the pod restarts with a new tailnet login")
+
 // shutdownBudget bounds the best-effort withdrawal of routes at shutdown (a variable so tests can shorten it).
 var shutdownBudget = 5 * time.Second
 
@@ -25,9 +31,11 @@ var shutdownBudget = 5 * time.Second
 // target, registers the services (retrying with backoff, re-asserting every cfg.ReregisterInterval), reports
 // readiness through ready (true only while the last round registered every service), and on shutdown deletes
 // its routes best effort within a bounded time. Registration failures, including 403 and 409, never end the
-// process: the operator may fix a tag or free a name while the sidecar keeps retrying.
+// process: the operator may fix a tag or free a name while the sidecar keeps retrying. Only when the API gives
+// no answer at all (a transport error, typically a timeout) for cfg.UnreachableExit does Run withdraw and return
+// ErrUnreachable, so that the process exits and Kubernetes restarts it.
 func Run(ctx context.Context, cfg config.SidecarConfig, svcs []Service, listen func(network, addr string) (net.Listener, error), reg Registrar, ready func(bool)) error {
-	return run(ctx, cfg, svcs, listen, reg, ready, sleep, (&net.Dialer{Timeout: 10 * time.Second}).DialContext)
+	return run(ctx, cfg, svcs, listen, reg, ready, sleep, time.Now, (&net.Dialer{Timeout: 10 * time.Second}).DialContext)
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {
@@ -42,7 +50,7 @@ func sleep(ctx context.Context, d time.Duration) bool {
 }
 
 func run(ctx context.Context, cfg config.SidecarConfig, svcs []Service, listen func(network, addr string) (net.Listener, error), reg Registrar, ready func(bool),
-	wait func(context.Context, time.Duration) bool, dial func(context.Context, string, string) (net.Conn, error)) error {
+	wait func(context.Context, time.Duration) bool, now func() time.Time, dial func(context.Context, string, string) (net.Conn, error)) error {
 	var lns []net.Listener
 	for _, s := range svcs {
 		ln, err := listen("tcp", fmt.Sprintf(":%d", s.TailnetPort))
@@ -65,14 +73,20 @@ func run(ctx context.Context, cfg config.SidecarConfig, svcs []Service, listen f
 	}
 
 	backoff := initialBackoff
+	lastAnswer := now() // last round in which the API answered every request (with any status)
+	var result error
 	for ctx.Err() == nil {
-		allOK := true
+		allOK, allAnswered := true, true
 		for _, s := range svcs {
 			rctx, cancel := context.WithTimeout(ctx, registerTimeout)
 			err := reg.Put(rctx, cfg.NS, s.Name, s.TailnetPort)
 			cancel()
 			if err != nil && ctx.Err() == nil {
 				allOK = false
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) {
+					allAnswered = false
+				}
 				slog.Warn("registering failed", "ns", cfg.NS, "service", s.Name, "error", err)
 			}
 		}
@@ -80,6 +94,13 @@ func run(ctx context.Context, cfg config.SidecarConfig, svcs []Service, listen f
 			break
 		}
 		ready(allOK)
+		if allAnswered {
+			lastAnswer = now()
+		} else if silent := now().Sub(lastAnswer); cfg.UnreachableExit > 0 && silent >= cfg.UnreachableExit {
+			slog.Error("registration API unreachable, exiting", "ns", cfg.NS, "for", silent.Round(time.Second))
+			result = ErrUnreachable
+			break
+		}
 		d := cfg.ReregisterInterval
 		if allOK {
 			backoff = initialBackoff
@@ -105,5 +126,5 @@ func run(ctx context.Context, cfg config.SidecarConfig, svcs []Service, listen f
 	cancel()
 	stopForward()
 	wg.Wait()
-	return nil
+	return result
 }

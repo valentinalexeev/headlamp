@@ -33,7 +33,7 @@ test-release:
 test-manual-style:
 	./scripts/test/manual-style/run_tests.sh
 
-# Checks every manual, or only those changed since a ref: make check-manuals BASE=origin/develop
+# Checks every manual, or only those changed since a ref: make check-manuals BASE=origin/main
 check-manuals:
 	@./scripts/list-manuals.sh $(BASE) | xargs ./scripts/check-manual-style.py
 

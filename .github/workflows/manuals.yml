@@ -2,7 +2,7 @@
 name: manuals
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main]
     paths: ['**.md', 'scripts/check-manual-style.py', 'scripts/list-manuals.sh', '.github/workflows/manuals.yml']
 permissions:
   contents: read

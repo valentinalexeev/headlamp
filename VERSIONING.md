@@ -63,9 +63,13 @@ adds its own in a private overlay.
 
 ## Cutting a release
 
-1. On `develop`, set `VERSION` and move the `Unreleased` part of `CHANGELOG.md` under the new version.
-2. Merge `develop` into `main` through a PR.
-3. Tag the merge commit on `main` and push the tag: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
+All work merges into `main` through pull requests. There is no other long-lived branch.
+
+1. Make a `release/X.Y.Z` branch from `main`. In one commit `chore(release): vX.Y.Z`, set `VERSION` and move the
+   `Unreleased` part of `CHANGELOG.md` under the new version. Merge it into `main` through a PR.
+2. Tag the merge commit on `main` and push the tag: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
+
+A hotfix is a normal fix on a `hotfix/` branch, followed at once by a PATCH release.
 
 CI checks the rules, tags the images and creates the GitHub release. To see whether a tag would pass before pushing it, tag
 locally and run `scripts/check-release.sh vX.Y.Z`.

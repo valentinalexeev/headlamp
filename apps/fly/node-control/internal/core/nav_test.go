@@ -921,3 +921,57 @@ func TestSearchBoxActionsStayInsideTheirAttribute(t *testing.T) {
 		t.Fatalf("the icon and the palette hook stay: %s", out)
 	}
 }
+
+// CodeQL go/reflected-xss (#108): API handlers answer JSON that may carry request-derived text, and the shell writer
+// wraps those responses. A response that says JSON must reach the browser as JSON, untouched and not sniffable, even
+// when its text looks like HTML.
+func TestNavMiddlewareNeverTurnsJSONIntoHTML(t *testing.T) {
+	payload := `{"detail":"<script>alert(1)</script><body><img src=x onerror=alert(2)>"}`
+	for _, ct := range []string{"application/json", "application/json; charset=utf-8", "application/problem+json", ""} {
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ct != "" {
+				w.Header().Set("Content-Type", ct)
+			}
+			_, _ = io.WriteString(w, payload)
+		})
+		rec := do(testNav(richItems(), h), "GET", "/funnel/routes")
+		if got := rec.Body.String(); got != payload {
+			t.Errorf("ct %q: body changed: %q", ct, got)
+		}
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("ct %q: X-Content-Type-Options = %q", ct, got)
+		}
+		if got := rec.Header().Get("Content-Type"); ct == "" && strings.HasPrefix(got, "text/html") {
+			t.Errorf("an untyped body was served as HTML: %q", got)
+		}
+	}
+}
+
+// Every admin response, HTML pages included, carries nosniff.
+func TestNavMiddlewareSetsNoSniffOnPages(t *testing.T) {
+	rec := do(testNav(richItems(), htmlHandler(`<body><p>hi</p></body>`)), "GET", "/nodes")
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+}
+
+// Over a real server, an untyped body that starts with markup gets Go's sniffed type. The shell must still leave it
+// alone, and nosniff must be on the wire, so the browser does not render it as HTML from a type it guessed.
+func TestNavMiddlewareUntypedOverRealServer(t *testing.T) {
+	srv := httptest.NewServer(testNav(richItems(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `<body><script>alert(1)</script></body>`)
+	})))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/funnel/routes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if string(b) != `<body><script>alert(1)</script></body>` {
+		t.Fatalf("body changed (shell injected into an untyped answer): %q", b)
+	}
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("no nosniff on the wire: %v", resp.Header)
+	}
+}

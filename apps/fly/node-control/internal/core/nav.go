@@ -269,10 +269,11 @@ func (n *navWriter) decide(status int, first []byte) {
 	n.decided = true
 	n.status = status
 	h := n.Header()
+	// Never sniff (#108): only a handler that declares text/html gets the shell. An untyped body that merely starts
+	// with markup (an API answer echoing request text) must not be turned into a page, and the browser must not
+	// sniff it either.
+	h.Set("X-Content-Type-Options", "nosniff")
 	ct := h.Get("Content-Type")
-	if ct == "" && len(first) > 0 {
-		ct = http.DetectContentType(first)
-	}
 	n.buffering = status == http.StatusOK && h.Get("Content-Encoding") == "" &&
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(ct)), "text/html")
 }

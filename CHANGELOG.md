@@ -23,6 +23,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 - The node-control provider name `selectel` (`tag:cloud-selectel`, a `selectel` node block) and the Terraform module `exit-node-vm/selectel`. Use `openstack` and `exit-node-vm/openstack`. They will be removed by 1.0.0.
 
+### Security
+
+- node-control no longer guesses the type of an answer without a `Content-Type`, and sends `X-Content-Type-Options: nosniff`. Before, an untyped answer that started with markup got the navigation shell and was sent as HTML (#108).
+
 ## 0.9.0 - 2026-11-05
 
 ### Added

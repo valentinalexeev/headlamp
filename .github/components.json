@@ -29,7 +29,7 @@
     "context": "apps/fly/headscale",
     "dockerfile": "Dockerfile",
     "paths": ["apps/fly/headscale"],
-    "test": "make test-headscale-policy"
+    "test": "make test-headscale-policy && make test-runtime-config IMAGE=headscale"
   },
   {
     "image": "exit-node",
@@ -37,7 +37,7 @@
     "dockerfile": "Dockerfile",
     "paths": ["apps/fly/exit-ams", "TAILSCALE_VERSION"],
     "args_from_files": {"TSVERSION": "TAILSCALE_VERSION"},
-    "test": "make test-exit-node-state"
+    "test": "make test-exit-node-state && make test-runtime-config IMAGE=exit-node"
   },
   {
     "image": "task-runner-browser",

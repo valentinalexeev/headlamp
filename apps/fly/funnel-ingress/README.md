@@ -229,8 +229,13 @@ warnings (`tailnet: node status`).
 
 - Use **one ephemeral pre-auth key for each namespace**. The key carries `tag:funnel` and `tag:ns-<ns>`. A leaked key can publish only
   inside that namespace.
-- Use one sidecar for each `(ns, service)`. For replicated apps, run a single-replica forwarder in front of the Kubernetes Service
-  (`examples/k8s/forwarder-deployment.yaml`). Do not run one sidecar for each replica, because a second registrant gets `409`.
+- One sidecar can publish several services of one namespace. Put each service in `FUNNEL_SERVICES` with its own name
+  and its own tailnet port, for example `web=8080@web.demo.svc:80,hook=8081@hook.demo.svc:80`. The targets can be in
+  different Kubernetes namespaces. All the routes go into the namespace of the sidecar (`FUNNEL_NS`), and together they
+  count toward `FUNNEL_MAX_ROUTES_PER_NODE`. `/readyz` is ready only when all of them are registered. SIGTERM deletes all of them.
+- Each service name has one registrant. For replicated apps, run a single-replica forwarder in front of the Kubernetes
+  Service (`examples/k8s/forwarder-deployment.yaml`). Do not run one sidecar for each replica, because a second
+  registrant gets `409`.
 - The route of a dead pod disappears when headscale expires its ephemeral node (`node.ephemeral.inactivity_timeout` in the
   headscale config). The default is 30 minutes and the minimum is 65 s. A value of 2 to 5 minutes is good here.
   Services behind a subnet router are not supported.

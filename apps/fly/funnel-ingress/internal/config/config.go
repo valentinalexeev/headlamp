@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/clientip"
 	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/statestore"
 )
 
@@ -47,6 +48,8 @@ type Config struct {
 	MaxBodyBytes      int64
 
 	ConnectTimeout, IdleTimeout, RequestTimeout time.Duration
+
+	ClientIP *clientip.Resolver // where the client address comes from (FUNNEL_CLIENT_IP_HEADER, FUNNEL_TRUSTED_PROXIES)
 }
 
 // Load builds a Config from getenv (os.Getenv in production). Error texts name settings, never values:
@@ -150,6 +153,10 @@ func Load(getenv func(string) string) (Config, error) {
 		errs = append(errs, err)
 	}
 	c.RedisKey = key
+
+	if c.ClientIP, err = clientip.New(getenv("FUNNEL_CLIENT_IP_HEADER"), getenv("FUNNEL_TRUSTED_PROXIES")); err != nil {
+		fail("FUNNEL_CLIENT_IP_HEADER or FUNNEL_TRUSTED_PROXIES: %v", err)
+	}
 
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)

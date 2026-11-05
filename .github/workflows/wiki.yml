@@ -1,0 +1,33 @@
+# Publishes the released documentation to the GitHub wiki on every push to main. The repository is the reviewed
+# source; the wiki is a copy (scripts/wiki-render.sh). The wiki must have one page before the first run: create Home
+# once by hand.
+name: wiki
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', 'README.md', 'VERSIONING.md', 'CHANGELOG.md', 'scripts/wiki-render.sh', '.github/workflows/wiki.yml']
+  workflow_dispatch:
+permissions:
+  contents: write # the wiki is pushed with the workflow token
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Render and push
+        env:
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git clone -q "https://x-access-token:${TOKEN}@github.com/${REPO}.wiki.git" "$RUNNER_TEMP/wiki"
+          scripts/wiki-render.sh "$RUNNER_TEMP/wiki" "$REPO" main
+          cd "$RUNNER_TEMP/wiki"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "wiki up to date"; exit 0; }
+          git commit -qm "docs: sync from ${GITHUB_SHA::7}"
+          git push -q

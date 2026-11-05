@@ -1,0 +1,128 @@
+# Runs the repository checks that are not tied to one image: shell lint and script tests, Terraform module format and
+# validation, Ansible syntax, a secret scan of the new commits, and the commit subjects. Adapted from agentdev's ci.yml.
+# Every job always reports, so branch protection never waits on a skipped workflow; heavy steps run only when their
+# inputs changed. Image builds and their tests stay in images.yml.
+name: ci
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  scope:
+    runs-on: ubuntu-24.04
+    outputs:
+      shell: ${{ steps.f.outputs.shell }}
+      terraform: ${{ steps.f.outputs.terraform }}
+      ansible: ${{ steps.f.outputs.ansible }}
+      base: ${{ steps.f.outputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: f
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            files=$(git ls-files); BASE=$(git rev-list --max-parents=0 HEAD | tail -1)
+          else
+            files=$(git diff --name-only "$BASE"...HEAD)
+          fi
+          has() { grep -qE "$1" <<<"$files" && echo true || echo false; }
+          {
+            echo "base=$BASE"
+            echo "shell=$(has '(\.sh$|^scripts/|^\.githooks/|^Makefile$|^\.github/workflows/ci\.yml$)')"
+            echo "terraform=$(has '(^terraform/|^\.github/workflows/ci\.yml$)')"
+            echo "ansible=$(has '(^ansible/|^\.github/workflows/ci\.yml$)')"
+          } >>"$GITHUB_OUTPUT"
+
+  commits:
+    needs: scope
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # PRs merge with a merge commit, so every commit subject reaches the history the release check reads.
+      - name: Conventional commit subjects
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ needs.scope.outputs.base }}
+        run: |
+          fail=0
+          while IFS= read -r s; do scripts/check-conventional.sh "$s" || fail=1; done \
+            < <(git log --no-merges --format=%s "$BASE..HEAD")
+          exit "$fail"
+      - name: Secret scan of the new commits (gitleaks)
+        env:
+          BASE: ${{ needs.scope.outputs.base }}
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar xz gitleaks
+          ./gitleaks git --no-banner --redact --log-opts="$BASE..HEAD" .
+
+  shell:
+    needs: scope
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.scope.outputs.shell == 'true'
+      - name: Lint and script tests
+        if: needs.scope.outputs.shell == 'true'
+        run: |
+          make lint
+          make test-tf-run test-check-denylist test-exit-node-state test-headscale-policy \
+            test-headscale-tag-node test-tasks-cli test-release
+      - name: Skipped
+        if: needs.scope.outputs.shell != 'true'
+        run: echo "no shell, script or Makefile change"
+
+  terraform:
+    needs: scope
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.scope.outputs.terraform == 'true'
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: needs.scope.outputs.terraform == 'true'
+        with:
+          terraform_wrapper: false
+      - name: Format and validate the modules
+        if: needs.scope.outputs.terraform == 'true'
+        run: |
+          terraform fmt -check -recursive terraform
+          for m in terraform/modules/exit-node-vm/*/; do
+            # cloudru's provider is not on the public registry (see its versions.tf): format only.
+            case $m in */cloudru/) continue ;; esac
+            echo "::group::$m"
+            terraform -chdir="$m" init -backend=false -input=false
+            terraform -chdir="$m" validate
+            echo "::endgroup::"
+          done
+      - name: Skipped
+        if: needs.scope.outputs.terraform != 'true'
+        run: echo "no Terraform change"
+
+  ansible:
+    needs: scope
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.scope.outputs.ansible == 'true'
+      - name: Syntax check the playbooks
+        if: needs.scope.outputs.ansible == 'true'
+        working-directory: ansible
+        run: |
+          pipx install --include-deps ansible-core
+          ansible-galaxy collection install -r requirements.yml
+          for p in playbooks/*.yml; do ANSIBLE_ROLES_PATH=roles ansible-playbook -i localhost, --syntax-check "$p"; done
+      - name: Skipped
+        if: needs.scope.outputs.ansible != 'true'
+        run: echo "no Ansible change"

@@ -111,6 +111,166 @@ Anything that identifies a deployment is a placeholder here (`example.com`, `<yo
 Dockerfiles `COPY` those placeholder files, so a forked build works but is not configured: your
 private repo lays its real files over them at deploy time (section 2.5).
 
+## 1a. Agentic development workflow
+
+Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, sections 0 to 5). The rules in section 1
+(public repo, no geographic references, denylist) apply on top of everything here and win on conflict.
+
+### Starting a session
+
+1. Read this file.
+2. Load the bot identity: `source ~/.config/github-bot/env.sh`, then check `gh api user -q .login` prints
+   `valentinalexeev-bot`.
+3. Open GitHub issues of `valentinalexeev/headlamp` **assigned to `valentinalexeev-bot`** only, in this order:
+   open `incident` issues, then `in-progress`, then the rest by priority (lowest number first).
+4. Work the issue, check it against its acceptance criterion, update the issue.
+
+### Status lives in GitHub issues only
+
+- Every piece of unfinished work is an issue: a planned change, a leftover found in a session, an incident.
+  "To do later" in code, docs or commit messages without an issue link is not allowed.
+- Labels: `AI` (created by an agent), `in-progress`, `needs-decision` (waits for the owner), `blocked`,
+  `roadmap` (umbrella issue with the status comment), `deferred` (reason in a comment), `incident`, `ADR`, plus the
+  existing topic labels. Add a new label only if none fits.
+- Statuses: not started = open without `in-progress`; in progress = `in-progress`; done = closed as completed **only**
+  when the acceptance criterion is met, with a comment (what was done, checks, PR); partial = stays open with a list of
+  what remains; rejected = closed as not planned with a reason.
+- Commits and PRs reference the issue (`#NN`): `Closes #NN` only when the acceptance criterion is met, else `Refs #NN`.
+- **Every question to the owner goes on an issue** (form below), even when also asked in chat, so the owner sees all
+  open decisions in `label:needs-decision` without reading the chat.
+- Issue text is public: run `scripts/check-denylist.sh --text FILE` on it before posting (section 1).
+
+### Bot and owner
+
+| Action | Bot `valentinalexeev-bot` | Owner `valentinalexeev` |
+|---|---|---|
+| Issues, comments, labels | yes, marked (below) | yes |
+| Decide an open question | **no**, a bot comment is never a decision | yes, by comment |
+| Branch, commit, push to a branch | yes, always as the bot | yes |
+| Act as the owner (owner git identity, credentials, `gh` login) | **no**, unless the owner gave explicit permission **in that ticket, for that change** | yes |
+| Push to `develop` or `main` | **no** | via PR |
+| Open / update PR, fix mechanical conflicts | yes | yes |
+| Merge a PR | only after an owner **Approve** review on the PR's current head commit and green CI | yes |
+| Repo settings, secrets, branch protection, release tags | **no** | yes |
+
+- **Marking.** Issues the bot creates get the `AI` label. Bodies, comments and PR descriptions start with
+  `🤖 AI agent:`. Commits are authored by the bot; add
+  `Co-authored-by: Valentin Alexeev <valentinalexeev@users.noreply.github.com>` when the owner requested the change.
+- **Queue = assignee.** The agent works only on issues the owner assigned to `valentinalexeev-bot` and never assigns
+  itself. When it needs a decision, or is done and waits for review or merge, it reassigns the issue to
+  `valentinalexeev` with a comment saying what is needed.
+- **Questions.** A human decision → comment + `needs-decision`: numbered points with options, a link to the exact
+  section, a default proposal with reasons ("as proposed" counts as the answer), and whether it blocks. Purely
+  technical choices are decided by the agent in an ADR (`docs/adr/`) without asking. Ask before the work, not at the end.
+- **Recording answers.** On an owner answer: comment "Decision recorded: …" with a link, move it into the doc or ADR,
+  drop `needs-decision`, continue if unblocked. An ambiguous answer → ask again, don't guess.
+- **Never as the owner.** When the bot cannot do something itself (e.g. its token lacks `workflow` scope for
+  `.github/workflows/`), it posts the exact diff on the ticket and waits. If the bot token fails (401), tell the owner
+  and stop; never fall back to the owner account.
+
+### Branches and pull requests
+
+- Branches start from `develop` and PRs target `develop`; `develop` reaches `main` only through a release PR
+  (`VERSIONING.md`). Names: `<prefix>/<issue>-<slug>`, lower-case, prefixes `feat/`, `fix/`, `docs/`, `refactor/`,
+  `test/`, `ci/`, `chore/`, `hotfix/` (incidents), `release/X.Y.Z`. Example: `fix/97-sidecar-retry`.
+- Commits and PR titles: Conventional Commits (section 1, checked by `pr-title`), footers `Refs #NN` / `Closes #NN`.
+  Commit and push as you go.
+- PR description (template in `.github/pull_request_template.md`): `🤖 AI agent:`, issue link, what was done,
+  **checks run with results**, what remains open (as issue links), files shared with other open PRs.
+- Request the owner's review on opening and after every push that makes the last approval stale:
+  `gh api -X POST repos/valentinalexeev/headlamp/pulls/NN/requested_reviewers -f "reviewers[]=valentinalexeev"`.
+- Before proposing a merge: CI green, and an independent review pass (a separate agent or reviewer) with its result in
+  the PR. Blocking findings are fixed first.
+- **Documentation is part of the change:** a PR that changes behaviour updates the affected README/manuals and adds an
+  `Unreleased` line to `CHANGELOG.md` in the same PR.
+- **Merge permission is a review with state `APPROVED` by `valentinalexeev` on the current head commit.** Comments,
+  chat messages and others' approvals are not permission. Check
+  `gh api repos/valentinalexeev/headlamp/pulls/NN/reviews` right before merging, then merge with the head `sha`
+  pinned, as a merge commit. After a merge, check other open PRs for conflicts; merge `develop` into them when the
+  conflict is mechanical, ask the owner when it is semantic.
+
+### Releases, tags and images
+
+The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the agent's view of them.
+
+- **Branches.** `develop` is the integration branch: every feature, fix and docs PR targets it. `main` holds only
+  released (or about to be released) code and receives PRs from `develop` (a release) or from `hotfix/` branches.
+  Images publish from `main` and tags only, never from `develop` or feature branches (PRs build and test, no push).
+- **Version.** Strict SemVer, one version for the whole repo in `VERSION`. Before 1.0.0 a breaking change moves MINOR.
+  The bump is derived from commit subjects since the last stable tag: `feat` → at least MINOR, `!` or
+  `BREAKING CHANGE:` → MAJOR (MINOR before 1.0.0), the rest PATCH. So a wrong commit type is a release bug: pick it
+  carefully, and check `scripts/check-conventional.sh "<title>"` on PR titles.
+- **Changelog.** Every user-visible change adds a line under `## Unreleased` in `CHANGELOG.md` (Keep a Changelog
+  sections), breaking ones marked **BREAKING** with the migration step.
+- **Cutting a release** (the bot may prepare it, the owner merges and tags):
+  1. Branch `release/X.Y.Z` from `develop`; commit `chore(release): vX.Y.Z` that sets `VERSION` and moves `Unreleased`
+     under `## X.Y.Z - <date>`. PR into `develop`, owner approves and merges.
+  2. PR `develop` → `main` titled `chore(release): vX.Y.Z`. The owner approves and merges (merge commit).
+  3. The owner, or the bot only with explicit permission in that release's issue or PR, tags the merge commit on `main`:
+     `git tag vX.Y.Z <commit> && scripts/check-release.sh vX.Y.Z && git push origin vX.Y.Z`.
+     Release candidates use `vX.Y.Z-rc.N`.
+  4. CI (`images.yml`) runs `check-release.sh` as a gate: tag format, `VERSION` match, commit on `main`, next version
+     with no skipping, bump at least what the commits need, milestone `X.Y.Z` (if any) has no open issues. Then it
+     tags the already-built images and creates the GitHub release. Check the run and report its result on the issue.
+- **Hotfix.** `hotfix/NN-…` from `main`, PR into `main` with a PATCH bump in the same PR, tag as above, then merge
+  `main` back into `develop` through a PR. There is no fix release to an older line.
+- **Tags are immutable.** Never move or delete a release tag or re-publish a version; fix a bad release with a new one.
+- **Images.** `ghcr.io/valentinalexeev/headlamp/<image>`, one per entry in `.github/components.json` (new or renamed
+  image: add it there and to `docs/images.md`). Only a component whose source changed is rebuilt (`src-<hash>`); a
+  release reuses the images `main` built, so what was tested ships. Tags: `src-<hash>` and `sha-<commit>` (fixed),
+  `main` (moves), `X.Y.Z` / `X.Y.Z-rc.N` (fixed), `X.Y`, `X`, `latest` (move; `X`/`latest` from 1.0.0). Deployments
+  pin `X.Y.Z` or a digest, never `main` or `latest`. A forced full rebuild is `workflow_dispatch` with `rebuild_all`
+  and is an owner action.
+
+### Commits, changelog, manuals and the wiki
+
+- **Conventional Commits 1.0.0** for every commit and PR title: `<type>[(scope)][!]: <description>`, imperative,
+  lower-case, no trailing period, then an optional body and footers. Types: `feat`, `fix`, `docs`, `style`,
+  `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Scope is the component (`node-control`,
+  `funnel-ingress`, `headscale`, `exit-ams`, `tailguard`, `task-runner`, `route-provisioner`, `terraform`, `ansible`,
+  `ci`, ...). A breaking change uses `!` **and** a `BREAKING CHANGE: <what and how to migrate>` footer. Footers also
+  carry `Refs #NN` / `Closes #NN` and `Co-authored-by:`. PRs merge with a merge commit, so every commit on the branch
+  reaches `develop`: each one must pass `scripts/check-conventional.sh` and the denylist, not only the title.
+- **Changelog** ([Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)): every PR with a user-visible change
+  adds a line under `## Unreleased` in `CHANGELOG.md`, in the section that fits (Added, Changed, Deprecated, Removed,
+  Fixed, Security). Write it for an operator who upgrades: what changed and what they must do. Breaking lines start with
+  **BREAKING** and give the migration step. Refactors, tests and CI-only changes need no line. A release moves
+  `Unreleased` under `## X.Y.Z - YYYY-MM-DD`; nothing else edits released sections.
+- **Manuals in ASD-STE100 Simplified Technical English**, to [`docs/writing-manuals.md`](docs/writing-manuals.md),
+  which also says which files are manuals. Procedures are numbered steps with one instruction each, a WARNING or
+  CAUTION comes before the step it is about, sentences stay short, and words come from the approved list plus this
+  project's technical names. CI checks changed manuals (`make check-manuals`, workflow `manuals`); run it before
+  pushing. Accuracy comes first: keep every value, limit and warning when rewriting. The independent reviewer checks STE
+  on every PR that changes a manual. Agent rules (this section, `AGENTS.md`), the changelog and code comments use
+  normal technical English.
+- **Wiki.** The documentation is published to the GitHub wiki by the `wiki` workflow on every push to `main` (so on
+  release, not on each merge to `develop`): `README.md` → Home, `docs/<name>.md` → `<name>`, plus `VERSIONING.md` and
+  `CHANGELOG.md` (`scripts/wiki-render.sh`). The repository is the source: never edit the wiki by hand, its next sync
+  overwrites it. Wiki pages are public too, so the rules of section 1 apply to everything in `docs/`. To preview:
+  `scripts/wiki-render.sh "$(mktemp -d)" valentinalexeev/headlamp`.
+
+### CI
+
+| Workflow | Runs on | Checks |
+|---|---|---|
+| `ci` | PRs and pushes to `develop`/`main` | conventional subject of every commit, gitleaks on the new commits, `make lint` and the script tests, `terraform fmt` + `validate` of the modules (cloudru: format only, its provider is not on the public registry), Ansible syntax |
+| `pr-title` | PRs | the title is a Conventional Commit |
+| `manuals` | PRs changing `*.md` | STE check of the changed manuals |
+| `images` | PRs (build + test), `main` and tags (publish) | per-component build and tests, release gate on tags |
+| `test-task-runner`, `test-ingress-agent` | PRs touching those apps | their Go tests |
+| `wiki` | pushes to `main` | publishes the docs |
+
+`ci` jobs always report (skipped steps say so), so they can be required checks in branch protection. Run the same
+checks locally before pushing; a red CI on `develop` or `main` is an incident.
+
+### Incidents
+
+Something that already went wrong: red CI on `develop`/`main`, a leaked or expired secret, a denylist hit in history,
+an agent that damaged work. Open an issue at once (labels `incident`, `AI`, template *Incident*): what happened, when
+and how found, impact, immediate actions. Never paste secrets or denylisted text, even partially. Fix in
+`hotfix/NN-…` with `Closes #NN`; the closing comment states root cause, fix and what prevents a repeat. Revoking
+secrets and rewriting history are owner actions (section 1).
+
 ## 2. Bootstrap your own infra
 
 At the end you have a private repo `<your>-infra`. It contains your config and encrypted state,

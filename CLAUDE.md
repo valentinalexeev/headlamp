@@ -222,6 +222,33 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   pin `X.Y.Z` or a digest, never `main` or `latest`. A forced full rebuild is `workflow_dispatch` with `rebuild_all`
   and is an owner action.
 
+### Commits, changelog, manuals and the wiki
+
+- **Conventional Commits 1.0.0** for every commit and PR title: `<type>[(scope)][!]: <description>`, imperative,
+  lower-case, no trailing period, then an optional body and footers. Types: `feat`, `fix`, `docs`, `style`,
+  `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Scope is the component (`node-control`,
+  `funnel-ingress`, `headscale`, `exit-ams`, `tailguard`, `task-runner`, `route-provisioner`, `terraform`, `ansible`,
+  `ci`, ...). A breaking change uses `!` **and** a `BREAKING CHANGE: <what and how to migrate>` footer. Footers also
+  carry `Refs #NN` / `Closes #NN` and `Co-authored-by:`. PRs merge with a merge commit, so every commit on the branch
+  reaches `develop`: each one must pass `scripts/check-conventional.sh` and the denylist, not only the title.
+- **Changelog** ([Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)): every PR with a user-visible change
+  adds a line under `## Unreleased` in `CHANGELOG.md`, in the section that fits (Added, Changed, Deprecated, Removed,
+  Fixed, Security). Write it for an operator who upgrades: what changed and what they must do. Breaking lines start with
+  **BREAKING** and give the migration step. Refactors, tests and CI-only changes need no line. A release moves
+  `Unreleased` under `## X.Y.Z - YYYY-MM-DD`; nothing else edits released sections.
+- **Manuals in ASD-STE100 Simplified Technical English**, to [`docs/writing-manuals.md`](docs/writing-manuals.md),
+  which also says which files are manuals. Procedures are numbered steps with one instruction each, a WARNING or
+  CAUTION comes before the step it is about, sentences stay short, and words come from the approved list plus this
+  project's technical names. CI checks changed manuals (`make check-manuals`, workflow `manuals`); run it before
+  pushing. Accuracy comes first: keep every value, limit and warning when rewriting. The independent reviewer checks STE
+  on every PR that changes a manual. Agent rules (this section, `AGENTS.md`), the changelog and code comments use
+  normal technical English.
+- **Wiki.** The documentation is published to the GitHub wiki by the `wiki` workflow on every push to `main` (so on
+  release, not on each merge to `develop`): `README.md` → Home, `docs/<name>.md` → `<name>`, plus `VERSIONING.md` and
+  `CHANGELOG.md` (`scripts/wiki-render.sh`). The repository is the source: never edit the wiki by hand, its next sync
+  overwrites it. Wiki pages are public too, so the rules of section 1 apply to everything in `docs/`. To preview:
+  `scripts/wiki-render.sh "$(mktemp -d)" valentinalexeev/headlamp`.
+
 ### Incidents
 
 Something that already went wrong: red CI on `develop`/`main`, a leaked or expired secret, a denylist hit in history,

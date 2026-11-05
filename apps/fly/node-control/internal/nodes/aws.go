@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -140,7 +141,8 @@ func (p *awsProvider) cacheKey(n Target) string {
 }
 
 // apiError turns an SDK error into an APIError: HTTP status when there is one, the AWS error code and message,
-// bounded and scrubbed. An unknown instance id is a 404, so the id cache drops it.
+// bounded and scrubbed. An unknown instance id is a 404, so the id cache drops it. AWS messages (AccessDenied in
+// particular) name the caller's ARN and account id; those reach the console, so they are redacted.
 func apiError(op string, err error) error {
 	var ae smithy.APIError
 	status := 0
@@ -152,9 +154,22 @@ func apiError(op string, err error) error {
 		if ae.ErrorCode() == "InvalidInstanceID.NotFound" || ae.ErrorCode() == "InvalidInstanceID.Malformed" {
 			status = http.StatusNotFound
 		}
-		return &APIError{Status: status, Message: scrub(fmt.Sprintf("%s: %s: %s", op, ae.ErrorCode(), ae.ErrorMessage()), nil)}
+		return &APIError{Status: status, Message: redactAWS(scrub(fmt.Sprintf("%s: %s: %s", op, ae.ErrorCode(), ae.ErrorMessage()), nil))}
 	}
-	return &APIError{Status: status, Message: scrub(op+": "+err.Error(), nil)}
+	return &APIError{Status: status, Message: redactAWS(scrub(op+": "+err.Error(), nil))}
+}
+
+var (
+	awsARN       = regexp.MustCompile(`arn:aws[a-z-]*:[^\s"',]+`)
+	awsAccountID = regexp.MustCompile(`\b\d{12}\b`)
+	awsKeyID     = regexp.MustCompile(`\b(AKIA|ASIA)[A-Z0-9]{12,}\b`)
+)
+
+// redactAWS removes ARNs, account ids and access key ids from text shown to admins.
+func redactAWS(s string) string {
+	s = awsARN.ReplaceAllString(s, "<arn>")
+	s = awsKeyID.ReplaceAllString(s, "<access-key-id>")
+	return awsAccountID.ReplaceAllString(s, "<account>")
 }
 
 type awsInstance struct {

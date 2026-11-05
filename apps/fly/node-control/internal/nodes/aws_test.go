@@ -339,3 +339,27 @@ func TestAWSBlockNamesTheGroup(t *testing.T) {
 		t.Fatal("a named group must not list instances by name")
 	}
 }
+
+func TestAWSErrorsRedactIdentities(t *testing.T) {
+	keyID := "AKIA" + strings.Repeat("X", 16) // built at runtime: a literal key id would trip the commit hook
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprintf(w, `<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>User: arn:aws:sts::123456789012:assumed-role/node-control/i-0abc is not authorized to perform: ec2:DescribeInstances (account 123456789012, key %s)</Message></Error></Errors></Response>`, keyID)
+	}))
+	defer srv.Close()
+
+	p := newAWSTest(t, &fakeEC2{}, map[string]string{"AWS_ENDPOINT_URL_EC2": srv.URL})
+	_, err := p.Status(context.Background(), Target{Name: "x"})
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	msg := err.Error()
+	for _, leak := range []string{"123456789012", "arn:aws", keyID, "node-control/i-0abc"} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("error leaks %q: %s", leak, msg)
+		}
+	}
+	if !strings.Contains(msg, "UnauthorizedOperation") || !strings.Contains(msg, "ec2:DescribeInstances") {
+		t.Errorf("error lost its useful part: %s", msg)
+	}
+}

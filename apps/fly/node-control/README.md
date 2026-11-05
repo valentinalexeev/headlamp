@@ -191,10 +191,10 @@ You do not keep a list of nodes. node-control looks at each headscale node at ev
 The `aws` provider controls a node in one of two ways:
 
 - A plain EC2 instance: the provider starts and stops the instance.
-- An instance in an Auto Scaling group, as made by `terraform/modules/exit-node-vm/aws`: the provider sets the group
-  to 0 instances to stop the node, and to 1 instance to start it. A stopped node of this type has no instance. The
-  next start makes a new instance, which joins the tailnet again with the same name. See
-  [ADR 0001](../../../docs/adr/0001-aws-exit-nodes-stop-by-scaling-the-group.md).
+- An instance in an Auto Scaling group, as `terraform/modules/exit-node-vm/aws` makes it. To stop the node, the
+  provider sets the group to 0 instances. To start it, the provider sets the group to 1 instance. A stopped node of
+  this type has no instance. The next start makes a new instance, which joins the tailnet again with the same name.
+  See [ADR 0001](../../../docs/adr/0001-aws-exit-nodes-stop-by-scaling-the-group.md).
 
 The provider finds the group from the instance, from the `asg` key in `nodes.json`, or from the name `<node name>-asg`.
 

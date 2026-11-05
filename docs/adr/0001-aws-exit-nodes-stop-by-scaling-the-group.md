@@ -4,14 +4,14 @@ Status: accepted (decided by the agent, as a technical choice under CLAUDE.md se
 
 ## Context
 
-`terraform/modules/exit-node-vm/aws` runs each exit node as one instance in an Auto Scaling group with `min_size`,
-`max_size` and `desired_capacity` equal to 1, mostly so a reclaimed Spot instance comes back. #99 asks node-control to
-start and stop these nodes.
+`terraform/modules/exit-node-vm/aws` runs each exit node as one instance in an Auto Scaling group. The group has
+`min_size`, `max_size` and `desired_capacity` equal to 1. A reclaimed Spot instance then comes back. #99 asks
+node-control to start and stop these nodes.
 
 `ec2:StopInstances` does not work for this layout:
 
-- the group's EC2 health check treats a stopped instance as unhealthy and replaces it with a new, running one, so a stop
-  undoes itself within minutes;
+- the EC2 health check of the group sees a stopped instance as unhealthy. The group replaces it with a new instance,
+  so the stop undoes itself within minutes;
 - a one-time Spot instance cannot be stopped at all (only Spot instances with `persistent` requests can).
 
 An instance that is not in a group (made by hand, or by another module) can be stopped and started as usual.
@@ -29,8 +29,8 @@ The `aws` provider handles both shapes:
      the instance state otherwise.
 2. Otherwise it calls `StartInstances`/`StopInstances` on the instance.
 
-The group of a node with no instance (after a stop) is found from the block's `asg`, or by the group name the module
-uses, `<name>-asg`.
+After a stop, the node has no instance. The provider then finds the group from the `asg` key in the block. If there is
+no `asg` key, it uses the group name that the module makes, `<name>-asg`.
 
 ## Consequences
 
@@ -42,5 +42,8 @@ uses, `<name>-asg`.
 - Stop is not instant: the group terminates the instance asynchronously. The provider reports `STOPPING` until it is gone.
 - Plain instances keep the cheaper stop/start, with their disk and identity intact.
 
-Alternatives not chosen: suspending the group's `HealthCheck` and `ReplaceUnhealthy` processes and stopping the instance
-(fragile, and impossible for one-time Spot); standby mode (`EnterStandby` keeps the instance running and billed).
+Alternatives not chosen:
+
+- Suspend the `HealthCheck` and `ReplaceUnhealthy` processes of the group, then stop the instance. This is fragile, and
+  it is not possible for one-time Spot instances.
+- Standby mode (`EnterStandby`). The instance continues to run, and it is billed.

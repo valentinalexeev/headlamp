@@ -53,7 +53,7 @@ func TestValidateRejectsBadID(t *testing.T) {
 
 func TestValidateRejectsUnknownProvider(t *testing.T) {
 	_, err := ParseConfig([]byte(`{"nodes":{"x":{"provider":"nosuchcloud"}}}`))
-	if err == nil || !strings.Contains(err.Error(), "provider must be one of yandex, oci, selectel, aws, fly") {
+	if err == nil || !strings.Contains(err.Error(), "provider must be one of yandex, oci, openstack, selectel, aws, fly") {
 		t.Fatalf("err = %v", err)
 	}
 	for _, bad := range []string{`[]`, `{"nodes":[]}`, `{"nodes":{"x":{"provider":"fly","fly":"app"}}}`, `not json`} {

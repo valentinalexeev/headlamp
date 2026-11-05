@@ -12,6 +12,7 @@ Those services use this node, whichever exit node a client selected. This app is
 - Secrets: `flyctl secrets set TAILSCALE_AUTH_KEY=<reusable, non-ephemeral key>` and
   `HEADSCALE_LOGIN_SERVER=https://<your-headscale-url>`. Use a reusable non-ephemeral key.
   Ephemeral keys are IPv6-only on Tailscale and work poorly for exit nodes.
+- Name: the node joins the tailnet as `ams`. To use a different name, set `EXIT_NODE_HOSTNAME`.
 - Deploy: `flyctl deploy [--build-arg TSVERSION=<x.y.z>]`. The node advertises itself as an exit
   node. Approve it (or use the ACL `autoApprovers.exitNode`) before clients can use it.
 

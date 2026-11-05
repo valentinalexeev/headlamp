@@ -7,6 +7,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Added
 
 - Run the published images with site config mounted at runtime, with no rebuild or overlay: `HEADSCALE_CONFIG` and `HEADSCALE_POLICY_PATH` for headscale, the new `DIRECT_HOSTS_FILE` for the exit node, `NODES_CONFIG` and `ENROLL_CONFIG` for node-control. Without them the images use their placeholders, as before. See `docs/images.md`.
+- `EXIT_NODE_HOSTNAME` sets the tailnet name of the exit-node image (default `ams`, as before).
 
 ## 0.9.0 - 2026-11-05
 

@@ -46,7 +46,8 @@ headscale_tests() {
 
 exit_node_tests() {
 	local img=headlamp-test/exit-node
-	docker build -q -t "$img" "$root/apps/fly/exit-ams" >/dev/null || { fail "exit-node: image builds"; return; }
+	docker build -q --build-arg TSVERSION="$(cat "$root/TAILSCALE_VERSION")" -t "$img" "$root/apps/fly/exit-ams" >/dev/null ||
+		{ fail "exit-node: image builds"; return; }
 	printf 'mounted.example.com\n' >"$tmp/direct-hosts.txt"
 	chmod 644 "$tmp/direct-hosts.txt"
 	# Stub dig and tailscale: the test checks which file is read and what would be advertised, nothing else.

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -23,7 +24,10 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/sidecar"
 )
 
-const tailnetUpTimeout = 90 * time.Second
+const (
+	tailnetUpTimeout   = 90 * time.Second
+	tailnetWatchPeriod = 30 * time.Second
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -86,10 +90,66 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}()
 	defer readySrv.Close()
 
+	lc, err := srv.LocalClient()
+	if err != nil {
+		return fmt.Errorf("opening the tailnet node's local client: %w", err)
+	}
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	go watchTailnet(watchCtx, func(c context.Context) (string, []string, error) {
+		st, err := lc.StatusWithoutPeers(c)
+		if err != nil {
+			return "", nil, err
+		}
+		return st.BackendState, st.Health, nil
+	}, tailnetWatchPeriod, func(healthy bool, msg string, args ...any) {
+		if healthy {
+			slog.Info(msg, args...)
+		} else {
+			slog.Warn(msg, args...)
+		}
+	})
+
 	client := &http.Client{
 		Timeout:   15 * time.Second,
 		Transport: &http.Transport{DialContext: srv.Dial, DisableKeepAlives: true},
 	}
 	slog.Info("funnel-sidecar running", "ns", cfg.NS, "services", len(svcs))
 	return sidecar.Run(ctx, cfg, svcs, srv.Listen, sidecar.NewHTTPRegistrar(cfg.APIURL, client), isReady.Store)
+}
+
+// watchTailnet reads the node's backend state and health warnings every period and logs them when they change.
+// tsnet's own log is too verbose to keep, so without this a node that the control server removed (state
+// NeedsLogin, or a "cannot reach the coordination server" warning) leaves no trace in the pod log.
+func watchTailnet(ctx context.Context, status func(context.Context) (string, []string, error), period time.Duration, logf func(healthy bool, msg string, args ...any)) {
+	var lastState, lastErr string
+	var lastHealth []string
+	first := true
+	for {
+		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		state, health, err := status(c)
+		cancel()
+		switch {
+		case err != nil && ctx.Err() == nil:
+			if err.Error() != lastErr {
+				logf(false, "tailnet: reading the node status failed", "error", err)
+				lastErr = err.Error()
+			}
+		case err == nil:
+			lastErr = ""
+			health = slices.Clone(health)
+			slices.Sort(health)
+			if first || state != lastState || !slices.Equal(health, lastHealth) {
+				logf(state == "Running" && len(health) == 0, "tailnet: node status", "state", state, "health", strings.Join(health, "; "))
+				lastState, lastHealth, first = state, health, false
+			}
+		}
+		t := time.NewTimer(period)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+	}
 }

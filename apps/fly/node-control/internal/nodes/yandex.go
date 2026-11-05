@@ -31,31 +31,87 @@ const (
 type yandex struct {
 	env core.Env
 	hc  *http.Client
-	// iamURL and computeURL are overridden in tests.
+	// iamURL and computeURL are the defaults (YANDEX_IAM_ENDPOINT, YANDEX_API_ENDPOINT); a node block may name another
+	// installation with "endpoint" and "iam_endpoint".
 	iamURL     string
 	computeURL string
+	aud        string // audience of the key assertion: the installation's IAM token URL (tests send iamURL elsewhere)
 	now        func() time.Time
 	ids        idCache // name -> instance id for idCacheTTL
 
-	mu      sync.Mutex
+	mu     sync.Mutex
+	tokens map[string]yandexToken // by IAM URL: each installation issues its own tokens
+}
+
+type yandexToken struct {
 	token   string
 	jwt     string // the assertion behind token, kept only for scrubbing
 	expires time.Time
 }
 
 // NewYandex returns the Yandex Compute provider, talking to the REST API.
-// The target's block is {"yandex": {"instance_name", "instance_id"}}, all
+// The target's block is {"yandex": {"instance_name", "instance_id", "endpoint", "iam_endpoint"}}, all
 // optional: the instance is found by name in the folder (the id is cached for 15 s)
 // (default Target.Name) unless instance_id pins one. Credentials:
 // YANDEX_SA_KEY_JSON (service account key with id, service_account_id and
 // private_key) and YANDEX_FOLDER_ID (needed for the lookup by name, which
 // requires list permission). Start and stop fire the long-running operation
-// and do not wait for it.
+// and do not wait for it. A separate cloud installation has its own API: set
+// YANDEX_API_ENDPOINT (the compute API base, e.g. https://compute.api.<domain>) and YANDEX_IAM_ENDPOINT (the IAM
+// API base) for all nodes, or "endpoint"/"iam_endpoint" in one node's block. The IAM endpoint is also the audience
+// of the signed key assertion.
 func NewYandex(env core.Env, hc *http.Client) Provider {
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	return &yandex{env: env, hc: hc, iamURL: yandexIAMURL, computeURL: yandexComputeURL, now: time.Now}
+	iam := tokenURL(env.Default("YANDEX_IAM_ENDPOINT", ""), yandexIAMURL)
+	return &yandex{env: env, hc: hc, now: time.Now, tokens: map[string]yandexToken{}, iamURL: iam, aud: iam,
+		computeURL: instancesURL(env.Default("YANDEX_API_ENDPOINT", ""), yandexComputeURL)}
+}
+
+// tokenURL turns an IAM API base (https://iam.api.example.com) into the token URL; a full URL is kept as it is.
+func tokenURL(base, def string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	switch {
+	case base == "":
+		return def
+	case strings.HasSuffix(base, "/iam/v1/tokens"):
+		return base
+	}
+	return base + "/iam/v1/tokens"
+}
+
+// instancesURL turns a compute API base (https://compute.api.example.com) into the instances URL.
+func instancesURL(base, def string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	switch {
+	case base == "":
+		return def
+	case strings.HasSuffix(base, "/compute/v1/instances"):
+		return base
+	}
+	return base + "/compute/v1/instances"
+}
+
+// endpoints returns the IAM token URL, the assertion audience and the instances URL for the node: its block wins over
+// the defaults. Only https URLs are accepted from a block, so a node config cannot send the key assertion over plain
+// HTTP.
+func (y *yandex) endpoints(n Target) (iam, aud, compute string, err error) {
+	iam, aud, compute = y.iamURL, y.aud, y.computeURL
+	if v, _ := n.Block["iam_endpoint"].(string); v != "" {
+		if !strings.HasPrefix(v, "https://") {
+			return "", "", "", notConfigured(`"iam_endpoint" must be an https URL`)
+		}
+		iam = tokenURL(v, y.iamURL)
+		aud = iam
+	}
+	if v, _ := n.Block["endpoint"].(string); v != "" {
+		if !strings.HasPrefix(v, "https://") {
+			return "", "", "", notConfigured(`"endpoint" must be an https URL`)
+		}
+		compute = instancesURL(v, y.computeURL)
+	}
+	return iam, aud, compute, nil
 }
 
 type yandexKey struct {
@@ -134,17 +190,17 @@ func (y *yandex) do(req *http.Request, label string, secrets []string) ([]byte, 
 	return b, nil
 }
 
-// iam returns an IAM token, cached until shortly before it expires.
-func (y *yandex) iam(ctx context.Context, k *yandexKey) (token, assertion string, err error) {
+// iam returns an IAM token from the installation at iamURL, cached until shortly before it expires.
+func (y *yandex) iam(ctx context.Context, k *yandexKey, iamURL, aud string) (token, assertion string, err error) {
 	y.mu.Lock()
 	defer y.mu.Unlock()
-	if y.token != "" && y.expires.Sub(y.now()) > yandexSlack {
-		return y.token, y.jwt, nil
+	if c, ok := y.tokens[iamURL]; ok && c.expires.Sub(y.now()) > yandexSlack {
+		return c.token, c.jwt, nil
 	}
 	now := y.now()
 	tok := jwt.NewWithClaims(jwt.SigningMethodPS256, jwt.MapClaims{
 		"iss": k.saID,
-		"aud": yandexIAMURL,
+		"aud": aud,
 		"iat": now.Unix(),
 		"exp": now.Add(yandexJWTTTL).Unix(),
 	})
@@ -157,7 +213,7 @@ func (y *yandex) iam(ctx context.Context, k *yandexKey) (token, assertion string
 	payload, _ := json.Marshal(map[string]string{"jwt": signed})
 	ctx, cancel := context.WithTimeout(ctx, yandexTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, y.iamURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, iamURL, bytes.NewReader(payload))
 	if err != nil {
 		return "", "", &APIError{Message: "iam auth failed: " + scrub(err.Error(), secrets)}
 	}
@@ -177,18 +233,22 @@ func (y *yandex) iam(ctx context.Context, k *yandexKey) (token, assertion string
 	if err != nil {
 		exp = now.Add(yandexJWTTTL) // unknown expiry: assume the short lifetime
 	}
-	y.token, y.jwt, y.expires = doc.Token, signed, exp
+	y.tokens[iamURL] = yandexToken{token: doc.Token, jwt: signed, expires: exp}
 	return doc.Token, signed, nil
 }
 
-// call performs an authorized compute request.
-func (y *yandex) call(ctx context.Context, k *yandexKey, method, path string, query url.Values) ([]byte, error) {
-	tok, assertion, err := y.iam(ctx, k)
+// call performs an authorized compute request against the node's installation.
+func (y *yandex) call(ctx context.Context, k *yandexKey, n Target, method, path string, query url.Values) ([]byte, error) {
+	iamURL, aud, computeURL, err := y.endpoints(n)
+	if err != nil {
+		return nil, err
+	}
+	tok, assertion, err := y.iam(ctx, k, iamURL, aud)
 	if err != nil {
 		return nil, err
 	}
 	secrets := append(append([]string{}, k.secrets...), tok, assertion)
-	u := y.computeURL + path
+	u := computeURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -228,15 +288,15 @@ func (y *yandex) resolve(ctx context.Context, n Target) (*yandexKey, string, err
 	if strings.ContainsAny(name, `"\`) {
 		return nil, "", notConfigured("instance name must not contain a double quote or backslash")
 	}
-	folder := y.env.Getenv("YANDEX_FOLDER_ID")
+	folder := y.folder(n)
 	if folder == "" {
-		return nil, "", notConfigured("YANDEX_FOLDER_ID is not set (or pin \"instance_id\")")
+		return nil, "", notConfigured("YANDEX_FOLDER_ID is not set (or set \"folder_id\", or pin \"instance_id\")")
 	}
 	key := y.cacheKey(n)
 	if cached, ok := y.ids.get(key, y.now()); ok {
 		return k, cached, nil
 	}
-	b, err := y.call(ctx, k, http.MethodGet, "", url.Values{"folderId": {folder}, "filter": {`name="` + name + `"`}})
+	b, err := y.call(ctx, k, n, http.MethodGet, "", url.Values{"folderId": {folder}, "filter": {`name="` + name + `"`}})
 	if err != nil {
 		return nil, "", err
 	}
@@ -258,14 +318,25 @@ func (y *yandex) resolve(ctx context.Context, n Target) (*yandexKey, string, err
 	return nil, "", &APIError{Message: fmt.Sprintf("%d instances named '%s'; refusing to guess", len(list.Instances), scrub(name, nil))}
 }
 
-// cacheKey identifies a name lookup; the pinned-id case never uses it.
+// cacheKey identifies a name lookup; the pinned-id case never uses it. The endpoint is part of it, so two
+// installations with the same instance name never share a cached id.
 func (y *yandex) cacheKey(n Target) string {
 	name, _ := y.block(n)
-	return y.env.Getenv("YANDEX_FOLDER_ID") + "|" + name
+	_, _, compute, _ := y.endpoints(n)
+	return compute + "|" + y.folder(n) + "|" + name
 }
 
-func (y *yandex) get(ctx context.Context, k *yandexKey, id string) (string, error) {
-	b, err := y.call(ctx, k, http.MethodGet, "/"+url.PathEscape(id), nil)
+// folder is the folder for the lookup by name: the node block's "folder_id", else YANDEX_FOLDER_ID. Each installation
+// has its own folders, so a node there usually needs its own.
+func (y *yandex) folder(n Target) string {
+	if v, _ := n.Block["folder_id"].(string); v != "" {
+		return v
+	}
+	return y.env.Getenv("YANDEX_FOLDER_ID")
+}
+
+func (y *yandex) get(ctx context.Context, k *yandexKey, n Target, id string) (string, error) {
+	b, err := y.call(ctx, k, n, http.MethodGet, "/"+url.PathEscape(id), nil)
 	if err != nil {
 		return "", err
 	}
@@ -286,7 +357,7 @@ func (y *yandex) Status(ctx context.Context, n Target) (Status, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := y.get(ctx, k, id)
+	st, err := y.get(ctx, k, n, id)
 	if err != nil {
 		y.ids.forgetOnNotFound(y.cacheKey(n), err)
 		return nil, err
@@ -299,7 +370,7 @@ func (y *yandex) power(ctx context.Context, n Target, want, transient, action st
 	if err != nil {
 		return "", "", err
 	}
-	prev, err := y.get(ctx, k, id)
+	prev, err := y.get(ctx, k, n, id)
 	if err != nil {
 		y.ids.forgetOnNotFound(y.cacheKey(n), err)
 		return "", "", err
@@ -307,7 +378,7 @@ func (y *yandex) power(ctx context.Context, n Target, want, transient, action st
 	if prev == want || prev == transient {
 		return prev, prev, nil
 	}
-	if _, err := y.call(ctx, k, http.MethodPost, "/"+url.PathEscape(id)+":"+action, nil); err != nil {
+	if _, err := y.call(ctx, k, n, http.MethodPost, "/"+url.PathEscape(id)+":"+action, nil); err != nil {
 		y.ids.forgetOnNotFound(y.cacheKey(n), err)
 		return "", "", err
 	}

@@ -85,6 +85,7 @@ type fakeYandex struct {
 	getErr    string // body of a 500 on GET /instances/{id}; {JWT} is replaced
 	postCode  int
 	noStatus  bool
+	prefix    string // compute path prefix; default "/instances"
 	jwts      []string
 	iamCalls  int
 	lists     []string // raw query of list calls
@@ -119,7 +120,11 @@ func (f *fakeYandex) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthenticated", 401)
 		return
 	}
-	rest := strings.TrimPrefix(r.URL.Path, "/instances")
+	prefix := f.prefix
+	if prefix == "" {
+		prefix = "/instances"
+	}
+	rest := strings.TrimPrefix(r.URL.Path, prefix)
 	switch {
 	case r.Method == http.MethodGet && rest == "":
 		f.lists = append(f.lists, r.URL.RawQuery)
@@ -463,4 +468,70 @@ func TestYandexErrorsAreBoundedAndScrubbed(t *testing.T) {
 			t.Fatalf("%q", err)
 		}
 	})
+}
+
+// A separate cloud installation has its own API. YANDEX_API_ENDPOINT and YANDEX_IAM_ENDPOINT move every node there;
+// the IAM endpoint is also the audience of the signed assertion.
+func TestYandexEndpointsFromEnv(t *testing.T) {
+	env := yxEnv(t)
+	env["YANDEX_API_ENDPOINT"] = "https://compute.api.example.com/"
+	env["YANDEX_IAM_ENDPOINT"] = "https://iam.api.example.com"
+	p := NewYandex(core.MapEnv(env), nil).(*yandex)
+	if p.computeURL != "https://compute.api.example.com/compute/v1/instances" ||
+		p.iamURL != "https://iam.api.example.com/iam/v1/tokens" || p.aud != p.iamURL {
+		t.Fatalf("urls: %s %s %s", p.computeURL, p.iamURL, p.aud)
+	}
+	// A full URL is kept as given; no setting keeps the public endpoints.
+	env["YANDEX_IAM_ENDPOINT"] = "https://iam.api.example.com/iam/v1/tokens"
+	if p := NewYandex(core.MapEnv(env), nil).(*yandex); p.iamURL != "https://iam.api.example.com/iam/v1/tokens" {
+		t.Fatalf("full URL changed: %s", p.iamURL)
+	}
+	if p := NewYandex(core.MapEnv(yxEnv(t)), nil).(*yandex); p.iamURL != yandexIAMURL || p.computeURL != yandexComputeURL {
+		t.Fatalf("defaults changed: %s %s", p.iamURL, p.computeURL)
+	}
+}
+
+// One node in another installation: its block names the endpoints and the folder. That node gets its own token
+// (audience = its IAM URL) and its own cached id; the default installation is untouched.
+func TestYandexPerNodeEndpoint(t *testing.T) {
+	f := &fakeYandex{instances: []yxInstance{{"i1", "web", "RUNNING"}}}
+	p, c := newYandex(t, f, yxEnv(t))
+	other := &fakeYandex{instances: []yxInstance{{"i9", "web", "STOPPED"}}, clock: c}
+	tls := httptest.NewTLSServer(other)
+	t.Cleanup(tls.Close)
+	other.srv = tls
+	p.hc = tls.Client() // trusts the test CA; the default fake is plain HTTP and is reached with any client
+	ctx := context.Background()
+
+	far := yxBlock(map[string]any{"endpoint": tls.URL + "/compute/v1/instances", "iam_endpoint": tls.URL, "folder_id": "folder-b"})
+	other.prefix = "/compute/v1/instances"
+	st, err := p.Status(ctx, far)
+	if err != nil || st["status"] != "STOPPED" {
+		t.Fatalf("other installation: %v %v", st, err)
+	}
+	if len(other.lists) != 1 || !strings.Contains(other.lists[0], "folderId=folder-b") {
+		t.Fatalf("lookup in the other folder: %v", other.lists)
+	}
+	claims := jwt.MapClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(other.jwts[0], claims); err != nil || claims["aud"] != tls.URL+"/iam/v1/tokens" {
+		t.Fatalf("audience: %v %v", claims["aud"], err)
+	}
+	if st, err := p.Status(ctx, yxTarget); err != nil || st["status"] != "RUNNING" {
+		t.Fatalf("default installation: %v %v", st, err)
+	}
+	if f.iamCalls != 1 || other.iamCalls != 1 {
+		t.Fatalf("one token per installation: default=%d other=%d", f.iamCalls, other.iamCalls)
+	}
+	if _, _, err := p.Start(ctx, far); err != nil || len(other.posts) != 1 || len(f.posts) != 0 {
+		t.Fatalf("start went to the wrong installation: %v other=%v default=%v", err, other.posts, f.posts)
+	}
+}
+
+func TestYandexBlockEndpointMustBeHTTPS(t *testing.T) {
+	p, _ := newYandex(t, &fakeYandex{}, yxEnv(t))
+	for _, b := range []map[string]any{{"endpoint": "http://compute.api.example.com"}, {"iam_endpoint": "http://iam.api.example.com"}} {
+		if _, err := p.Status(context.Background(), yxBlock(b)); !errors.Is(err, ErrNotConfigured) {
+			t.Errorf("%v: want not configured, got %v", b, err)
+		}
+	}
 }

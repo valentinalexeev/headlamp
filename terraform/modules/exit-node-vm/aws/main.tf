@@ -91,7 +91,8 @@ resource "aws_launch_template" "this" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name = var.name
+      Name                = var.name
+      (local.control_tag) = "true"
     }
   }
 
@@ -121,4 +122,22 @@ resource "aws_autoscaling_group" "this" {
     value               = var.name
     propagate_at_launch = true
   }
+
+  # node-control's aws provider scales this group to stop and start the node; its IAM policy is limited to resources
+  # with this tag (see apps/fly/node-control/README.md, "AWS permissions").
+  tag {
+    key                 = local.control_tag
+    value               = "true"
+    propagate_at_launch = true
+  }
+
+  # node-control sets desired_capacity and min_size to 0 to stop the node and back to 1 to start it. Terraform must not
+  # undo that on the next apply.
+  lifecycle {
+    ignore_changes = [desired_capacity, min_size]
+  }
+}
+
+locals {
+  control_tag = "headlamp-exit-node"
 }

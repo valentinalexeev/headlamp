@@ -56,6 +56,7 @@ Put secrets in Fly secrets. Put plain settings in `fly.toml`.
 | `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | The Yandex service account key, and the folder for the lookup by name. The account needs `compute.operator` and `compute.viewer`. |
 | `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | The OCI credentials, and the default region and compartment. |
 | `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | The Selectel (OpenStack) service user, the default region and the optional auth URL. |
+| `AWS_REGION`, `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_EC2`, `AWS_ENDPOINT_URL_AUTO_SCALING` | The default region for EC2 nodes, and the standard AWS credential chain. Use an instance or task role if possible, so that no key is necessary. The endpoint override is optional. See "AWS permissions". |
 | `FLY_API_TOKEN` | The app-scoped deploy token for the controlled Fly app or apps. |
 
 ## Tailscale state
@@ -173,9 +174,10 @@ Run a backup after enrolment changes. It is a manual step until an automatic one
 You do not keep a list of nodes. node-control looks at each headscale node at every refresh. It caches the result for 15 seconds, and the node list and the tailnet status share one headscale fetch.
 
 1. node-control lists a node if the node has the tag `tag:exit`. The UI and API id of the node is its reported `name`.
-2. A node can also have `tag:cloud-<provider>` (`yandex`, `oci`, `selectel`, `fly`). That provider then finds the VM whose name equals the node name:
+2. A node can also have `tag:cloud-<provider>` (`yandex`, `oci`, `selectel`, `aws`, `fly`). That provider then finds the VM whose name equals the node name:
    - OCI finds it by name in the compartment.
    - Selectel finds it by name in the project and region.
+   - AWS finds it by its `Name` tag in the region. Terminated instances do not count.
    - Yandex finds it by name in the folder.
    - Fly finds it by app name.
 
@@ -183,6 +185,44 @@ You do not keep a list of nodes. node-control looks at each headscale node at ev
 3. Provider settings are per provider and come from the environment (table above), not from the node.
 4. Headscale keeps offline nodes, so a stopped VM stays in the list and you can start it. A node that you delete from headscale goes from the list.
 5. Duplicate registrations (`name-1` next to `name`) fold into one entry. The online entry wins.
+
+### AWS permissions
+
+The `aws` provider controls a node in one of two ways:
+
+- A plain EC2 instance: the provider starts and stops the instance.
+- An instance in an Auto Scaling group, as made by `terraform/modules/exit-node-vm/aws`: the provider sets the group
+  to 0 instances to stop the node, and to 1 instance to start it. A stopped node of this type has no instance. The
+  next start makes a new instance, which joins the tailnet again with the same name. See
+  [ADR 0001](../../../docs/adr/0001-aws-exit-nodes-stop-by-scaling-the-group.md).
+
+The provider finds the group from the instance, from the `asg` key in `nodes.json`, or from the name `<node name>-asg`.
+
+Give node-control only the actions below. Limit the changes with a tag, so that node-control cannot change other
+instances or groups:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Effect": "Allow", "Action": ["ec2:DescribeInstances", "autoscaling:DescribeAutoScalingGroups"], "Resource": "*"},
+    {
+      "Effect": "Allow",
+      "Action": ["ec2:StartInstances", "ec2:StopInstances", "autoscaling:UpdateAutoScalingGroup"],
+      "Resource": ["arn:aws:ec2:*:<your-account-id>:instance/*", "arn:aws:autoscaling:*:<your-account-id>:autoScalingGroup:*"],
+      "Condition": {"StringEquals": {"aws:ResourceTag/headlamp-exit-node": "true"}}
+    }
+  ]
+}
+```
+
+1. Put the tag `headlamp-exit-node=true` on each exit node instance or group. The `exit-node-vm/aws` module puts it on
+   the group and on its instances.
+2. Attach the policy to the role of the host that runs node-control.
+3. If node-control runs outside AWS, attach the policy to a dedicated user, and set its keys as secrets.
+
+The two describe actions do not support resource conditions, so they must have `"Resource": "*"`. They can read the
+state of all instances and groups in the account, but they cannot change them.
 
 ### Optional overrides: `nodes.json`
 
@@ -202,6 +242,7 @@ The file is optional. Files from the Python version continue to work. Start from
   | `yandex` | `{"instance_id"}` |
   | `oci` | `{"region", "compartment_id", "instance_name"}` or `{"instance_id"}` |
   | `selectel` | `{"region", "instance_name"}` or `{"instance_id"}` |
+  | `aws` | `{"region", "instance_name"}` (the `Name` tag), `{"region", "instance_id"}` or `{"region", "asg"}` |
   | `fly` | `{"app"}` |
 - `aliases`: `{"old-id": "node-name"}`, so that bookmarks and scripts with an old id continue to work.
 - `tailnetTrack`: extra headscale names to include in `/tailnet/status`.

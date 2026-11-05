@@ -49,6 +49,7 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		"yandex":   nodes.NewYandex(env, hc),
 		"oci":      nodes.NewOCI(env, hc),
 		"selectel": nodes.NewSelectel(env, hc),
+		"aws":      nodes.NewAWS(env, hc),
 		"fly":      nodes.NewFly(env, hc),
 	}
 	// Nodes takes the audit log from enrolment, and enrolment asks Nodes what is stopped: hence nm is declared first.

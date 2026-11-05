@@ -12,7 +12,7 @@ import (
 )
 
 // Providers lists the supported cloud providers, in tag-precedence order.
-var Providers = []string{"yandex", "oci", "selectel", "fly"}
+var Providers = []string{"yandex", "oci", "openstack", "selectel", "aws", "fly"}
 
 // IDPattern is the shape every node id must have (it ends up in API paths).
 const IDPattern = `^[a-z0-9][a-z0-9_-]*$`
@@ -28,9 +28,11 @@ type ProviderDefault map[string]any
 
 // ProviderDefaults mirrors PROVIDER_DEFAULTS of the Python app.
 var ProviderDefaults = map[string]ProviderDefault{
-	"yandex":   {"label": "Yandex Compute", "startStatus": "RUNNING", "stopStatus": "STOPPED", "detailFields": []any{"detail"}},
-	"oci":      {"label": "OCI Compute", "startStatus": "RUNNING", "stopStatus": "STOPPED", "detailFields": []any{"detail", "shape"}},
-	"selectel": {"label": "Selectel Cloud", "startStatus": "RUNNING", "stopStatus": "STOPPED", "detailFields": []any{"detail"}},
+	"yandex":    {"label": "Yandex Compute", "startStatus": "RUNNING", "stopStatus": "STOPPED", "detailFields": []any{"detail"}},
+	"oci":       {"label": "OCI Compute", "startStatus": "RUNNING", "stopStatus": "STOPPED", "detailFields": []any{"detail", "shape"}},
+	"openstack": {"label": "OpenStack", "startStatus": "RUNNING", "stopStatus": "STOPPED", "detailFields": []any{"detail"}},
+	"selectel":  {"label": "Selectel Cloud", "startStatus": "RUNNING", "stopStatus": "STOPPED", "detailFields": []any{"detail"}},
+	"aws":       {"label": "AWS EC2", "startStatus": "RUNNING", "stopStatus": "STOPPED", "detailFields": []any{"detail", "shape"}},
 	"fly": {
 		"label": "Fly Machine", "startStatus": "STARTED", "stopStatus": "STOPPED",
 		"detailFields":              []any{map[string]any{"field": "machine_id", "template": "machine {value}"}},

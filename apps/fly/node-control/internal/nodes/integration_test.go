@@ -63,7 +63,7 @@ func TestExampleConfigBlocksReachProviderRequests(t *testing.T) {
 	sel := discoverFrom(t, `{"nodes":{"s1":{"provider":"selectel","tailnetName":"node-d","selectel":{"instance_id":"pinned","region":"region-2"}}}}`, ns)
 	s1, _ := byID(sel, "s1")
 	fn := &fakeNova{region: "region-2", status: map[string]string{"pinned": "ACTIVE"}}
-	ps, _ := newSelectel(t, fn, selEnv)
+	ps, _ := newOpenStack(t, fn, selEnv)
 	st, err = ps.Status(ctx, s1)
 	if err != nil || st["status"] != "RUNNING" || len(fn.queries) != 0 {
 		t.Fatalf("selectel block ignored: %v %v %v", st, err, fn.queries)

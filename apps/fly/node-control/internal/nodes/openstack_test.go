@@ -107,7 +107,7 @@ var selEnv = map[string]string{
 	"SELECTEL_USER": "svc", "SELECTEL_PASSWORD": "pw-secret", "SELECTEL_REGION": "region-1",
 }
 
-func newSelectel(t *testing.T, f *fakeNova, env map[string]string) (*selectel, *clock) {
+func newOpenStack(t *testing.T, f *fakeNova, env map[string]string) (*openstack, *clock) {
 	t.Helper()
 	f.srv = httptest.NewServer(f)
 	t.Cleanup(f.srv.Close)
@@ -117,7 +117,7 @@ func newSelectel(t *testing.T, f *fakeNova, env map[string]string) (*selectel, *
 	if f.region == "" {
 		f.region = "region-1"
 	}
-	p := NewSelectel(core.MapEnv(env), f.srv.Client()).(*selectel)
+	p := NewOpenStack(core.MapEnv(env), f.srv.Client()).(*openstack)
 	p.authURL = f.srv.URL + "/identity/v3"
 	c := &clock{t: time.Unix(1_000_000, 0)}
 	p.now = c.now
@@ -128,7 +128,7 @@ var selTarget = Target{ID: "node-a", Name: "node-a", Provider: "selectel"}
 
 func TestFindsInstanceByName(t *testing.T) {
 	f := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}}
-	p, _ := newSelectel(t, f, selEnv)
+	p, _ := newOpenStack(t, f, selEnv)
 	st, err := p.Status(context.Background(), selTarget)
 	if err != nil || st["status"] != "RUNNING" {
 		t.Fatal(st, err)
@@ -156,7 +156,7 @@ func TestFindsInstanceByName(t *testing.T) {
 
 func TestInstanceIDPinsAndRegionFromBlock(t *testing.T) {
 	f := &fakeNova{region: "region-2", status: map[string]string{"pinned": "SHUTOFF"}}
-	p, _ := newSelectel(t, f, map[string]string{
+	p, _ := newOpenStack(t, f, map[string]string{
 		"SELECTEL_ACCOUNT_ID": "a", "SELECTEL_PROJECT_ID": "p", "SELECTEL_USER": "u", "SELECTEL_PASSWORD": "pw",
 	})
 	tg := Target{ID: "x", Name: "x", Provider: "selectel", Block: map[string]any{"instance_id": "pinned", "region": "region-2"}}
@@ -171,7 +171,7 @@ func TestInstanceIDPinsAndRegionFromBlock(t *testing.T) {
 
 func TestStatusVocabulary(t *testing.T) {
 	f := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "BUILD"}}
-	p, _ := newSelectel(t, f, selEnv)
+	p, _ := newOpenStack(t, f, selEnv)
 	for raw, want := range map[string]string{"ACTIVE": "RUNNING", "SHUTOFF": "STOPPED", "BUILD": "STARTING", "HARD_REBOOT": "STARTING", "ERROR": "ERROR"} {
 		f.status["id1"] = raw
 		st, err := p.Status(context.Background(), selTarget)
@@ -183,7 +183,7 @@ func TestStatusVocabulary(t *testing.T) {
 
 func TestStartStopIdempotent(t *testing.T) {
 	f := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}}
-	p, _ := newSelectel(t, f, selEnv)
+	p, _ := newOpenStack(t, f, selEnv)
 	ctx := context.Background()
 
 	prev, cur, err := p.Start(ctx, selTarget)
@@ -210,7 +210,7 @@ func TestStartStopIdempotent(t *testing.T) {
 
 func TestTokenCachedUntilNearExpiry(t *testing.T) {
 	f := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}}
-	p, c := newSelectel(t, f, selEnv)
+	p, c := newOpenStack(t, f, selEnv)
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
 		if _, err := p.Status(ctx, selTarget); err != nil {
@@ -242,7 +242,7 @@ func TestMissingCredentialsNotConfigured(t *testing.T) {
 			}
 		}
 		f := &fakeNova{}
-		p, _ := newSelectel(t, f, env)
+		p, _ := newOpenStack(t, f, env)
 		_, err := p.Status(context.Background(), selTarget)
 		if !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), drop) {
 			t.Fatalf("%s: %v", drop, err)
@@ -260,14 +260,14 @@ func TestSelectelRegionNotConfigured(t *testing.T) {
 			env[k] = v
 		}
 	}
-	p, _ := newSelectel(t, &fakeNova{}, env)
+	p, _ := newOpenStack(t, &fakeNova{}, env)
 	if _, err := p.Status(context.Background(), selTarget); !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("%v", err)
 	}
 }
 
 func TestSelectelNoNameNotConfigured(t *testing.T) {
-	p, _ := newSelectel(t, &fakeNova{}, selEnv)
+	p, _ := newOpenStack(t, &fakeNova{}, selEnv)
 	if _, err := p.Status(context.Background(), Target{ID: "x", Provider: "selectel"}); !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("%v", err)
 	}
@@ -275,7 +275,7 @@ func TestSelectelNoNameNotConfigured(t *testing.T) {
 
 func TestSelectelAmbiguousAndMissingInstance(t *testing.T) {
 	f := &fakeNova{servers: []map[string]string{{"id": "a", "name": "node-a"}, {"id": "b", "name": "node-a"}}, status: map[string]string{}}
-	p, _ := newSelectel(t, f, selEnv)
+	p, _ := newOpenStack(t, f, selEnv)
 	var ae *APIError
 	_, err := p.Status(context.Background(), selTarget)
 	if !errors.As(err, &ae) || !strings.Contains(err.Error(), "2 instances named 'node-a'; refusing to guess") {
@@ -297,7 +297,7 @@ func TestSelectelErrorsAreBoundedAndScrubbed(t *testing.T) {
 		http.Error(w, "bad login pw-secret for svc", 401)
 	}))
 	defer ks.Close()
-	p := NewSelectel(core.MapEnv(selEnv), ks.Client()).(*selectel)
+	p := NewOpenStack(core.MapEnv(selEnv), ks.Client()).(*openstack)
 	p.authURL = ks.URL
 	_, err := p.Status(ctx, selTarget)
 	if !errors.As(err, &ae) || ae.Status != 401 || strings.Contains(err.Error(), "pw-secret") || !strings.Contains(err.Error(), "bad login *** for svc") {
@@ -306,7 +306,7 @@ func TestSelectelErrorsAreBoundedAndScrubbed(t *testing.T) {
 
 	// Compute failure whose body echoes the token.
 	f := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}, token: "tok-leak", serverErr: "oops tok-leak oops"}
-	p2, _ := newSelectel(t, f, selEnv)
+	p2, _ := newOpenStack(t, f, selEnv)
 	_, err = p2.Status(ctx, selTarget)
 	if !errors.As(err, &ae) || ae.Status != 500 || strings.Contains(err.Error(), "tok-leak") || !strings.Contains(err.Error(), "oops *** oops") {
 		t.Fatalf("compute: %v", err)
@@ -318,7 +318,7 @@ func TestSelectelErrorsAreBoundedAndScrubbed(t *testing.T) {
 		big := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, body, 500)
 		}))
-		p3 := NewSelectel(core.MapEnv(selEnv), big.Client()).(*selectel)
+		p3 := NewOpenStack(core.MapEnv(selEnv), big.Client()).(*openstack)
 		p3.authURL = big.URL
 		_, err = p3.Status(ctx, selTarget)
 		big.Close()
@@ -337,7 +337,7 @@ func TestScrubKeepsValidUTF8(t *testing.T) {
 
 func TestSelectelActionFailureAndPinned404(t *testing.T) {
 	f := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "SHUTOFF"}, postStatus: 409}
-	p, _ := newSelectel(t, f, selEnv)
+	p, _ := newOpenStack(t, f, selEnv)
 	var ae *APIError
 	_, _, err := p.Start(context.Background(), selTarget)
 	if !errors.As(err, &ae) || ae.Status != 409 {
@@ -352,10 +352,118 @@ func TestSelectelActionFailureAndPinned404(t *testing.T) {
 
 func TestSelectelNoComputeEndpointForRegion(t *testing.T) {
 	f := &fakeNova{region: "region-9"}
-	p, _ := newSelectel(t, f, selEnv)
+	p, _ := newOpenStack(t, f, selEnv)
 	_, err := p.Status(context.Background(), selTarget)
 	var ae *APIError
 	if !errors.As(err, &ae) || !strings.Contains(err.Error(), "region-1") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// Another OpenStack-compatible cloud with its own Keystone (#101): the operator declares it in OPENSTACK_CLOUDS and
+// the node block names it. That cloud's own service user signs in there.
+func otherCloud(t *testing.T) (*openstack, *fakeNova, *fakeNova, Target) {
+	t.Helper()
+	other := &fakeNova{servers: []map[string]string{{"id": "id9", "name": "node-a"}}, status: map[string]string{"id9": "SHUTOFF"},
+		token: "tok-2", region: "zone-2"}
+	tls := httptest.NewTLSServer(other)
+	t.Cleanup(tls.Close)
+	other.srv = tls
+	env := map[string]string{"OPENSTACK_CLOUDS": " OTHERCLOUD = " + tls.URL + "/identity/v3/ ",
+		"OTHERCLOUD_ACCOUNT_ID": "acct-2", "OTHERCLOUD_PROJECT_ID": "proj-2",
+		"OTHERCLOUD_USER": "svc2", "OTHERCLOUD_PASSWORD": "pw2-secret", "OTHERCLOUD_REGION": "zone-2"}
+	for k, v := range selEnv {
+		env[k] = v
+	}
+	def := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}}
+	p, _ := newOpenStack(t, def, env)
+	p.hc = tls.Client()
+	return p, def, other, Target{ID: "node-a", Name: "node-a", Provider: "selectel", Block: map[string]any{"cloud": "OTHERCLOUD"}}
+}
+
+func TestOtherOpenStackCloud(t *testing.T) {
+	p, def, other, far := otherCloud(t)
+	st, err := p.Status(context.Background(), far)
+	if err != nil || st["status"] != "STOPPED" {
+		t.Fatalf("other cloud: %v %v", st, err)
+	}
+	id := other.authBody["auth"].(map[string]any)["identity"].(map[string]any)["password"].(map[string]any)["user"].(map[string]any)
+	if id["name"] != "svc2" || id["password"] != "pw2-secret" || id["domain"].(map[string]any)["name"] != "acct-2" {
+		t.Fatalf("auth body: %v", other.authBody)
+	}
+	if proj := other.authBody["auth"].(map[string]any)["scope"].(map[string]any)["project"].(map[string]any)["id"]; proj != "proj-2" {
+		t.Fatalf("project: %v", proj)
+	}
+	if st, err := p.Status(context.Background(), selTarget); err != nil || st["status"] != "RUNNING" {
+		t.Fatalf("default cloud: %v %v", st, err)
+	}
+	if def.authN != 1 || other.authN != 1 {
+		t.Fatalf("one token per cloud: default=%d other=%d", def.authN, other.authN)
+	}
+	if _, cur, err := p.Start(context.Background(), far); err != nil || cur != "STARTING" || len(other.posts) != 1 || len(def.posts) != 0 {
+		t.Fatalf("start went to the wrong cloud: %v %v other=%v default=%v", cur, err, other.posts, def.posts)
+	}
+}
+
+func TestOtherOpenStackCloudPasswordScrubbed(t *testing.T) {
+	p, _, other, far := otherCloud(t)
+	other.authFail = 401
+	other.token = "pw2-secret" // the fake echoes the token in its error body: make it the password
+	_, err := p.Status(context.Background(), far)
+	if err == nil || strings.Contains(err.Error(), "pw2-secret") {
+		t.Fatalf("password not scrubbed: %v", err)
+	}
+}
+
+func TestOpenStackCloudsRules(t *testing.T) {
+	ctx := context.Background()
+	base := func(clouds string) *openstack {
+		env := map[string]string{"OPENSTACK_CLOUDS": clouds, "OTHERCLOUD_REGION": "r"}
+		for k, v := range selEnv {
+			env[k] = v
+		}
+		p, _ := newOpenStack(t, &fakeNova{}, env)
+		return p
+	}
+	far := Target{Name: "x", Block: map[string]any{"cloud": "OTHERCLOUD"}}
+	// A block can only name a declared cloud; it can never supply a URL.
+	if _, err := base("").Status(ctx, far); !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), "OPENSTACK_CLOUDS") {
+		t.Errorf("undeclared cloud: %v", err)
+	}
+	for _, bad := range []string{
+		"OTHERCLOUD=http://keystone.example.com/v3",      // not https
+		"SELECTEL=https://keystone.example.com/v3",       // would send the Selectel password elsewhere
+		"lower=https://keystone.example.com/v3",          // not an env name
+		"OTHERCLOUD",                                     // no URL
+		"secret-value-here=https://keystone.example.com", // the error names the entry, never its text
+	} {
+		_, err := base(bad).Status(ctx, far)
+		if !errors.Is(err, ErrNotConfigured) || strings.Contains(err.Error(), "secret-value-here") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	// Declared, but its credentials are missing: the error names the variable, never a value.
+	if _, err := base("OTHERCLOUD=https://keystone.example.com/v3").Status(ctx, far); !errors.Is(err, ErrNotConfigured) ||
+		!strings.Contains(err.Error(), "OTHERCLOUD_USER") {
+		t.Errorf("missing creds: %v", err)
+	}
+}
+
+// "openstack" is the generic provider name (#101): the same provider, chosen by tag:cloud-openstack or
+// "provider": "openstack" with an "openstack" block.
+func TestOpenStackProviderName(t *testing.T) {
+	cfg, err := ParseConfig([]byte(`{"nodes":{"n1":{"provider":"openstack","openstack":{"instance_id":"id1","region":"r"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := Discover(cfg, nil)
+	if len(ts) != 1 || ts[0].Provider != "openstack" || ts[0].Block["instance_id"] != "id1" {
+		t.Fatalf("targets: %+v", ts)
+	}
+	if got := cloudProvider([]string{"tag:exit", "tag:cloud-openstack"}); got != "openstack" {
+		t.Fatalf("tag: %q", got)
+	}
+	if ProviderDefaults["openstack"]["startStatus"] != "RUNNING" {
+		t.Fatal("no UI defaults for openstack")
 	}
 }

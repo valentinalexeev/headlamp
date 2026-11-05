@@ -63,8 +63,8 @@ adds its own in a private overlay.
 
 ## Cutting a release
 
-1. On a `release/X.Y.Z` branch from `develop`, commit `chore(release): vX.Y.Z`: set `VERSION` and move the `Unreleased`
-   part of `CHANGELOG.md` under the new version. Merge it into `develop` through a PR.
+1. Make a `release/X.Y.Z` branch from `develop`. In one commit `chore(release): vX.Y.Z`, set `VERSION` and move the
+   `Unreleased` part of `CHANGELOG.md` under the new version. Merge it into `develop` through a PR.
 2. Merge `develop` into `main` through a PR.
 3. Tag the merge commit on `main` and push the tag: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
 

@@ -7,7 +7,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Added
 
 - Image publishing to GHCR for each component, rebuilt only when its source changes.
-- Publication of the documentation to the GitHub wiki on every push to `main`.
+- Publication of the documentation to the GitHub wiki when a release is tagged.
 - A `ci` workflow: commit subjects, secret scan, shell lint and script tests, Terraform module validation and Ansible syntax on every PR.
 - A `linux/arm64` build of the `funnel-sidecar` image. The Kubernetes examples use the published image.
 - A release policy with checks on PR titles and release tags.

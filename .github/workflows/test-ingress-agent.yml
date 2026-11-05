@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths: ['apps/ingress-agent/**', '.github/workflows/test-ingress-agent.yml']
   pull_request:
-    branches: [main, develop]
+    branches: [main]
     paths: ['apps/ingress-agent/**', '.github/workflows/test-ingress-agent.yml']
 permissions:
   contents: read

@@ -148,7 +148,7 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
 | Decide an open question | **no**, a bot comment is never a decision | yes, by comment |
 | Branch, commit, push to a branch | yes, always as the bot | yes |
 | Act as the owner (owner git identity, credentials, `gh` login) | **no**, unless the owner gave explicit permission **in that ticket, for that change** | yes |
-| Push to `develop` or `main` | **no** | via PR |
+| Push to `main` | **no** | via PR |
 | Open / update PR, fix mechanical conflicts | yes | yes |
 | Merge a PR | only after an owner **Approve** review on the PR's current head commit and green CI | yes |
 | Repo settings, secrets, branch protection, release tags | **no** | yes |
@@ -170,9 +170,10 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
 
 ### Branches and pull requests
 
-- Branches start from `develop` and PRs target `develop`; `develop` reaches `main` only through a release PR
-  (`VERSIONING.md`). Names: `<prefix>/<issue>-<slug>`, lower-case, prefixes `feat/`, `fix/`, `docs/`, `refactor/`,
-  `test/`, `ci/`, `chore/`, `hotfix/` (incidents), `release/X.Y.Z`. Example: `fix/97-sidecar-retry`.
+- `main` is the only long-lived branch. Branches start from `main` and PRs target `main`; there is no `develop`.
+  Names: `<prefix>/<issue>-<slug>`, lower-case, prefixes `feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `ci/`,
+  `chore/`, `hotfix/` (incidents), `release/X.Y.Z`. Example: `fix/97-sidecar-retry`. Keep branches short-lived and
+  `main` releasable at every merge.
 - Commits and PR titles: Conventional Commits (section 1, checked by `pr-title`), footers `Refs #NN` / `Closes #NN`.
   Commit and push as you go.
 - PR description (template in `.github/pull_request_template.md`): `🤖 AI agent:`, issue link, what was done,
@@ -186,16 +187,15 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
 - **Merge permission is a review with state `APPROVED` by `valentinalexeev` on the current head commit.** Comments,
   chat messages and others' approvals are not permission. Check
   `gh api repos/valentinalexeev/headlamp/pulls/NN/reviews` right before merging, then merge with the head `sha`
-  pinned, as a merge commit. After a merge, check other open PRs for conflicts; merge `develop` into them when the
+  pinned, as a merge commit. After a merge, check other open PRs for conflicts; merge `main` into them when the
   conflict is mechanical, ask the owner when it is semantic.
 
 ### Releases, tags and images
 
 The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the agent's view of them.
 
-- **Branches.** `develop` is the integration branch: every feature, fix and docs PR targets it. `main` holds only
-  released (or about to be released) code and receives PRs from `develop` (a release) or from `hotfix/` branches.
-  Images publish from `main` and tags only, never from `develop` or feature branches (PRs build and test, no push).
+- **Branches.** Trunk-based: every PR merges into `main`, and a release is a tag on a commit of `main`. Images publish
+  from `main` and tags only, never from other branches (PRs build and test, no push).
 - **Version.** Strict SemVer, one version for the whole repo in `VERSION`. Before 1.0.0 a breaking change moves MINOR.
   The bump is derived from commit subjects since the last stable tag: `feat` → at least MINOR, `!` or
   `BREAKING CHANGE:` → MAJOR (MINOR before 1.0.0), the rest PATCH. So a wrong commit type is a release bug: pick it
@@ -203,17 +203,16 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
 - **Changelog.** Every user-visible change adds a line under `## Unreleased` in `CHANGELOG.md` (Keep a Changelog
   sections), breaking ones marked **BREAKING** with the migration step.
 - **Cutting a release** (the bot may prepare it, the owner merges and tags):
-  1. Branch `release/X.Y.Z` from `develop`; commit `chore(release): vX.Y.Z` that sets `VERSION` and moves `Unreleased`
-     under `## X.Y.Z - <date>`. PR into `develop`, owner approves and merges.
-  2. PR `develop` → `main` titled `chore(release): vX.Y.Z`. The owner approves and merges (merge commit).
-  3. The owner, or the bot only with explicit permission in that release's issue or PR, tags the merge commit on `main`:
+  1. Branch `release/X.Y.Z` from `main`; commit `chore(release): vX.Y.Z` that sets `VERSION` and moves `Unreleased`
+     under `## X.Y.Z - <date>`. PR into `main` titled `chore(release): vX.Y.Z`; the owner approves and merges.
+  2. The owner, or the bot only with explicit permission in that release's issue or PR, tags the merge commit on `main`:
      `git tag vX.Y.Z <commit> && scripts/check-release.sh vX.Y.Z && git push origin vX.Y.Z`.
      Release candidates use `vX.Y.Z-rc.N`.
-  4. CI (`images.yml`) runs `check-release.sh` as a gate: tag format, `VERSION` match, commit on `main`, next version
+  3. CI (`images.yml`) runs `check-release.sh` as a gate: tag format, `VERSION` match, commit on `main`, next version
      with no skipping, bump at least what the commits need, milestone `X.Y.Z` (if any) has no open issues. Then it
      tags the already-built images and creates the GitHub release. Check the run and report its result on the issue.
-- **Hotfix.** `hotfix/NN-…` from `main`, PR into `main` with a PATCH bump in the same PR, tag as above, then merge
-  `main` back into `develop` through a PR. There is no fix release to an older line.
+- **Hotfix.** `hotfix/NN-…` from `main`, PR into `main`, then a PATCH release as above. There is no fix release to an
+  older line.
 - **Tags are immutable.** Never move or delete a release tag or re-publish a version; fix a bad release with a new one.
 - **Images.** `ghcr.io/valentinalexeev/headlamp/<image>`, one per entry in `.github/components.json` (new or renamed
   image: add it there and to `docs/images.md`). Only a component whose source changed is rebuilt (`src-<hash>`); a
@@ -230,7 +229,7 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   `funnel-ingress`, `headscale`, `exit-ams`, `tailguard`, `task-runner`, `route-provisioner`, `terraform`, `ansible`,
   `ci`, ...). A breaking change uses `!` **and** a `BREAKING CHANGE: <what and how to migrate>` footer. Footers also
   carry `Refs #NN` / `Closes #NN` and `Co-authored-by:`. PRs merge with a merge commit, so every commit on the branch
-  reaches `develop`: each one must pass `scripts/check-conventional.sh` and the denylist, not only the title.
+  reaches `main`: each one must pass `scripts/check-conventional.sh` and the denylist, not only the title.
 - **Changelog** ([Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)): every PR with a user-visible change
   adds a line under `## Unreleased` in `CHANGELOG.md`, in the section that fits (Added, Changed, Deprecated, Removed,
   Fixed, Security). Write it for an operator who upgrades: what changed and what they must do. Breaking lines start with
@@ -243,8 +242,8 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   pushing. Accuracy comes first: keep every value, limit and warning when rewriting. The independent reviewer checks STE
   on every PR that changes a manual. Agent rules (this section, `AGENTS.md`), the changelog and code comments use
   normal technical English.
-- **Wiki.** The documentation is published to the GitHub wiki by the `wiki` workflow on every push to `main` (so on
-  release, not on each merge to `develop`): `README.md` → Home, `docs/<name>.md` → `<name>`, plus `VERSIONING.md` and
+- **Wiki.** The documentation is published to the GitHub wiki by the `wiki` workflow when a release tag is pushed, so
+  the wiki shows the released docs, not work in progress on `main`: `README.md` → Home, `docs/<name>.md` → `<name>`, plus `VERSIONING.md` and
   `CHANGELOG.md` (`scripts/wiki-render.sh`). The repository is the source: never edit the wiki by hand, its next sync
   overwrites it. Wiki pages are public too, so the rules of section 1 apply to everything in `docs/`. To preview:
   `scripts/wiki-render.sh "$(mktemp -d)" valentinalexeev/headlamp`.
@@ -253,19 +252,19 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
 
 | Workflow | Runs on | Checks |
 |---|---|---|
-| `ci` | PRs and pushes to `develop`/`main` | conventional subject of every commit, gitleaks on the new commits, `make lint` and the script tests, `terraform fmt` + `validate` of the modules (cloudru: format only, its provider is not on the public registry), Ansible syntax |
+| `ci` | PRs and pushes to `main` | conventional subject of every commit, gitleaks on the new commits, `make lint` and the script tests, `terraform fmt` + `validate` of the modules (cloudru: format only, its provider is not on the public registry), Ansible syntax |
 | `pr-title` | PRs | the title is a Conventional Commit |
 | `manuals` | PRs changing `*.md` | STE check of the changed manuals |
 | `images` | PRs (build + test), `main` and tags (publish) | per-component build and tests, release gate on tags |
 | `test-task-runner`, `test-ingress-agent` | PRs touching those apps | their Go tests |
-| `wiki` | pushes to `main` | publishes the docs |
+| `wiki` | release tags | publishes the docs of that release |
 
 `ci` jobs always report (skipped steps say so), so they can be required checks in branch protection. Run the same
-checks locally before pushing; a red CI on `develop` or `main` is an incident.
+checks locally before pushing; a red CI on `main` is an incident.
 
 ### Incidents
 
-Something that already went wrong: red CI on `develop`/`main`, a leaked or expired secret, a denylist hit in history,
+Something that already went wrong: red CI on `main`, a leaked or expired secret, a denylist hit in history,
 an agent that damaged work. Open an issue at once (labels `incident`, `AI`, template *Incident*): what happened, when
 and how found, impact, immediate actions. Never paste secrets or denylisted text, even partially. Fix in
 `hotfix/NN-…` with `Closes #NN`; the closing comment states root cause, fix and what prevents a repeat. Revoking

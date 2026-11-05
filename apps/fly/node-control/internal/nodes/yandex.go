@@ -69,6 +69,17 @@ func NewYandex(env core.Env, hc *http.Client) Provider {
 		computeURL: instancesURL(env.Default("YANDEX_API_ENDPOINT", ""), yandexComputeURL)}
 }
 
+// checkEnvEndpoints reports a plain-HTTP YANDEX_*_ENDPOINT: the signed key assertion and the token would cross the
+// network in clear text, so such an endpoint is refused like one in a node block.
+func (y *yandex) checkEnvEndpoints() error {
+	for _, name := range []string{"YANDEX_API_ENDPOINT", "YANDEX_IAM_ENDPOINT"} {
+		if v := strings.TrimSpace(y.env.Getenv(name)); v != "" && !strings.HasPrefix(v, "https://") {
+			return notConfigured(name + " must be an https URL")
+		}
+	}
+	return nil
+}
+
 // tokenURL turns an IAM API base (https://iam.api.example.com) into the token URL; a full URL is kept as it is.
 func tokenURL(base, def string) string {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
@@ -97,15 +108,24 @@ func instancesURL(base, def string) string {
 // the defaults. Only https URLs are accepted from a block, so a node config cannot send the key assertion over plain
 // HTTP.
 func (y *yandex) endpoints(n Target) (iam, aud, compute string, err error) {
+	if err := y.checkEnvEndpoints(); err != nil {
+		return "", "", "", err
+	}
 	iam, aud, compute = y.iamURL, y.aud, y.computeURL
-	if v, _ := n.Block["iam_endpoint"].(string); v != "" {
+	bi, _ := n.Block["iam_endpoint"].(string)
+	bc, _ := n.Block["endpoint"].(string)
+	// Each installation issues its own tokens: a compute endpoint with the default IAM would fail with an unclear 401.
+	if (bi == "") != (bc == "") {
+		return "", "", "", notConfigured(`"endpoint" and "iam_endpoint" go together`)
+	}
+	if v := bi; v != "" {
 		if !strings.HasPrefix(v, "https://") {
 			return "", "", "", notConfigured(`"iam_endpoint" must be an https URL`)
 		}
 		iam = tokenURL(v, y.iamURL)
 		aud = iam
 	}
-	if v, _ := n.Block["endpoint"].(string); v != "" {
+	if v := bc; v != "" {
 		if !strings.HasPrefix(v, "https://") {
 			return "", "", "", notConfigured(`"endpoint" must be an https URL`)
 		}

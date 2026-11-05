@@ -529,9 +529,26 @@ func TestYandexPerNodeEndpoint(t *testing.T) {
 
 func TestYandexBlockEndpointMustBeHTTPS(t *testing.T) {
 	p, _ := newYandex(t, &fakeYandex{}, yxEnv(t))
-	for _, b := range []map[string]any{{"endpoint": "http://compute.api.example.com"}, {"iam_endpoint": "http://iam.api.example.com"}} {
+	for _, b := range []map[string]any{{"endpoint": "http://compute.api.example.com", "iam_endpoint": "https://iam.api.example.com"}, {"endpoint": "https://compute.api.example.com", "iam_endpoint": "http://iam.api.example.com"}} {
 		if _, err := p.Status(context.Background(), yxBlock(b)); !errors.Is(err, ErrNotConfigured) {
 			t.Errorf("%v: want not configured, got %v", b, err)
 		}
+	}
+}
+
+func TestYandexEndpointRules(t *testing.T) {
+	p, _ := newYandex(t, &fakeYandex{}, yxEnv(t))
+	// One without the other would take a token from the wrong installation.
+	for _, b := range []map[string]any{{"endpoint": "https://compute.api.example.com"}, {"iam_endpoint": "https://iam.api.example.com"}} {
+		if _, err := p.Status(context.Background(), yxBlock(b)); !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), "go together") {
+			t.Errorf("%v: got %v", b, err)
+		}
+	}
+	// The env endpoints must be https as well.
+	env := yxEnv(t)
+	env["YANDEX_IAM_ENDPOINT"] = "http://iam.api.example.com"
+	q := NewYandex(core.MapEnv(env), nil)
+	if _, err := q.Status(context.Background(), yxTarget); !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), "YANDEX_IAM_ENDPOINT") {
+		t.Errorf("http env endpoint: %v", err)
 	}
 }

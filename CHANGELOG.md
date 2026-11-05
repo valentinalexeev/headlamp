@@ -15,6 +15,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 - funnel-ingress ignores a client-address header that arrives twice and uses the peer address, where it used the first value before. A correct edge sets the header once, so only a forged request sees the difference.
 - The wiki also publishes every component, Ansible role and Terraform module manual (for example the funnel-ingress manual as `funnel-ingress`), with a sidebar that lists all pages.
 
+### Security
+
+- node-control no longer guesses the type of an answer without a `Content-Type`, and sends `X-Content-Type-Options: nosniff`. Before, an untyped answer that started with markup got the navigation shell and was sent as HTML (#108).
+
 ## 0.9.0 - 2026-11-05
 
 ### Added

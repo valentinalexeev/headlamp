@@ -6,7 +6,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
-- Other OpenStack-compatible clouds: the operator declares them in `OPENSTACK_CLOUDS` (`NAME=https://keystone`) and a node-control `selectel` node block names one with `"cloud"`; it signs in with that cloud's own `NAME_*` credentials. Tokens and cached ids are kept per cloud, and the Selectel password is never sent there. The `exit-node-vm/selectel` module gains `external_network_name` (default `external-network`, as before), and its README shows a provider alias for such a cloud.
+- Generic OpenStack support (#101). The module `exit-node-vm/openstack` replaces `exit-node-vm/selectel` and gains `external_network_name` (default `external-network`). `exit-node-vm/selectel` stays as a wrapper with `moved` blocks, so existing root stacks plan no change. node-control accepts the provider name `openstack` (`tag:cloud-openstack`, an `openstack` block), and `selectel` still works. Other OpenStack clouds: the operator declares them in `OPENSTACK_CLOUDS` (`NAME=https://keystone`), and a node block names one with `"cloud"`. That node signs in with the cloud's own `NAME_*` credentials. Tokens and cached ids are kept per cloud, and the Selectel password is never sent there.
 - funnel-ingress behind any load balancer: `FUNNEL_CLIENT_IP_HEADER` chooses the header with the client address (`X-Forwarded-For` is read as a chain) and `FUNNEL_TRUSTED_PROXIES` limits which peers may set it and `X-Forwarded-Proto`. The default keeps `Fly-Client-IP` from every peer, as before.
 
 ### Changed

@@ -448,3 +448,22 @@ func TestOpenStackCloudsRules(t *testing.T) {
 		t.Errorf("missing creds: %v", err)
 	}
 }
+
+// "openstack" is the generic provider name (#101): the same provider, chosen by tag:cloud-openstack or
+// "provider": "openstack" with an "openstack" block.
+func TestOpenStackProviderName(t *testing.T) {
+	cfg, err := ParseConfig([]byte(`{"nodes":{"n1":{"provider":"openstack","openstack":{"instance_id":"id1","region":"r"}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := Discover(cfg, nil)
+	if len(ts) != 1 || ts[0].Provider != "openstack" || ts[0].Block["instance_id"] != "id1" {
+		t.Fatalf("targets: %+v", ts)
+	}
+	if got := cloudProvider([]string{"tag:exit", "tag:cloud-openstack"}); got != "openstack" {
+		t.Fatalf("tag: %q", got)
+	}
+	if ProviderDefaults["openstack"]["startStatus"] != "RUNNING" {
+		t.Fatal("no UI defaults for openstack")
+	}
+}

@@ -91,7 +91,7 @@ commits on top of it or attempt a rewrite on your own.
 | Path | What it is |
 |---|---|
 | `.github/components.json`, `.github/workflows/`, `VERSIONING.md`, `docs/images.md` | images CI publishes to GHCR, rebuilt per component; the release rules and their checks (`scripts/check-release.sh`); what each image is and how they fit together |
-| `terraform/modules/exit-node-vm/{yandex,oci,aws,cloudru,selectel}` | reusable VM exit-node modules (root stacks live in YOUR repo) |
+| `terraform/modules/exit-node-vm/{yandex,oci,aws,cloudru,openstack}` | reusable VM exit-node modules (root stacks live in YOUR repo); `openstack` serves Selectel and other OpenStack clouds, and `selectel` is its old name, kept as a wrapper |
 | `ansible/roles/{tailscale,route-provisioner,task-runner}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; the task runner on a VM node (rootless podman, nftables guard for its user; see the role README); version bump / key rotation playbooks |
 | `apps/fly/headscale` | headscale server image; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. The route approver (`approve-gateway-routes.sh`, `cron-approve-routes.sh`) is shipped but OFF by default (commented `route_approver` process in `fly.toml`); prefer `autoApprovers.routes` in `acl.json` |
 | `apps/fly/exit-ams` | Fly tailscale exit node; `fly.toml`, `direct-hosts.txt` are **placeholders** |
@@ -479,7 +479,7 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
   and advertises these routes. Use your own list, not the example.
 - `apps/fly/node-control` is a Go service (one binary, embedded tailscale). It has a start/stop UI and API for your exit nodes.
   It is reachable only over the tailnet by design (no public service). It discovers exit nodes from headscale.
-  It lists a node with `tag:exit`. A `tag:cloud-<provider>` tag (`yandex`, `oci`, `selectel`, `fly`) plus the reported name of the node
+  It lists a node with `tag:exit`. A `tag:cloud-<provider>` tag (`yandex`, `oci`, `openstack` or its old name `selectel`, `fly`) plus the reported name of the node
   selects the VM or app to control.
 
   The optional JSON `app/nodes.json` (see `testdata/nodes.example.json`) only adds overrides: explicit connection

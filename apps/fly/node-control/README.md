@@ -20,7 +20,7 @@ A bridge is an entry host (xray/Reality front plus bridge agent) for clients on 
 
 node-control replaces the earlier Python implementation. It has the same HTTP API and the same enrolment database format.
 
-Providers: Yandex Compute, OCI Compute, Selectel Cloud, Fly Machines.
+Providers: Yandex Compute, OCI Compute, OpenStack (Selectel and other OpenStack clouds), Fly Machines.
 
 ## Environment
 
@@ -55,7 +55,7 @@ Put secrets in Fly secrets. Put plain settings in `fly.toml`.
 | `TASKS_*` | The scheduled-task module. It is on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set. "Tasks module" gives the variables and defaults. |
 | `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | The Yandex service account key, and the folder for the lookup by name. The account needs `compute.operator` and `compute.viewer`. |
 | `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | The OCI credentials, and the default region and compartment. |
-| `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | The Selectel (OpenStack) service user, the default region and the optional auth URL. |
+| `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | The service user, the default region and the optional auth URL of the default OpenStack cloud (Selectel). |
 | `OPENSTACK_CLOUDS` | Optional. Other OpenStack-compatible clouds, as `NAME=https://<keystone>/v3`, comma separated. `NAME` is upper case. The credentials of each cloud are `NAME_ACCOUNT_ID`, `NAME_PROJECT_ID`, `NAME_USER`, `NAME_PASSWORD` and `NAME_REGION`. Only this variable sets where these credentials go, so `nodes.json` cannot send them to a different URL. |
 | `FLY_API_TOKEN` | The app-scoped deploy token for the controlled Fly app or apps. |
 
@@ -174,9 +174,9 @@ Run a backup after enrolment changes. It is a manual step until an automatic one
 You do not keep a list of nodes. node-control looks at each headscale node at every refresh. It caches the result for 15 seconds, and the node list and the tailnet status share one headscale fetch.
 
 1. node-control lists a node if the node has the tag `tag:exit`. The UI and API id of the node is its reported `name`.
-2. A node can also have `tag:cloud-<provider>` (`yandex`, `oci`, `selectel`, `fly`). That provider then finds the VM whose name equals the node name:
+2. A node can also have `tag:cloud-<provider>` (`yandex`, `oci`, `openstack`, `fly`). The old name `selectel` gives the same provider. That provider then finds the VM whose name equals the node name:
    - OCI finds it by name in the compartment.
-   - Selectel finds it by name in the project and region.
+   - OpenStack finds it by name in the project and region.
    - Yandex finds it by name in the folder.
    - Fly finds it by app name.
 
@@ -202,7 +202,7 @@ The file is optional. Files from the Python version continue to work. Start from
   |---|---|
   | `yandex` | `{"instance_id"}` |
   | `oci` | `{"region", "compartment_id", "instance_name"}` or `{"instance_id"}` |
-  | `selectel` | `{"region", "instance_name"}` or `{"instance_id"}`. For a node in a different OpenStack cloud, add `"cloud": "NAME"`, with a `NAME` from `OPENSTACK_CLOUDS` |
+  | `openstack` (or the old name `selectel`) | `{"region", "instance_name"}` or `{"instance_id"}`. For a node in a different OpenStack cloud, add `"cloud": "NAME"`, with a `NAME` from `OPENSTACK_CLOUDS` |
   | `fly` | `{"app"}` |
 - `aliases`: `{"old-id": "node-name"}`, so that bookmarks and scripts with an old id continue to work.
 - `tailnetTrack`: extra headscale names to include in `/tailnet/status`.

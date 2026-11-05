@@ -104,3 +104,37 @@ func TestInvalidSettings(t *testing.T) {
 		t.Errorf("valid list rejected: %v", err)
 	}
 }
+
+func TestUntrustedPeerInChainMode(t *testing.T) {
+	r := must(t, "X-Forwarded-For", "10.0.0.0/8")
+	if got := r.ClientIP(req("192.0.2.9:1", map[string][]string{"X-Forwarded-For": {"203.0.113.7"}})); got != "192.0.2.9" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestZonesAndMappedAddresses(t *testing.T) {
+	r := must(t, "X-Forwarded-For", "fe80::/10, ::ffff:10.0.0.0/104")
+	// A zoned hop is compared without its zone, so a trusted link-local proxy is skipped and the zone never leaks.
+	if got := r.ClientIP(req("10.0.0.1:1", map[string][]string{"X-Forwarded-For": {"203.0.113.7, fe80::1%eth0"}})); got != "203.0.113.7" {
+		t.Errorf("zoned hop: got %q", got)
+	}
+	if got := r.ClientIP(req("10.0.0.1:1", map[string][]string{"X-Forwarded-For": {"2001:db8::1%eth0"}})); got != "2001:db8::1" {
+		t.Errorf("zone kept: got %q", got)
+	}
+	// The mapped CIDR became 10.0.0.0/8, so a mapped peer and a plain peer both count as trusted.
+	for _, peer := range []string{"[::ffff:10.1.1.1]:1", "10.1.1.1:1"} {
+		if !r.TrustedPeer(req(peer, nil)) {
+			t.Errorf("peer %s not trusted", peer)
+		}
+	}
+	if _, err := New("", "::ffff:0.0.0.0/80"); err == nil {
+		t.Error("mapped prefix shorter than /96 accepted")
+	}
+}
+
+func TestNoneStillGuardsTheScheme(t *testing.T) {
+	r := must(t, "none", "10.0.0.0/8")
+	if r.TrustedPeer(req("192.0.2.9:1", nil)) || !r.TrustedPeer(req("10.0.0.1:1", nil)) {
+		t.Fatal("TrustedPeer ignores FUNNEL_TRUSTED_PROXIES with header none")
+	}
+}

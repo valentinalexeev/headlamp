@@ -86,7 +86,7 @@ func (r *Resolver) fromHeader(req *http.Request) (netip.Addr, bool) {
 			return netip.Addr{}, false // missing, or set twice: do not guess which one the proxy wrote
 		}
 		ip, err := netip.ParseAddr(strings.TrimSpace(values[0]))
-		return ip.Unmap(), err == nil
+		return norm(ip), err == nil
 	}
 	var chain []netip.Addr
 	for _, v := range values {
@@ -95,7 +95,7 @@ func (r *Resolver) fromHeader(req *http.Request) (netip.Addr, bool) {
 			if err != nil {
 				return netip.Addr{}, false // a broken chain cannot be trusted at all
 			}
-			chain = append(chain, ip.Unmap())
+			chain = append(chain, norm(ip))
 		}
 	}
 	if len(chain) == 0 {
@@ -127,19 +127,32 @@ func peerAddr(req *http.Request) (netip.Addr, bool) {
 	if err != nil {
 		return netip.Addr{}, false
 	}
-	return ip.Unmap(), true
+	return norm(ip), true
 }
+
+// norm drops the IPv4-mapped form and any IPv6 zone, so an address compares equal to the CIDRs it belongs to.
+func norm(ip netip.Addr) netip.Addr { return ip.Unmap().WithZone("") }
 
 func parsePrefix(s string) (netip.Prefix, error) {
 	if strings.Contains(s, "/") {
 		p, err := netip.ParsePrefix(s)
-		return p.Masked(), err
+		if err != nil {
+			return netip.Prefix{}, err
+		}
+		// Peers are compared unmapped, so a mapped CIDR (::ffff:10.0.0.0/104) becomes its IPv4 form.
+		if a := p.Addr(); a.Is4In6() {
+			if p.Bits() < 96 {
+				return netip.Prefix{}, errors.New("mapped prefix shorter than /96")
+			}
+			p = netip.PrefixFrom(a.Unmap(), p.Bits()-96)
+		}
+		return p.Masked(), nil
 	}
 	ip, err := netip.ParseAddr(s)
 	if err != nil {
 		return netip.Prefix{}, err
 	}
-	ip = ip.Unmap()
+	ip = norm(ip)
 	return netip.PrefixFrom(ip, ip.BitLen()), nil
 }
 

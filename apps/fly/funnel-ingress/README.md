@@ -30,13 +30,15 @@ Host `<service>.<namespace>.<public domain>` maps to a route. There are exactly 
 The proxy normalises case, a port and one trailing dot. Any other host gets a bare `404`.
 
 The proxy forwards the original `Host`. It rebuilds `X-Forwarded-For/Host/Proto` from scratch. It drops client-supplied forwarding headers.
+
 The proxy reads the client address from one header. By default, this is the `Fly-Client-IP` header that the edge of Fly sets.
 Behind a different load balancer, set `FUNNEL_CLIENT_IP_HEADER` and `FUNNEL_TRUSTED_PROXIES` (see the table).
+
 The proxy reads the header and `X-Forwarded-Proto` only from a trusted peer. For `X-Forwarded-For`, the client is the
 right-most address that is not a trusted proxy. If the header is missing or not valid, the proxy uses the address of the peer.
 
 **WARNING:** if `FUNNEL_TRUSTED_PROXIES` is empty, the proxy reads the header from all peers. Use an empty value only if
-the load balancer is the only route to the listener. Otherwise, a client can set a false address.
+the load balancer is the only route to the listener. Otherwise, a client can send a false address.
 
 The proxy strips hop-by-hop headers. WebSocket upgrades work.
 Connect, idle and response-header timeouts and a request-body limit apply.

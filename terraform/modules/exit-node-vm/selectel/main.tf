@@ -16,6 +16,7 @@ data "openstack_images_image_v2" "this" {
 
 data "openstack_networking_network_v2" "external" {
   external = true
+  name     = var.external_network_name
 }
 
 resource "openstack_compute_keypair_v2" "this" {
@@ -130,7 +131,7 @@ resource "openstack_compute_instance_v2" "this" {
 }
 
 resource "openstack_networking_floatingip_v2" "this" {
-  pool = "external-network"
+  pool = data.openstack_networking_network_v2.external.name
 }
 
 resource "openstack_networking_floatingip_associate_v2" "this" {

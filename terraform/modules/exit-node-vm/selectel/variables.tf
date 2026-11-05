@@ -94,3 +94,13 @@ variable "tailscale_authkey" {
   sensitive   = true
   description = "Pre-auth key (reusable, non-ephemeral). Required when bootstrap_tailscale is true."
 }
+
+variable "external_network_name" {
+  type        = string
+  default     = "external-network"
+  description = <<-EOT
+    Name of the external (public) network: the router's gateway and the floating IP pool. The default is the name
+    Selectel uses. Another OpenStack-compatible cloud usually names it differently (often "public" or "ext-net");
+    `openstack network list --external` shows it.
+  EOT
+}

@@ -54,7 +54,9 @@ type selectel struct {
 // Target.Name) unless instance_id pins one; region falls back to
 // SELECTEL_REGION. Credentials: SELECTEL_ACCOUNT_ID (Keystone domain),
 // SELECTEL_PROJECT_ID, SELECTEL_USER, SELECTEL_PASSWORD. The Keystone URL
-// can be overridden with SELECTEL_AUTH_URL.
+// can be overridden with SELECTEL_AUTH_URL. Another OpenStack-compatible cloud with its own Keystone is reached from
+// a node block with "auth_url" and "env_prefix" (see cloud): its credentials and default region are read from
+// <PREFIX>_* instead.
 func NewSelectel(env core.Env, hc *http.Client) Provider {
 	if hc == nil {
 		hc = http.DefaultClient
@@ -68,13 +70,49 @@ func NewSelectel(env core.Env, hc *http.Client) Provider {
 	}
 }
 
+// selectelCloud is one OpenStack installation: its Keystone URL and the env names of its credentials. The default is
+// Selectel (SELECTEL_*); a node block with "auth_url" and "env_prefix" points at another OpenStack cloud whose
+// credentials live under <PREFIX>_ACCOUNT_ID (Keystone domain), <PREFIX>_PROJECT_ID, <PREFIX>_USER, <PREFIX>_PASSWORD.
+type selectelCloud struct {
+	authURL, prefix string
+}
+
+func (c selectelCloud) key() string { return c.authURL + "|" + c.prefix }
+
+var envPrefixRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,30}$`)
+
+// cloud returns the installation for the node. A block auth_url must be https and needs an env_prefix other than
+// SELECTEL, so a node config can never send the Selectel password to another endpoint.
+func (s *selectel) cloud(n Target) (selectelCloud, error) {
+	def := selectelCloud{authURL: s.authURL, prefix: "SELECTEL"}
+	u, _ := n.Block["auth_url"].(string)
+	p, _ := n.Block["env_prefix"].(string)
+	if u == "" && p == "" {
+		return def, nil
+	}
+	if u == "" || p == "" {
+		return selectelCloud{}, notConfigured(`"auth_url" and "env_prefix" go together`)
+	}
+	if !strings.HasPrefix(u, "https://") {
+		return selectelCloud{}, notConfigured(`"auth_url" must be an https URL`)
+	}
+	if !envPrefixRE.MatchString(p) || p == "SELECTEL" {
+		return selectelCloud{}, notConfigured(`"env_prefix" must be an upper-case name other than SELECTEL, e.g. OTHERCLOUD`)
+	}
+	return selectelCloud{authURL: strings.TrimRight(u, "/"), prefix: p}, nil
+}
+
 func (s *selectel) block(n Target) (region, name, id string) {
 	b := n.Block
 	region, _ = b["region"].(string)
 	name, _ = b["instance_name"].(string)
 	id, _ = b["instance_id"].(string)
 	if region == "" {
-		region = s.env.Getenv("SELECTEL_REGION")
+		if p, _ := n.Block["env_prefix"].(string); p != "" && envPrefixRE.MatchString(p) {
+			region = s.env.Getenv(p + "_REGION")
+		} else {
+			region = s.env.Getenv("SELECTEL_REGION")
+		}
 	}
 	if name == "" {
 		name = n.Name
@@ -90,36 +128,41 @@ func (s *selectel) require(name string) (string, error) {
 	return v, nil
 }
 
-// secrets lists values that must never reach error text.
-func (s *selectel) secrets(extra ...string) []string {
+// secrets lists values that must never reach error text: the passwords of every configured cloud.
+func (s *selectel) secrets(c selectelCloud, extra ...string) []string {
 	out := append([]string{}, extra...)
-	return append(out, s.env.Getenv("SELECTEL_PASSWORD"))
+	out = append(out, s.env.Getenv("SELECTEL_PASSWORD"))
+	if c.prefix != "SELECTEL" {
+		out = append(out, s.env.Getenv(c.prefix+"_PASSWORD"))
+	}
+	return out
 }
 
 // scrub removes secrets from text and bounds its length (shared by every provider).
 func scrub(text string, secrets []string) string { return scrubpkg.Scrub(text, secrets) }
 
-// auth returns the token and compute endpoint for the region; the token is
+// auth returns the token and compute endpoint for the cloud and region; the token is
 // cached until shortly before expiry.
-func (s *selectel) auth(ctx context.Context, region string) (string, string, error) {
+func (s *selectel) auth(ctx context.Context, c selectelCloud, region string) (string, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if c, ok := s.tokens[region]; ok && c.expires.Sub(s.now()) > selectelSlack {
-		return c.token, c.compute, nil
+	cacheKey := c.key() + "|" + region
+	if t, ok := s.tokens[cacheKey]; ok && t.expires.Sub(s.now()) > selectelSlack {
+		return t.token, t.compute, nil
 	}
-	user, err := s.require("SELECTEL_USER")
+	user, err := s.require(c.prefix + "_USER")
 	if err != nil {
 		return "", "", err
 	}
-	domain, err := s.require("SELECTEL_ACCOUNT_ID")
+	domain, err := s.require(c.prefix + "_ACCOUNT_ID")
 	if err != nil {
 		return "", "", err
 	}
-	password, err := s.require("SELECTEL_PASSWORD")
+	password, err := s.require(c.prefix + "_PASSWORD")
 	if err != nil {
 		return "", "", err
 	}
-	project, err := s.require("SELECTEL_PROJECT_ID")
+	project, err := s.require(c.prefix + "_PROJECT_ID")
 	if err != nil {
 		return "", "", err
 	}
@@ -131,22 +174,22 @@ func (s *selectel) auth(ctx context.Context, region string) (string, string, err
 	}})
 	ctx, cancel := context.WithTimeout(ctx, selectelTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.authURL+"/auth/tokens", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.authURL+"/auth/tokens", bytes.NewReader(payload))
 	if err != nil {
-		return "", "", &APIError{Message: "keystone auth failed: " + scrub(err.Error(), s.secrets())}
+		return "", "", &APIError{Message: "keystone auth failed: " + scrub(err.Error(), s.secrets(c))}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := s.hc.Do(req)
 	if err != nil {
-		return "", "", &APIError{Message: "keystone auth failed: " + scrub(err.Error(), s.secrets())}
+		return "", "", &APIError{Message: "keystone auth failed: " + scrub(err.Error(), s.secrets(c))}
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return "", "", &APIError{Status: resp.StatusCode, Message: "keystone auth failed: " + scrub(err.Error(), s.secrets())}
+		return "", "", &APIError{Status: resp.StatusCode, Message: "keystone auth failed: " + scrub(err.Error(), s.secrets(c))}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", "", &APIError{Status: resp.StatusCode, Message: fmt.Sprintf("keystone auth failed: %d %s", resp.StatusCode, scrub(string(b), s.secrets()))}
+		return "", "", &APIError{Status: resp.StatusCode, Message: fmt.Sprintf("keystone auth failed: %d %s", resp.StatusCode, scrub(string(b), s.secrets(c)))}
 	}
 	token := resp.Header.Get("X-Subject-Token")
 	var doc struct {
@@ -178,17 +221,17 @@ func (s *selectel) auth(ctx context.Context, region string) (string, string, err
 	if compute == "" {
 		return "", "", &APIError{Message: fmt.Sprintf("no public compute endpoint for region '%s' in the catalog", scrub(region, nil))}
 	}
-	s.tokens[region] = selectelToken{token: token, compute: compute, expires: s.now().Add(selectelTokenTTL)}
+	s.tokens[cacheKey] = selectelToken{token: token, compute: compute, expires: s.now().Add(selectelTokenTTL)}
 	return token, compute, nil
 }
 
 // call performs an authenticated compute request; non-2xx becomes an APIError.
-func (s *selectel) call(ctx context.Context, region, method, path string, query url.Values, body any) ([]byte, error) {
-	token, compute, err := s.auth(ctx, region)
+func (s *selectel) call(ctx context.Context, c selectelCloud, region, method, path string, query url.Values, body any) ([]byte, error) {
+	token, compute, err := s.auth(ctx, c, region)
 	if err != nil {
 		return nil, err
 	}
-	secrets := s.secrets(token)
+	secrets := s.secrets(c, token)
 	var rd io.Reader
 	if body != nil {
 		j, _ := json.Marshal(body)
@@ -223,26 +266,30 @@ func (s *selectel) call(ctx context.Context, region, method, path string, query 
 	return b, nil
 }
 
-// resolve returns the region and instance id for the target.
-func (s *selectel) resolve(ctx context.Context, n Target) (string, string, error) {
+// resolve returns the cloud, region and instance id for the target.
+func (s *selectel) resolve(ctx context.Context, n Target) (selectelCloud, string, string, error) {
+	c, err := s.cloud(n)
+	if err != nil {
+		return selectelCloud{}, "", "", err
+	}
 	region, name, id := s.block(n)
 	if id == "" && name == "" {
-		return "", "", notConfigured(`node needs a name, or "selectel": {"instance_name": ...} or {"instance_id": ...}`)
+		return c, "", "", notConfigured(`node needs a name, or "selectel": {"instance_name": ...} or {"instance_id": ...}`)
 	}
 	if region == "" {
-		return "", "", notConfigured(`set "selectel": {"region": ...} (or the SELECTEL_REGION env var)`)
+		return c, "", "", notConfigured(fmt.Sprintf(`set "selectel": {"region": ...} (or the %s_REGION env var)`, c.prefix))
 	}
 	if id != "" {
-		return region, id, nil
+		return c, region, id, nil
 	}
 	key := s.cacheKey(n)
 	if cached, ok := s.ids.get(key, s.now()); ok {
-		return region, cached, nil
+		return c, region, cached, nil
 	}
 	// Nova matches `name` as a regexp; anchor it so "a" never matches "a2".
-	b, err := s.call(ctx, region, http.MethodGet, "/servers", url.Values{"name": {"^" + regexp.QuoteMeta(name) + "$"}}, nil)
+	b, err := s.call(ctx, c, region, http.MethodGet, "/servers", url.Values{"name": {"^" + regexp.QuoteMeta(name) + "$"}}, nil)
 	if err != nil {
-		return "", "", err
+		return c, "", "", err
 	}
 	var doc struct {
 		Servers []struct {
@@ -250,26 +297,28 @@ func (s *selectel) resolve(ctx context.Context, n Target) (string, string, error
 		} `json:"servers"`
 	}
 	if err := json.Unmarshal(b, &doc); err != nil {
-		return "", "", &APIError{Message: "listing instances: bad response"}
+		return c, "", "", &APIError{Message: "listing instances: bad response"}
 	}
 	switch len(doc.Servers) {
 	case 0:
-		return "", "", &APIError{Message: fmt.Sprintf("no instance named '%s' in the project", scrub(name, nil))}
+		return c, "", "", &APIError{Message: fmt.Sprintf("no instance named '%s' in the project", scrub(name, nil))}
 	case 1:
 		s.ids.put(key, doc.Servers[0].ID, s.now())
-		return region, doc.Servers[0].ID, nil
+		return c, region, doc.Servers[0].ID, nil
 	}
-	return "", "", &APIError{Message: fmt.Sprintf("%d instances named '%s'; refusing to guess", len(doc.Servers), scrub(name, nil))}
+	return c, "", "", &APIError{Message: fmt.Sprintf("%d instances named '%s'; refusing to guess", len(doc.Servers), scrub(name, nil))}
 }
 
-// cacheKey identifies a name lookup; the pinned-id case never uses it.
+// cacheKey identifies a name lookup; the pinned-id case never uses it. The cloud is part of it, so two OpenStack
+// clouds with the same region and instance name never share a cached id.
 func (s *selectel) cacheKey(n Target) string {
 	region, name, _ := s.block(n)
-	return region + "|" + name
+	c, _ := s.cloud(n)
+	return c.key() + "|" + region + "|" + name
 }
 
-func (s *selectel) rawStatus(ctx context.Context, region, id string) (string, error) {
-	b, err := s.call(ctx, region, http.MethodGet, "/servers/"+url.PathEscape(id), nil, nil)
+func (s *selectel) rawStatus(ctx context.Context, c selectelCloud, region, id string) (string, error) {
+	b, err := s.call(ctx, c, region, http.MethodGet, "/servers/"+url.PathEscape(id), nil, nil)
 	if err != nil {
 		return "", err
 	}
@@ -292,11 +341,11 @@ func normStatus(raw string) string {
 }
 
 func (s *selectel) Status(ctx context.Context, n Target) (Status, error) {
-	region, id, err := s.resolve(ctx, n)
+	c, region, id, err := s.resolve(ctx, n)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := s.rawStatus(ctx, region, id)
+	raw, err := s.rawStatus(ctx, c, region, id)
 	if err != nil {
 		s.ids.forgetOnNotFound(s.cacheKey(n), err)
 		return nil, err
@@ -305,11 +354,11 @@ func (s *selectel) Status(ctx context.Context, n Target) (Status, error) {
 }
 
 func (s *selectel) power(ctx context.Context, n Target, want, action, transient string) (string, string, error) {
-	region, id, err := s.resolve(ctx, n)
+	c, region, id, err := s.resolve(ctx, n)
 	if err != nil {
 		return "", "", err
 	}
-	raw, err := s.rawStatus(ctx, region, id)
+	raw, err := s.rawStatus(ctx, c, region, id)
 	if err != nil {
 		s.ids.forgetOnNotFound(s.cacheKey(n), err)
 		return "", "", err
@@ -318,7 +367,7 @@ func (s *selectel) power(ctx context.Context, n Target, want, action, transient 
 	if prev == want {
 		return prev, prev, nil
 	}
-	if _, err := s.call(ctx, region, http.MethodPost, "/servers/"+url.PathEscape(id)+"/action", nil, map[string]any{action: nil}); err != nil {
+	if _, err := s.call(ctx, c, region, http.MethodPost, "/servers/"+url.PathEscape(id)+"/action", nil, map[string]any{action: nil}); err != nil {
 		s.ids.forgetOnNotFound(s.cacheKey(n), err)
 		return "", "", err
 	}

@@ -44,6 +44,47 @@ module "node" {
 }
 ```
 
+## Other OpenStack-compatible clouds
+
+The module uses only the `openstack` provider. Thus it works on other clouds that run OpenStack with their own Keystone.
+Do these steps in your private root stack:
+
+1. Declare an `openstack` provider with an alias, and set its `auth_url`, `region` and `domain_name` for that cloud:
+
+   ```hcl
+   provider "openstack" {
+     alias       = "other"
+     auth_url    = "https://keystone.<other-cloud-domain>/v3"
+     domain_name = var.other_domain
+     tenant_id   = var.other_project_id
+     user_name   = var.other_user
+     password    = var.other_password    # keep it in sops / env, never in git
+     region      = "<region>"
+   }
+   ```
+
+2. Give that provider to the module, with the names and IDs of that cloud:
+
+   ```hcl
+   module "node2" {
+     source                = "../vendor/headlamp/terraform/modules/exit-node-vm/selectel"
+     providers             = { openstack = openstack.other }
+     availability_zone     = "<zone>"
+     flavor_id             = "<flavor id>"
+     image_name            = "<public Ubuntu image name of that cloud>"
+     volume_type           = "<volume type>"
+     external_network_name = "<external network>"   # openstack network list --external
+     # the other inputs as usual
+   }
+   ```
+
+3. Check the first `plan` carefully. Flavors, volume types, images and the external network differ for each cloud.
+
+**CAUTION:** do not set `preemptible = true` on a different cloud. The `preemptible` tag has a meaning only for Selectel.
+
+To start and stop the node from node-control, give its block `auth_url` and `env_prefix` (see "Optional overrides" in
+`apps/fly/node-control/README.md`).
+
 ## Outputs
 
 - `instance_id`: the server's ID

@@ -359,3 +359,69 @@ func TestSelectelNoComputeEndpointForRegion(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// Another OpenStack-compatible cloud with its own Keystone: the node block names the auth URL and an env prefix, so
+// its own service user signs in there. The Selectel credentials never leave for that endpoint (#101).
+func TestOtherOpenStackCloudFromBlock(t *testing.T) {
+	def := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}}
+	env := map[string]string{"OTHERCLOUD_ACCOUNT_ID": "acct-2", "OTHERCLOUD_PROJECT_ID": "proj-2",
+		"OTHERCLOUD_USER": "svc2", "OTHERCLOUD_PASSWORD": "pw2-secret", "OTHERCLOUD_REGION": "zone-2"}
+	for k, v := range selEnv {
+		env[k] = v
+	}
+	p, _ := newSelectel(t, def, env)
+
+	other := &fakeNova{servers: []map[string]string{{"id": "id9", "name": "node-a"}}, status: map[string]string{"id9": "SHUTOFF"},
+		token: "tok-2", region: "zone-2"}
+	tls := httptest.NewTLSServer(other)
+	t.Cleanup(tls.Close)
+	other.srv = tls
+	p.hc = tls.Client()
+
+	far := Target{ID: "node-a", Name: "node-a", Provider: "selectel",
+		Block: map[string]any{"auth_url": tls.URL + "/identity/v3/", "env_prefix": "OTHERCLOUD"}}
+	st, err := p.Status(context.Background(), far)
+	if err != nil || st["status"] != "STOPPED" {
+		t.Fatalf("other cloud: %v %v", st, err)
+	}
+	// It signed in with its own user, domain, project and password, and used its own default region.
+	id := other.authBody["auth"].(map[string]any)["identity"].(map[string]any)["password"].(map[string]any)["user"].(map[string]any)
+	if id["name"] != "svc2" || id["password"] != "pw2-secret" || id["domain"].(map[string]any)["name"] != "acct-2" {
+		t.Fatalf("auth body: %v", other.authBody)
+	}
+	if proj := other.authBody["auth"].(map[string]any)["scope"].(map[string]any)["project"].(map[string]any)["id"]; proj != "proj-2" {
+		t.Fatalf("project: %v", proj)
+	}
+	// The default cloud still works, with its own token, and the two never share a cached id.
+	if st, err := p.Status(context.Background(), selTarget); err != nil || st["status"] != "RUNNING" {
+		t.Fatalf("default cloud: %v %v", st, err)
+	}
+	if def.authN != 1 || other.authN != 1 {
+		t.Fatalf("one token per cloud: default=%d other=%d", def.authN, other.authN)
+	}
+	if _, cur, err := p.Start(context.Background(), far); err != nil || cur != "STARTING" || len(other.posts) != 1 || len(def.posts) != 0 {
+		t.Fatalf("start went to the wrong cloud: %v %v other=%v default=%v", cur, err, other.posts, def.posts)
+	}
+}
+
+func TestOtherOpenStackCloudRules(t *testing.T) {
+	p, _ := newSelectel(t, &fakeNova{}, selEnv)
+	for _, b := range []map[string]any{
+		{"auth_url": "https://keystone.example.com/v3"},                            // no prefix
+		{"env_prefix": "OTHERCLOUD"},                                               // no URL
+		{"auth_url": "http://keystone.example.com/v3", "env_prefix": "OTHERCLOUD"}, // not https
+		{"auth_url": "https://keystone.example.com/v3", "env_prefix": "SELECTEL"},  // would send the Selectel password elsewhere
+		{"auth_url": "https://keystone.example.com/v3", "env_prefix": "lower"},     // not an env name
+	} {
+		b["region"] = "r"
+		if _, err := p.Status(context.Background(), Target{Name: "x", Block: b}); !errors.Is(err, ErrNotConfigured) {
+			t.Errorf("%v: want not configured, got %v", b, err)
+		}
+	}
+	// Missing credentials for the prefix name the variable, never a value.
+	b := map[string]any{"auth_url": "https://keystone.example.com/v3", "env_prefix": "OTHERCLOUD", "region": "r"}
+	if _, err := p.Status(context.Background(), Target{Name: "x", Block: b}); !errors.Is(err, ErrNotConfigured) ||
+		!strings.Contains(err.Error(), "OTHERCLOUD_USER") {
+		t.Errorf("missing creds: %v", err)
+	}
+}

@@ -56,6 +56,7 @@ Put secrets in Fly secrets. Put plain settings in `fly.toml`.
 | `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | The Yandex service account key, and the folder for the lookup by name. The account needs `compute.operator` and `compute.viewer`. |
 | `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | The OCI credentials, and the default region and compartment. |
 | `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | The Selectel (OpenStack) service user, the default region and the optional auth URL. |
+| `<PREFIX>_ACCOUNT_ID`, `<PREFIX>_PROJECT_ID`, `<PREFIX>_USER`, `<PREFIX>_PASSWORD`, `<PREFIX>_REGION` | Optional. The same values for a different OpenStack-compatible cloud. `<PREFIX>` is the `env_prefix` in the block of its nodes, for example `OTHERCLOUD`. |
 | `FLY_API_TOKEN` | The app-scoped deploy token for the controlled Fly app or apps. |
 
 ## Tailscale state
@@ -201,7 +202,7 @@ The file is optional. Files from the Python version continue to work. Start from
   |---|---|
   | `yandex` | `{"instance_id"}` |
   | `oci` | `{"region", "compartment_id", "instance_name"}` or `{"instance_id"}` |
-  | `selectel` | `{"region", "instance_name"}` or `{"instance_id"}` |
+  | `selectel` | `{"region", "instance_name"}` or `{"instance_id"}`. For a node in a different OpenStack cloud, add `"auth_url"` (its Keystone, https only) and `"env_prefix"` (where its credentials are, not `SELECTEL`) |
   | `fly` | `{"app"}` |
 - `aliases`: `{"old-id": "node-name"}`, so that bookmarks and scripts with an old id continue to work.
 - `tailnetTrack`: extra headscale names to include in `/tailnet/status`.

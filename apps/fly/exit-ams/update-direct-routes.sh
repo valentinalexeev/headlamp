@@ -11,7 +11,7 @@ set -eu
 # nodes, simplified: no ASN expansion, no bgpq4/python3 needed
 # for a handful of individually-tracked hosts.
 
-HOST_FILE="/app/direct-hosts.txt"
+HOST_FILE="${DIRECT_HOSTS_FILE:-/app/direct-hosts.txt}" # mount your own list and point DIRECT_HOSTS_FILE at it
 LOG_TAG="ams-direct-routes"
 
 log() {

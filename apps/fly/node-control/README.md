@@ -56,7 +56,7 @@ Put secrets in Fly secrets. Put plain settings in `fly.toml`.
 | `YANDEX_SA_KEY_JSON`, `YANDEX_FOLDER_ID` | The Yandex service account key, and the folder for the lookup by name. The account needs `compute.operator` and `compute.viewer`. |
 | `OCI_USER_OCID`, `OCI_TENANCY_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_ID` | The OCI credentials, and the default region and compartment. |
 | `SELECTEL_ACCOUNT_ID`, `SELECTEL_PROJECT_ID`, `SELECTEL_USER`, `SELECTEL_PASSWORD`, `SELECTEL_REGION`, `SELECTEL_AUTH_URL` | The Selectel (OpenStack) service user, the default region and the optional auth URL. |
-| `<PREFIX>_ACCOUNT_ID`, `<PREFIX>_PROJECT_ID`, `<PREFIX>_USER`, `<PREFIX>_PASSWORD`, `<PREFIX>_REGION` | Optional. The same values for a different OpenStack-compatible cloud. `<PREFIX>` is the `env_prefix` in the block of its nodes, for example `OTHERCLOUD`. |
+| `OPENSTACK_CLOUDS` | Optional. Other OpenStack-compatible clouds, as `NAME=https://<keystone>/v3`, comma separated. `NAME` is upper case. The credentials of each cloud are `NAME_ACCOUNT_ID`, `NAME_PROJECT_ID`, `NAME_USER`, `NAME_PASSWORD` and `NAME_REGION`. Only this variable sets where these credentials go, so `nodes.json` cannot send them to a different URL. |
 | `FLY_API_TOKEN` | The app-scoped deploy token for the controlled Fly app or apps. |
 
 ## Tailscale state
@@ -202,7 +202,7 @@ The file is optional. Files from the Python version continue to work. Start from
   |---|---|
   | `yandex` | `{"instance_id"}` |
   | `oci` | `{"region", "compartment_id", "instance_name"}` or `{"instance_id"}` |
-  | `selectel` | `{"region", "instance_name"}` or `{"instance_id"}`. For a node in a different OpenStack cloud, add `"auth_url"` (its Keystone, https only) and `"env_prefix"` (where its credentials are, not `SELECTEL`) |
+  | `selectel` | `{"region", "instance_name"}` or `{"instance_id"}`. For a node in a different OpenStack cloud, add `"cloud": "NAME"`, with a `NAME` from `OPENSTACK_CLOUDS` |
   | `fly` | `{"app"}` |
 - `aliases`: `{"old-id": "node-name"}`, so that bookmarks and scripts with an old id continue to work.
 - `tailnetTrack`: extra headscale names to include in `/tailnet/status`.

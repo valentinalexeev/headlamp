@@ -82,8 +82,9 @@ Do these steps in your private root stack:
 
 **CAUTION:** do not set `preemptible = true` on a different cloud. The `preemptible` tag has a meaning only for Selectel.
 
-To start and stop the node from node-control, give its block `auth_url` and `env_prefix` (see "Optional overrides" in
-`apps/fly/node-control/README.md`).
+node-control can start and stop the node. Declare the cloud in `OPENSTACK_CLOUDS`, and name it in the block of the node.
+See "Optional overrides" in
+`apps/fly/node-control/README.md`.
 
 ## Outputs
 

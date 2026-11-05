@@ -54,9 +54,8 @@ type selectel struct {
 // Target.Name) unless instance_id pins one; region falls back to
 // SELECTEL_REGION. Credentials: SELECTEL_ACCOUNT_ID (Keystone domain),
 // SELECTEL_PROJECT_ID, SELECTEL_USER, SELECTEL_PASSWORD. The Keystone URL
-// can be overridden with SELECTEL_AUTH_URL. Another OpenStack-compatible cloud with its own Keystone is reached from
-// a node block with "auth_url" and "env_prefix" (see cloud): its credentials and default region are read from
-// <PREFIX>_* instead.
+// can be overridden with SELECTEL_AUTH_URL. Other OpenStack-compatible clouds are declared in OPENSTACK_CLOUDS and
+// picked by a node block's "cloud" (see selectelCloud).
 func NewSelectel(env core.Env, hc *http.Client) Provider {
 	if hc == nil {
 		hc = http.DefaultClient
@@ -71,8 +70,10 @@ func NewSelectel(env core.Env, hc *http.Client) Provider {
 }
 
 // selectelCloud is one OpenStack installation: its Keystone URL and the env names of its credentials. The default is
-// Selectel (SELECTEL_*); a node block with "auth_url" and "env_prefix" points at another OpenStack cloud whose
-// credentials live under <PREFIX>_ACCOUNT_ID (Keystone domain), <PREFIX>_PROJECT_ID, <PREFIX>_USER, <PREFIX>_PASSWORD.
+// Selectel (SELECTEL_*). Other OpenStack-compatible clouds are declared by the operator in OPENSTACK_CLOUDS as
+// "NAME=https://keystone/v3,..."; a node block picks one with "cloud": "NAME". Its credentials are
+// NAME_ACCOUNT_ID (Keystone domain), NAME_PROJECT_ID, NAME_USER, NAME_PASSWORD and NAME_REGION. Only the operator, who
+// already holds those secrets, chooses where they are sent: a nodes.json author can name a declared cloud, never a URL.
 type selectelCloud struct {
 	authURL, prefix string
 }
@@ -81,25 +82,38 @@ func (c selectelCloud) key() string { return c.authURL + "|" + c.prefix }
 
 var envPrefixRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,30}$`)
 
-// cloud returns the installation for the node. A block auth_url must be https and needs an env_prefix other than
-// SELECTEL, so a node config can never send the Selectel password to another endpoint.
+// clouds parses OPENSTACK_CLOUDS. Bad entries are errors that name the entry number, not its content.
+func (s *selectel) clouds() (map[string]string, error) {
+	out := map[string]string{}
+	for i, e := range strings.Split(s.env.Getenv("OPENSTACK_CLOUDS"), ",") {
+		if e = strings.TrimSpace(e); e == "" {
+			continue
+		}
+		name, u, ok := strings.Cut(e, "=")
+		name, u = strings.TrimSpace(name), strings.TrimRight(strings.TrimSpace(u), "/")
+		if !ok || !envPrefixRE.MatchString(name) || name == "SELECTEL" || !strings.HasPrefix(u, "https://") {
+			return nil, notConfigured(fmt.Sprintf("OPENSTACK_CLOUDS entry %d must be NAME=https://... with an upper-case NAME other than SELECTEL", i+1))
+		}
+		out[name] = u
+	}
+	return out, nil
+}
+
+// cloud returns the installation for the node: Selectel, or the declared cloud its block names.
 func (s *selectel) cloud(n Target) (selectelCloud, error) {
-	def := selectelCloud{authURL: s.authURL, prefix: "SELECTEL"}
-	u, _ := n.Block["auth_url"].(string)
-	p, _ := n.Block["env_prefix"].(string)
-	if u == "" && p == "" {
-		return def, nil
+	name, _ := n.Block["cloud"].(string)
+	if name == "" {
+		return selectelCloud{authURL: s.authURL, prefix: "SELECTEL"}, nil
 	}
-	if u == "" || p == "" {
-		return selectelCloud{}, notConfigured(`"auth_url" and "env_prefix" go together`)
+	declared, err := s.clouds()
+	if err != nil {
+		return selectelCloud{}, err
 	}
-	if !strings.HasPrefix(u, "https://") {
-		return selectelCloud{}, notConfigured(`"auth_url" must be an https URL`)
+	u, ok := declared[name]
+	if !ok {
+		return selectelCloud{}, notConfigured(`"cloud" names a cloud that is not in OPENSTACK_CLOUDS`)
 	}
-	if !envPrefixRE.MatchString(p) || p == "SELECTEL" {
-		return selectelCloud{}, notConfigured(`"env_prefix" must be an upper-case name other than SELECTEL, e.g. OTHERCLOUD`)
-	}
-	return selectelCloud{authURL: strings.TrimRight(u, "/"), prefix: p}, nil
+	return selectelCloud{authURL: u, prefix: name}, nil
 }
 
 func (s *selectel) block(n Target) (region, name, id string) {
@@ -108,10 +122,8 @@ func (s *selectel) block(n Target) (region, name, id string) {
 	name, _ = b["instance_name"].(string)
 	id, _ = b["instance_id"].(string)
 	if region == "" {
-		if p, _ := n.Block["env_prefix"].(string); p != "" && envPrefixRE.MatchString(p) {
-			region = s.env.Getenv(p + "_REGION")
-		} else {
-			region = s.env.Getenv("SELECTEL_REGION")
+		if c, err := s.cloud(n); err == nil {
+			region = s.env.Getenv(c.prefix + "_REGION")
 		}
 	}
 	if name == "" {

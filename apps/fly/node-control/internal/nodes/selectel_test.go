@@ -360,31 +360,33 @@ func TestSelectelNoComputeEndpointForRegion(t *testing.T) {
 	}
 }
 
-// Another OpenStack-compatible cloud with its own Keystone: the node block names the auth URL and an env prefix, so
-// its own service user signs in there. The Selectel credentials never leave for that endpoint (#101).
-func TestOtherOpenStackCloudFromBlock(t *testing.T) {
-	def := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}}
-	env := map[string]string{"OTHERCLOUD_ACCOUNT_ID": "acct-2", "OTHERCLOUD_PROJECT_ID": "proj-2",
-		"OTHERCLOUD_USER": "svc2", "OTHERCLOUD_PASSWORD": "pw2-secret", "OTHERCLOUD_REGION": "zone-2"}
-	for k, v := range selEnv {
-		env[k] = v
-	}
-	p, _ := newSelectel(t, def, env)
-
+// Another OpenStack-compatible cloud with its own Keystone (#101): the operator declares it in OPENSTACK_CLOUDS and
+// the node block names it. That cloud's own service user signs in there.
+func otherCloud(t *testing.T) (*selectel, *fakeNova, *fakeNova, Target) {
+	t.Helper()
 	other := &fakeNova{servers: []map[string]string{{"id": "id9", "name": "node-a"}}, status: map[string]string{"id9": "SHUTOFF"},
 		token: "tok-2", region: "zone-2"}
 	tls := httptest.NewTLSServer(other)
 	t.Cleanup(tls.Close)
 	other.srv = tls
+	env := map[string]string{"OPENSTACK_CLOUDS": " OTHERCLOUD = " + tls.URL + "/identity/v3/ ",
+		"OTHERCLOUD_ACCOUNT_ID": "acct-2", "OTHERCLOUD_PROJECT_ID": "proj-2",
+		"OTHERCLOUD_USER": "svc2", "OTHERCLOUD_PASSWORD": "pw2-secret", "OTHERCLOUD_REGION": "zone-2"}
+	for k, v := range selEnv {
+		env[k] = v
+	}
+	def := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}}
+	p, _ := newSelectel(t, def, env)
 	p.hc = tls.Client()
+	return p, def, other, Target{ID: "node-a", Name: "node-a", Provider: "selectel", Block: map[string]any{"cloud": "OTHERCLOUD"}}
+}
 
-	far := Target{ID: "node-a", Name: "node-a", Provider: "selectel",
-		Block: map[string]any{"auth_url": tls.URL + "/identity/v3/", "env_prefix": "OTHERCLOUD"}}
+func TestOtherOpenStackCloud(t *testing.T) {
+	p, def, other, far := otherCloud(t)
 	st, err := p.Status(context.Background(), far)
 	if err != nil || st["status"] != "STOPPED" {
 		t.Fatalf("other cloud: %v %v", st, err)
 	}
-	// It signed in with its own user, domain, project and password, and used its own default region.
 	id := other.authBody["auth"].(map[string]any)["identity"].(map[string]any)["password"].(map[string]any)["user"].(map[string]any)
 	if id["name"] != "svc2" || id["password"] != "pw2-secret" || id["domain"].(map[string]any)["name"] != "acct-2" {
 		t.Fatalf("auth body: %v", other.authBody)
@@ -392,7 +394,6 @@ func TestOtherOpenStackCloudFromBlock(t *testing.T) {
 	if proj := other.authBody["auth"].(map[string]any)["scope"].(map[string]any)["project"].(map[string]any)["id"]; proj != "proj-2" {
 		t.Fatalf("project: %v", proj)
 	}
-	// The default cloud still works, with its own token, and the two never share a cached id.
 	if st, err := p.Status(context.Background(), selTarget); err != nil || st["status"] != "RUNNING" {
 		t.Fatalf("default cloud: %v %v", st, err)
 	}
@@ -404,23 +405,45 @@ func TestOtherOpenStackCloudFromBlock(t *testing.T) {
 	}
 }
 
-func TestOtherOpenStackCloudRules(t *testing.T) {
-	p, _ := newSelectel(t, &fakeNova{}, selEnv)
-	for _, b := range []map[string]any{
-		{"auth_url": "https://keystone.example.com/v3"},                            // no prefix
-		{"env_prefix": "OTHERCLOUD"},                                               // no URL
-		{"auth_url": "http://keystone.example.com/v3", "env_prefix": "OTHERCLOUD"}, // not https
-		{"auth_url": "https://keystone.example.com/v3", "env_prefix": "SELECTEL"},  // would send the Selectel password elsewhere
-		{"auth_url": "https://keystone.example.com/v3", "env_prefix": "lower"},     // not an env name
+func TestOtherOpenStackCloudPasswordScrubbed(t *testing.T) {
+	p, _, other, far := otherCloud(t)
+	other.authFail = 401
+	other.token = "pw2-secret" // the fake echoes the token in its error body: make it the password
+	_, err := p.Status(context.Background(), far)
+	if err == nil || strings.Contains(err.Error(), "pw2-secret") {
+		t.Fatalf("password not scrubbed: %v", err)
+	}
+}
+
+func TestOpenStackCloudsRules(t *testing.T) {
+	ctx := context.Background()
+	base := func(clouds string) *selectel {
+		env := map[string]string{"OPENSTACK_CLOUDS": clouds, "OTHERCLOUD_REGION": "r"}
+		for k, v := range selEnv {
+			env[k] = v
+		}
+		p, _ := newSelectel(t, &fakeNova{}, env)
+		return p
+	}
+	far := Target{Name: "x", Block: map[string]any{"cloud": "OTHERCLOUD"}}
+	// A block can only name a declared cloud; it can never supply a URL.
+	if _, err := base("").Status(ctx, far); !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), "OPENSTACK_CLOUDS") {
+		t.Errorf("undeclared cloud: %v", err)
+	}
+	for _, bad := range []string{
+		"OTHERCLOUD=http://keystone.example.com/v3",      // not https
+		"SELECTEL=https://keystone.example.com/v3",       // would send the Selectel password elsewhere
+		"lower=https://keystone.example.com/v3",          // not an env name
+		"OTHERCLOUD",                                     // no URL
+		"secret-value-here=https://keystone.example.com", // the error names the entry, never its text
 	} {
-		b["region"] = "r"
-		if _, err := p.Status(context.Background(), Target{Name: "x", Block: b}); !errors.Is(err, ErrNotConfigured) {
-			t.Errorf("%v: want not configured, got %v", b, err)
+		_, err := base(bad).Status(ctx, far)
+		if !errors.Is(err, ErrNotConfigured) || strings.Contains(err.Error(), "secret-value-here") {
+			t.Errorf("%q: %v", bad, err)
 		}
 	}
-	// Missing credentials for the prefix name the variable, never a value.
-	b := map[string]any{"auth_url": "https://keystone.example.com/v3", "env_prefix": "OTHERCLOUD", "region": "r"}
-	if _, err := p.Status(context.Background(), Target{Name: "x", Block: b}); !errors.Is(err, ErrNotConfigured) ||
+	// Declared, but its credentials are missing: the error names the variable, never a value.
+	if _, err := base("OTHERCLOUD=https://keystone.example.com/v3").Status(ctx, far); !errors.Is(err, ErrNotConfigured) ||
 		!strings.Contains(err.Error(), "OTHERCLOUD_USER") {
 		t.Errorf("missing creds: %v", err)
 	}

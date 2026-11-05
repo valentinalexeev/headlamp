@@ -215,3 +215,24 @@ func TestLoadSidecarErrorsNeverEchoTheKey(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestClientIPSettings(t *testing.T) {
+	c, err := Load(env(base()))
+	if err != nil || c.ClientIP == nil || c.ClientIP.Header() != "Fly-Client-IP" {
+		t.Fatalf("default: %v, %+v", err, c.ClientIP)
+	}
+	c, err = Load(env(with("FUNNEL_CLIENT_IP_HEADER", "x-forwarded-for", "FUNNEL_TRUSTED_PROXIES", "10.0.0.0/8")))
+	if err != nil || c.ClientIP.Header() != "X-Forwarded-For" {
+		t.Fatalf("override: %v", err)
+	}
+	for _, kv := range [][2]string{{"FUNNEL_CLIENT_IP_HEADER", "bad header!"}, {"FUNNEL_TRUSTED_PROXIES", "secret-looking-value"}} {
+		_, err := Load(env(with(kv[0], kv[1])))
+		if err == nil {
+			t.Errorf("%s accepted", kv[0])
+			continue
+		}
+		if strings.Contains(err.Error(), kv[1]) {
+			t.Errorf("%s: error echoes the value: %v", kv[0], err)
+		}
+	}
+}

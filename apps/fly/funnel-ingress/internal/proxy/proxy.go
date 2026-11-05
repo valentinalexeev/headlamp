@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/clientip"
 	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/config"
 	"github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/routes"
 )
@@ -67,6 +68,9 @@ type handler struct {
 func NewHandler(table *routes.Table, dial func(ctx context.Context, network, addr string) (net.Conn, error),
 	domain func() string, cfg config.Config) http.Handler {
 	h := &handler{table: table, domain: domain, cfg: cfg, proxies: map[variant]*httputil.ReverseProxy{}}
+	if h.cfg.ClientIP == nil {
+		h.cfg.ClientIP, _ = clientip.New("", "") // the default never fails
+	}
 	for _, v := range []variant{{false, false}, {true, false}, {true, true}} {
 		h.proxies[v] = h.newProxy(v, dial)
 	}
@@ -101,9 +105,9 @@ func (h *handler) newProxy(v variant, dial func(ctx context.Context, network, ad
 			pr.SetURL(&url.URL{Scheme: scheme, Host: net.JoinHostPort(rt.Target, strconv.Itoa(rt.Port))})
 			pr.Out.Host = pr.In.Host // the backend sees the name the client asked for
 			scrubForwarding(pr.Out.Header)
-			pr.Out.Header.Set("X-Forwarded-For", clientIP(pr.In))
+			pr.Out.Header.Set("X-Forwarded-For", h.cfg.ClientIP.ClientIP(pr.In))
 			pr.Out.Header.Set("X-Forwarded-Host", pr.In.Host)
-			pr.Out.Header.Set("X-Forwarded-Proto", forwardedProto(pr.In))
+			pr.Out.Header.Set("X-Forwarded-Proto", forwardedProto(pr.In, h.cfg.ClientIP.TrustedPeer(pr.In)))
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			var tooBig *http.MaxBytesError
@@ -145,25 +149,14 @@ func scrubForwarding(h http.Header) {
 	}
 }
 
-// clientIP is the address the trusted edge (Fly) reports; the machine accepts traffic only through it. It
-// falls back to the connecting peer.
-func clientIP(r *http.Request) string {
-	if ip, err := netip.ParseAddr(strings.TrimSpace(r.Header.Get("Fly-Client-IP"))); err == nil {
-		return ip.Unmap().String()
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
-func forwardedProto(r *http.Request) string {
+// forwardedProto is the scheme the client used. X-Forwarded-Proto counts only from a trusted proxy, which
+// overwrites a client-supplied value.
+func forwardedProto(r *http.Request, trustedPeer bool) string {
 	if r.TLS != nil {
 		return "https"
 	}
-	if p := strings.ToLower(r.Header.Get("X-Forwarded-Proto")); p == "http" || p == "https" {
-		return p // set by the trusted edge, which overwrites a client-supplied value
+	if p := strings.ToLower(r.Header.Get("X-Forwarded-Proto")); trustedPeer && (p == "http" || p == "https") {
+		return p
 	}
 	return "http"
 }

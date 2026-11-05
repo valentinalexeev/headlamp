@@ -189,6 +189,39 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
   pinned, as a merge commit. After a merge, check other open PRs for conflicts; merge `develop` into them when the
   conflict is mechanical, ask the owner when it is semantic.
 
+### Releases, tags and images
+
+The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the agent's view of them.
+
+- **Branches.** `develop` is the integration branch: every feature, fix and docs PR targets it. `main` holds only
+  released (or about to be released) code and receives PRs from `develop` (a release) or from `hotfix/` branches.
+  Images publish from `main` and tags only, never from `develop` or feature branches (PRs build and test, no push).
+- **Version.** Strict SemVer, one version for the whole repo in `VERSION`. Before 1.0.0 a breaking change moves MINOR.
+  The bump is derived from commit subjects since the last stable tag: `feat` → at least MINOR, `!` or
+  `BREAKING CHANGE:` → MAJOR (MINOR before 1.0.0), the rest PATCH. So a wrong commit type is a release bug: pick it
+  carefully, and check `scripts/check-conventional.sh "<title>"` on PR titles.
+- **Changelog.** Every user-visible change adds a line under `## Unreleased` in `CHANGELOG.md` (Keep a Changelog
+  sections), breaking ones marked **BREAKING** with the migration step.
+- **Cutting a release** (the bot may prepare it, the owner merges and tags):
+  1. Branch `release/X.Y.Z` from `develop`; commit `chore(release): vX.Y.Z` that sets `VERSION` and moves `Unreleased`
+     under `## X.Y.Z - <date>`. PR into `develop`, owner approves and merges.
+  2. PR `develop` → `main` titled `chore(release): vX.Y.Z`. The owner approves and merges (merge commit).
+  3. The owner, or the bot only with explicit permission in that release's issue or PR, tags the merge commit on `main`:
+     `git tag vX.Y.Z <commit> && scripts/check-release.sh vX.Y.Z && git push origin vX.Y.Z`.
+     Release candidates use `vX.Y.Z-rc.N`.
+  4. CI (`images.yml`) runs `check-release.sh` as a gate: tag format, `VERSION` match, commit on `main`, next version
+     with no skipping, bump at least what the commits need, milestone `X.Y.Z` (if any) has no open issues. Then it
+     tags the already-built images and creates the GitHub release. Check the run and report its result on the issue.
+- **Hotfix.** `hotfix/NN-…` from `main`, PR into `main` with a PATCH bump in the same PR, tag as above, then merge
+  `main` back into `develop` through a PR. There is no fix release to an older line.
+- **Tags are immutable.** Never move or delete a release tag or re-publish a version; fix a bad release with a new one.
+- **Images.** `ghcr.io/valentinalexeev/headlamp/<image>`, one per entry in `.github/components.json` (new or renamed
+  image: add it there and to `docs/images.md`). Only a component whose source changed is rebuilt (`src-<hash>`); a
+  release reuses the images `main` built, so what was tested ships. Tags: `src-<hash>` and `sha-<commit>` (fixed),
+  `main` (moves), `X.Y.Z` / `X.Y.Z-rc.N` (fixed), `X.Y`, `X`, `latest` (move; `X`/`latest` from 1.0.0). Deployments
+  pin `X.Y.Z` or a digest, never `main` or `latest`. A forced full rebuild is `workflow_dispatch` with `rebuild_all`
+  and is an owner action.
+
 ### Incidents
 
 Something that already went wrong: red CI on `develop`/`main`, a leaked or expired secret, a denylist hit in history,

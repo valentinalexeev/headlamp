@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.9.0 - 2026-11-05
+
 ### Added
 
 - Image publishing to GHCR for each component, rebuilt only when its source changes.

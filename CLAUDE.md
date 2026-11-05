@@ -249,6 +249,20 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   overwrites it. Wiki pages are public too, so the rules of section 1 apply to everything in `docs/`. To preview:
   `scripts/wiki-render.sh "$(mktemp -d)" valentinalexeev/headlamp`.
 
+### CI
+
+| Workflow | Runs on | Checks |
+|---|---|---|
+| `ci` | PRs and pushes to `develop`/`main` | conventional subject of every commit, gitleaks on the new commits, `make lint` and the script tests, `terraform fmt` + `validate` of the modules (cloudru: format only, its provider is not on the public registry), Ansible syntax |
+| `pr-title` | PRs | the title is a Conventional Commit |
+| `manuals` | PRs changing `*.md` | STE check of the changed manuals |
+| `images` | PRs (build + test), `main` and tags (publish) | per-component build and tests, release gate on tags |
+| `test-task-runner`, `test-ingress-agent` | PRs touching those apps | their Go tests |
+| `wiki` | pushes to `main` | publishes the docs |
+
+`ci` jobs always report (skipped steps say so), so they can be required checks in branch protection. Run the same
+checks locally before pushing; a red CI on `develop` or `main` is an incident.
+
 ### Incidents
 
 Something that already went wrong: red CI on `develop`/`main`, a leaked or expired secret, a denylist hit in history,

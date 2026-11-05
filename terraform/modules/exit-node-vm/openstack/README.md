@@ -14,8 +14,8 @@ module creates these resources:
 **not been applied against a live account**. Read the first `plan` carefully. Flavor IDs, volume types and image names
 differ for each cloud and pool. The defaults (`external_network_name`, `image_name`) are the Selectel names.
 
-The module `exit-node-vm/selectel` is the old name of this module. It continues to work for existing root stacks: it
-calls this module and moves the state for you (`moved` blocks), so the first plan after the upgrade shows no change.
+The module `exit-node-vm/selectel` is the old name of this module. It continues to work for existing root stacks. It
+calls this module and moves the state for you (`moved` blocks). Thus the first plan after the upgrade shows no change.
 
 ## Provider
 

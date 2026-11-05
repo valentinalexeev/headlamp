@@ -174,7 +174,7 @@ Run a backup after enrolment changes. It is a manual step until an automatic one
 You do not keep a list of nodes. node-control looks at each headscale node at every refresh. It caches the result for 15 seconds, and the node list and the tailnet status share one headscale fetch.
 
 1. node-control lists a node if the node has the tag `tag:exit`. The UI and API id of the node is its reported `name`.
-2. A node can also have `tag:cloud-<provider>` (`yandex`, `oci`, `openstack`, `fly`). The old name `selectel` gives the same provider. That provider then finds the VM whose name equals the node name:
+2. A node can also have `tag:cloud-<provider>` (`yandex`, `oci`, `openstack`, `fly`). The old name `selectel` gives the same provider (deprecated, removed by 1.0.0). That provider then finds the VM whose name equals the node name:
    - OCI finds it by name in the compartment.
    - OpenStack finds it by name in the project and region.
    - Yandex finds it by name in the folder.

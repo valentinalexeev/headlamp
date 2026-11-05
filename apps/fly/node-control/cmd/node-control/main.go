@@ -51,6 +51,8 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		// One OpenStack implementation (#101). A provider name names an organisation: "selectel" is the default cloud
 		// (SELECTEL_*), and "openstack" is the same provider under a generic name. Further clouds are declared in
 		// OPENSTACK_CLOUDS and picked with a node block's "cloud".
+		// Deprecated: the provider name "selectel" (tag:cloud-selectel, a "selectel" node block) is an alias of
+		// "openstack" and must be removed by 1.0.0.
 		"selectel":  nodes.NewOpenStack(env, hc),
 		"openstack": nodes.NewOpenStack(env, hc),
 		"fly":       nodes.NewFly(env, hc),

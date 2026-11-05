@@ -14,6 +14,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 - funnel-ingress ignores a client-address header that arrives twice and uses the peer address, where it used the first value before. A correct edge sets the header once, so only a forged request sees the difference.
 - The wiki also publishes every component, Ansible role and Terraform module manual (for example the funnel-ingress manual as `funnel-ingress`), with a sidebar that lists all pages.
 
+### Deprecated
+
+- The node-control provider name `selectel` (`tag:cloud-selectel`, a `selectel` node block) and the Terraform module `exit-node-vm/selectel`. Use `openstack` and `exit-node-vm/openstack`. They will be removed by 1.0.0.
+
 ## 0.9.0 - 2026-11-05
 
 ### Added

@@ -103,7 +103,9 @@ func (s *sqliteStore) inTx(f func(tx *sql.Tx) error) error {
 	return tx.Commit()
 }
 
-func isUnique(err error) bool { return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") }
+func isUnique(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
 
 func (s *sqliteStore) CreateService(sv Service) error {
 	return s.inTx(func(tx *sql.Tx) error {

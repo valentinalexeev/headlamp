@@ -27,6 +27,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/nodes"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/overview"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policy"
+	servemod "github.com/valentinalexeev/headlamp/apps/node-control/internal/serve"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tailnet"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tasks"
 )
@@ -172,6 +173,11 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			"TASKS_ADMIN_USERS":      adminLogin,
 			"TASKS_POLL_SECONDS":     "1",
 			"SESSIONS_TAG":           "tag:browser-session",
+			"SERVE_DB":               filepath.Join(w.dir, "serve.db"),
+			"SERVE_ZONE":             "svc.example.net",
+			"SERVE_BASE_DOMAIN":      "tailnet.example.net",
+			"SERVE_USER":             "demo",
+			"SERVE_DNS":              "off",
 		} {
 			m[k] = v
 		}
@@ -217,6 +223,7 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			return nil
 		}),
 		tasks.New(env, src),
+		servemod.New(env, client),
 	}
 	others := slices.Clone(mods)
 	return append(mods, overview.New(func() []core.Module { return others })), env, nil

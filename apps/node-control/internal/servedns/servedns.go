@@ -46,7 +46,9 @@ type wildEntry struct {
 }
 
 // Normalize lower-cases a name and drops one trailing dot.
-func Normalize(s string) string { return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s)), ".") }
+func Normalize(s string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s)), ".")
+}
 
 // NewTable builds a table for zone. Records outside the zone are dropped; so is the zone apex as a name.
 func NewTable(zone string, recs []Record) *Table {

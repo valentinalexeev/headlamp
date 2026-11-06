@@ -774,8 +774,8 @@ node-control decides everything:
 - the certificate for each name;
 - the record list for headscale.
 
-A node only asks. headscale has no API for DNS records, so the `serve-sync` agent next to headscale writes the list
-to headscale's `dns.extra_records_path` file (see "serve-sync" below).
+A node only asks. headscale has no API for DNS records. The `serve-sync` agent next to headscale therefore writes the
+list to headscale's `dns.extra_records_path` file (see "serve-sync" below).
 
 ### Environment
 
@@ -825,9 +825,8 @@ users who already trust its root need to do nothing.
 ### serve-sync
 
 `node-control serve-sync` runs next to headscale, on the same file system. It joins the tailnet as its own node
-(give its auth key `SERVE_SYNC_TAG`). It pulls the record list from node-control and writes `SERVE_RECORDS_PATH`,
-the file that `dns.extra_records_path` in the headscale config points to. headscale reloads that file when it
-changes.
+(give its auth key `SERVE_SYNC_TAG`). It pulls the record list from node-control and writes `SERVE_RECORDS_PATH`.
+The headscale config points `dns.extra_records_path` at that file, and headscale reloads it when it changes.
 
 - The agent writes the file in one step (a temporary file, then a rename), and only when the list changed.
 - It drops any record outside `SERVE_BASE_DOMAIN` or not at a tailnet address, even if node-control sent it.

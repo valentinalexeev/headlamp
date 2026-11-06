@@ -1,0 +1,6 @@
+# DNS-01 on Route 53. Build with DNS_PLUGINS=github.com/caddy-dns/route53@<version>.
+# Credentials: the standard AWS chain (on the AWS host, the instance role; elsewhere AWS_ACCESS_KEY_ID and
+# AWS_SECRET_ACCESS_KEY in edge.env). Give them change rights on the one zone only.
+tls {
+	dns route53
+}

@@ -1,0 +1,3 @@
+# No DNS-01. Caddy cannot get a wildcard certificate, so the funnel block serves nothing that a browser trusts.
+# This is the default: it is correct for a host without funnel. To use funnel, choose another file in caddy/dns/.
+tls internal

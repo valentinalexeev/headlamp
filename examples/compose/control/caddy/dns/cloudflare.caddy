@@ -1,0 +1,5 @@
+# DNS-01 on Cloudflare. Build with DNS_PLUGINS=github.com/caddy-dns/cloudflare@<version>.
+# Set CLOUDFLARE_API_TOKEN in edge.env: a token with Zone.DNS edit on the one zone only.
+tls {
+	dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+}

@@ -1,0 +1,10 @@
+# DNS-01 on any DNS server that accepts RFC 2136 dynamic updates with a TSIG key (BIND, PowerDNS, Knot).
+# Build with DNS_PLUGINS=github.com/caddy-dns/rfc2136@<version>. Set the RFC2136_* values in edge.env.
+tls {
+	dns rfc2136 {
+		key_name {env.RFC2136_KEY_NAME}
+		key_alg {env.RFC2136_KEY_ALG}
+		key {env.RFC2136_KEY}
+		server {env.RFC2136_SERVER}
+	}
+}

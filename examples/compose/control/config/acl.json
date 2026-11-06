@@ -1,0 +1,10 @@
+{
+  "tagOwners": {
+    "tag:exit": ["admin@", "_svcs@"],
+    "tag:gateway": ["admin@", "_svcs@"],
+    "tag:node-control": ["_svcs@"]
+  },
+  "autoApprovers": {
+    "exitNode": ["tag:exit"]
+  }
+}

@@ -1,0 +1,9 @@
+# DNS-01 on Google Cloud DNS. Build with DNS_PLUGINS=github.com/caddy-dns/googleclouddns@<version>.
+# Set GCP_PROJECT in edge.env. Credentials: on a GCE VM, its attached service account (nothing to set); elsewhere a
+# service account key file in caddy/secrets/, with GOOGLE_APPLICATION_CREDENTIALS=/etc/caddy/secrets/<file>.json.
+# Give the account roles/dns.admin on the one zone only, not on the project.
+tls {
+	dns googleclouddns {
+		gcp_project {env.GCP_PROJECT}
+	}
+}

@@ -1,0 +1,31 @@
+# TLS edge of the central host, for PUBLIC names only: headscale, the enrolment links and funnel. Let's Encrypt
+# checks each name over the internet (HTTP-01 on port 80, or DNS-01 for wildcards). Tailnet-only serve names (#117)
+# never come here: node-control signs their certificates with its own CA.
+# The load balancer passes TCP through and keeps the client address, so TLS ends here and the peer is the client.
+{
+	email {$ACME_EMAIL}
+	acme_ca {$CADDY_ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+}
+
+# headscale: the control API, the noise protocol and DERP over HTTPS (all on one name).
+{$HEADSCALE_DOMAIN} {
+	reverse_proxy headscale:8080
+}
+
+# Optional, the public enrolment links of node-control (/e/<token>, /sub/<secret>). Remove the block if you do not
+# use enrolment, or if a bridge serves the link host (see the node-control README, "Enrolment").
+{$ENROLL_DOMAIN:enroll.invalid} {
+	@public path /e/* /sub/*
+	handle @public {
+		reverse_proxy node-control:8081
+	}
+	respond 404
+}
+
+# Optional, funnel-ingress: one wildcard per namespace. Wildcards need DNS-01, so FUNNEL_DNS names the file in dns/
+# for your DNS provider (route53, cloudflare, rfc2136; default none). FUNNEL_DOMAIN is the public domain, for example
+# funnel.example.com; namespaces are *.pdl.funnel.example.com. Add one line per namespace.
+*.{$FUNNEL_DOMAIN:funnel.invalid} {
+	import dns/{$FUNNEL_DNS:none}.caddy
+	reverse_proxy funnel-ingress:8080
+}

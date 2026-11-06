@@ -111,6 +111,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 		Transport: &http.Transport{DialContext: srv.Dial, DisableKeepAlives: true},
 	}
 	slog.Info("funnel-sidecar running", "ns", cfg.NS, "services", len(svcs))
+	if cfg.Serve() {
+		return runServe(ctx, cfg, svcs, srv.Listen, client, func(ok bool) { ready.set(time.Now(), ok) })
+	}
 	return sidecar.Run(ctx, cfg, svcs, srv.Listen, sidecar.NewHTTPRegistrar(cfg.APIURL, client), func(ok bool) { ready.set(time.Now(), ok) })
 }
 

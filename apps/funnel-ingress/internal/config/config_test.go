@@ -236,3 +236,35 @@ func TestClientIPSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadSidecarServeMode(t *testing.T) {
+	m := sidecarBase()
+	delete(m, "FUNNEL_API_URL")
+	m["FUNNEL_SERVE_URL"] = "http://node-control/"
+	m["FUNNEL_SERVE_NAMES"] = " grafana.cluster.vpn.example.com , api.cluster.vpn.example.com,"
+	c, err := LoadSidecar(env(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Serve() || c.ServeURL != "http://node-control" || len(c.ServeNames) != 2 || c.ServeNames[1] != "api.cluster.vpn.example.com" {
+		t.Fatalf("%+v", c)
+	}
+	if c, _ := LoadSidecar(env(sidecarBase())); c.Serve() {
+		t.Fatal("funnel mode must stay the default")
+	}
+	for name, mod := range map[string]func(map[string]string){
+		"names without url": func(m map[string]string) { delete(m, "FUNNEL_SERVE_URL") },
+		"url without names": func(m map[string]string) { delete(m, "FUNNEL_SERVE_NAMES") },
+		"both modes":        func(m map[string]string) { m["FUNNEL_API_URL"] = "http://funnel-ingress:9100" },
+		"bad url":           func(m map[string]string) { m["FUNNEL_SERVE_URL"] = "node-control" },
+	} {
+		mm := map[string]string{}
+		for k, v := range m {
+			mm[k] = v
+		}
+		mod(mm)
+		if _, err := LoadSidecar(env(mm)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

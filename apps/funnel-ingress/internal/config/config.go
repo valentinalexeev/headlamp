@@ -179,7 +179,14 @@ type SidecarConfig struct {
 	ControlURL, AuthKey, Hostname, StateDir, ReadyAddr string        // ControlURL optional; StateDir is scratch space for the ephemeral node
 	ReregisterInterval                                 time.Duration // how often registrations are re-asserted
 	UnreachableExit                                    time.Duration // exit after the API gave no answer this long; 0 never exits
+	// Serve mode (#117): private tailnet names with TLS instead of public funnel routes. ServeURL is node-control on
+	// the tailnet; ServeNames are the full names to claim. In serve mode APIURL is not used.
+	ServeURL   string
+	ServeNames []string
 }
+
+// Serve reports whether the sidecar runs in serve mode.
+func (c SidecarConfig) Serve() bool { return c.ServeURL != "" }
 
 // LoadSidecar builds a SidecarConfig from getenv. Like Load, errors name settings, never values.
 func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
@@ -228,9 +235,28 @@ func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
 	if c.AuthKey == "" {
 		fail("TS_AUTHKEY is required")
 	}
-	if c.APIURL == "" {
+	c.ServeURL = strings.TrimRight(str("FUNNEL_SERVE_URL", ""), "/")
+	for _, n := range strings.Split(getenv("FUNNEL_SERVE_NAMES"), ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			c.ServeNames = append(c.ServeNames, n)
+		}
+	}
+	switch {
+	case c.ServeURL != "":
+		if !httpURL(c.ServeURL) {
+			fail("FUNNEL_SERVE_URL must be an http(s) URL")
+		}
+		if len(c.ServeNames) == 0 {
+			fail("FUNNEL_SERVE_NAMES is required with FUNNEL_SERVE_URL")
+		}
+		if c.APIURL != "" {
+			fail("set FUNNEL_SERVE_URL (private names) or FUNNEL_API_URL (public funnel), not both")
+		}
+	case len(c.ServeNames) > 0:
+		fail("FUNNEL_SERVE_NAMES needs FUNNEL_SERVE_URL")
+	case c.APIURL == "":
 		fail("FUNNEL_API_URL is required")
-	} else if !httpURL(c.APIURL) {
+	case !httpURL(c.APIURL):
 		fail("FUNNEL_API_URL must be an http(s) URL")
 	}
 	if c.ControlURL != "" && !httpURL(c.ControlURL) {

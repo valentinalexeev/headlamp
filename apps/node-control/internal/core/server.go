@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -105,9 +104,22 @@ func EnrolmentEnabled(env Env) bool {
 // shutdownTimeout bounds graceful shutdown; a var so tests can shorten it.
 var shutdownTimeout = 5 * time.Second
 
+// Option changes how Run serves.
+type Option func(*runOptions)
+
+type runOptions struct{ auth Authorizer }
+
+// WithAuthorizer puts every admin route behind a (see Mux.Seal). Run then refuses to start if any admin route has
+// no permission. Without it, routes are served as the modules registered them.
+func WithAuthorizer(a Authorizer) Option { return func(o *runOptions) { o.auth = a } }
+
 // Run registers mods, opens listeners, starts modules and serves until ctx
 // is cancelled or a module fails to start. Shutdown is graceful.
-func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
+func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option) error {
+	var o runOptions
+	for _, f := range opts {
+		f(&o)
+	}
 	log := slog.Default()
 
 	// The enrolment module owns its database; the core only decides whether a
@@ -117,12 +129,7 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 		public = http.NewServeMux()
 	}
 
-	admin := http.NewServeMux()
-	admin.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
-
+	admin := NewMux()
 	routes := &Routes{Admin: admin, Public: public, Env: env, Tailnet: tn, Log: log}
 
 	// Stop runs on every return path from here on, after the servers are
@@ -146,15 +153,15 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 	}
 
 	// Only modules that registered contribute entries; a disabled module reports none.
-	navItems, err := CollectNav(mods)
+	navItems, navActions, err := RegisterCoreRoutes(admin, mods, tn)
 	if err != nil {
 		return err
 	}
-	navActions, err := CollectActions(mods)
-	if err != nil {
-		return err
+	if o.auth != nil {
+		if err := admin.Seal(o.auth); err != nil {
+			return err
+		}
 	}
-	registerAttention(admin, mods, navItems, tn)
 
 	// Modules start before any listener exists, so no request can reach a
 	// module that has not started. A failed Start leaves nothing open.

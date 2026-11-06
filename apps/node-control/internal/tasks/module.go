@@ -106,12 +106,20 @@ func (m *Module) Nav() []core.NavItem {
 	if !m.on {
 		return nil
 	}
-	admins := authz.ParseAllowed(m.env.Getenv("TASKS_ADMIN_USERS"))
-	items := []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40, Group: "operate", Icon: "tasks", Source: "tasks", Allow: admins.Has}}
+	view := func(login string) bool { return m.can(login, authz.LevelView) }
+	items := []core.NavItem{{Label: "Tasks", Path: "/tasks", Order: 40, Group: "operate", Icon: "tasks", Source: "tasks", Allow: view}}
 	if m.sessionsTag != "" {
-		items = append(items, core.NavItem{Label: "Sessions", Path: "/sessions", Order: 45, Group: "operate", Icon: "sessions", Allow: admins.Has})
+		items = append(items, core.NavItem{Label: "Sessions", Path: "/sessions", Order: 45, Group: "operate", Icon: "sessions", Allow: view})
 	}
 	return items
+}
+
+// legacy is TASKS_ADMIN_USERS: the module's own list, which decides only when no process-wide policy is set.
+func (m *Module) legacy() authz.Allowed { return authz.ParseAllowed(m.env.Getenv("TASKS_ADMIN_USERS")) }
+
+// can reports whether login holds the tasks feature at level l.
+func (m *Module) can(login string, l authz.Level) bool {
+	return authz.Can(login, authz.P(authz.FeatureTasks, l), m.legacy())
 }
 
 // intEnv reads an integer variable with a default and an inclusive range.
@@ -125,16 +133,6 @@ func intEnv(env core.Env, key string, def, lo, hi int) (int, error) {
 		return 0, fmt.Errorf("%s must be a whole number from %d to %d", key, lo, hi)
 	}
 	return n, nil
-}
-
-// firstLogin returns the first non-blank item of a csv list.
-func firstLogin(csv string) string {
-	for _, p := range strings.Split(csv, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			return p
-		}
-	}
-	return ""
 }
 
 func (m *Module) Register(r *core.Routes) error {
@@ -153,10 +151,8 @@ func (m *Module) Register(r *core.Routes) error {
 		return nil
 	}
 	const enabled = "tasks module enabled (REDIS_URL, NODE_CONTROL_STATE_KEY and TASKS_RUNNER_TOKEN set)"
-	users := m.env.Getenv("TASKS_ADMIN_USERS")
-	allowed := authz.ParseAllowed(users)
-	if !allowed.Has(firstLogin(users)) {
-		return errors.New(enabled + " but TASKS_ADMIN_USERS names no login")
+	if !authz.AnyoneCan(authz.P(authz.FeatureTasks, authz.LevelAdmin), m.legacy()) {
+		return errors.New(enabled + " but TASKS_ADMIN_USERS names no login (and ADMIN_CONFIG grants tasks.admin to nobody)")
 	}
 	m.stateKey = m.env.Getenv("NODE_CONTROL_STATE_KEY")
 	if err := statestore.ValidateStateKey(m.stateKey); err != nil {
@@ -207,7 +203,8 @@ func (m *Module) Register(r *core.Routes) error {
 	if m.pollEvery == 0 {
 		m.pollEvery = time.Duration(poll) * time.Second
 	}
-	gate := authz.UserGate(r.Tailnet, allowed, r.Log)
+	// The module gate is view; the admin listener's Authorizer checks each route's exact level.
+	gate := authz.Gate(r.Tailnet, authz.P(authz.FeatureTasks, authz.LevelView), m.legacy(), r.Log)
 	(&api{m: m}).register(r.Admin, gate)
 	if sessTag != "" {
 		m.sessionsTag = sessTag

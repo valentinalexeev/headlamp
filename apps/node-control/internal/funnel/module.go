@@ -64,7 +64,7 @@ func (m *Module) Nav() []core.NavItem {
 	}
 	allow := func(string) bool { return false } // not configured: show nothing
 	if m.s != nil {
-		allow = m.s.Admins.Has
+		allow = func(login string) bool { return m.s.Can(login, authz.LevelView) }
 	}
 	return []core.NavItem{
 		{Label: "Funnel", Path: "/funnel", Order: 30, Group: "operate", Icon: "funnel", Source: "funnel", Allow: allow},
@@ -111,7 +111,8 @@ func (m *Module) Register(r *core.Routes) error {
 	}
 
 	// Two gates, no overlap: humans on /funnel/*, the ingress node on /ingress/v1/*.
-	human := authz.UserGate(r.Tailnet, s.Admins, m.log)
+	// The module gate is view; the admin listener's Authorizer checks each route's exact level.
+	human := authz.Gate(r.Tailnet, authz.P(authz.FeatureFunnel, authz.LevelView), s.Admins, m.log)
 	machine := authz.TagGate(r.Tailnet, s.IngressTag, m.log)
 	(&ingress{st: st, s: s, outcome: m.outcome, now: m.now, log: m.log}).register(r.Admin, machine)
 	m.registerHuman(r.Admin, human)

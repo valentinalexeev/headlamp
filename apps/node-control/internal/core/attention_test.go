@@ -40,7 +40,7 @@ type searchMod struct {
 func (m *searchMod) Search(context.Context, string) ([]SearchItem, error) { return m.items, m.err }
 
 func attHandler(tn Tailnet, nav []NavItem, mods ...Module) http.Handler {
-	mux := http.NewServeMux()
+	mux := NewMux()
 	registerAttention(mux, mods, nav, tn)
 	return mux
 }

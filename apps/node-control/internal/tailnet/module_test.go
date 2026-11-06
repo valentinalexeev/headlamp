@@ -23,7 +23,7 @@ func (f fakeSrc) Nodes(ctx context.Context) ([]headscale.Node, error) { return f
 func serve(t *testing.T, src headscale.NodeSource, tracked map[string]bool) (int, map[string]any) {
 	t.Helper()
 	m := New(src, func(context.Context) map[string]bool { return tracked })
-	r := &core.Routes{Admin: http.NewServeMux()}
+	r := &core.Routes{Admin: core.NewMux()}
 	if err := m.Register(r); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestTrackedReceivesRequestContext(t *testing.T) {
 	type key struct{}
 	var got any
 	m := New(fakeSrc{}, func(ctx context.Context) map[string]bool { got = ctx.Value(key{}); return nil })
-	r := &core.Routes{Admin: http.NewServeMux()}
+	r := &core.Routes{Admin: core.NewMux()}
 	if err := m.Register(r); err != nil {
 		t.Fatal(err)
 	}

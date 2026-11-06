@@ -98,7 +98,7 @@ func (a *Admin) SetTailnet(tn core.Tailnet) { a.tn = tn }
 func (a *Admin) State() *SyncState { return a.reg.First().State }
 
 // Register adds the admin routes to mux.
-func (a *Admin) Register(mux *http.ServeMux) {
+func (a *Admin) Register(mux *core.Mux) {
 	mux.HandleFunc("GET /enroll", asset("text/html; charset=utf-8", enrollHTML))
 	mux.HandleFunc("GET /enroll/static/enroll.js", asset("text/javascript; charset=utf-8", enrollJS))
 	mux.HandleFunc("GET /enroll/qrcode.js", asset("text/javascript; charset=utf-8", qrcodeJS))

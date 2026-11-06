@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/scrub"
 )
@@ -39,7 +40,7 @@ type sessionAPI struct {
 	c SessionClient
 }
 
-func (a *sessionAPI) register(mux *http.ServeMux, gate func(http.Handler) http.Handler) {
+func (a *sessionAPI) register(mux *core.Mux, gate func(http.Handler) http.Handler) {
 	plain := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(h)) }
 	body := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(authz.RequireJSON(h))) }
 	plain("GET /sessions", asset("text/html; charset=utf-8", sessionsHTML))

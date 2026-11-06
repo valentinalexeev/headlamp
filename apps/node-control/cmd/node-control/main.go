@@ -119,6 +119,12 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 // keyViewers is who sees the headscale API key warning: anyone on an admin list of a module. With no list at all
 // there is nobody to limit it to, so it returns nil and anyone who can reach the console sees it.
 func keyViewers(env core.Env) func(string) bool {
+	// With an admin policy, whoever may view the overview sees the warning. Without one, the old rule applies.
+	if p := authz.Default(); p != nil && !p.Empty() {
+		return func(login string) bool {
+			return p.Can(authz.Subject{Login: login}, authz.P(authz.FeatureOverview, authz.LevelView))
+		}
+	}
 	lists := strings.Join([]string{env.Getenv("POLICY_ADMIN_USERS"), env.Getenv("FUNNEL_ADMIN_USERS"), env.Getenv("TASKS_ADMIN_USERS")}, ",")
 	if strings.Trim(lists, ", \t") == "" {
 		return nil
@@ -164,6 +170,13 @@ func main() {
 	defer stop()
 
 	env := core.OSEnv()
+	// The admin policy is installed before the modules register, so their start checks and gates see it.
+	pol, err := buildPolicy(env)
+	if err != nil {
+		slog.Error("node-control cannot start", "err", err)
+		os.Exit(1)
+	}
+	authz.SetDefault(pol)
 	mods, err := buildModules(env, &http.Client{Timeout: 30 * time.Second})
 	if err != nil {
 		slog.Error("node-control cannot start", "err", err)
@@ -187,7 +200,7 @@ func main() {
 		closeStore()
 		os.Exit(1)
 	}
-	err = core.Run(ctx, mods, env, tn)
+	err = core.Run(ctx, mods, env, tn, core.WithAuthorizer(newAuthorizer(pol, tn, slog.Default())))
 	tn.Close() // writes the final state, so the store is closed after it
 	closeStore()
 	if err != nil {

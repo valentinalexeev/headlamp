@@ -187,7 +187,7 @@ func newRig(t *testing.T, extra map[string]string) *rig {
 	logBuf := &bytes.Buffer{}
 	log := slog.New(slog.NewTextHandler(logBuf, nil))
 	mod := New(funnelEnv(t.TempDir(), extra), hs, func() PolicyService { return pol }).(*Module)
-	mux := http.NewServeMux()
+	mux := core.NewMux()
 	if err := mod.Register(&core.Routes{Admin: mux, Env: funnelEnv(t.TempDir(), extra), Tailnet: tn, Log: log}); err != nil {
 		t.Fatal(err)
 	}
@@ -815,7 +815,7 @@ func TestRegisterRefusesIncompleteSetups(t *testing.T) {
 				}
 				return nil
 			}).(*Module)
-			routes := &core.Routes{Admin: http.NewServeMux(), Env: env, Log: slog.Default()}
+			routes := &core.Routes{Admin: core.NewMux(), Env: env, Log: slog.Default()}
 			if c.tn {
 				routes.Tailnet = authz.NewFakeTailnet(nil)
 			}

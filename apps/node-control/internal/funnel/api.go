@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policy"
 )
@@ -50,7 +51,7 @@ func fromRanges(in []Range) []rangeJSON {
 	return out
 }
 
-func (m *Module) registerHuman(mux *http.ServeMux, gate func(http.Handler) http.Handler) {
+func (m *Module) registerHuman(mux *core.Mux, gate func(http.Handler) http.Handler) {
 	get := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(h)) }
 	write := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(authz.RequireJSON(h))) }
 	get("GET /funnel", asset("text/html; charset=utf-8", pageHTML))

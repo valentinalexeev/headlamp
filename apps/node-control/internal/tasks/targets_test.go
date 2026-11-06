@@ -3,7 +3,6 @@ package tasks
 import (
 	"bytes"
 	"log/slog"
-	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -128,7 +127,7 @@ func TestEngineLogsRunnerUnauthorizedOnce(t *testing.T) {
 func registerErr(t *testing.T, env map[string]string) error {
 	t.Helper()
 	m := New(core.MapEnv(env), testNodes())
-	return m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet})
+	return m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet})
 }
 
 func TestTasksRequireHostGuard(t *testing.T) {
@@ -147,7 +146,7 @@ func TestTasksRequireHostGuard(t *testing.T) {
 func TestRunnerTagEnv(t *testing.T) {
 	m := New(core.MapEnv(modEnv("redis://127.0.0.1:1")), testNodes()).(*Module)
 	env := modEnv("redis://127.0.0.1:1")
-	if err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
+	if err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
 		t.Fatal(err)
 	}
 	if m.tag != DefaultRunnerTag || DefaultRunnerTag != "tag:task-runner" {
@@ -155,7 +154,7 @@ func TestRunnerTagEnv(t *testing.T) {
 	}
 	env["TASKS_RUNNER_TAG"] = "tag:runners-2"
 	m = New(core.MapEnv(env), testNodes()).(*Module)
-	if err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
+	if err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
 		t.Fatal(err)
 	}
 	if m.tag != "tag:runners-2" {

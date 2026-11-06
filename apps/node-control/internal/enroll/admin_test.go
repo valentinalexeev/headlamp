@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"net/http"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
@@ -65,7 +65,7 @@ type adminFx struct {
 	store *Store
 	agent *stubAgent
 	admin *Admin
-	mux   *http.ServeMux
+	mux   *core.Mux
 }
 
 func newStore(t *testing.T, now int64) *Store {
@@ -85,7 +85,7 @@ func newAdminFxCfg(t *testing.T, cfg IngressConfig) *adminFx {
 	store := newStore(t, adminNow)
 	agent := &stubAgent{}
 	a := NewAdmin(store, cfg, agent)
-	mux := http.NewServeMux()
+	mux := core.NewMux()
 	a.Register(mux)
 	return &adminFx{t: t, store: store, agent: agent, admin: a, mux: mux}
 }

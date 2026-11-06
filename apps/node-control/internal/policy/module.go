@@ -49,8 +49,17 @@ func (m *Module) Nav() []core.NavItem {
 	if m.svc == nil {
 		return nil
 	}
-	admins := authz.ParseAllowed(m.env.Getenv("POLICY_ADMIN_USERS"))
-	return []core.NavItem{{Label: "Policy", Path: "/policy", Order: 50, Group: "configure", Icon: "policy", Source: "policy", Allow: admins.Has}}
+	return []core.NavItem{{Label: "Policy", Path: "/policy", Order: 50, Group: "configure", Icon: "policy", Source: "policy", Allow: m.can(authz.LevelView)}}
+}
+
+// legacy is POLICY_ADMIN_USERS: the console's own list, which decides only when no process-wide policy is set.
+func (m *Module) legacy() authz.Allowed {
+	return authz.ParseAllowed(m.env.Getenv("POLICY_ADMIN_USERS"))
+}
+
+// can returns a check that login holds the policy feature at level l.
+func (m *Module) can(l authz.Level) func(string) bool {
+	return func(login string) bool { return authz.Can(login, authz.P(authz.FeaturePolicy, l), m.legacy()) }
 }
 
 // intEnv reads an integer variable with a default and an inclusive range.
@@ -71,9 +80,8 @@ func (m *Module) Register(r *core.Routes) error {
 	if path == "" {
 		return nil
 	}
-	allowed := authz.ParseAllowed(m.env.Getenv("POLICY_ADMIN_USERS"))
-	if !allowed.Has(firstLogin(m.env.Getenv("POLICY_ADMIN_USERS"))) {
-		return errors.New("policy console enabled (POLICY_DB set) but POLICY_ADMIN_USERS names no login")
+	if !authz.AnyoneCan(authz.P(authz.FeaturePolicy, authz.LevelAdmin), m.legacy()) {
+		return errors.New("policy console enabled (POLICY_DB set) but POLICY_ADMIN_USERS names no login (and ADMIN_CONFIG grants policy.admin to nobody)")
 	}
 	hosts := m.env.List("ENROLL_ALLOWED_HOSTS")
 	if len(hosts) == 0 || slices.Contains(hosts, "*") {
@@ -102,19 +110,11 @@ func (m *Module) Register(r *core.Routes) error {
 	}
 	m.store = store
 	m.svc = NewService(m.api, store, time.Duration(revert)*time.Second, maxBytes, nil)
-	gate := authz.UserGate(r.Tailnet, allowed, r.Log)
+	// The module gate is view. The admin listener's Authorizer (core.Mux.Seal) checks each route's exact level, so
+	// apply and confirm need policy.admin. Without a policy, only POLICY_ADMIN_USERS pass, as before.
+	gate := authz.Gate(r.Tailnet, authz.P(authz.FeaturePolicy, authz.LevelView), m.legacy(), r.Log)
 	newConsole(m.svc, store, maxBytes).register(r.Admin, gate)
 	return nil
-}
-
-// firstLogin returns the first non-blank item of a csv list, so a list of only blanks is caught.
-func firstLogin(csv string) string {
-	for _, p := range strings.Split(csv, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			return p
-		}
-	}
-	return ""
 }
 
 // Start launches the revert watcher and returns at once. The watcher stops with ctx; the store

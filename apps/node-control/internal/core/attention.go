@@ -241,7 +241,7 @@ func readAttention(ctx context.Context, att []modOf[AttentionSource], navPath fu
 // registerAttention serves GET /_attention.json, /_activity.json and /_search.json on mux, and the acknowledge routes
 // when some module offers an AckStore. Sources are the modules that implement the matching interface. nav gives the
 // page of an unreachable system.
-func registerAttention(mux *http.ServeMux, mods []Module, nav []NavItem, tn Tailnet) {
+func registerAttention(mux *Mux, mods []Module, nav []NavItem, tn Tailnet) {
 	att := sourcesOf[AttentionSource](mods)
 	act := sourcesOf[ActivitySource](mods)
 	srch := sourcesOf[SearchSource](mods)

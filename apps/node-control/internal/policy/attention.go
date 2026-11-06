@@ -20,7 +20,7 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 	if m.store == nil {
 		return nil, nil, nil
 	}
-	if !authz.ParseAllowed(m.env.Getenv("POLICY_ADMIN_USERS")).Has(login) {
+	if !m.can(authz.LevelView)(login) {
 		return nil, nil, core.ErrNotVisible
 	}
 	now := time.Now
@@ -88,7 +88,7 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 	if m.store == nil {
 		return nil, nil
 	}
-	if !authz.ParseAllowed(m.env.Getenv("POLICY_ADMIN_USERS")).Has(login) {
+	if !m.can(authz.LevelView)(login) {
 		return nil, core.ErrNotVisible
 	}
 	hist, err := m.store.History(limit)

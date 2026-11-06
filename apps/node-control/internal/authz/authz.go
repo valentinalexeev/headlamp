@@ -44,6 +44,9 @@ func (a Allowed) Has(login string) bool {
 	return l != "" && a.set[l]
 }
 
+// Empty reports whether the set names nobody.
+func (a Allowed) Empty() bool { return len(a.set) == 0 }
+
 func deny(w http.ResponseWriter, log *slog.Logger, reason string) {
 	if log == nil {
 		log = slog.Default()

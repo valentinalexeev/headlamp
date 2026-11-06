@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 )
 
 // maxIngressBody caps what the ingress may post as its state report.
@@ -157,7 +158,7 @@ type ingress struct {
 	log     *slog.Logger
 }
 
-func (g *ingress) register(mux *http.ServeMux, gate func(http.Handler) http.Handler) {
+func (g *ingress) register(mux *core.Mux, gate func(http.Handler) http.Handler) {
 	mux.Handle("GET /ingress/v1/config", gate(http.HandlerFunc(g.config)))
 	mux.Handle("POST /ingress/v1/state", gate(authz.RequireJSON(http.HandlerFunc(g.state))))
 }

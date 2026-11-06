@@ -55,7 +55,7 @@ func (e *modEnv) without(keys ...string) core.Env {
 }
 
 func routesFor(env core.Env) *core.Routes {
-	return &core.Routes{Admin: http.NewServeMux(), Public: http.NewServeMux(), Env: env, Tailnet: core.NewLocal("127.0.0.1"), Log: nil}
+	return &core.Routes{Admin: core.NewMux(), Public: http.NewServeMux(), Env: env, Tailnet: core.NewLocal("127.0.0.1"), Log: nil}
 }
 
 func TestModuleName(t *testing.T) {
@@ -67,7 +67,7 @@ func TestModuleName(t *testing.T) {
 func TestDisabledWithoutDB(t *testing.T) {
 	e := newModEnv(t, "http://agent.test")
 	env := e.without("ENROLL_DB")
-	r := &core.Routes{Admin: http.NewServeMux(), Env: env}
+	r := &core.Routes{Admin: core.NewMux(), Env: env}
 	m := New(env)
 	if err := m.Register(r); err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestDisabledWithoutDB(t *testing.T) {
 	}
 	// even the other variables being absent is fine when enrolment is off
 	m2 := New(core.MapEnv(nil))
-	if err := m2.Register(&core.Routes{Admin: http.NewServeMux()}); err != nil {
+	if err := m2.Register(&core.Routes{Admin: core.NewMux()}); err != nil {
 		t.Fatal(err)
 	}
 }

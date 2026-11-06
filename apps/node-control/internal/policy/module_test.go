@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
@@ -51,14 +50,14 @@ func baseEnv(t *testing.T) map[string]string {
 }
 
 type harness struct {
-	mux *http.ServeMux
+	mux *core.Mux
 	mod core.Module
 	api *fakeAPI
 }
 
-func register(t *testing.T, env map[string]string, api API, log *slog.Logger) (*http.ServeMux, core.Module, error) {
+func register(t *testing.T, env map[string]string, api API, log *slog.Logger) (*core.Mux, core.Module, error) {
 	t.Helper()
-	mux := http.NewServeMux()
+	mux := core.NewMux()
 	if log == nil {
 		log = slog.Default()
 	}

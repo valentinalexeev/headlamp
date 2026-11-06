@@ -35,7 +35,7 @@ func twoPages() []core.Module {
 func serve(t *testing.T, others []core.Module, path string) (*httptest.ResponseRecorder, core.Module) {
 	t.Helper()
 	m := New(func() []core.Module { return others })
-	mux := http.NewServeMux()
+	mux := core.NewMux()
 	if err := m.Register(&core.Routes{Admin: mux}); err != nil {
 		t.Fatal(err)
 	}

@@ -54,7 +54,7 @@ func modEnv(redisURL string) map[string]string {
 type modHarness struct {
 	t        *testing.T
 	m        *Module
-	mux      *http.ServeMux
+	mux      *core.Mux
 	runner   *fakeRunner
 	notifier *fakeNotifier
 	mr       *miniredis.Miniredis
@@ -83,7 +83,7 @@ func newModHarnessEnv(t *testing.T, env map[string]string, mod func(map[string]s
 	if mod != nil {
 		mod(env)
 	}
-	h := &modHarness{t: t, mux: http.NewServeMux(), runner: &fakeRunner{}, notifier: &fakeNotifier{}, mr: mr,
+	h := &modHarness{t: t, mux: core.NewMux(), runner: &fakeRunner{}, notifier: &fakeNotifier{}, mr: mr,
 		logs: &bytes.Buffer{}}
 	h.m = New(core.MapEnv(env), testNodes()).(*Module)
 	h.m.newRunner = func() Runner { return h.runner }
@@ -193,7 +193,7 @@ func TestTasksInactiveWithoutEnv(t *testing.T) {
 			env := modEnv("redis://user:hunter2-pass@127.0.0.1:1")
 			delete(env, missing)
 			var logs bytes.Buffer
-			mux := http.NewServeMux()
+			mux := core.NewMux()
 			m := New(core.MapEnv(env), testNodes())
 			err := m.Register(&core.Routes{Admin: mux, Env: core.MapEnv(env), Tailnet: gateTailnet(),
 				Log: slog.New(slog.NewTextHandler(&logs, nil))})
@@ -233,7 +233,7 @@ func TestTasksRequiresAdminUsersWhenActive(t *testing.T) {
 	env := modEnv("redis://127.0.0.1:1")
 	env["TASKS_ADMIN_USERS"] = " , "
 	m := New(core.MapEnv(env), testNodes())
-	err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet()})
+	err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet()})
 	if err == nil || !strings.Contains(err.Error(), "TASKS_ADMIN_USERS") {
 		t.Fatalf("err = %v", err)
 	}
@@ -241,7 +241,7 @@ func TestTasksRequiresAdminUsersWhenActive(t *testing.T) {
 		env := modEnv("redis://127.0.0.1:1")
 		env[k] = v
 		m := New(core.MapEnv(env), testNodes())
-		err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet()})
+		err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet()})
 		if err == nil || !strings.Contains(err.Error(), k) {
 			t.Fatalf("%s=%s: err = %v", k, v, err)
 		}
@@ -271,7 +271,7 @@ func closedPort(t *testing.T) string {
 func TestTasksDegradedWhenRedisDown(t *testing.T) {
 	env := modEnv("redis://:pw-secret-123@" + closedPort(t))
 	var logs bytes.Buffer
-	mux := http.NewServeMux()
+	mux := core.NewMux()
 	routes := &core.Routes{Admin: mux, Env: core.MapEnv(env), Tailnet: gateTailnet(),
 		Log: slog.New(slog.NewTextHandler(&logs, nil))}
 	tm := New(core.MapEnv(env), testNodes()).(*Module)
@@ -1038,7 +1038,7 @@ func TestStopClosesRedisOnlyAfterEngineStopped(t *testing.T) {
 			closeKV()
 		}, nil
 	}
-	if err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
+	if err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Start(context.Background()); err != nil {

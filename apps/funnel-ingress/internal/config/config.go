@@ -179,7 +179,13 @@ type SidecarConfig struct {
 	ControlURL, AuthKey, Hostname, StateDir, ReadyAddr string        // ControlURL optional; StateDir is scratch space for the ephemeral node
 	ReregisterInterval                                 time.Duration // how often registrations are re-asserted
 	UnreachableExit                                    time.Duration // exit after the API gave no answer this long; 0 never exits
+	// Serve mode (#117): a tailnet-only name with TLS instead of a public funnel route. ServeURL is node-control on
+	// the tailnet. The name is not configured here: node-control knows it from the auth key the node joined with.
+	ServeURL string
 }
+
+// Serve reports whether the sidecar runs in serve mode.
+func (c SidecarConfig) Serve() bool { return c.ServeURL != "" }
 
 // LoadSidecar builds a SidecarConfig from getenv. Like Load, errors name settings, never values.
 func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
@@ -219,18 +225,30 @@ func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
 			c.UnreachableExit = d
 		}
 	}
-	if c.NS == "" {
-		fail("FUNNEL_NS is required")
-	}
+	c.ServeURL = strings.TrimRight(str("FUNNEL_SERVE_URL", ""), "/")
 	if c.Services == "" {
 		fail("FUNNEL_SERVICES is required")
 	}
 	if c.AuthKey == "" {
 		fail("TS_AUTHKEY is required")
 	}
-	if c.APIURL == "" {
+	switch {
+	case c.ServeURL != "":
+		// The service and its namespace come from the auth key, so FUNNEL_NS is not needed.
+		if !httpURL(c.ServeURL) {
+			fail("FUNNEL_SERVE_URL must be an http(s) URL")
+		}
+		if c.APIURL != "" {
+			fail("set FUNNEL_SERVE_URL (tailnet-only name) or FUNNEL_API_URL (public funnel), not both")
+		}
+		if getenv("FUNNEL_SERVE_NAMES") != "" {
+			fail("FUNNEL_SERVE_NAMES is gone: the name comes from the auth key of the service (see Serve mode)")
+		}
+	case c.NS == "":
+		fail("FUNNEL_NS is required")
+	case c.APIURL == "":
 		fail("FUNNEL_API_URL is required")
-	} else if !httpURL(c.APIURL) {
+	case !httpURL(c.APIURL):
 		fail("FUNNEL_API_URL must be an http(s) URL")
 	}
 	if c.ControlURL != "" && !httpURL(c.ControlURL) {

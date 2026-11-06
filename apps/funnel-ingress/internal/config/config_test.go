@@ -236,3 +236,41 @@ func TestClientIPSettings(t *testing.T) {
 		}
 	}
 }
+
+// Serve mode (#117): no FUNNEL_NS and no names, because the service comes from the auth key.
+func TestLoadSidecarServeMode(t *testing.T) {
+	serve := func(mod map[string]string) (SidecarConfig, error) {
+		m := sidecarBase()
+		delete(m, "FUNNEL_API_URL")
+		delete(m, "FUNNEL_NS")
+		m["FUNNEL_SERVE_URL"] = "http://node-control/"
+		for k, v := range mod {
+			if v == "" {
+				delete(m, k)
+			} else {
+				m[k] = v
+			}
+		}
+		return LoadSidecar(env(m))
+	}
+	c, err := serve(nil)
+	if err != nil || !c.Serve() || c.ServeURL != "http://node-control" {
+		t.Fatalf("serve mode without FUNNEL_NS: %+v %v", c, err)
+	}
+	for name, mod := range map[string]map[string]string{
+		"both modes":  {"FUNNEL_API_URL": "http://funnel-ingress:9100"},
+		"old names":   {"FUNNEL_SERVE_NAMES": "a.svc.example.com"},
+		"bad url":     {"FUNNEL_SERVE_URL": "node-control"},
+		"no services": {"FUNNEL_SERVICES": ""},
+	} {
+		if _, err := serve(mod); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// funnel mode still needs FUNNEL_NS
+	m := sidecarBase()
+	delete(m, "FUNNEL_NS")
+	if _, err := LoadSidecar(env(m)); err == nil || !strings.Contains(err.Error(), "FUNNEL_NS") {
+		t.Fatalf("funnel mode without FUNNEL_NS: %v", err)
+	}
+}

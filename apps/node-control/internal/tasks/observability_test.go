@@ -315,7 +315,7 @@ func TestMetricsEnvValidation(t *testing.T) {
 		env := modEnv("redis://" + mr.Addr())
 		env["TASKS_METRICS_ADDR"] = bad
 		m := New(core.MapEnv(env), testNodes()).(*Module)
-		err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet})
+		err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet})
 		if err == nil || !strings.Contains(err.Error(), "TASKS_METRICS_ADDR") {
 			t.Errorf("%q: err = %v", bad, err)
 		}
@@ -323,7 +323,7 @@ func TestMetricsEnvValidation(t *testing.T) {
 	env := modEnv("redis://" + mr.Addr())
 	env["TASKS_HEARTBEAT_SECRET"] = "not a name!"
 	m := New(core.MapEnv(env), testNodes()).(*Module)
-	if err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err == nil ||
+	if err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err == nil ||
 		!strings.Contains(err.Error(), "TASKS_HEARTBEAT_SECRET") {
 		t.Errorf("bad heartbeat secret name: err = %v", err)
 	}
@@ -350,7 +350,7 @@ func TestMetricsEnvValidation(t *testing.T) {
 		}
 		m.newRunner = func() Runner { return &fakeRunner{} }
 		m.newNotifier = func(*Store) Notifier { return &fakeNotifier{} }
-		if err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
+		if err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
 			t.Fatalf("Register: %v", err)
 		}
 		if err := m.Start(context.Background()); err != nil {
@@ -413,7 +413,7 @@ func TestModuleWiresHeartbeatAndObserver(t *testing.T) {
 	pn := &pingingNotifier{}
 	m.newRunner = func() Runner { return &fakeRunner{} }
 	m.newNotifier = func(*Store) Notifier { return pn }
-	if err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
+	if err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet(), Log: quiet}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Start(context.Background()); err != nil {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/ui"
 )
@@ -38,7 +39,7 @@ func newConsole(svc *Service, store *Store, maxBytes int) *console {
 }
 
 // register mounts every route behind the user gate; mutating ones also need a JSON content type.
-func (c *console) register(mux *http.ServeMux, gate func(http.Handler) http.Handler) {
+func (c *console) register(mux *core.Mux, gate func(http.Handler) http.Handler) {
 	get := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, gate(h))
 	}

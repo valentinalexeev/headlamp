@@ -134,7 +134,7 @@ func TestSessionsPageServedWithPagePolicy(t *testing.T) {
 
 func TestTasksPageStillServedWhenDegraded(t *testing.T) {
 	env := modEnv("redis://:pw-secret-123@" + closedPort(t))
-	mux := http.NewServeMux()
+	mux := core.NewMux()
 	tm := New(core.MapEnv(env), testNodes()).(*Module)
 	routes := &core.Routes{Admin: mux, Env: core.MapEnv(env), Tailnet: gateTailnet(),
 		Log: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))}

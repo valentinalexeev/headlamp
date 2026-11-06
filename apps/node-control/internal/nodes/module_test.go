@@ -64,7 +64,7 @@ func newHandler(t *testing.T, cfg *Config, src headscale.NodeSource, provs map[s
 	if timeout > 0 {
 		m.(*Module).timeout = timeout
 	}
-	r := &core.Routes{Admin: http.NewServeMux()}
+	r := &core.Routes{Admin: core.NewMux()}
 	if err := m.Register(r); err != nil {
 		t.Fatal(err)
 	}

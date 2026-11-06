@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"strings"
@@ -70,7 +69,7 @@ func (f *fakeSessions) callList() []string {
 
 type sessHarness struct {
 	m    *Module
-	mux  *http.ServeMux
+	mux  *core.Mux
 	fake *fakeSessions
 	logs *bytes.Buffer
 }
@@ -85,7 +84,7 @@ func newSessHarness(t *testing.T, withTag bool, nodes ...headscale.Node) *sessHa
 	if withTag {
 		env["SESSIONS_TAG"] = sessTag
 	}
-	h := &sessHarness{mux: http.NewServeMux(), fake: &fakeSessions{cur: map[string]*SessionInfo{}, curErr: map[string]error{}}, logs: &bytes.Buffer{}}
+	h := &sessHarness{mux: core.NewMux(), fake: &fakeSessions{cur: map[string]*SessionInfo{}, curErr: map[string]error{}}, logs: &bytes.Buffer{}}
 	h.m = New(core.MapEnv(env), &fakeNodes{nodes: nodes}).(*Module)
 	h.m.newSessions = func() SessionClient { return h.fake }
 	log := slog.New(slog.NewTextHandler(h.logs, nil))
@@ -400,7 +399,7 @@ func TestSessionsInvalidTagRefused(t *testing.T) {
 	env := modEnv("redis://127.0.0.1:1")
 	env["SESSIONS_TAG"] = "browser"
 	m := New(core.MapEnv(env), &fakeNodes{}).(*Module)
-	err := m.Register(&core.Routes{Admin: http.NewServeMux(), Env: core.MapEnv(env), Tailnet: gateTailnet()})
+	err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(env), Tailnet: gateTailnet()})
 	if err == nil || !strings.Contains(err.Error(), "SESSIONS_TAG") {
 		t.Fatalf("err = %v", err)
 	}

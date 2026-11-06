@@ -329,7 +329,7 @@ func findAckItem(w http.ResponseWriter, v attentionView, req ackRequest) (Attent
 
 // registerAckRoutes serves the two writes. Each reads the caller's own attention list first: only someone who sees an
 // item right now may acknowledge it or undo that.
-func registerAckRoutes(mux *http.ServeMux, tn Tailnet, k *ackKeeper, read func(context.Context, string) attentionView) {
+func registerAckRoutes(mux *Mux, tn Tailnet, k *ackKeeper, read func(context.Context, string) attentionView) {
 	ok := func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")

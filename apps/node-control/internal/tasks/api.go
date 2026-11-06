@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 )
 
 const (
@@ -44,7 +45,7 @@ var (
 // through Module.current and answers 503 while they are not open.
 type api struct{ m *Module }
 
-func (a *api) register(mux *http.ServeMux, gate func(http.Handler) http.Handler) {
+func (a *api) register(mux *core.Mux, gate func(http.Handler) http.Handler) {
 	plain := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(h)) }
 	body := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, gate(authz.RequireJSON(h))) }
 	plain("GET /tasks", asset("text/html; charset=utf-8", pageHTML))

@@ -43,7 +43,7 @@ func (w whoStub) WhoIs(context.Context, string) (string, []string, error) { retu
 func auditHandler(t *testing.T, tn core.Tailnet, lg *slog.Logger, audit func() core.AuditLog, provs map[string]Provider) http.Handler {
 	t.Helper()
 	m := New(testConfig(t), nil, provs, WithAudit(audit))
-	r := &core.Routes{Admin: http.NewServeMux(), Tailnet: tn, Log: lg}
+	r := &core.Routes{Admin: core.NewMux(), Tailnet: tn, Log: lg}
 	if err := m.Register(r); err != nil {
 		t.Fatal(err)
 	}

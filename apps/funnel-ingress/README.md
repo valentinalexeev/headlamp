@@ -258,6 +258,28 @@ warnings (`tailnet: node status`).
   headscale config). The default is 30 minutes and the minimum is 65 s. A value of 2 to 5 minutes is good here.
   Services behind a subnet router are not supported.
 
+### Serve mode: private names on the tailnet
+
+The same sidecar can publish a service under a private name that resolves only on the tailnet, like `tailscale
+serve`, instead of a public funnel route. Set `FUNNEL_SERVE_URL` and `FUNNEL_SERVE_NAMES` in place of
+`FUNNEL_API_URL`. A sidecar runs in one mode only.
+
+| variable | purpose |
+|---|---|
+| `FUNNEL_SERVE_URL` | node-control on the tailnet, for example `http://node-control` |
+| `FUNNEL_SERVE_NAMES` | the full names to claim, comma separated, for example `grafana.cluster.vpn.example.com` |
+| `FUNNEL_NS` | the serve namespace (required, as in funnel mode); the key must carry `tag:ns-<ns>` for it |
+
+- The pre-auth key carries `tag:serve` and `tag:ns-<ns>`. node-control allows only names under the suffixes of that
+  namespace (see "Serve module" in the node-control manual).
+- The sidecar creates its TLS key at start and keeps it in memory. node-control signs a certificate for exactly the
+  requested names. The sidecar renews it at two thirds of its life, and a renewal takes effect without a restart.
+- Each service in `FUNNEL_SERVICES` listens with TLS on its tailnet port and forwards plain TCP to its target. Use
+  port 443 for HTTPS clients: `grafana=443@grafana.monitoring.svc:3000`.
+- `/readyz` is ready while a valid certificate is in place. If node-control is down, the current certificate keeps
+  serving until it expires.
+- Users trust the serve CA once (`/serve/ca.crt` on node-control), unless node-control uses your own CA.
+
 ## Security notes
 
 The registration API is on the tailnet only. Expose only the proxy port to the internet (the `fly.toml` here does

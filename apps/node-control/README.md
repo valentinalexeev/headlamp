@@ -761,6 +761,88 @@ Confirm names the pending change. It succeeds only while headscale still serves 
 
 The console adds a "Policy" entry to the sidebar. Its Content-Security-Policy (`ui.PageCSP`, like every admin page) allows scripts and styles only from the files of the page: no inline script and no style attributes.
 
+## Serve module (optional)
+
+The serve module publishes services under private names on the tailnet, like `tailscale serve`. A name such as
+`grafana.cluster.<base_domain>` resolves only through MagicDNS, to the tailnet address of the node that claimed it.
+Nothing is published on the public internet. Services use HTTPS with a certificate that node-control signs.
+
+node-control decides everything:
+
+- which names each namespace may use;
+- which node holds a name;
+- the certificate for each name;
+- the record list for headscale.
+
+A node only asks. headscale has no API for DNS records, so the `serve-sync` agent next to headscale writes the list
+to headscale's `dns.extra_records_path` file (see "serve-sync" below).
+
+### Environment
+
+| Variable | Meaning |
+|---|---|
+| `SERVE_DB` | The path of the SQLite database. Setting it turns the module on. |
+| `SERVE_BASE_DOMAIN` | The headscale MagicDNS `base_domain`. Every name is under it (required). |
+| `SERVE_CA_CERT`, `SERVE_CA_KEY` | Optional. Your CA or intermediate certificate (with its chain after it) and its private key, PEM. Without them, node-control creates a self-signed CA on the first start. |
+| `NODE_CONTROL_STATE_KEY` | Required for a self-signed CA. It encrypts the CA key in the database. A self-signed CA without it refuses to start, because a CA key must never be stored in clear. |
+| `SERVE_NODE_TAG` | The tag a publishing node must have. Default `tag:serve`. |
+| `SERVE_NS_TAG_PREFIX` | The prefix of namespace tags. Default `tag:ns-` (a node with `tag:ns-cluster` is in namespace `cluster`). |
+| `SERVE_SYNC_TAG` | The tag of the `serve-sync` agent. Default `tag:headscale`. |
+
+### Namespaces and names
+
+An admin with `serve.admin` gives each namespace one or more suffixes. A node in the namespace may then claim any
+name below a suffix, at any depth:
+
+```
+PUT /serve/namespaces/cluster   {"suffixes": ["cluster"], "note": "k8s cluster"}
+```
+
+With base domain `vpn.example.com`, nodes of `cluster` may claim `grafana.cluster.vpn.example.com` or
+`api.v2.cluster.vpn.example.com`. They may not claim:
+
+- the suffix name itself (`cluster.vpn.example.com`);
+- a name in another namespace's zone;
+- the MagicDNS name of a tailnet node.
+
+A name belongs to the node that claimed it first. Another node gets `409` until the holder releases the name or an
+admin removes it (`DELETE /serve/names/{name}`). If you remove a suffix from a namespace, its names are removed at once.
+
+`GET /serve/state` (`serve.view`) shows the namespaces, every name with its node and certificate expiry, and the
+last report of the `serve-sync` agent.
+
+### Certificates
+
+A node sends a certificate request with its names (`POST /serve/v1/register`). It keeps its private key.
+node-control checks every name, and if any one is refused, the whole request is refused. It then signs a
+certificate for exactly the approved names. Names inside the request are ignored. Certificates last 30 days by
+default and at most 90. The sidecar renews them at two thirds of their life.
+
+With a self-signed CA, every user must trust it once. `GET /serve/ca.crt` serves it to anyone who can reach the
+console. node-control logs its SHA-256 fingerprint at the first start, so users can compare it. With your own CA,
+users who already trust its root need to do nothing.
+
+### serve-sync
+
+`node-control serve-sync` runs next to headscale, on the same file system. It joins the tailnet as its own node
+(give its auth key `SERVE_SYNC_TAG`). It pulls the record list from node-control and writes `SERVE_RECORDS_PATH`,
+the file that `dns.extra_records_path` in the headscale config points to. headscale reloads that file when it
+changes.
+
+- The agent writes the file in one step (a temporary file, then a rename), and only when the list changed.
+- It drops any record outside `SERVE_BASE_DOMAIN` or not at a tailnet address, even if node-control sent it.
+- If node-control cannot be reached, the last file stays, so names keep resolving.
+
+| Variable | Meaning |
+|---|---|
+| `SERVE_SYNC_URL` | node-control on the tailnet, for example `http://node-control` |
+| `SERVE_RECORDS_PATH` | The file headscale reads, for example `/data/extra-records.json` |
+| `SERVE_BASE_DOMAIN` | As above |
+| `HEADSCALE_LOGIN_SERVER`, `SERVE_SYNC_AUTH_KEY` | Where the agent's tailnet node logs in, and its pre-auth key |
+| `SERVE_SYNC_HOSTNAME`, `SERVE_SYNC_STATE_DIR`, `SERVE_SYNC_SECONDS` | Optional: the tailnet name (default `headscale-sync`), the state directory (default `/data/serve-sync`) and the poll interval (default 15) |
+
+The sidecar side (a Kubernetes service with a private name) is "Serve mode" in the funnel-ingress manual.
+
 ## Funnel module (optional)
 
 Set `FUNNEL_DB` to make node-control the single admin surface of the `funnel-ingress` app (`apps/funnel-ingress`). The ingress has no admin page of its own. It **pulls** its configuration from here and **reports** what it observes. Without `FUNNEL_DB`, the app registers nothing. The module needs the policy console (`POLICY_DB`), because every ACL change that it makes goes through the confirm-or-revert of the console. The same `ENROLL_ALLOWED_HOSTS` rule (no bare `*`) applies.

@@ -1,0 +1,10 @@
+{
+  "roles": {
+    "netops": ["*.view", "nodes.operate", "funnel.admin"]
+  },
+  "grants": [
+    {"subject": "alice@", "roles": ["owner"]},
+    {"subject": "bob@example.com", "roles": ["netops"]},
+    {"subject": "carol@", "roles": ["viewer"]}
+  ]
+}

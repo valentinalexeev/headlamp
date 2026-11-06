@@ -64,6 +64,75 @@ Fly.io, `fly.toml`).
 | `OPENSTACK_CLOUDS` | Optional. Other OpenStack-compatible clouds, as `NAME=https://<keystone>/v3`, comma separated. `NAME` is upper case. The credentials of each cloud are `NAME_ACCOUNT_ID`, `NAME_PROJECT_ID`, `NAME_USER`, `NAME_PASSWORD` and `NAME_REGION`. Only this variable sets where these credentials go, so `nodes.json` cannot send them to a different URL. |
 | `AWS_REGION`, `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_EC2`, `AWS_ENDPOINT_URL_AUTO_SCALING` | The default region for EC2 nodes, and the standard AWS credential chain. Use an instance or task role if possible, so that no key is necessary. The endpoint override is optional. See "AWS permissions". |
 | `FLY_API_TOKEN` | The app-scoped deploy token for the controlled Fly app or apps. |
+| `ADMIN_CONFIG` | Optional. The path of the admin roles file (see "Admin roles"). A file that does not parse, has an unknown field or names an unknown role stops the start. |
+| `ADMIN_USERS` | Optional. Comma-separated tailnet logins that get the `owner` role. |
+
+## Admin roles
+
+The tailnet ACL decides who can reach port 80 at all. Admin roles decide what each user can do there. Every admin
+route needs one permission. The server refuses to start if a route has none.
+
+A permission is a feature and a level. A higher level includes the lower ones:
+
+- `view`: read the page and its data.
+- `operate`: do the daily actions.
+- `admin`: change the configuration.
+
+| Feature | `view` | `operate` | `admin` |
+|---|---|---|---|
+| `overview` | the overview, tailnet status | | |
+| `nodes` | node list and status | start, stop | |
+| `enroll` | devices, bridges | create, revoke, extend, links, rotate | approve bridges |
+| `tasks` | tasks, runs, sessions, config | run now, cancel, start or stop a session | edit config and secrets |
+| `policy` | the policy, preview | | apply, confirm, revert |
+| `funnel` | state, config, audit | | namespaces, keys, routes, blocks |
+| `audit` | the activity page | | |
+
+The built-in roles:
+
+| Role | Permissions |
+|---|---|
+| `viewer` | `view` on every feature |
+| `operator` | `viewer`, plus `operate` on `nodes`, `tasks` and `enroll` |
+| `owner` | `admin` on every feature |
+
+A user who holds no permission sees no page and gets `403` everywhere. A tagged node is never a user. The menu shows
+only the pages a user can open. Buttons for actions a user cannot do still show, but the server refuses the request.
+
+### Who gets which role
+
+Three sources add up:
+
+1. `ADMIN_USERS`: each login is an `owner`.
+2. `ADMIN_CONFIG`: a JSON file with custom roles and grants. Mount it like `NODES_CONFIG`. The UI cannot change it.
+3. The old lists `POLICY_ADMIN_USERS`, `FUNNEL_ADMIN_USERS` and `TASKS_ADMIN_USERS`: each login is `admin` of that
+   one feature. They keep working.
+
+An example file is in
+[`examples/private-repo/fly/node-control/admin.example.json`](../../examples/private-repo/fly/node-control/admin.example.json):
+
+```json
+{
+  "roles": {
+    "netops": ["*.view", "nodes.operate", "funnel.admin"]
+  },
+  "grants": [
+    {"subject": "alice@", "roles": ["owner"]},
+    {"subject": "bob@example.com", "roles": ["netops"]},
+    {"subject": "carol@", "roles": ["viewer"]}
+  ]
+}
+```
+
+- A custom role is a list of `feature.level`. `*.level` means every feature.
+- A built-in role name cannot be redefined.
+- A `subject` is a tailnet login, written as in the old lists. The group subject `group:<name>` is reserved for OIDC
+  (#102).
+
+### No admin configured
+
+If no source names anyone, node-control logs a warning at every start. Every user who can reach the console can
+then use all of it, as in earlier releases. Set `ADMIN_USERS` to close it. This open mode is removed in 1.0.0.
 
 ## Tailscale state
 

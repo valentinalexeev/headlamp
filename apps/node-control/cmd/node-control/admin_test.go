@@ -54,6 +54,18 @@ func TestBuildPolicySourcesAddUp(t *testing.T) {
 	}
 }
 
+// The README points at this placeholder, so it must keep loading.
+func TestAdminExampleParses(t *testing.T) {
+	p, err := authz.LoadPolicy(filepath.Join("..", "..", "..", "..", "examples", "private-repo", "fly", "node-control", "admin.example.json"))
+	if err != nil {
+		t.Fatalf("the example ADMIN_CONFIG moved or no longer loads: update the README link too: %v", err)
+	}
+	if !p.Can(authz.Subject{Login: "bob@example.com"}, authz.P(authz.FeatureNodes, authz.LevelOperate)) ||
+		p.Can(authz.Subject{Login: "carol@"}, authz.P(authz.FeatureNodes, authz.LevelOperate)) {
+		t.Fatal("the example no longer means what the README says")
+	}
+}
+
 func TestBuildPolicyRefusesBadConfig(t *testing.T) {
 	for _, body := range []string{`{"grant":[]}`, `{"grants":[{"subject":"a@","roles":["god"]}]}`, `not json`} {
 		if _, err := buildPolicy(core.MapEnv(map[string]string{"ADMIN_CONFIG": writeAdminConfig(t, body)})); err == nil ||

@@ -27,6 +27,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/nodes"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/overview"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policy"
+	servemod "github.com/valentinalexeev/headlamp/apps/node-control/internal/serve"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tailnet"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tasks"
 )
@@ -166,6 +167,8 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			"FUNNEL_KEY_USER":        "demo",
 			"FUNNEL_TAG_OWNERS":      "demo@",
 			"FUNNEL_ADMIN_USERS":     adminLogin,
+			"SERVE_DB":               filepath.Join(w.dir, "serve.db"),
+			"SERVE_BASE_DOMAIN":      "tailnet.example.com",
 			"REDIS_URL":              "redis://" + w.redis.Addr(),
 			"NODE_CONTROL_STATE_KEY": stateKey,
 			"TASKS_RUNNER_TOKEN":     "demo-runner-token",
@@ -217,6 +220,7 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			return nil
 		}),
 		tasks.New(env, src),
+		servemod.New(env, src),
 	}
 	others := slices.Clone(mods)
 	return append(mods, overview.New(func() []core.Module { return others })), env, nil

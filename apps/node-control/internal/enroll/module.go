@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 )
@@ -218,7 +219,7 @@ func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {
 		return nil
 	}
-	return []core.NavItem{{Label: "Devices", Path: "/enroll", Order: 20, Group: "operate", Icon: "devices", Source: "enroll"}}
+	return []core.NavItem{{Label: "Devices", Path: "/enroll", Order: 20, Group: "operate", Icon: "devices", Source: "enroll", Allow: authz.NavAllow(authz.P(authz.FeatureEnroll, authz.LevelView))}}
 }
 
 // Actions puts "Enrol device" in the top bar, but only when the module registered.

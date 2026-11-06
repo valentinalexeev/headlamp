@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/ui"
@@ -312,5 +313,5 @@ func (m *Module) act(action string) http.HandlerFunc {
 
 // Nav puts the control page in the top bar.
 func (m *Module) Nav() []core.NavItem {
-	return []core.NavItem{{Label: "Nodes", Path: "/nodes", Order: 10, Group: "operate", Icon: "nodes", Source: "nodes"}}
+	return []core.NavItem{{Label: "Nodes", Path: "/nodes", Order: 10, Group: "operate", Icon: "nodes", Source: "nodes", Allow: authz.NavAllow(authz.P(authz.FeatureNodes, authz.LevelView))}}
 }

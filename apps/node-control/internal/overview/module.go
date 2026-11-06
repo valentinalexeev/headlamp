@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"net/http"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/ui"
 )
@@ -73,7 +74,7 @@ func (m *Module) activityNav() (core.NavItem, bool) {
 	if len(m.pages()) < 2 || !m.hasActivity() {
 		return core.NavItem{}, false
 	}
-	return core.NavItem{Label: "Activity", Path: "/activity", Order: 900, Icon: "activity"}, true
+	return core.NavItem{Label: "Activity", Path: "/activity", Order: 900, Icon: "activity", Allow: authz.NavAllow(authz.P(authz.FeatureAudit, authz.LevelView))}, true
 }
 
 // Nav lists Overview first, with no group, but only when there are at least two other pages: with one
@@ -83,7 +84,7 @@ func (m *Module) Nav() []core.NavItem {
 	if len(m.pages()) < 2 {
 		return nil
 	}
-	items := []core.NavItem{{Label: "Overview", Path: "/", Order: 1, Icon: "overview"}}
+	items := []core.NavItem{{Label: "Overview", Path: "/", Order: 1, Icon: "overview", Allow: authz.NavAllow(authz.P(authz.FeatureOverview, authz.LevelView))}}
 	if a, ok := m.activityNav(); ok {
 		items = append(items, a)
 	}

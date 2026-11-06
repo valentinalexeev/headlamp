@@ -45,6 +45,16 @@ func AnyoneCan(perm Perm, legacy Allowed) bool {
 	return len(legacy.set) > 0
 }
 
+// NavAllow is the NavItem.Allow of a page that needs perm. With no policy, or one that grants nothing (the open
+// transition mode), it is nil: the page shows to everyone who can reach the console, as before. Otherwise the
+// page shows only to who holds perm, matching what its route lets through.
+func NavAllow(perm Perm) func(string) bool {
+	if p := current.Load(); p == nil || p.Empty() {
+		return nil
+	}
+	return func(login string) bool { return Can(login, perm, Allowed{}) }
+}
+
 // Gate is the module-level user gate: it lets through a human who holds perm under the process-wide policy, or,
 // with no policy set, one on the legacy list. Tagged nodes and WhoIs errors never pass. The normalised login is
 // stored in the context for LoginFrom.

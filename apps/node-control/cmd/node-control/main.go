@@ -119,6 +119,12 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 // keyViewers is who sees the headscale API key warning: anyone on an admin list of a module. With no list at all
 // there is nobody to limit it to, so it returns nil and anyone who can reach the console sees it.
 func keyViewers(env core.Env) func(string) bool {
+	// With an admin policy, whoever may view the overview sees the warning. Without one, the old rule applies.
+	if p := authz.Default(); p != nil && !p.Empty() {
+		return func(login string) bool {
+			return p.Can(authz.Subject{Login: login}, authz.P(authz.FeatureOverview, authz.LevelView))
+		}
+	}
 	lists := strings.Join([]string{env.Getenv("POLICY_ADMIN_USERS"), env.Getenv("FUNNEL_ADMIN_USERS"), env.Getenv("TASKS_ADMIN_USERS")}, ",")
 	if strings.Trim(lists, ", \t") == "" {
 		return nil

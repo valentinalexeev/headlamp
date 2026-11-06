@@ -44,6 +44,9 @@ var adminOpen = true
 
 // newAuthorizer builds the admin listener's Authorizer and logs the mode.
 func newAuthorizer(p *authz.Policy, tn core.Tailnet, log *slog.Logger) *authz.Authorizer {
+	if log == nil {
+		log = slog.Default()
+	}
 	if p.Empty() {
 		if adminOpen {
 			log.Warn("no admin users configured: anyone the tailnet ACL admits can operate this console. " +

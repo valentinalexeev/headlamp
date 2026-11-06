@@ -711,6 +711,26 @@ func TestChecklistContainsWildcardCNAMEAndAcmeHint(t *testing.T) {
 	}
 }
 
+// Behind an edge that is not Fly.io, the checklist names that edge and shows no Fly.io command or record.
+func TestChecklistForOtherEdgeHasNoFlySteps(t *testing.T) {
+	r := newRig(t, map[string]string{"FUNNEL_INGRESS_HOSTNAME": "lb.example.net"})
+	r.createNS("pdl", p9000)
+	nss := r.admin("GET", "/funnel/state", nil).json(t)["namespaces"].([]any)
+	cl := nss[0].(map[string]any)["checklist"].(map[string]any)
+	b, _ := json.Marshal(cl)
+	if !strings.Contains(string(b), `"value":"lb.example.net."`) || !strings.Contains(string(b), `wildcard certificate for *.pdl.example.com`) {
+		t.Errorf("checklist does not point at the edge: %s", b)
+	}
+	for _, bad := range []string{"fly certs", "_acme-challenge", "Fly"} {
+		if strings.Contains(string(b), bad) {
+			t.Errorf("checklist for a non-Fly edge mentions %q: %s", bad, b)
+		}
+	}
+	if c, ok := cl["commands"].([]any); !ok || len(c) != 0 {
+		t.Errorf("commands = %v, want an empty list", cl["commands"])
+	}
+}
+
 func TestEveryRoute403ForNonAdminTaggedAndWhoIsError(t *testing.T) {
 	r := newRig(t, nil)
 	routes := []struct{ method, path string }{

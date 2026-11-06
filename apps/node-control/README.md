@@ -7,7 +7,8 @@ node-control is a single static Go binary that embeds a tailscale node (`tsnet`)
 - `:80` is the admin listener.
 - `:8081` is the public enrolment listener, when `ENROLL_DB` or `ENROLL_REDIS=1` is set.
 
-node-control exposes nothing through the Fly proxy (`fly.toml` has no `[[services]]`).
+node-control exposes nothing outside the tailnet. Publish no port for it on your platform (on Fly.io, `fly.toml` has no
+`[[services]]`).
 
 A bridge is an entry host (xray/Reality front plus bridge agent) for clients on restrictive networks. For compatibility, these items keep the historical name `ingress`:
 
@@ -20,11 +21,14 @@ A bridge is an entry host (xray/Reality front plus bridge agent) for clients on 
 
 node-control replaces the earlier Python implementation. It has the same HTTP API and the same enrolment database format.
 
-Providers: Yandex Compute, OCI Compute, OpenStack (Selectel and other OpenStack clouds), Fly Machines.
+node-control starts and stops exit nodes on these clouds: Yandex Compute, OCI Compute, OpenStack, AWS EC2 and Fly
+Machines. OpenStack includes Selectel and other OpenStack clouds. node-control itself runs on any container host that
+can reach headscale. The `fly.toml` here is one example.
 
 ## Environment
 
-Put secrets in Fly secrets. Put plain settings in `fly.toml`.
+Put secrets in the secret store of your platform (on Fly.io, Fly secrets). Put plain settings in the environment (on
+Fly.io, `fly.toml`).
 
 | variable | purpose |
 |---|---|
@@ -33,8 +37,8 @@ Put secrets in Fly secrets. Put plain settings in `fly.toml`.
 | `TAILSCALE_AUTH_KEY` | Secret. The pre-auth key for the tailnet identity of this app. The tags come from the key, not from the client. |
 | `TAILNET_HOSTNAME` | The name on the tailnet. The default is `node-control`. |
 | `TSNET_VERBOSE` | `1` forwards the logs of the embedded tailscale node (a large quantity of log lines). By default, the app logs only messages for users, such as the login URL. At start, the app waits up to 60 s for the node to join the tailnet. If the node cannot join (bad auth key, control server not reachable), the app exits with a non-zero code. |
-| `REDIS_URL` | Secret (Fly secret only, never in `fly.toml`). The plain `redis://` URL of the shared Redis on the Fly private network. When it is set, the tailscale state is in Redis, not in a file (see "Tailscale state"). When it is not set, the state is in a file under `/var/lib/tailscale`, as before. |
-| `REDIS_KEY` | Optional hash key for the state. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:tsnet` (for example `node-control:tsnet`). It must have the form `<app>:<name>` and must not contain `* ? [ \`. |
+| `REDIS_URL` | Secret (never in a plain config file such as `fly.toml`). The plain `redis://` URL of the shared Redis on a private network. When it is set, the tailscale state is in Redis, not in a file (see "Tailscale state"). When it is not set, the state is in a file under `/var/lib/tailscale`, as before. |
+| `REDIS_KEY` | Optional hash key for the state. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:tsnet` (for example `node-control:tsnet`; Fly.io sets `FLY_APP_NAME`). It must have the form `<app>:<name>` and must not contain `* ? [ \`. |
 | `NODE_CONTROL_STATE_KEY` | Secret. 32 random bytes, base64 (`openssl rand -base64 32`). It encrypts the Redis state (AES-256-GCM). It is required with `REDIS_URL` unless `STATE_ALLOW_PLAINTEXT=1`. Without `REDIS_URL`, the app ignores it and logs a warning. |
 | `STATE_ALLOW_PLAINTEXT` | `1` keeps the Redis state unencrypted. This is an explicit opt-out. We do not recommend it, because the state holds node private keys. |
 | `STATE_IMPORT_FROM` | Optional path of a tailscaled or tsnet state file (for example `/var/lib/tailscale/tailscaled.state`). The app imports the file one time at start when the Redis hash is empty. In other conditions, the app ignores it. |
@@ -80,7 +84,7 @@ Redis rules (shared instance):
 To move a current identity (so the node keeps its tailnet address), do one of these procedures:
 
 - Set `STATE_IMPORT_FROM` to the current state file for the first start. The app imports the file only while the Redis hash is empty, and then ignores the setting.
-- Run the import manually from `fly ssh console`:
+- Run the import manually in the container (on Fly.io, from `fly ssh console`; with Docker, `docker exec`):
 
 ```
 node-control state-import -from /var/lib/tailscale/tailscaled.state [-force]
@@ -149,7 +153,8 @@ Backup and restore:
 - `node-control enroll-export [-to <file>]` writes the devices, UUIDs and approvals as JSON (stdout by default). It does not include one-time links, because Redis cannot list them without a scan.
 - `node-control enroll-import -json <file|->` restores such a file into an empty Redis and verifies the copy. `-` reads stdin, so you can send an encrypted backup through a pipe with no plaintext file. Give exactly one of `-from` and `-json`. The command checks the shape of the JSON first. It refuses unknown fields, duplicate ids, unknown modes and empty UUIDs, and error texts never echo the file.
 - `node-control enroll-export -format sqlite -to <new file>` writes a new SQLite enrolment database. The SQLite store (and so a release without Redis support) opens it as it is. The id counter stays ahead of every id that the store ever issued. The command refuses a file that exists, and it creates the new file with mode 0600. Use it to roll back.
-`scripts/enroll-backup.sh` wraps both for a Fly deployment (it needs `flyctl` logged in and `jq`):
+`scripts/enroll-backup.sh` wraps both for a Fly.io deployment (it needs `flyctl` logged in and `jq`). On another
+platform, run the same two commands in the container and pipe through `sops` or `age` yourself:
 
 ```sh
 scripts/enroll-backup.sh backup  <fly-app> backup.sops.json --sops           # or: --age <recipient>
@@ -266,9 +271,9 @@ Set `ENROLL_DB` or `ENROLL_REDIS=1` to turn on user enrolment for a REALITY brid
 | 80 | admin app, with the `/enroll` admin pages | operators on the tailnet |
 | 8081 | public enrolment | the bridge proxy only (restrict it in the tailnet ACL) |
 
-Environment (secrets through Fly secrets, the rest in `fly.toml`):
+Environment (secrets in the secret store of your platform, the rest in the environment):
 
-- `ENROLL_DB`: the path of the SQLite database: `/var/lib/tailscale/enroll.db`. It must be on a Fly volume, or a deploy removes it. A Fly Machine mounts only one volume, so use the current `tailscale_state` volume (mounted at `/var/lib/tailscale`, see above). Do not create a second volume. The snapshots of that volume then also hold the enrolment database. The database holds device names and owners, but not the subscription secrets, which the app derives from `ENROLL_SECRET_KEY`. Treat the snapshots accordingly. Back up the database with `sqlite3 ... .backup` before risky changes.
+- `ENROLL_DB`: the path of the SQLite database: `/var/lib/tailscale/enroll.db`. It must be on persistent storage, or a deploy removes it. On Fly.io, a Machine mounts only one volume, so use the current `tailscale_state` volume (mounted at `/var/lib/tailscale`, see above). Do not create a second volume. The snapshots of that volume then also hold the enrolment database. The database holds device names and owners, but not the subscription secrets, which the app derives from `ENROLL_SECRET_KEY`. Treat the snapshots accordingly. Back up the database with `sqlite3 ... .backup` before risky changes.
 - `ENROLL_REDIS=1`: keep the enrolment data in Redis (next subsection). The app then does not use `ENROLL_DB`.
 - `ENROLL_CONFIG`: the path of a JSON file that describes the bridge nodes (shape below). Keep the real file in your private repo and overlay it.
 - `ENROLL_SECRET_KEY`: at least 16 bytes. It derives the subscription secrets and the per-bridge credentials. A change to it invalidates both (see "Credentials per bridge").
@@ -989,7 +994,7 @@ Crash behaviour: the module stores the cooldown only after ntfy accepted the mes
 
 With `TASKS_METRICS_ADDR` set, a read-only listener answers `GET /metrics` (Prometheus text format 0.0.4). Every other path is `404` and every other method is `405`. It has **no authentication by design** and serves counters and gauges only. Labels are limited to task ids, node names, run states and notification kinds (never a result value, an account, a secret or a URL).
 
-> **WARNING:** Bind the metrics listener on a private network only, because it has no authentication. The listener uses the network of the machine, not the tailnet. With no `[[services]]` in `fly.toml`, only the Fly private network can reach it. Thus any app in the same Fly organisation network can read it. The content (ids, counts, states) is of low sensitivity but not secret.
+> **WARNING:** Bind the metrics listener on a private network only, because it has no authentication. The listener uses the network of the machine, not the tailnet. Publish no port for it. On Fly.io, with no `[[services]]` in `fly.toml`, only the Fly private network can reach it. Thus any app in the same Fly organisation network can read it. The content (ids, counts, states) is of low sensitivity but not secret.
 
 The module logs a listen error one time and continues to work. Values are in memory: counters restart at zero with the process.
 
@@ -1003,7 +1008,7 @@ The module logs a listen error one time and continues to work. Values are in mem
 | `task_last_success_timestamp_seconds` | gauge | `task` (absent until a success) |
 | `task_next_run_timestamp_seconds` | gauge | `task` (the retry time while a retry is pending) |
 
-The module drops the gauges of a task that leaves the config. Its counters stay until restart. The module counts the heartbeat ping under `task="scheduler"`, `kind="ping"`. To let Fly scrape it, set the address and add a `[metrics]` block to `fly.toml`:
+The module drops the gauges of a task that leaves the config. Its counters stay until restart. The module counts the heartbeat ping under `task="scheduler"`, `kind="ping"`. To scrape it, set `TASKS_METRICS_ADDR` and point your Prometheus at that address on the private network. On Fly.io, add a `[metrics]` block to `fly.toml`:
 
 ```toml
 [env]

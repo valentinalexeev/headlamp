@@ -5,10 +5,12 @@ It is for a self-hosted headscale network. headscale does not implement Funnel. 
 control-issued certificates and no relay fleet. For this reason, `tailscale funnel` on a client cannot work here. This app is
 the equivalent.
 
-It is a small public reverse proxy on its own Fly app. It joins the tailnet as one more node.
+It is a small public reverse proxy. It joins the tailnet as one more node. It serves plain HTTP. Put a TLS edge with
+wildcard certificates in front of it. On Fly.io, the Fly edge does this (see the `fly.toml` here). Elsewhere, use a
+cloud load balancer or a reverse proxy such as Caddy.
 
 ```
-Internet -> Fly edge (TLS, wildcard certs) -> funnel-ingress machine (Go, embedded tailscale node)
+Internet -> TLS edge (wildcard certs) -> funnel-ingress (Go, embedded tailscale node)
                                                |- public listener  :8080  reverse proxy, routed by Host
                                                |- tailnet listener :9100  registration API (not on the internet)
                                                |- reconcile loop          peer list vs. registered routes
@@ -31,8 +33,8 @@ The proxy normalises case, a port and one trailing dot. Any other host gets a ba
 
 The proxy forwards the original `Host`. It rebuilds `X-Forwarded-For/Host/Proto` from scratch. It drops client-supplied forwarding headers.
 
-The proxy reads the client address from one header. By default, this is the `Fly-Client-IP` header that the edge of Fly sets.
-Behind a different load balancer, set `FUNNEL_CLIENT_IP_HEADER` and `FUNNEL_TRUSTED_PROXIES` (see the table).
+The proxy reads the client address from one header. The default is `Fly-Client-IP`, the header that the Fly.io edge sets.
+Behind any other edge, set `FUNNEL_CLIENT_IP_HEADER` and `FUNNEL_TRUSTED_PROXIES` (see the table).
 
 The proxy reads the header and `X-Forwarded-Proto` only from a trusted peer. For `X-Forwarded-For`, the client is the
 right-most address that is not a trusted proxy. If the header is missing or not valid, the proxy uses the address of the peer.
@@ -105,7 +107,8 @@ This is intended, because the proxy could not reach the node anyway.
 
 ## Environment
 
-Put secrets in Fly secrets. Put plain settings in `fly.toml`. Namespaces, ports, the public domain and routes are **not**
+Put secrets in the secret store of your platform (on Fly.io, Fly secrets) and plain settings in the environment (on
+Fly.io, `fly.toml`). Namespaces, ports, the public domain and routes are **not**
 process settings. They arrive through the configuration source.
 
 | variable | purpose |
@@ -143,9 +146,9 @@ Redis rules (shared instance, billed for each command):
 The ingress reads Redis at start. It writes only when something changed. An unchanged
 re-registration or configuration version writes nothing. The connection uses the normal OS dialer, not the tailnet.
 
-- **Generate the key** with `openssl rand -base64 32`. Keep it in your password manager first. Then set it as a Fly
+- **Generate the key** with `openssl rand -base64 32`. Keep it in your password manager first. Then set it as a
   secret. `REDIS_URL` without a key refuses to start, unless `STATE_ALLOW_PLAINTEXT=1`.
-- **Redis unreachable at start:** the ingress exits non-zero (Fly retries). The node never registers a new identity because Redis was
+- **Redis unreachable at start:** the ingress exits non-zero, so let your platform restart it (Fly.io does). The node never registers a new identity because Redis was
   briefly down. After the start, an outage does not stop traffic. The ingress refuses a registration that it cannot save (`503`).
 - **Carrying over an identity:** for the first start, set `STATE_IMPORT_FROM` to an existing tailscale state file. The ingress
   imports it (crash-safe, verified) only while the hash is empty.
@@ -176,12 +179,17 @@ After every cycle, the ingress sends a `POST` to `{FUNNEL_CONFIG_URL}/ingress/v1
 
 ## DNS and certificates
 
-Per namespace, once:
+Per namespace, once, point `*.pdl.<public domain>` at your TLS edge and give the edge a wildcard certificate for it.
+Wildcard certificates need DNS validation (ACME DNS-01). A wildcard does not cover `pdl.<public domain>` itself.
+
+On Fly.io:
 
 1. DNS: add `*.pdl.<public domain>` CNAME to the Fly app (or A/AAAA to dedicated IPs).
-2. Run `fly certs add "*.pdl.<public domain>" -a <app>`. Wildcard validation is DNS-based, so add the `_acme-challenge.pdl`
-   CNAME that Fly prints. A wildcard does not cover `pdl.<public domain>` itself.
+2. Run `fly certs add "*.pdl.<public domain>" -a <app>`. Add the `_acme-challenge.pdl` CNAME that Fly prints.
 3. Check the current certificate pricing and limits of Fly before you add many namespaces.
+
+With another edge, use its own wildcard certificate procedure. node-control shows the Fly.io steps in its checklist
+only when `FUNNEL_INGRESS_HOSTNAME` is a `.fly.dev` name.
 
 `<public domain>` must not be under the headscale `base_domain` (MagicDNS suffix).
 
@@ -252,7 +260,8 @@ warnings (`tailnet: node status`).
 
 ## Security notes
 
-The registration API is on the tailnet only. The Fly service config exposes just the proxy port. The ACL, not code,
+The registration API is on the tailnet only. Expose only the proxy port to the internet (the `fly.toml` here does
+that). The ACL, not code,
 is the outer wall for what the proxy can reach. The public listener serves the proxy and `/healthz` only (for hosts that
 are not service hosts). There is no pprof or metrics endpoint on it.
 

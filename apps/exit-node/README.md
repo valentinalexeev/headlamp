@@ -1,20 +1,59 @@
-# apps/exit-node — Fly.io tailscale exit node
+# apps/exit-node — tailscale exit node image
 
-A Fly machine that joins your tailnet (headscale or Tailscale) as an exit node. It advertises
+A container that joins your tailnet (headscale or Tailscale) as an exit node. It advertises
 extra `/32` routes for the hostnames in `direct-hosts.txt`. The script `update-direct-routes.sh` resolves these hostnames again every 3 hours.
 Those services use this node, whichever exit node a client selected. This app is derived from patte/fly-tailscale-exit. See `THIRD_PARTY.md`.
 
-- `fly.toml` and `direct-hosts.txt` here are placeholders. Keep the real ones in your private
-  repo. Copy them over before you deploy (see `CLAUDE.md`, "overlay procedure"). Or mount your list in the published
-  image and set `DIRECT_HOSTS_FILE` to its path (see `docs/images.md`).
-- State: `flyctl volumes create tailscale_state -a <app> -r <region> -n 1`. With the volume, the node keeps its
-  identity across deploys. Without the volume, every deploy registers a new node.
-- Secrets: `flyctl secrets set TAILSCALE_AUTH_KEY=<reusable, non-ephemeral key>` and
-  `HEADSCALE_LOGIN_SERVER=https://<your-headscale-url>`. Use a reusable non-ephemeral key.
-  Ephemeral keys are IPv6-only on Tailscale and work poorly for exit nodes.
-- Name: the node joins the tailnet as `ams`. To use a different name, set `EXIT_NODE_HOSTNAME`.
-- Deploy: `flyctl deploy [--build-arg TSVERSION=<x.y.z>]`. The node advertises itself as an exit
-  node. Approve it (or use the ACL `autoApprovers.exitNode`) before clients can use it.
+The image runs on any container host that gives it what a tailnet router needs. Fly.io is one option, and this
+directory has a `fly.toml` for it. For an exit node on a VM, use `terraform/modules/exit-node-vm` and the Ansible
+roles instead. They do not use this image.
+
+## Requirements of the host
+
+- Linux with `NET_ADMIN`, access to `/dev/net/tun`, and IPv4 and IPv6 forwarding on. At start, `start.sh` loads
+  `xt_mark`, tries to turn forwarding on and adds a `MASQUERADE` rule on `eth0`. The interface name `eth0` is fixed.
+  A container usually cannot change sysctls itself (the log says `Read-only file system`), so set forwarding from
+  the host. Without it, the node joins but forwards nothing.
+- Inbound UDP on port `41641` (optional, for direct connections). Without it, clients reach the node through DERP.
+- A persistent directory at `/var/lib/tailscale` for the node state, or Redis state mode (see below). Without
+  either, every restart registers a new node.
+
+## Configuration
+
+| Variable | Kind | Meaning |
+| --- | --- | --- |
+| `TAILSCALE_AUTH_KEY` | secret | A reusable, non-ephemeral auth key. Ephemeral keys are IPv6-only on Tailscale and work poorly for exit nodes. |
+| `HEADSCALE_LOGIN_SERVER` | env | `https://<your-headscale-url>` |
+| `EXIT_NODE_HOSTNAME` | env | The tailnet name of the node. The default is `ams`. |
+| `DIRECT_HOSTS_FILE` | env | Path of a mounted host list that replaces the built-in placeholder (see `docs/images.md`). |
+
+- `direct-hosts.txt` here is a placeholder. Keep the real one in your private repo. Mount it and set
+  `DIRECT_HOSTS_FILE`, or copy it over before you build (see `CLAUDE.md`, "overlay procedure").
+- The node advertises itself as an exit node. Approve it (or use the ACL `autoApprovers.exitNode`) before clients
+  can use it.
+
+## Run on Fly.io
+
+`fly.toml` here is a placeholder. Keep the real one in your private repo.
+
+- State: `flyctl volumes create tailscale_state -a <app> -r <region> -n 1`. The `[mounts]` section of `fly.toml`
+  mounts it at `/var/lib/tailscale`.
+- Secrets: `flyctl secrets set TAILSCALE_AUTH_KEY=<key> HEADSCALE_LOGIN_SERVER=https://<your-headscale-url>`.
+- Deploy: `flyctl deploy [--build-arg TSVERSION=<x.y.z>]`.
+
+## Run with Docker or another container host
+
+```sh
+docker run -d --name exit-node --cap-add NET_ADMIN --device /dev/net/tun -p 41641:41641/udp \
+  --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv6.conf.all.forwarding=1 \
+  -v exit-node-state:/var/lib/tailscale \
+  -e TAILSCALE_AUTH_KEY=<key> -e HEADSCALE_LOGIN_SERVER=https://<your-headscale-url> \
+  ghcr.io/valentinalexeev/headlamp/exit-node:<tag>
+```
+
+Give the container an `eth0` that leads to the internet (the default Docker bridge does). On Kubernetes, the same
+capability, device, volume and sysctls apply. The forwarding sysctls are unsafe sysctls there, so the kubelet must
+allow them. Checked with Docker: forwarding is on, the `MASQUERADE` rule is in place and tailscaled starts.
 
 ## Redis state mode (optional)
 
@@ -33,7 +72,8 @@ is unset, everything below is off and the node works as described above.
 | `BOOT_WAIT_SECONDS` | env | `60` | wall-clock seconds `restore` waits for Redis at boot |
 | `REDIS_TIMEOUT_SECONDS` | env | `5` | per `redis-cli` call limit (uses `timeout`, present in the image); keeps a hung connection from stalling boot or the shutdown push |
 
-- Secrets: `flyctl secrets set REDIS_URL=<redis url> STATE_AGE_IDENTITY=<age secret key>`.
+- Secrets: set `REDIS_URL` and `STATE_AGE_IDENTITY` as secrets of your platform (on Fly.io:
+  `flyctl secrets set REDIS_URL=<redis url> STATE_AGE_IDENTITY=<age secret key>`).
   Generate the identity with `age-keygen`. Keep a copy outside the app. Without the copy, you cannot decrypt the
   stored state. The node never logs these values.
 - Key naming: use one Redis key for each node. If several nodes share

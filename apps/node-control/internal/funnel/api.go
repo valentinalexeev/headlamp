@@ -675,26 +675,33 @@ type checklist struct {
 }
 
 func (m *Module) checklistFor(ns string) checklist {
-	// FUNNEL_INGRESS_HOSTNAME is the name the wildcard record points at, for example <app>.fly.dev.
+	// FUNNEL_INGRESS_HOSTNAME is the name the wildcard record points at: the TLS edge in front of the ingress, for
+	// example <app>.fly.dev or a load balancer name. The Fly.io commands are shown only for a Fly.io target (or when
+	// the name is unset, as a placeholder): other edges have their own certificate procedure.
 	target, app := m.s.IngressHostname, "<your-funnel-ingress-app>"
-	if target == "" {
+	fly := target == ""
+	if fly {
 		target = app + ".fly.dev"
 	} else if a, ok := strings.CutSuffix(target, ".fly.dev"); ok && !strings.Contains(a, ".") {
-		app = a
+		app, fly = a, true
 	}
 	host := ns + "." + m.s.PublicDomain
-	return checklist{
-		Records: []map[string]string{
-			{"type": "CNAME", "name": "*." + host + ".", "value": target + "."},
-			{"type": "CNAME", "name": "_acme-challenge." + host + ".", "value": "(the value `fly certs add` prints)"},
-		},
-		Commands: []string{fmt.Sprintf(`fly certs add "*.%s" -a %s`, host, app)},
+	cl := checklist{
+		Records:  []map[string]string{{"type": "CNAME", "name": "*." + host + ".", "value": target + "."}},
+		Commands: []string{},
 		Notes: []string{
 			"A wildcard does not cover " + host + " itself; add it separately if you want it.",
 			"The public domain must not be under the headscale base domain.",
-			"Check Fly's current certificate price and limits before adding many namespaces.",
 		},
 	}
+	if fly {
+		cl.Records = append(cl.Records, map[string]string{"type": "CNAME", "name": "_acme-challenge." + host + ".", "value": "(the value `fly certs add` prints)"})
+		cl.Commands = append(cl.Commands, fmt.Sprintf(`fly certs add "*.%s" -a %s`, host, app))
+		cl.Notes = append(cl.Notes, "Check Fly's current certificate price and limits before adding many namespaces.")
+	} else {
+		cl.Notes = append(cl.Notes, "Give "+target+" a wildcard certificate for *."+host+" (DNS-01 validation).")
+	}
+	return cl
 }
 
 type nsView struct {

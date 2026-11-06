@@ -1,10 +1,13 @@
 # headlamp — instructions for agents and operators
 
 headlamp is infrastructure code for a self-hosted Tailscale-compatible network: a
-**headscale** control server on Fly.io, **exit nodes** (a Fly machine and VM-based nodes on
-Yandex / OCI / AWS), split-tunnel route provisioning, a small **node-control** web app that
+**headscale** control server, **exit nodes** (a container image and VM-based nodes on
+Yandex / OCI / AWS / OpenStack), split-tunnel route provisioning, a small **node-control** web app that
 starts/stops the VM nodes, and **tailguard** (a WireGuard server that egresses through a
-tailnet exit node, so a plain-WireGuard device such as a home router can use it).
+tailnet exit node, so a plain-WireGuard device such as a home router can use it). The central
+components are container images that run on any container host. Fly.io is the reference platform, with ready
+`fly.toml` files and the overlay deploy below. On other hosts, run the published images with your config mounted
+(`docs/images.md`).
 
 This file tells you (a) the rules for changing this repo, and (b) how to bootstrap your own
 infrastructure from it with **your own private repo that vendors this one as a git
@@ -94,7 +97,7 @@ commits on top of it or attempt a rewrite on your own.
 | `terraform/modules/exit-node-vm/{yandex,oci,aws,cloudru,openstack}` | reusable VM exit-node modules (root stacks live in YOUR repo); `openstack` serves Selectel and other OpenStack clouds, and `selectel` is its old name, kept as a wrapper |
 | `ansible/roles/{tailscale,route-provisioner,task-runner}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; the task runner on a VM node (rootless podman, nftables guard for its user; see the role README); version bump / key rotation playbooks |
 | `apps/headscale` | headscale server image; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. The route approver (`approve-gateway-routes.sh`, `cron-approve-routes.sh`) is shipped but OFF by default (commented `route_approver` process in `fly.toml`); prefer `autoApprovers.routes` in `acl.json` |
-| `apps/exit-node` | Fly tailscale exit node; `fly.toml`, `direct-hosts.txt` are **placeholders** |
+| `apps/exit-node` | tailscale exit node image (any container host; a `fly.toml` for Fly.io); `fly.toml`, `direct-hosts.txt` are **placeholders** |
 | `apps/node-control` | Go service (embedded tailscale): start/stop UI and API for the exit nodes (discovered from headscale), tailnet status, optional device enrolment, optional policy console, optional scheduled browser-script tasks (`internal/tasks`, see its README section "Tasks module"); `fly.toml` is a **placeholder**, `app/nodes.json` is an optional overlay |
 | `apps/funnel-ingress` | Go service (embedded tailscale): public name-based reverse proxy into the tailnet (`<service>.<ns>.<domain>`), tag-authorised self-registration API, a Kubernetes registration sidecar (`funnel-sidecar`), config pulled from node-control; `fly.toml` is a **placeholder** |
 | `apps/task-runner` | Go service run on a node (by the `task-runner` role): runs one caller-supplied browser script at a time in a throwaway rootless container and returns a small JSON result; called by node-control over the tailnet |
@@ -280,10 +283,12 @@ that costs money or touches a real account.
 
 ### 2.0 Prerequisites
 
-- Accounts: Fly.io (required, for headscale). If you want VM exit nodes, get at least one VM provider
-  (Yandex Cloud, Oracle Cloud or AWS). A domain that you control is recommended
+- Accounts: a container host for headscale with a public HTTPS name and persistent storage. This guide uses Fly.io
+  (the reference platform, steps 2.4 and 2.5). On another host, run the published images (`docs/images.md`). If you
+  want VM exit nodes, get at least one VM provider
+  (Yandex Cloud, Oracle Cloud, AWS or an OpenStack cloud). A domain that you control is recommended
   (MagicDNS base domain, stable node names).
-- Tools: `git`, `sops`, `age`, `terraform` (>= 1.5), `ansible` (+ collections, below), `flyctl`,
+- Tools: `git`, `sops`, `age`, `terraform` (>= 1.5), `ansible` (+ collections, below), `flyctl` (for Fly.io),
   `jq`, `python3`, `shellcheck`. Add the provider CLIs that you use (`yc`, `oci`, `aws`). Optional:
   1Password CLI `op`. Without it, supply `SOPS_AGE_KEY` from a file or keychain (see 2.3).
 - Dedicated cloud credentials with narrow scope for each provider (a separate CLI profile such as
@@ -366,7 +371,12 @@ To create an encrypted secrets file:
 
 The hook refuses plaintext secret files and unencrypted `*.enc.*` and `*.sops.*` files.
 
-### 2.4 headscale control server (Fly.io)
+### 2.4 headscale control server (Fly.io shown)
+
+These steps use Fly.io. On another host, run the `headscale` image with `HEADSCALE_CONFIG` and
+`HEADSCALE_POLICY_PATH` pointing at your mounted files, a persistent `/data` (the placeholder config keeps its keys and
+database there), and TLS in front of it
+(`docs/images.md`). Step 3 is the same everywhere: run the `headscale` commands inside the container.
 
 1. Copy `vendor/headlamp/apps/headscale/{fly.toml,headscale.yaml,acl.json}` into
    `fly/headscale/`. Edit the Fly app name, `server_url` and `base_domain`. `base_domain` must differ from
@@ -473,7 +483,10 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
 - Run from `ansible/` with `SOPS_AGE_KEY` set:
   `ansible-playbook site.yml --extra-vars tailscale_version=<x.y.z>`. Add `--check --diff` first.
 
-### 2.8 Fly exit node and node-control (optional)
+### 2.8 Exit node image and node-control (optional)
+
+The steps below use Fly.io. On another host, run the same images with the same variables. `apps/exit-node/README.md`
+has a `docker run` example and the host requirements.
 
 - `apps/exit-node`: copy `fly.toml` and `direct-hosts.txt` to `fly/exit-node/`. Set your app name.
   Run `flyctl volumes create tailscale_state …`. Run `flyctl secrets set TAILSCALE_AUTH_KEY=… HEADSCALE_LOGIN_SERVER=…`.
@@ -488,9 +501,10 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
   blocks, labels, aliases and `hidden`. Keep the real file in
   your private repo and lay it over the app dir with the overlay procedure.
 
-  Provider credentials are Fly secrets (`YANDEX_SA_KEY_JSON`, `FLY_API_TOKEN`, the
-  OCI keys, `SELECTEL_*`, `HEADSCALE_API_KEY`). Keep the tailnet identity on the `tailscale_state` volume (see its
-  `fly.toml`), or in a shared Redis with `REDIS_URL` and an encryption key. Details: `apps/node-control/README.md`.
+  Provider credentials are secrets of your platform (on Fly.io, Fly secrets): `YANDEX_SA_KEY_JSON`, `FLY_API_TOKEN`, the
+  OCI keys, `SELECTEL_*`, the AWS credential chain, `HEADSCALE_API_KEY`. Keep the tailnet identity on persistent storage at
+  `/var/lib/tailscale` (on Fly.io, the `tailscale_state` volume in its `fly.toml`), or in a shared Redis with
+  `REDIS_URL` and an encryption key. Details: `apps/node-control/README.md`.
 - Tasks module (optional, needs that Redis): scheduled browser-script checks that run on a node, with retries, alerts,
   metrics and a heartbeat. To set it up, do these steps:
   1. Set `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `TASKS_RUNNER_TOKEN`, `TASKS_ADMIN_USERS` and

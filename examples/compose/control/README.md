@@ -77,8 +77,28 @@ The node-control console is on the tailnet only, at `http://node-control/`. It h
    docker compose --profile funnel up -d
    ```
 
-The edge gets the wildcard certificates with DNS-01 on Route 53. On AWS, it uses the instance role. Give the role the
-zone with `route53_zone_id` in the module. For another DNS provider, change the plugin in `caddy/Dockerfile`.
+### The edge and its certificates
+
+The edge is a Caddy container. `caddy/Dockerfile` builds it from the official `caddy` image, with one plugin added:
+`caddy-dns/route53`. Caddy gets each certificate from Let's Encrypt with the ACME protocol, and renews it.
+
+All names on the edge are public names on the internet. They are the headscale name, the enrolment name and the
+funnel names. Let's Encrypt checks each name in one of two ways:
+
+- HTTP-01, for a fixed name such as the headscale name. Let's Encrypt connects to the name on port 80. Caddy answers.
+  This needs only port 80 open and a public DNS record. Caddy uses it with no settings.
+- DNS-01, for a wildcard name such as `*.pdl.<FUNNEL_DOMAIN>`. Let's Encrypt does not accept HTTP-01 for a wildcard.
+  Caddy must write a TXT record in the public DNS zone of the name. The Route 53 plugin does this through the AWS API.
+
+The plugin uses the standard AWS credential chain. On the AWS host, this is the instance role. The module gives the
+role change rights on the one zone in `route53_zone_id`, and on no other zone. You need DNS-01 only for funnel. If
+you do not use funnel, set no `route53_zone_id`.
+
+For a DNS provider that is not Route 53, replace the plugin in `caddy/Dockerfile` with the plugin for that provider.
+The Caddy documentation lists them. Then change `dns route53` in the funnel block of `caddy/Caddyfile`.
+
+**NOTE:** The edge does not serve the tailnet-only names of serve (#117). Those names are not on the public internet,
+so Let's Encrypt cannot check them. node-control signs their certificates with the serve CA.
 
 The edge sends `X-Forwarded-For`. `compose.yaml` thus sets `FUNNEL_CLIENT_IP_HEADER` to `X-Forwarded-For`. It sets
 `FUNNEL_TRUSTED_PROXIES` to the compose network, so only the edge can set the client address.
@@ -93,7 +113,7 @@ The edge sends only these two paths to node-control. Any other path gets 404. Se
 
 [`terraform/modules/control-host/aws`](../../../terraform/modules/control-host/aws/) makes these parts:
 
-- one EC2 instance (Ubuntu 24.04, `t3.small` by default) with Docker and the compose plugin;
+- one EC2 instance (Ubuntu 26.04 LTS, `t3.small` by default) with Docker and the compose plugin;
 - an encrypted EBS data volume, mounted at `/srv/headlamp/data`, with daily snapshots;
 - a network load balancer that passes 443/tcp, 80/tcp and 3478/udp to the instance, and keeps the client address;
 - a security group with these three ports only, and no SSH unless you set `admin_cidrs`;

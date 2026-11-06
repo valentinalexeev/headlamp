@@ -6,7 +6,7 @@ gives the full procedure.
 
 ## What it makes
 
-- One EC2 instance: Ubuntu 24.04, Docker and the compose plugin, IMDSv2 only.
+- One EC2 instance: Ubuntu 26.04 LTS, Docker and the compose plugin, IMDSv2 only.
 - An encrypted gp3 data volume, mounted at `/srv/headlamp/data`. The module formats it only when it is empty, so a new
   instance keeps the tailnet. The volume has `prevent_destroy`.
 - Daily snapshots of the data volume (`snapshot_retain_days`, default 14, `0` turns them off).

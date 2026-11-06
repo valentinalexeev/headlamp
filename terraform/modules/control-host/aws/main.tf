@@ -14,13 +14,13 @@ data "aws_subnet" "this" {
   id = coalesce(var.subnet_id, sort(data.aws_subnets.this.ids)[0])
 }
 
-data "aws_ami" "ubuntu_noble" {
+data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-${var.ami_arch}-server-*"]
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-${var.ami_arch}-server-*"]
   }
 
   filter {
@@ -150,7 +150,7 @@ resource "aws_ebs_volume" "data" {
 }
 
 resource "aws_instance" "this" {
-  ami                    = data.aws_ami.ubuntu_noble.id
+  ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
   subnet_id              = data.aws_subnet.this.id
   vpc_security_group_ids = [aws_security_group.this.id]

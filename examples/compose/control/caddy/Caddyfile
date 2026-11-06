@@ -1,5 +1,7 @@
-# TLS edge of the central host. The load balancer passes TCP through and keeps the client address, so TLS ends here
-# and the peer address is the client.
+# TLS edge of the central host, for PUBLIC names only: headscale, the enrolment links and funnel. Let's Encrypt
+# checks each name over the internet (HTTP-01 on port 80, or DNS-01 for wildcards). Tailnet-only serve names (#117)
+# never come here: node-control signs their certificates with its own CA.
+# The load balancer passes TCP through and keeps the client address, so TLS ends here and the peer is the client.
 {
 	email {$ACME_EMAIL}
 	acme_ca {$CADDY_ACME_CA:https://acme-v02.api.letsencrypt.org/directory}

@@ -2,15 +2,15 @@
 
 Infrastructure code for a self-hosted, Tailscale-compatible network:
 
-- **headscale** control server on Fly.io (`apps/fly/headscale`)
-- **exit nodes**: a Fly machine (`apps/fly/exit-ams`) and VM-based nodes on Yandex Cloud, Oracle
+- **headscale** control server on Fly.io (`apps/headscale`)
+- **exit nodes**: a Fly machine (`apps/exit-node`) and VM-based nodes on Yandex Cloud, Oracle
   Cloud, AWS, Cloud.ru or Selectel. The directory `terraform/modules/exit-node-vm` creates the VM nodes. The Ansible roles in `ansible/` configure them.
 - **split-tunnel route provisioning**: nodes advertise routes for chosen ASNs/hostnames so those
   services leave from a chosen country (`ansible/roles/route-provisioner`)
-- **node-control** (`apps/fly/node-control`): a small web UI, only on the tailnet, to start and stop the VM nodes.
+- **node-control** (`apps/node-control`): a small web UI, only on the tailnet, to start and stop the VM nodes.
   It can also schedule browser-script checks. These run on a node through **task-runner** (`apps/task-runner`,
   `ansible/roles/task-runner`).
-- **funnel-ingress**: publishes tailnet services under stable public names, Funnel-style (`apps/fly/funnel-ingress`)
+- **funnel-ingress**: publishes tailnet services under stable public names, Funnel-style (`apps/funnel-ingress`)
 - **tailguard** (`apps/tailguard`): a WireGuard server that sends its traffic out through a tailnet exit node.
   A plain-WireGuard device, for example a home router, can then use your exit nodes.
   It has a watchdog sidecar and a sidecar that follows the exit node.

@@ -1,22 +1,22 @@
 #!/bin/sh
 # Shows how funnel-ingress's copy of the Redis state store drifted from node-control's original.
 #
-# internal/scrub and internal/statestore of apps/fly/funnel-ingress are a port of the same packages in
-# apps/fly/node-control (two Go modules, two Docker contexts; extracting a shared module is a later cleanup).
+# internal/scrub and internal/statestore of apps/funnel-ingress are a port of the same packages in
+# apps/node-control (two Go modules, two Docker contexts; extracting a shared module is a later cleanup).
 # This script applies the documented substitutions to the original and diffs the result against the copy,
 # so a fix made on one side is easy to carry to the other. Advisory: it always exits 0.
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-src=$root/apps/fly/node-control
-dst=$root/apps/fly/funnel-ingress
+src=$root/apps/node-control
+dst=$root/apps/funnel-ingress
 
 # Files adapted by hand beyond the substitutions (they take a plain getenv function instead of core.Env,
 # and tests that scan the sources look in the other command directory): reviewed, not diffed.
 by_hand="importer.go importer_test.go env_test.go redis.go"
 
 norm() {
-	sed -e 's#github.com/valentinalexeev/headlamp/apps/fly/node-control/internal/scrub#github.com/valentinalexeev/headlamp/apps/fly/funnel-ingress/internal/scrub#' \
+	sed -e 's#github.com/valentinalexeev/headlamp/apps/node-control/internal/scrub#github.com/valentinalexeev/headlamp/apps/funnel-ingress/internal/scrub#' \
 	    -e 's/NODE_CONTROL_STATE_KEY/FUNNEL_STATE_KEY/g' \
 	    -e 's/_node-control-import/_funnel-ingress-import/' \
 	    -e 's/node-control:tsnet/funnel-ingress:tsnet/g' \

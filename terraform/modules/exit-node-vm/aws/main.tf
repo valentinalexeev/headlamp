@@ -124,7 +124,7 @@ resource "aws_autoscaling_group" "this" {
   }
 
   # node-control's aws provider scales this group to stop and start the node; its IAM policy is limited to resources
-  # with this tag (see apps/fly/node-control/README.md, "AWS permissions").
+  # with this tag (see apps/node-control/README.md, "AWS permissions").
   tag {
     key                 = local.control_tag
     value               = "true"

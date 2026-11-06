@@ -16,6 +16,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Changed
 
+- The components moved out of `apps/fly/`: `apps/headscale`, `apps/node-control`, `apps/funnel-ingress`, and `apps/fly/exit-ams` is now `apps/exit-node` (#119). The Go module paths change to `github.com/valentinalexeev/headlamp/apps/<component>`. Image names do not change. To migrate a private site repo: replace `vendor/headlamp/apps/fly/` with `vendor/headlamp/apps/` in your scripts and CI, and rename your overlay `fly/exit-ams/` to `fly/exit-node/` (`fly/deploy.sh exit-node`). The wiki page `exit-ams` is now `exit-node`.
 - funnel-ingress ignores a client-address header that arrives twice and uses the peer address, where it used the first value before. A correct edge sets the header once, so only a forged request sees the difference.
 - The wiki also publishes every component, Ansible role and Terraform module manual (for example the funnel-ingress manual as `funnel-ingress`), with a sidebar that lists all pages.
 

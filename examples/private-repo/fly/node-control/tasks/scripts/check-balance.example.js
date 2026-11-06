@@ -1,5 +1,5 @@
 'use strict';
-// Example task script for node-control's tasks module (see apps/fly/node-control/README.md, "Tasks module").
+// Example task script for node-control's tasks module (see apps/node-control/README.md, "Tasks module").
 //
 // Contract: a CommonJS module that exports `run`. The runner calls it as
 //   run({ page, params, secrets, log })

@@ -88,7 +88,7 @@ Do these steps in your private root stack:
 
 node-control can start and stop the node. Declare the cloud in `OPENSTACK_CLOUDS`, and name it in the block of the node.
 See "Optional overrides" in
-`apps/fly/node-control/README.md`.
+`apps/node-control/README.md`.
 
 ## Outputs
 

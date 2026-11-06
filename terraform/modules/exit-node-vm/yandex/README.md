@@ -40,4 +40,4 @@ these steps in your private root stack:
 3. Use the zone, subnet and image IDs of that installation. IDs of one installation do not work in a different one.
 
 To start and stop that node from node-control, set its API endpoints in `nodes.json`. See "Optional overrides" in
-`apps/fly/node-control/README.md`.
+`apps/node-control/README.md`.

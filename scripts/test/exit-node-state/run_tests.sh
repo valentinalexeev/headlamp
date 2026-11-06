@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Tests for apps/fly/exit-ams/state-sync.sh. No network: redis-cli, age and age-keygen are stubs on PATH.
+# Tests for apps/exit-node/state-sync.sh. No network: redis-cli, age and age-keygen are stubs on PATH.
 # The stubs keep "Redis" in files under $tmp/redis/ and "encrypt" with a reversible transform tagged with the
 # recipient. Env overrides used here: STATE_POLL_SECONDS=1 and BOOT_WAIT_SECONDS=2 (state-sync.sh waits that many
 # seconds for Redis at boot; the default is 60). A real-age round trip runs only if age and age-keygen are installed.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"; root="$here/../../.."
-sync="$root/apps/fly/exit-ams/state-sync.sh"
+sync="$root/apps/exit-node/state-sync.sh"
 tmp="$(mktemp -d)"
 bgpids=""
 cleanup() { for p in $bgpids; do kill "$p" 2>/dev/null; done; rm -rf "$tmp"; }

@@ -148,6 +148,15 @@ func joinTailnet(ctx context.Context, up func(context.Context) error, timeout ti
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "serve-sync" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := runServeSync(ctx, core.OSEnv()); err != nil {
+			slog.Error("serve-sync stopped", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "state-import" {
 		if err := runStateImport(context.Background(), os.Args[2:], core.OSEnv(), os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "state-import failed:", err)

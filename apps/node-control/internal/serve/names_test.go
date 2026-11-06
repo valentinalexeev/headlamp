@@ -9,7 +9,7 @@ import (
 func pol() Policy {
 	return Policy{
 		BaseDomain: "vpn.example.com",
-		Suffixes:   map[string][]string{"cluster": {"cluster"}, "lab": {"lab", "v2.apps"}},
+		Suffixes:   map[string][]string{"cluster": {"cluster.vpn.example.com"}, "lab": {"lab.vpn.example.com", "v2.apps.vpn.example.com"}, "stray": {"other.example.org"}},
 		NodeNames:  func(n string) bool { return n == "web.cluster.vpn.example.com" },
 	}
 }
@@ -43,6 +43,7 @@ func TestCheckRefuses(t *testing.T) {
 		{"cluster", "a b.cluster.vpn.example.com", "space"},
 		{"cluster", "*.cluster.vpn.example.com", "wildcard"},
 		{"cluster", "", "empty"},
+		{"stray", "a.other.example.org", "a stored zone outside the base domain"},
 	} {
 		if _, err := pol().Check(tc.ns, tc.name); !errors.Is(err, ErrName) {
 			t.Errorf("Check(%s, %q) accepted (%s): %v", tc.ns, tc.name, tc.why, err)
@@ -61,8 +62,11 @@ func TestCheckRefuses(t *testing.T) {
 }
 
 func TestCheckSuffix(t *testing.T) {
-	if s, err := CheckSuffix("Cluster.", "vpn.example.com"); err != nil || s != "cluster" {
+	if s, err := CheckSuffix("Cluster.", "vpn.example.com"); err != nil || s != "cluster.vpn.example.com" {
 		t.Fatalf("%q %v", s, err)
+	}
+	if _, err := CheckSuffix("cluster", ""); !errors.Is(err, ErrName) {
+		t.Error("no base domain accepted")
 	}
 	for _, bad := range []string{"", "cluster.vpn.example.com", "vpn.example.com", "a_b", "-x"} {
 		if _, err := CheckSuffix(bad, "vpn.example.com"); !errors.Is(err, ErrName) {

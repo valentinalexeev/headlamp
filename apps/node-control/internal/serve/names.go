@@ -44,8 +44,9 @@ func validLabel(l string) bool {
 type Policy struct {
 	// BaseDomain is the headscale MagicDNS base_domain. Every name is under it.
 	BaseDomain string
-	// Suffixes maps a namespace to the suffixes (under BaseDomain, without it) its nodes may claim names in. A name
-	// must end in ".<suffix>.<base>". The suffix itself is not claimable, so one node cannot take a whole zone.
+	// Suffixes maps a namespace to the zones its nodes may claim names in, written in full ("cluster.<base>"), as the
+	// store keeps them. A name must end in ".<zone>". The zone itself is not claimable, so one node cannot take a
+	// whole zone.
 	Suffixes map[string][]string
 	// NodeNames reports whether a full name is a MagicDNS node name; such names are refused, so serve never
 	// shadows a node.
@@ -72,8 +73,8 @@ func (p Policy) Check(ns, name string) (string, error) {
 	}
 	ok := false
 	for _, s := range p.Suffixes[ns] {
-		zone := NormalizeName(s) + "." + base
-		if strings.HasSuffix(n, "."+zone) {
+		zone := NormalizeName(s)
+		if (zone == base || strings.HasSuffix(zone, "."+base)) && strings.HasSuffix(n, "."+zone) {
 			ok = true
 			break
 		}
@@ -87,15 +88,18 @@ func (p Policy) Check(ns, name string) (string, error) {
 	return n, nil
 }
 
-// CheckSuffix validates a suffix an admin adds to a namespace: one or more labels, not empty, written without the
-// base domain.
+// CheckSuffix validates a suffix an admin adds to a namespace, written without the base domain ("cluster" or
+// "v2.apps"), and returns the full zone the store keeps ("cluster.<base>").
 func CheckSuffix(s, base string) (string, error) {
 	n := NormalizeName(s)
 	b := NormalizeName(base)
+	if b == "" {
+		return "", refuse("no base domain configured")
+	}
 	if n == "" {
 		return "", refuse("empty suffix")
 	}
-	if b != "" && (n == b || strings.HasSuffix(n, "."+b)) {
+	if n == b || strings.HasSuffix(n, "."+b) {
 		return "", refuse("write the suffix without the base domain")
 	}
 	for _, l := range strings.Split(n, ".") {
@@ -103,7 +107,7 @@ func CheckSuffix(s, base string) (string, error) {
 			return "", refuse("%q is not a valid DNS suffix", s)
 		}
 	}
-	return n, nil
+	return n + "." + b, nil
 }
 
 // Record is one DNS answer published to headscale.

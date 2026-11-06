@@ -22,11 +22,10 @@
 	respond 404
 }
 
-# Optional, funnel-ingress: one wildcard per namespace, certificates by DNS-01 on Route 53. FUNNEL_DOMAIN is the
-# public domain, for example funnel.example.com; namespaces are *.pdl.funnel.example.com. Add one line per namespace.
+# Optional, funnel-ingress: one wildcard per namespace. Wildcards need DNS-01, so FUNNEL_DNS names the file in dns/
+# for your DNS provider (route53, cloudflare, rfc2136; default none). FUNNEL_DOMAIN is the public domain, for example
+# funnel.example.com; namespaces are *.pdl.funnel.example.com. Add one line per namespace.
 *.{$FUNNEL_DOMAIN:funnel.invalid} {
-	tls {
-		dns route53
-	}
+	import dns/{$FUNNEL_DNS:none}.caddy
 	reverse_proxy funnel-ingress:8080
 }

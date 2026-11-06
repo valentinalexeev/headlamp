@@ -18,7 +18,7 @@ DERP and the funnel wildcards, and no cloud certificate service is necessary.
 - A Linux host with Docker and the compose plugin, and a data directory that is not lost when you replace the host.
 - Public ports 443/tcp, 80/tcp and 3478/udp to the host. Port 80 is for ACME HTTP-01 and the redirect to HTTPS.
 - A DNS name for headscale, for example `headscale.example.com`, that points at the host or at the load balancer.
-- For `funnel-ingress` only: a public domain for funnel names, and DNS-01 access to its zone (Route 53 in this example).
+- For `funnel-ingress` only: a public domain for funnel names, and API access to its DNS zone (see below).
 
 ## Files
 
@@ -30,6 +30,7 @@ DERP and the funnel wildcards, and no cloud certificate service is necessary.
 | `config/node-control/` | Optional `nodes.json`, `enroll.json` and `admin.json`, mounted at `/srv/app` | yes, in your private repo |
 | `.env` | The image digests, the names and the data directory | no |
 | `node-control.env`, `funnel-ingress.env` | The secrets of each app | no |
+| `edge.env` | Optional: the DNS credentials of the edge, for funnel only | no |
 
 Copy this directory into your private repo. Make each `*.example` file into the file without `.example`, and fill it in.
 The `.gitignore` here keeps `.env` and the `*.env` files out of git.
@@ -79,23 +80,34 @@ The node-control console is on the tailnet only, at `http://node-control/`. It h
 
 ### The edge and its certificates
 
-The edge is a Caddy container. `caddy/Dockerfile` builds it from the official `caddy` image, with one plugin added:
-`caddy-dns/route53`. Caddy gets each certificate from Let's Encrypt with the ACME protocol, and renews it.
+The edge is a Caddy container. `caddy/Dockerfile` builds it from the official `caddy` image. It adds a DNS plugin
+only when you ask for one. Caddy gets each certificate from Let's Encrypt with the ACME protocol, and renews it.
 
 All names on the edge are public names on the internet. They are the headscale name, the enrolment name and the
 funnel names. Let's Encrypt checks each name in one of two ways:
 
 - HTTP-01, for a fixed name such as the headscale name. Let's Encrypt connects to the name on port 80. Caddy answers.
-  This needs only port 80 open and a public DNS record. Caddy uses it with no settings.
+  This needs only port 80 open and a public DNS record. It works on any host, in any cloud, with no plugin.
 - DNS-01, for a wildcard name such as `*.pdl.<FUNNEL_DOMAIN>`. Let's Encrypt does not accept HTTP-01 for a wildcard.
-  Caddy must write a TXT record in the public DNS zone of the name. The Route 53 plugin does this through the AWS API.
+  Caddy must write a TXT record in the public DNS zone of the name, through the API of your DNS provider.
 
-The plugin uses the standard AWS credential chain. On the AWS host, this is the instance role. The module gives the
-role change rights on the one zone in `route53_zone_id`, and on no other zone. You need DNS-01 only for funnel. If
-you do not use funnel, set no `route53_zone_id`.
+You need DNS-01 only for funnel. Without funnel, the edge is the plain Caddy image, and it needs no credentials.
 
-For a DNS provider that is not Route 53, replace the plugin in `caddy/Dockerfile` with the plugin for that provider.
-The Caddy documentation lists them. Then change `dns route53` in the funnel block of `caddy/Caddyfile`.
+For funnel, set these values in `.env` for the DNS provider of `FUNNEL_DOMAIN`:
+
+| DNS provider | `EDGE_DNS_PLUGINS` | `FUNNEL_DNS` | Credentials in `edge.env` |
+|---|---|---|---|
+| Route 53 | `github.com/caddy-dns/route53@v1.6.0` | `route53` | none on the AWS host (the instance role); else `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| Cloudflare | `github.com/caddy-dns/cloudflare@v0.2.1` | `cloudflare` | `CLOUDFLARE_API_TOKEN` |
+| Your own DNS server (BIND, PowerDNS, Knot) | `github.com/caddy-dns/rfc2136@v1.0.0` | `rfc2136` | `RFC2136_KEY_NAME`, `RFC2136_KEY_ALG`, `RFC2136_KEY`, `RFC2136_SERVER` |
+
+Then run `docker compose build edge`. Each value of `FUNNEL_DNS` is a file in `caddy/dns/`. For another provider,
+add its plugin to `EDGE_DNS_PLUGINS` and copy one of those files. The Caddy documentation lists the plugins.
+
+**WARNING:** Give the credentials the right to change the one zone of `FUNNEL_DOMAIN` only. A key that can change
+other zones can also take the certificates of other names.
+
+On AWS, the module gives the instance role change rights on the one zone in `route53_zone_id`.
 
 **NOTE:** The edge does not serve the tailnet-only names of serve (#117). Those names are not on the public internet,
 so Let's Encrypt cannot check them. node-control signs their certificates with the serve CA.

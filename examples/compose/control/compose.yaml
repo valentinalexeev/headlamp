@@ -5,8 +5,11 @@ name: headlamp
 
 services:
   edge:
-    # Caddy with the Route 53 DNS plugin, for wildcard certificates (funnel). Built from caddy/Dockerfile.
-    build: ./caddy
+    # The official Caddy image, plus a DNS plugin for funnel wildcards when EDGE_DNS_PLUGINS names one.
+    build:
+      context: ./caddy
+      args:
+        DNS_PLUGINS: ${EDGE_DNS_PLUGINS:-}
     image: headlamp-edge:local
     restart: unless-stopped
     ports:
@@ -19,8 +22,14 @@ services:
       ENROLL_DOMAIN: ${ENROLL_DOMAIN:-enroll.invalid}
       FUNNEL_DOMAIN: ${FUNNEL_DOMAIN:-funnel.invalid}
       CADDY_ACME_CA: ${CADDY_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      FUNNEL_DNS: ${FUNNEL_DNS:-none}
+    # Credentials of the DNS provider, for funnel wildcards only (see caddy/dns/). Optional.
+    env_file:
+      - path: ./edge.env
+        required: false
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/dns:/etc/caddy/dns:ro
       - ${DATA_DIR:-/srv/headlamp/data}/caddy:/data
     depends_on:
       headscale:

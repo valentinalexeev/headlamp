@@ -56,17 +56,19 @@ EDGE_SUBNET=172.30.77.0/24
 EOF
 : > "$T/app/node-control.env"
 
-# The test differs from production only here: the edge uses Caddy's internal CA, the local images, and every
+# The test differs from production only here: the edge (the default build, no DNS plugin) uses Caddy's internal CA,
+# the images are local, and every
 # container resolves the public name to the edge, as DNS would.
 cat > "$T/override.yaml" <<EOF
 services:
   edge:
     build: !reset null
-    image: caddy:2.10
+    image: hl-compose-edge-none:local
     ports: !override
       - "127.0.0.1::443"
     volumes: !override
       - ./Caddyfile.test:/etc/caddy/Caddyfile:ro
+      - ./caddy/dns:/etc/caddy/dns:ro
       - $T/data/caddy:/data
     networks:
       default:
@@ -81,21 +83,27 @@ services:
       - $T/ca:/ca:ro
 EOF
 mkdir -p "$T/ca"
-# the production Caddyfile with the ACME issuer swapped for the internal CA (the global options block only), and
-# without the funnel wildcard block (it needs DNS-01; build_edge below checks that the plugin builds)
+# the production Caddyfile with the ACME issuer swapped for the internal CA (the global options block only). The
+# funnel block stays: with the default FUNNEL_DNS=none it runs on the plain image.
 awk '/^\{$/ && !done { print; print "\tlocal_certs"; skip = 1; next } skip && /^\}$/ { skip = 0; done = 1 } !skip { print }' \
-  "$src/caddy/Caddyfile" | awk '/^\*\./ { drop = 1 } !drop { print } drop && /^\}$/ { drop = 0 }' > "$T/app/Caddyfile.test"
+  "$src/caddy/Caddyfile" > "$T/app/Caddyfile.test"
 
 echo "# building images"
 tmo 600 docker build -q -t hl-compose-headscale:local "$root/apps/headscale" >/dev/null || die "headscale image"
 tmo 600 docker build -q -t hl-compose-node-control:local "$root/apps/node-control" >/dev/null || die "node-control image"
 docker image inspect "$ts_image" >/dev/null 2>&1 || tmo 300 docker pull -q "$ts_image" >/dev/null || die "pull $ts_image"
-# the production edge image (Caddy with the Route 53 plugin) builds, and its Caddyfile, funnel block included, is valid
-if tmo 900 docker build -q -t hl-compose-edge:local "$src/caddy" >/dev/null 2>&1 && \
-   docker run --rm -e HEADSCALE_DOMAIN=h.example.test -e ACME_EMAIL=a@example.test -e FUNNEL_DOMAIN=f.example.test \
-     -v "$src/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" hl-compose-edge:local caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
-  ok "the edge image builds with the Route 53 plugin and the Caddyfile is valid"
-else nok "the edge image builds with the Route 53 plugin and the Caddyfile is valid"; fi
+# The production edge image: the default build (no plugin) and each documented DNS provider build, each with the
+# full Caddyfile (funnel block included) for its FUNNEL_DNS value.
+for v in "none|" "route53|github.com/caddy-dns/route53@v1.6.0" "rfc2136|github.com/caddy-dns/rfc2136@v1.0.0"; do
+  dns=${v%%|*}; mods=${v#*|}
+  if tmo 900 docker build -q --build-arg DNS_PLUGINS="$mods" -t "hl-compose-edge-$dns:local" "$src/caddy" >/dev/null 2>&1 && \
+     docker run --rm -e HEADSCALE_DOMAIN=h.example.test -e ACME_EMAIL=a@example.test -e FUNNEL_DOMAIN=f.example.test \
+       -e FUNNEL_DNS="$dns" -e RFC2136_KEY_NAME=k -e RFC2136_KEY_ALG=hmac-sha256 -e RFC2136_KEY=YQ== -e RFC2136_SERVER=192.0.2.1:53 \
+       -v "$src/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$src/caddy/dns:/etc/caddy/dns:ro" \
+       "hl-compose-edge-$dns:local" caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+    ok "the edge builds and validates with FUNNEL_DNS=$dns"
+  else nok "the edge builds and validates with FUNNEL_DNS=$dns"; fi
+done
 
 dc config -q || die "compose config"
 ok "compose.yaml is valid with the example settings"

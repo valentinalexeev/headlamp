@@ -131,6 +131,17 @@ var Routes = map[string]Rule{
 	"DELETE /funnel/blocks/{ns}/{service}": need(FeatureFunnel, LevelAdmin),
 	"GET /ingress/v1/config":               machine,
 	"POST /ingress/v1/state":               machine,
+
+	// serve (#117)
+	"GET /serve/state":                need(FeatureServe, LevelView),
+	"PUT /serve/namespaces/{name}":    need(FeatureServe, LevelAdmin),
+	"DELETE /serve/namespaces/{name}": need(FeatureServe, LevelAdmin),
+	"DELETE /serve/names/{name}":      need(FeatureServe, LevelAdmin),
+	"GET /serve/ca.crt":               open, // public: users install it
+	"POST /serve/v1/register":         machine,
+	"DELETE /serve/v1/names/{name}":   machine,
+	"GET /serve/v1/records":           machine,
+	"POST /serve/v1/state":            machine,
 }
 
 // Authorizer is the core.Authorizer of the admin listener. Open is the transition mode of #122 decision 3: when

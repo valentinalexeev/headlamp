@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -118,11 +117,6 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 	}
 
 	admin := NewMux()
-	admin.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
-
 	routes := &Routes{Admin: admin, Public: public, Env: env, Tailnet: tn, Log: log}
 
 	// Stop runs on every return path from here on, after the servers are
@@ -146,15 +140,10 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet) error {
 	}
 
 	// Only modules that registered contribute entries; a disabled module reports none.
-	navItems, err := CollectNav(mods)
+	navItems, navActions, err := RegisterCoreRoutes(admin, mods, tn)
 	if err != nil {
 		return err
 	}
-	navActions, err := CollectActions(mods)
-	if err != nil {
-		return err
-	}
-	registerAttention(admin, mods, navItems, tn)
 
 	// Modules start before any listener exists, so no request can reach a
 	// module that has not started. A failed Start leaves nothing open.

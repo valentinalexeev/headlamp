@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -60,6 +61,25 @@ func (m *Mux) Patterns() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// RegisterCoreRoutes adds the routes the core owns (health, attention, activity, search) after every module has
+// registered, and returns the collected navigation. Run calls it; a test can call it to see the full route set.
+func RegisterCoreRoutes(admin *Mux, mods []Module, tn Tailnet) ([]NavItem, []NavAction, error) {
+	admin.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	navItems, err := CollectNav(mods)
+	if err != nil {
+		return nil, nil, err
+	}
+	navActions, err := CollectActions(mods)
+	if err != nil {
+		return nil, nil, err
+	}
+	registerAttention(admin, mods, navItems, tn)
+	return navItems, navActions, nil
 }
 
 // Seal puts every route behind a. It fails, listing them, if any route has no permission.

@@ -1,0 +1,84 @@
+# headlamp central nodes on one host (#41): headscale, node-control and, optionally, funnel-ingress, behind a Caddy
+# TLS edge. Copy this directory to your private repo, fill in .env and config/, and run `docker compose up -d`.
+# See README.md for the full procedure.
+name: headlamp
+
+services:
+  edge:
+    # Caddy with the Route 53 DNS plugin, for wildcard certificates (funnel). Built from caddy/Dockerfile.
+    build: ./caddy
+    image: headlamp-edge:local
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      HEADSCALE_DOMAIN: ${HEADSCALE_DOMAIN:?set HEADSCALE_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      # An unused name stays on a reserved .invalid name: Caddy never gets a certificate for it.
+      ENROLL_DOMAIN: ${ENROLL_DOMAIN:-enroll.invalid}
+      FUNNEL_DOMAIN: ${FUNNEL_DOMAIN:-funnel.invalid}
+      CADDY_ACME_CA: ${CADDY_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${DATA_DIR:-/srv/headlamp/data}/caddy:/data
+    depends_on:
+      headscale:
+        condition: service_healthy
+
+  headscale:
+    image: ${HEADSCALE_IMAGE:?pin ghcr.io/valentinalexeev/headlamp/headscale:<version>@sha256:<digest> in .env}
+    restart: unless-stopped
+    command: ["headscale", "serve"]
+    environment:
+      HEADSCALE_CONFIG: /config/headscale.yaml
+      HEADSCALE_POLICY_PATH: /config/acl.json
+    ports:
+      # STUN for the embedded DERP server. TCP for DERP goes through the edge on 443.
+      - "3478:3478/udp"
+    volumes:
+      - ./config/headscale.yaml:/config/headscale.yaml:ro
+      - ./config/acl.json:/config/acl.json:ro
+      - ${DATA_DIR:-/srv/headlamp/data}/headscale:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+
+  node-control:
+    image: ${NODE_CONTROL_IMAGE:?pin ghcr.io/valentinalexeev/headlamp/node-control:<version>@sha256:<digest> in .env}
+    restart: unless-stopped
+    env_file: ./node-control.env
+    environment:
+      # headscale on the compose network: no public round trip, and the control URL nodes see stays the public one
+      HEADSCALE_LOGIN_SERVER: https://${HEADSCALE_DOMAIN}
+    volumes:
+      - ${DATA_DIR:-/srv/headlamp/data}/node-control:/var/lib/tailscale
+      - ./config/node-control:/srv/app:ro
+    depends_on:
+      headscale:
+        condition: service_healthy
+
+  funnel-ingress:
+    # Optional: public names for tailnet services. Start it with `docker compose --profile funnel up -d`.
+    profiles: ["funnel"]
+    image: ${FUNNEL_INGRESS_IMAGE:-ghcr.io/valentinalexeev/headlamp/funnel-ingress:pin-me}
+    restart: unless-stopped
+    env_file: ./funnel-ingress.env
+    environment:
+      FUNNEL_CONTROL_URL: https://${HEADSCALE_DOMAIN}
+      # The edge is the only peer that may set the client address.
+      FUNNEL_CLIENT_IP_HEADER: X-Forwarded-For
+      FUNNEL_TRUSTED_PROXIES: ${EDGE_SUBNET:-172.30.0.0/24}
+    volumes:
+      - ${DATA_DIR:-/srv/headlamp/data}/funnel-ingress:/var/lib/tailscale
+    depends_on:
+      headscale:
+        condition: service_healthy
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-172.30.0.0/24}

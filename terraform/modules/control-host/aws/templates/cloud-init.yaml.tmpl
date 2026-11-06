@@ -1,0 +1,37 @@
+#cloud-config
+# Installs Docker with the compose plugin, and mounts the EBS data volume at /srv/headlamp/data. The volume is
+# formatted only when it has no file system, so a replaced instance keeps the tailnet.
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+write_files:
+  - path: /usr/local/sbin/headlamp-mount-data
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      # Nitro instances show EBS volumes as NVMe devices whose serial is the volume id without the dash.
+      id=$(echo "${volume_id}" | tr -d -)
+      dev=""
+      i=0
+      while [ $i -lt 60 ]; do
+        dev=$(ls /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${id} 2>/dev/null || ls /dev/xvdf /dev/sdf 2>/dev/null || true)
+        [ -n "$dev" ] && break
+        i=$((i + 1)); sleep 5
+      done
+      [ -n "$dev" ] || { echo "data volume ${volume_id} is not attached" >&2; exit 1; }
+      blkid "$dev" >/dev/null 2>&1 || mkfs.ext4 -L headlamp-data "$dev"
+      mkdir -p /srv/headlamp/data
+      grep -q 'LABEL=headlamp-data' /etc/fstab || echo 'LABEL=headlamp-data /srv/headlamp/data ext4 defaults,nofail 0 2' >> /etc/fstab
+      mountpoint -q /srv/headlamp/data || mount /srv/headlamp/data
+runcmd:
+  - /usr/local/sbin/headlamp-mount-data
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list'
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - systemctl enable --now docker
+  - |
+    ${indent(4, user_data_extra)}

@@ -1,0 +1,30 @@
+# TLS edge of the central host. The load balancer passes TCP through and keeps the client address, so TLS ends here
+# and the peer address is the client.
+{
+	email {$ACME_EMAIL}
+	acme_ca {$CADDY_ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+}
+
+# headscale: the control API, the noise protocol and DERP over HTTPS (all on one name).
+{$HEADSCALE_DOMAIN} {
+	reverse_proxy headscale:8080
+}
+
+# Optional, the public enrolment links of node-control (/e/<token>, /sub/<secret>). Remove the block if you do not
+# use enrolment, or if a bridge serves the link host (see the node-control README, "Enrolment").
+{$ENROLL_DOMAIN:enroll.invalid} {
+	@public path /e/* /sub/*
+	handle @public {
+		reverse_proxy node-control:8081
+	}
+	respond 404
+}
+
+# Optional, funnel-ingress: one wildcard per namespace, certificates by DNS-01 on Route 53. FUNNEL_DOMAIN is the
+# public domain, for example funnel.example.com; namespaces are *.pdl.funnel.example.com. Add one line per namespace.
+*.{$FUNNEL_DOMAIN:funnel.invalid} {
+	tls {
+		dns route53
+	}
+	reverse_proxy funnel-ingress:8080
+}

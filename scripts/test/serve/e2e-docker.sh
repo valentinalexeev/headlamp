@@ -174,6 +174,17 @@ else ok "x.y.apps.$zone does not verify: a wildcard certificate covers one label
 if docker exec "$cl" curl -fsS --max-time 10 "https://grafana.$zone/" >/dev/null 2>&1; then nok "without the serve CA the name must not verify"
 else ok "without the serve CA the name does not verify"; fi
 
+# acceptance (#117): reachable from the tailnet only. A container on the same network that is not on the tailnet
+# reaches neither the sidecar's TLS port nor node-control's DNS: both listen inside tsnet, not on the container.
+outsider() { dk run --rm --network "$net" python:3.13-alpine sh -c "$1" >/dev/null 2>&1; }
+# control: the outsider does reach a plain port on the same network, so a refusal below means "not on the tailnet"
+outsider "python3 -c \"import socket;socket.create_connection(('$be2',3000),3)\"" || die "the outsider probe cannot reach the backend (control)"
+if outsider "python3 -c \"import socket;socket.create_connection(('$sc2',443),3)\""; then nok "the sidecar's port 443 must not be reachable off the tailnet"
+else ok "off the tailnet, the sidecar's port 443 is not reachable"; fi
+if outsider "python3 -c \"import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3);s.sendto(bytes.fromhex('12340100000100000000000007677261666166610373766303653265076578616d706c650000010001'),('$nc',53));s.recv(512)\""; then
+  nok "node-control must not answer DNS off the tailnet"
+else ok "off the tailnet, node-control does not answer DNS"; fi
+
 echo "# replicas and deletion"
 sidecar "serve-e2e-sc3-$sfx" "$gk" grafana "$be1"
 wait_for 60 sh -c "docker exec $cl dig +short @100.100.100.100 grafana.$zone A | grep -c . | grep -qx 2" && ok "a second replica on the grafana key: the name answers both" || nok "two replicas ($(docker exec "$cl" dig +short @100.100.100.100 "grafana.$zone" A | tr '\n' ' '))"

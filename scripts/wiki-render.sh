@@ -4,8 +4,8 @@
 # usage: wiki-render.sh OUT_DIR REPO [REF]     (REPO is owner/name, REF defaults to main)
 # Pages:
 #   README.md -> Home, VERSIONING.md, CHANGELOG.md -> same name, docs/<name>.md -> <name>
-#   <dir>/README.md (an app, role or module manual) -> <dir> with "/" replaced by "-", without a leading "apps-fly-",
-#   "apps-" or "ansible-roles-" (apps/fly/funnel-ingress/README.md -> funnel-ingress,
+#   <dir>/README.md (an app, role or module manual) -> <dir> with "/" replaced by "-", without a leading "apps-" or
+#   "ansible-roles-" (apps/funnel-ingress/README.md -> funnel-ingress,
 #   ansible/roles/task-runner/README.md -> role-task-runner, terraform/modules/exit-node-vm/oci/README.md ->
 #   terraform-exit-node-vm-oci). Test fixtures are left out.
 # A _Sidebar page lists every page. Links to another published page become wiki links; any other relative link points
@@ -33,7 +33,7 @@ def page(s):
         return "Home"
     if os.path.basename(s) == "README.md":
         d = os.path.dirname(s)
-        for prefix, repl in (("apps/fly/", ""), ("apps/", ""), ("ansible/roles/", "role-"), ("terraform/modules/", "terraform-")):
+        for prefix, repl in (("apps/", ""), ("ansible/roles/", "role-"), ("terraform/modules/", "terraform-")):
             if d.startswith(prefix):
                 d = repl + d[len(prefix):]
                 break

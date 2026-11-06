@@ -2,7 +2,7 @@
 # Tests for the route approver's error reporting and the rotation script's argument handling (no network: curl is stubbed).
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"; root="$here/../../.."
-approve="$root/apps/fly/headscale/approve-gateway-routes.sh"; rotate="$root/scripts/rotate-headscale-api-key.sh"
+approve="$root/apps/headscale/approve-gateway-routes.sh"; rotate="$root/scripts/rotate-headscale-api-key.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fails=0
 ok()   { echo "ok   - $1"; }

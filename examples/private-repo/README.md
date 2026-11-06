@@ -18,6 +18,6 @@ fly/node-control/tasks/       placeholder task config and a commented task scrip
 ```
 
 `fly/node-control/tasks/` is only an example. It shows how to keep your scheduled-task config and scripts in git.
-Push them with `scripts/tasks.sh` (see "Tasks module" in `apps/fly/node-control/README.md`).
+Push them with `scripts/tasks.sh` (see "Tasks module" in `apps/node-control/README.md`).
 node-control never reads git. The node-control image does not copy this directory, so the overlay deploy ships nothing from it.
 Rename `tasks.example.json` to `tasks.json`. Rename the script to the name that the `script` field of your task uses.

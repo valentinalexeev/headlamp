@@ -31,7 +31,7 @@ set -eu
 
 NAME_RE='\\A[A-Za-z0-9._-]{1,64}\\z'
 # The server's problem for a secret that is not stored yet. Keep in step with TestUnknownSecretProblemWordingMatchesCLI
-# in apps/fly/node-control/internal/tasks/api_test.go, which pins the wording.
+# in apps/node-control/internal/tasks/api_test.go, which pins the wording.
 MISSING_SECRET_RE='^task .*: secret ([A-Za-z0-9_]+) is not stored'
 
 say() { printf '%s\n' "$*" >&2; }

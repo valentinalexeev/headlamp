@@ -42,7 +42,7 @@ check-manuals:
 	@./scripts/list-manuals.sh $(BASE) | xargs ./scripts/check-manual-style.py
 
 test-node-control:
-	cd apps/fly/node-control && go vet ./... && go test -race -count=1 ./...
+	cd apps/node-control && go vet ./... && go test -race -count=1 ./...
 
 # on demand: needs docker and a headscale image (see the script)
 test-headscale-policy-e2e:
@@ -54,9 +54,9 @@ check-statestore-port:
 
 lint:
 	shellcheck -S error -x scripts/*.sh scripts/test/tf-run/run_tests.sh scripts/test/check-denylist/run_tests.sh \
-	  scripts/test/exit-node-state/run_tests.sh scripts/test/runtime-config/run_tests.sh scripts/test/headscale-policy/run.sh scripts/test/headscale-policy/e2e-docker.sh apps/fly/exit-ams/*.sh \
+	  scripts/test/exit-node-state/run_tests.sh scripts/test/runtime-config/run_tests.sh scripts/test/headscale-policy/run.sh scripts/test/headscale-policy/e2e-docker.sh apps/exit-node/*.sh \
 	  scripts/tasks.sh scripts/test/tasks/run.sh \
 	  scripts/headscale-tag-node.sh scripts/test/headscale-tag-node/run.sh \
 	  .githooks/pre-commit .githooks/commit-msg \
-	  apps/tailguard/*.sh apps/fly/headscale/*.sh
+	  apps/tailguard/*.sh apps/headscale/*.sh
 	-./scripts/check-statestore-port.sh

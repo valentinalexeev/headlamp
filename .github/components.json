@@ -1,41 +1,41 @@
 [
   {
     "image": "node-control",
-    "context": "apps/fly/node-control",
+    "context": "apps/node-control",
     "dockerfile": "Dockerfile",
-    "paths": ["apps/fly/node-control"],
+    "paths": ["apps/node-control"],
     "go": true,
     "test": "make test-node-control"
   },
   {
     "image": "funnel-ingress",
-    "context": "apps/fly/funnel-ingress",
+    "context": "apps/funnel-ingress",
     "dockerfile": "Dockerfile",
-    "paths": ["apps/fly/funnel-ingress"],
+    "paths": ["apps/funnel-ingress"],
     "go": true,
-    "test": "cd apps/fly/funnel-ingress && go vet ./... && go test -count=1 ./..."
+    "test": "cd apps/funnel-ingress && go vet ./... && go test -count=1 ./..."
   },
   {
     "image": "funnel-sidecar",
-    "context": "apps/fly/funnel-ingress",
+    "context": "apps/funnel-ingress",
     "dockerfile": "Dockerfile.sidecar",
-    "paths": ["apps/fly/funnel-ingress"],
+    "paths": ["apps/funnel-ingress"],
     "platforms": "linux/amd64,linux/arm64",
     "go": true,
-    "test": "cd apps/fly/funnel-ingress && go vet ./... && go test -count=1 ./..."
+    "test": "cd apps/funnel-ingress && go vet ./... && go test -count=1 ./..."
   },
   {
     "image": "headscale",
-    "context": "apps/fly/headscale",
+    "context": "apps/headscale",
     "dockerfile": "Dockerfile",
-    "paths": ["apps/fly/headscale"],
+    "paths": ["apps/headscale"],
     "test": "make test-headscale-policy && make test-runtime-config IMAGE=headscale"
   },
   {
     "image": "exit-node",
-    "context": "apps/fly/exit-ams",
+    "context": "apps/exit-node",
     "dockerfile": "Dockerfile",
-    "paths": ["apps/fly/exit-ams", "TAILSCALE_VERSION"],
+    "paths": ["apps/exit-node", "TAILSCALE_VERSION"],
     "args_from_files": {"TSVERSION": "TAILSCALE_VERSION"},
     "test": "make test-exit-node-state && make test-runtime-config IMAGE=exit-node"
   },

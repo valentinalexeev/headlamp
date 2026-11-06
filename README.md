@@ -2,15 +2,15 @@
 
 Infrastructure code for a self-hosted, Tailscale-compatible network:
 
-- **headscale** control server on Fly.io (`apps/fly/headscale`)
-- **exit nodes**: a Fly machine (`apps/fly/exit-ams`) and VM-based nodes on Yandex Cloud, Oracle
-  Cloud, AWS, Cloud.ru or Selectel. The directory `terraform/modules/exit-node-vm` creates the VM nodes. The Ansible roles in `ansible/` configure them.
+- **headscale** control server (`apps/headscale`)
+- **exit nodes**: a container image (`apps/exit-node`) and VM-based nodes on Yandex Cloud, Oracle
+  Cloud, AWS, Cloud.ru or OpenStack clouds such as Selectel. The directory `terraform/modules/exit-node-vm` creates the VM nodes. The Ansible roles in `ansible/` configure them.
 - **split-tunnel route provisioning**: nodes advertise routes for chosen ASNs/hostnames so those
   services leave from a chosen country (`ansible/roles/route-provisioner`)
-- **node-control** (`apps/fly/node-control`): a small web UI, only on the tailnet, to start and stop the VM nodes.
+- **node-control** (`apps/node-control`): a small web UI, only on the tailnet, to start and stop the VM nodes.
   It can also schedule browser-script checks. These run on a node through **task-runner** (`apps/task-runner`,
   `ansible/roles/task-runner`).
-- **funnel-ingress**: publishes tailnet services under stable public names, Funnel-style (`apps/fly/funnel-ingress`)
+- **funnel-ingress**: publishes tailnet services under stable public names, Funnel-style (`apps/funnel-ingress`)
 - **tailguard** (`apps/tailguard`): a WireGuard server that sends its traffic out through a tailnet exit node.
   A plain-WireGuard device, for example a home router, can then use your exit nodes.
   It has a watchdog sidecar and a sidecar that follows the exit node.
@@ -29,7 +29,8 @@ bootstrap guide. [`examples/private-repo/`](examples/private-repo/) is the skele
 
 ## Images and releases
 
-CI publishes the components that run as containers to GHCR. [`docs/images.md`](docs/images.md) explains what each image does and how they fit together, and [`VERSIONING.md`](VERSIONING.md) covers tags and release rules.
+CI publishes the components that run as containers to GHCR. They run on any container host. Fly.io is the reference
+platform, with a `fly.toml` per app and an overlay deploy in `examples/private-repo/`. [`docs/images.md`](docs/images.md) explains what each image does, how they fit together and what each needs from its host, and [`VERSIONING.md`](VERSIONING.md) covers tags and release rules.
 
 ## Terraform state workflow
 

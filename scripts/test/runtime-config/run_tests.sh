@@ -16,10 +16,10 @@ chmod 755 "$tmp"
 
 headscale_tests() {
 	local img=headlamp-test/headscale
-	docker build -q -t "$img" "$root/apps/fly/headscale" >/dev/null || { fail "headscale: image builds"; return; }
+	docker build -q -t "$img" "$root/apps/headscale" >/dev/null || { fail "headscale: image builds"; return; }
 	# A mounted config that differs from the placeholder in a way configtest reports: its own policy path.
 	sed -e 's#/etc/headscale/acl.json#/config/policy.json#' -e 's#/data/#/tmp/#g' \
-		"$root/apps/fly/headscale/headscale.yaml" >"$tmp/headscale.yaml"
+		"$root/apps/headscale/headscale.yaml" >"$tmp/headscale.yaml"
 	printf '{"tagOwners": {"tag:example": ["admin@"]}}\n' >"$tmp/policy.json"
 	chmod 644 "$tmp"/*
 
@@ -46,7 +46,7 @@ headscale_tests() {
 
 exit_node_tests() {
 	local img=headlamp-test/exit-node
-	docker build -q --build-arg TSVERSION="$(cat "$root/TAILSCALE_VERSION")" -t "$img" "$root/apps/fly/exit-ams" >/dev/null ||
+	docker build -q --build-arg TSVERSION="$(cat "$root/TAILSCALE_VERSION")" -t "$img" "$root/apps/exit-node" >/dev/null ||
 		{ fail "exit-node: image builds"; return; }
 	printf 'mounted.example.com\n' >"$tmp/direct-hosts.txt"
 	chmod 644 "$tmp/direct-hosts.txt"

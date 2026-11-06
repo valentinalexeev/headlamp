@@ -30,4 +30,4 @@ bump-tailscale-version:
 	@echo "$(VERSION)" > TAILSCALE_VERSION
 	cd ansible && ansible-playbook ../$(H)/ansible/playbooks/bump-tailscale-version.yml -i inventory/hosts.yml --extra-vars "tailscale_version=$(VERSION)"
 	@echo "VM exit nodes updated to $(VERSION). Now redeploy the Fly exit node, e.g.:"
-	@echo "  fly/deploy.sh exit-ams --build-arg TSVERSION=$(VERSION)"
+	@echo "  fly/deploy.sh exit-node --build-arg TSVERSION=$(VERSION)"

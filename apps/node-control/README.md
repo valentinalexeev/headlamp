@@ -793,6 +793,112 @@ The ingress reaches two machine endpoints on the admin listener: `GET /ingress/v
 
 > **WARNING:** Do not use `FUNNEL_TAG_OWNERS` to control who can mint keys. Headscale does not check tag ownership when a key is created or used. The controls are the fixed tags and the user gate.
 
+## Serve module (optional)
+
+Serve (#117) gives tailnet-only names, with HTTPS, to services that run behind a proxy. An example is a Kubernetes
+pod with `funnel-sidecar` in serve mode. The names are not on the public internet. Only devices on the tailnet can
+resolve and reach them. It is the headlamp equivalent of `tailscale serve`.
+
+### How it works
+
+- A **service** is one name in the serve zone. It can be an exact name, `grafana.svc.example.com`. It can also be a
+  wildcard, `*.apps.svc.example.com`, for an ingress controller behind one proxy.
+- Each service has a **reusable ephemeral pre-auth key**. node-control creates the key in headscale, with the tags
+  `tag:serve` and `tag:ns-<namespace>`. Every proxy of the service joins the tailnet with that key.
+- node-control knows the service of a node from the key that the node joined with. The node sends no name. Thus a
+  proxy can get a certificate and a DNS name only for its own service.
+- **DNS:** headscale sends the serve zone to node-control (`dns.nameservers.split`). node-control answers on port 53
+  of its tailnet address. A name answers the addresses of the online nodes of its service, so it follows the replicas.
+- **HTTPS:** node-control signs a certificate for the name of the service. It uses your CA, or a self-signed CA. The
+  proxy makes its own key, and the key never leaves the proxy.
+
+### Environment
+
+| Variable | Meaning |
+|---|---|
+| `SERVE_DB` | The path of the SQLite database. It turns serve on. Put it on the state volume. |
+| `SERVE_ZONE` | The DNS zone that node-control answers, for example `svc.example.com` (required). See "The zone". |
+| `SERVE_BASE_DOMAIN` | The headscale MagicDNS `base_domain` (required). Serve checks that the zone is outside it. |
+| `SERVE_USER` | The headscale user, name or id, that owns the service keys (required). |
+| `SERVE_KEY_TTL` | The life of a service key. The default is `2160h` (90 days). Rotate before it ends. |
+| `SERVE_CERT_TTL` | The life of a certificate. The default is `720h` (30 days). The maximum is `2160h`. |
+| `SERVE_DNS_REFRESH` | How often the answers follow the nodes. The default is `15s`. |
+| `SERVE_NODE_TAG`, `SERVE_NS_TAG_PREFIX` | The tags on the service keys. The defaults are `tag:serve` and `tag:ns-`. |
+| `SERVE_CA_CERT`, `SERVE_CA_KEY` | Optional: your CA or intermediate, in PEM. Without them, serve makes a self-signed CA. |
+| `NODE_CONTROL_STATE_KEY` | Required for a self-signed CA. It encrypts the CA key in the database. |
+| `SERVE_DNS` | `off` turns off the DNS listener (for tests). |
+
+**WARNING:** Without `SERVE_CA_*` and without `NODE_CONTROL_STATE_KEY`, serve does not start. It never keeps a CA key
+in clear.
+
+### The zone
+
+Tailnet devices answer every name under the MagicDNS `base_domain` themselves. They do not send those names to a
+split resolver. Thus the serve zone must be outside the base domain, and serve does not start otherwise.
+
+- Use a zone in a domain that you own, for example `svc.example.com` next to `tailnet.example.com`. The zone needs no
+  public DNS records, because only tailnet devices send queries for it to node-control.
+- Do not use a name that is on the public internet. A device asks node-control only while it is on the tailnet.
+
+Set the split in `headscale.yaml` one time. The address is the tailnet IPv4 address of node-control:
+
+```yaml
+dns:
+  nameservers:
+    split:
+      svc.example.com:
+        - 100.64.0.1
+```
+
+Get the address with `headscale nodes list`. node-control keeps it while its state volume stays.
+
+### Add a service
+
+1. Open the API on the tailnet, as a user with `serve.admin`:
+
+   ```sh
+   curl -X POST http://node-control/serve/services -H 'Content-Type: application/json' \
+     -d '{"name": "grafana", "namespace": "mon"}'
+   ```
+
+2. Copy `auth_key` from the answer into the secret of the proxy. node-control shows the key one time only.
+3. Start the proxy with that key (see "Serve mode" in the funnel-ingress README).
+
+A name without the zone gets the zone added: `grafana` becomes `grafana.svc.example.com`. For an ingress
+controller, use `*.apps`: the controller then serves `<anything>.apps.svc.example.com`. A wildcard certificate covers
+one label only, so `a.apps` verifies and `a.b.apps` does not.
+
+### Rotate a key
+
+1. Add a key: `POST /serve/services/<id>/keys`. The service now has two keys, and nodes on either key belong to it.
+2. Put the new key into the secret of the proxies, and restart them.
+3. Retire the old key: `DELETE /serve/services/<id>/keys/<key id>`. headscale expires it. Nodes on it leave the DNS
+   answers and get no new certificate.
+
+A service has two keys at most.
+
+### Remove a service
+
+`DELETE /serve/services/<id>` expires its keys in headscale and removes the name from DNS. A proxy that is still
+running keeps its tailnet identity until it stops, because the key is ephemeral. It gets no new certificate.
+
+### Trust the CA
+
+Give users `http://node-control/serve/ca.crt`. Each device must trust it once (the system store, or the browser).
+`GET /serve/state` shows the fingerprint of the CA, so a user can check the file.
+
+### API
+
+| Route | Permission | What it does |
+|---|---|---|
+| `GET /serve/state` | `serve.view` | The zone, the CA fingerprint, each service with its keys and nodes |
+| `POST /serve/services` | `serve.admin` | Add a service. The answer holds the auth key, one time. |
+| `DELETE /serve/services/{id}` | `serve.admin` | Remove a service and expire its keys |
+| `POST /serve/services/{id}/keys` | `serve.admin` | Add a key (rotation) |
+| `DELETE /serve/services/{id}/keys/{key}` | `serve.admin` | Retire a key |
+| `GET /serve/ca.crt` | none | The CA certificate |
+| `POST /serve/v1/cert` | a node with `tag:serve` | Sign the node's CSR for the name of its service |
+
 ## Tasks module (optional)
 
 The module gives scheduled checks that drive a browser script on one of your nodes, with retries, alerts and observability. A task names a script, a node (or a set of tags), a schedule and what to do with the result.

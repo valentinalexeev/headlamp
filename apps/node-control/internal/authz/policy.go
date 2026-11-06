@@ -239,6 +239,15 @@ func (p *Policy) AddLegacy(f Feature, logins Allowed) {
 	}
 }
 
+// AddOwners grants the built-in owner role to each login (ADMIN_USERS).
+func (p *Policy) AddOwners(logins Allowed) {
+	for sub := range logins.set {
+		if !slices.Contains(p.grants[sub], "owner") {
+			p.grants[sub] = append(p.grants[sub], "owner")
+		}
+	}
+}
+
 // Subject is who is asking: a tailnet login and, with OIDC, the groups of the session.
 type Subject struct {
 	Login  string

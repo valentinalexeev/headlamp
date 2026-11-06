@@ -164,6 +164,13 @@ func main() {
 	defer stop()
 
 	env := core.OSEnv()
+	// The admin policy is installed before the modules register, so their start checks and gates see it.
+	pol, err := buildPolicy(env)
+	if err != nil {
+		slog.Error("node-control cannot start", "err", err)
+		os.Exit(1)
+	}
+	authz.SetDefault(pol)
 	mods, err := buildModules(env, &http.Client{Timeout: 30 * time.Second})
 	if err != nil {
 		slog.Error("node-control cannot start", "err", err)
@@ -187,7 +194,7 @@ func main() {
 		closeStore()
 		os.Exit(1)
 	}
-	err = core.Run(ctx, mods, env, tn)
+	err = core.Run(ctx, mods, env, tn, core.WithAuthorizer(newAuthorizer(pol, tn, slog.Default())))
 	tn.Close() // writes the final state, so the store is closed after it
 	closeStore()
 	if err != nil {

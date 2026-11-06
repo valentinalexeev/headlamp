@@ -30,6 +30,8 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/dns:/etc/caddy/dns:ro
+      # Optional key files of the DNS provider (Google Cloud DNS service account). Not in git.
+      - ./caddy/secrets:/etc/caddy/secrets:ro
       - ${DATA_DIR:-/srv/headlamp/data}/caddy:/data
     depends_on:
       headscale:

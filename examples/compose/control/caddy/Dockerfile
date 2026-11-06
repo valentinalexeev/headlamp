@@ -7,6 +7,7 @@
 # DNS_PLUGINS is a space-separated list of Go modules. Empty (the default) builds the plain official Caddy binary.
 #   github.com/caddy-dns/route53@v1.6.0      Route 53 (AWS)
 #   github.com/caddy-dns/cloudflare@v0.2.1   Cloudflare
+#   github.com/caddy-dns/googleclouddns@v1.1.0   Google Cloud DNS
 #   github.com/caddy-dns/rfc2136@v1.0.0      any DNS server that accepts RFC 2136 updates (BIND, PowerDNS, Knot)
 # Pin the versions; rebuild to upgrade.
 ARG CADDY_VERSION=2.10

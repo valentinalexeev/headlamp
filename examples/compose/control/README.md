@@ -30,7 +30,7 @@ DERP and the funnel wildcards, and no cloud certificate service is necessary.
 | `config/node-control/` | Optional `nodes.json`, `enroll.json` and `admin.json`, mounted at `/srv/app` | yes, in your private repo |
 | `.env` | The image digests, the names and the data directory | no |
 | `node-control.env`, `funnel-ingress.env` | The secrets of each app | no |
-| `edge.env` | Optional: the DNS credentials of the edge, for funnel only | no |
+| `edge.env`, `caddy/secrets/` | Optional: the DNS credentials of the edge, for funnel only | no |
 
 Copy this directory into your private repo. Make each `*.example` file into the file without `.example`, and fill it in.
 The `.gitignore` here keeps `.env` and the `*.env` files out of git.
@@ -99,6 +99,7 @@ For funnel, set these values in `.env` for the DNS provider of `FUNNEL_DOMAIN`:
 |---|---|---|---|
 | Route 53 | `github.com/caddy-dns/route53@v1.6.0` | `route53` | none on the AWS host (the instance role); else `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | Cloudflare | `github.com/caddy-dns/cloudflare@v0.2.1` | `cloudflare` | `CLOUDFLARE_API_TOKEN` |
+| Google Cloud DNS | `github.com/caddy-dns/googleclouddns@v1.1.0` | `googleclouddns` | `GCP_PROJECT`; on a GCE VM nothing else (its service account); else `GOOGLE_APPLICATION_CREDENTIALS` and a key file in `caddy/secrets/` |
 | Your own DNS server (BIND, PowerDNS, Knot) | `github.com/caddy-dns/rfc2136@v1.0.0` | `rfc2136` | `RFC2136_KEY_NAME`, `RFC2136_KEY_ALG`, `RFC2136_KEY`, `RFC2136_SERVER` |
 
 Then run `docker compose build edge`. Each value of `FUNNEL_DNS` is a file in `caddy/dns/`. For another provider,

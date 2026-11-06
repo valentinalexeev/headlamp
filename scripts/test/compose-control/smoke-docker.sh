@@ -94,11 +94,11 @@ tmo 600 docker build -q -t hl-compose-node-control:local "$root/apps/node-contro
 docker image inspect "$ts_image" >/dev/null 2>&1 || tmo 300 docker pull -q "$ts_image" >/dev/null || die "pull $ts_image"
 # The production edge image: the default build (no plugin) and each documented DNS provider build, each with the
 # full Caddyfile (funnel block included) for its FUNNEL_DNS value.
-for v in "none|" "route53|github.com/caddy-dns/route53@v1.6.0" "rfc2136|github.com/caddy-dns/rfc2136@v1.0.0"; do
+for v in "none|" "route53|github.com/caddy-dns/route53@v1.6.0" "googleclouddns|github.com/caddy-dns/googleclouddns@v1.1.0" "rfc2136|github.com/caddy-dns/rfc2136@v1.0.0"; do
   dns=${v%%|*}; mods=${v#*|}
   if tmo 900 docker build -q --build-arg DNS_PLUGINS="$mods" -t "hl-compose-edge-$dns:local" "$src/caddy" >/dev/null 2>&1 && \
      docker run --rm -e HEADSCALE_DOMAIN=h.example.test -e ACME_EMAIL=a@example.test -e FUNNEL_DOMAIN=f.example.test \
-       -e FUNNEL_DNS="$dns" -e RFC2136_KEY_NAME=k -e RFC2136_KEY_ALG=hmac-sha256 -e RFC2136_KEY=YQ== -e RFC2136_SERVER=192.0.2.1:53 \
+       -e FUNNEL_DNS="$dns" -e GCP_PROJECT=demo-project -e RFC2136_KEY_NAME=k -e RFC2136_KEY_ALG=hmac-sha256 -e RFC2136_KEY=YQ== -e RFC2136_SERVER=192.0.2.1:53 \
        -v "$src/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$src/caddy/dns:/etc/caddy/dns:ro" \
        "hl-compose-edge-$dns:local" caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
     ok "the edge builds and validates with FUNNEL_DNS=$dns"

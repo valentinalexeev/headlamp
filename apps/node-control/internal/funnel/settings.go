@@ -66,12 +66,17 @@ func SettingsFromEnv(env core.Env) (*Settings, error) {
 	if s.ReservedPorts, err = reservedPortsEnv(env); err != nil {
 		return nil, err
 	}
-	admins := env.List("FUNNEL_ADMIN_USERS")
-	if len(admins) == 0 {
-		return nil, errors.New("funnel enabled (FUNNEL_DB set) but FUNNEL_ADMIN_USERS names no login")
+	s.Admins = authz.ParseAllowed(strings.Join(env.List("FUNNEL_ADMIN_USERS"), ","))
+	if !authz.AnyoneCan(authz.P(authz.FeatureFunnel, authz.LevelAdmin), s.Admins) {
+		return nil, errors.New("funnel enabled (FUNNEL_DB set) but FUNNEL_ADMIN_USERS names no login (and ADMIN_CONFIG grants funnel.admin to nobody)")
 	}
-	s.Admins = authz.ParseAllowed(strings.Join(admins, ","))
 	return s, nil
+}
+
+// Can reports whether login holds the funnel feature at level l. Admins (FUNNEL_ADMIN_USERS) decides only when no
+// process-wide policy is set.
+func (s *Settings) Can(login string, l authz.Level) bool {
+	return authz.Can(login, authz.P(authz.FeatureFunnel, l), s.Admins)
 }
 
 func (s *Settings) readTags(env core.Env) error {

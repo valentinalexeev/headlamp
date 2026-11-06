@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 )
 
@@ -18,7 +19,7 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 	if m.st == nil || m.s == nil {
 		return nil, nil, nil
 	}
-	if !m.s.Admins.Has(login) {
+	if !m.s.Can(login, authz.LevelView) {
 		return nil, nil, core.ErrNotVisible
 	}
 	// Settling first makes a namespace whose change was just reverted read "failed" now.
@@ -115,7 +116,7 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 	if !m.HasActivity() {
 		return nil, nil
 	}
-	if !m.s.Admins.Has(login) {
+	if !m.s.Can(login, authz.LevelView) {
 		return nil, core.ErrNotVisible
 	}
 	es, err := m.st.AuditLog(limit)
@@ -135,7 +136,7 @@ func (m *Module) Search(_ context.Context, login string) ([]core.SearchItem, err
 	if !m.HasActivity() {
 		return nil, nil
 	}
-	if !m.s.Admins.Has(login) {
+	if !m.s.Can(login, authz.LevelView) {
 		return nil, core.ErrNotVisible
 	}
 	nss, err := m.st.Namespaces()

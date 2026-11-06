@@ -22,7 +22,7 @@ func (m *Module) Attention(ctx context.Context, login string) ([]core.AttentionI
 	if !m.on {
 		return nil, nil, nil
 	}
-	if !authz.ParseAllowed(m.env.Getenv("TASKS_ADMIN_USERS")).Has(login) {
+	if !m.can(login, authz.LevelView) {
 		return nil, nil, core.ErrNotVisible
 	}
 	items, lines := m.taskAttention()
@@ -204,7 +204,7 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 	if !m.on {
 		return nil, nil
 	}
-	if !authz.ParseAllowed(m.env.Getenv("TASKS_ADMIN_USERS")).Has(login) {
+	if !m.can(login, authz.LevelView) {
 		return nil, core.ErrNotVisible
 	}
 	st, _ := m.current()
@@ -248,7 +248,7 @@ func (m *Module) Search(_ context.Context, login string) ([]core.SearchItem, err
 	if !m.on {
 		return nil, nil
 	}
-	if !authz.ParseAllowed(m.env.Getenv("TASKS_ADMIN_USERS")).Has(login) {
+	if !m.can(login, authz.LevelView) {
 		return nil, core.ErrNotVisible
 	}
 	st, _ := m.current()

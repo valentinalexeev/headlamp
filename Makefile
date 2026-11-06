@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-runtime-config lint \
+.PHONY: hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-serve-e2e test-runtime-config lint \
   test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -47,6 +47,10 @@ test-node-control:
 # on demand: needs docker and a headscale image (see the script)
 test-headscale-policy-e2e:
 	sh scripts/test/headscale-policy/e2e-docker.sh
+
+# On demand: serve (#117) against a real headscale in docker (MagicDNS answer and HTTPS through the sidecar).
+test-serve-e2e:
+	sh scripts/test/serve/e2e-docker.sh
 
 .PHONY: check-statestore-port
 check-statestore-port:

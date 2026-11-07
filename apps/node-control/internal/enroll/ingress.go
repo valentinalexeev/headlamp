@@ -28,6 +28,15 @@ type Ingress struct {
 	Node string `json:"node,omitempty"`
 	// Intermittent says the bridge is expected to come and go: an unreachable agent is a notice, not a risk. Optional.
 	Intermittent bool `json:"intermittent,omitempty"`
+	// Hy2Port is the public UDP port of the bridge's Hysteria 2 inbound (#110). 0: the bridge has none.
+	Hy2Port int `json:"hy2_port,omitempty"`
+	// Hy2Obfs is the Salamander password, from HY2_OBFS_<NAME> (see hy2Var). Never in config, info or fingerprint.
+	Hy2Obfs string `json:"-"`
+}
+
+// hy2Var is the variable that holds the Salamander password of a bridge.
+func hy2Var(name string) string {
+	return "HY2_OBFS_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 }
 
 // IngressConfig is the parsed ENROLL_CONFIG: one or more ingresses, the host that serves
@@ -217,6 +226,13 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 			return fail("node must be a tailnet name (lowercase letters, digits, hyphens and dots)")
 		}
 	}
+	if v, present := raw["hy2_port"]; present {
+		n, err := parseIntLiteral(v)
+		if err != nil || n < 1 || n > 65535 {
+			return fail("hy2_port must be an integer 1-65535")
+		}
+		in.Hy2Port = n
+	}
 	if v, present := raw["intermittent"]; present {
 		if json.Unmarshal(v, &in.Intermittent) != nil || string(v) == "null" {
 			return fail("intermittent must be true or false")
@@ -227,7 +243,7 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 
 var (
 	newShapeTopKeys = []string{"profile_name", "link_host", "ingresses"}
-	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids", "node", "intermittent"}
+	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids", "node", "intermittent", "hy2_port"}
 	keyNameRe       = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,40}$`)
 )
 

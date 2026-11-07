@@ -34,7 +34,7 @@ def _token(v: str) -> bool:
 
 def load_info(env: Mapping[str, str]) -> dict | None:
     """The /v1/info body, or None when the deployment does not configure it (answered with 503)."""
-    vals = {k: env.get(k, "") for k in (*REQUIRED, "INGRESS_PORT", "INGRESS_SNI")}
+    vals = {k: env.get(k, "") for k in (*REQUIRED, "INGRESS_PORT", "INGRESS_SNI", "INGRESS_HY2_PORT")}
     # Validate whatever is set, even if the set is incomplete: a typo must not hide until later.
     if vals["INGRESS_NAME"] and not NAME_RE.match(vals["INGRESS_NAME"]):
         raise InfoConfigError("INGRESS_NAME")
@@ -43,15 +43,24 @@ def load_info(env: Mapping[str, str]) -> dict | None:
             raise InfoConfigError(var)
     port = DEFAULT_PORT
     if vals["INGRESS_PORT"]:
-        raw = vals["INGRESS_PORT"]
-        if not (raw.isascii() and raw.isdigit()) or not 1 <= int(raw) <= 65535:
-            raise InfoConfigError("INGRESS_PORT")
-        port = int(raw)
+        port = _port(vals["INGRESS_PORT"], "INGRESS_PORT")
+    # INGRESS_HY2_PORT: the public UDP port of the Hysteria 2 inbound (#110), if this bridge has one. The Salamander
+    # password is not here: it is a secret, and node-control gets it from its own environment.
+    hy2 = _port(vals["INGRESS_HY2_PORT"], "INGRESS_HY2_PORT") if vals["INGRESS_HY2_PORT"] else None
     for var in ("INGRESS_PUBLIC_KEY", "INGRESS_SHORT_ID"):
         if env.get(var, "") and not _token(vals[var]):
             raise InfoConfigError(var)
     if not all(vals[k] for k in REQUIRED):
         return None
-    return {"name": vals["INGRESS_NAME"], "host": vals["INGRESS_HOST"], "port": port,
-            "sni": vals["INGRESS_SNI"] or vals["INGRESS_HOST"],
-            "public_key": vals["INGRESS_PUBLIC_KEY"], "short_id": vals["INGRESS_SHORT_ID"]}
+    out = {"name": vals["INGRESS_NAME"], "host": vals["INGRESS_HOST"], "port": port,
+           "sni": vals["INGRESS_SNI"] or vals["INGRESS_HOST"],
+           "public_key": vals["INGRESS_PUBLIC_KEY"], "short_id": vals["INGRESS_SHORT_ID"]}
+    if hy2 is not None:
+        out["hy2_port"] = hy2
+    return out
+
+
+def _port(raw: str, var: str) -> int:
+    if not (raw.isascii() and raw.isdigit()) or not 1 <= int(raw) <= 65535:
+        raise InfoConfigError(var)
+    return int(raw)

@@ -209,7 +209,8 @@ def create_app_from_env() -> FastAPI:
         raise RuntimeError("AGENT_TOKEN is required")
     info = load_info(env)  # raises naming the variable; never echoes a value
     state_dir = Path(env.get("AGENT_STATE_DIR", "/var/lib/ingress-agent"))
-    runner = XrayRunner(env.get("XRAY_BIN", "/usr/local/bin/xray"), env.get("XRAY_UNIT", "xray"), env.get("XRAY_API", "127.0.0.1:10085"))
+    runner = XrayRunner(env.get("XRAY_BIN", "/usr/local/bin/xray"), env.get("XRAY_UNIT", "xray"), env.get("XRAY_API", "127.0.0.1:10085"),
+                        restart_cmd=env.get("XRAY_RESTART_CMD", "").split())
     applier = Applier(state_dir / "credentials.json", env.get("XRAY_BASE_CONFIG", "/etc/xray/config.base.json"),
                       env.get("XRAY_CONFIG", "/etc/xray/config.json"), runner,
                       direct_geoip=parse_list(env.get("INGRESS_DIRECT_GEOIP", "")),

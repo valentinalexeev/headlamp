@@ -3,6 +3,9 @@
 Infrastructure code for a self-hosted, Tailscale-compatible network:
 
 - **headscale** control server (`apps/headscale`)
+- **central nodes on any host**: headscale, node-control and funnel-ingress as published container images. Run them on
+  AWS (`terraform/modules/control-host/aws` with `examples/compose/control/`), on any Docker host with the same
+  compose files, or on Fly.io (a `fly.toml` per app)
 - **exit nodes**: a container image (`apps/exit-node`) and VM-based nodes on Yandex Cloud, Oracle
   Cloud, AWS, Cloud.ru or OpenStack clouds such as Selectel. The directory `terraform/modules/exit-node-vm` creates the VM nodes. The Ansible roles in `ansible/` configure them.
 - **split-tunnel route provisioning**: nodes advertise routes for chosen ASNs/hostnames so those
@@ -22,15 +25,19 @@ Infrastructure code for a self-hosted, Tailscale-compatible network:
 It contains no secrets, no state, and nothing that identifies a deployment: every site-specific
 value is a placeholder (`example.com`, `<your-...>`). Run it from **your own private repo**.
 The private repo vendors this repo as a git submodule (`vendor/headlamp`). It holds your Terraform root
-stacks, encrypted state, Ansible inventory, variables and vault, Fly configs and route lists.
+stacks, encrypted state, Ansible inventory, variables and vault, the config of your container host and route lists.
 
 **Start with [`CLAUDE.md`](CLAUDE.md)** (also readable by humans): the repo rules and a step-by-step
 bootstrap guide. [`examples/private-repo/`](examples/private-repo/) is the skeleton to copy.
 
 ## Images and releases
 
-CI publishes the components that run as containers to GHCR. They run on any container host. Fly.io is the reference
-platform, with a `fly.toml` per app and an overlay deploy in `examples/private-repo/`. [`docs/images.md`](docs/images.md) explains what each image does, how they fit together and what each needs from its host, and [`VERSIONING.md`](VERSIONING.md) covers tags and release rules.
+CI publishes the components that run as containers to GHCR. They run on any container host. These targets are
+ready to use, and none of them is the default:
+
+- **AWS:** `terraform/modules/control-host/aws` builds the host, and `examples/compose/control/` runs the central nodes on it.
+- **Any Docker host:** the same compose files, with the published images and your config mounted.
+- **Fly.io:** a `fly.toml` per app and an overlay deploy in `examples/private-repo/`. [`docs/images.md`](docs/images.md) explains what each image does, how they fit together and what each needs from its host, and [`VERSIONING.md`](VERSIONING.md) covers tags and release rules.
 
 ## Terraform state workflow
 

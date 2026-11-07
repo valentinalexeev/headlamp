@@ -23,7 +23,8 @@ node-control replaces the earlier Python implementation. It has the same HTTP AP
 
 node-control starts and stops exit nodes on these clouds: Yandex Compute, OCI Compute, OpenStack, AWS EC2 and Fly
 Machines. OpenStack includes Selectel and other OpenStack clouds. node-control itself runs on any container host that
-can reach headscale. The `fly.toml` here is one example.
+can reach headscale. Use the compose files in `examples/compose/control/` on AWS or any Docker host, or the
+`fly.toml` here on Fly.io.
 
 ## Environment
 

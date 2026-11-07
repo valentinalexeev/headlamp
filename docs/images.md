@@ -45,10 +45,10 @@ Every node, image or not, joins the tailnet through headscale. `exit-node`, `nod
 
 | Image | What it does | Where it runs | Needed? |
 |---|---|---|---|
-| `headscale` | The control server: who is on the tailnet and what they may reach | One container with a public HTTPS name and a volume (a Fly.io machine, a VM, a cluster) | Yes |
-| `exit-node` | A tailnet exit node, with routes for chosen hostnames that always leave through it | A container with `NET_ADMIN`, `/dev/net/tun` and forwarding on (a Fly.io machine or any Docker host; see its README) | No, if VM exit nodes are enough |
+| `headscale` | The control server: who is on the tailnet and what they may reach | One container with a public HTTPS name and a volume (a VM such as the AWS control host, a Docker host, a cluster, a Fly.io machine) | Yes |
+| `exit-node` | A tailnet exit node, with routes for chosen hostnames that always leave through it | A container with `NET_ADMIN`, `/dev/net/tun` and forwarding on (any Docker host or a Fly.io machine; see its README) | No, if VM exit nodes are enough |
 | `node-control` | The admin console and API: start and stop nodes, enrol devices, manage policy, Funnel config and tasks | One machine, reachable only over the tailnet | Strongly recommended, and required by `funnel-ingress` and task-runner |
-| `funnel-ingress` | Publishes tailnet services under public names, as a reverse proxy | A public container behind a TLS edge with wildcard certificates (the Fly.io edge, a load balancer or a reverse proxy) | Only for public ingress |
+| `funnel-ingress` | Publishes tailnet services under public names, as a reverse proxy | A public container behind a TLS edge (a reverse proxy such as the Caddy edge in `examples/compose/control/`, a load balancer, or the Fly.io edge) | Only for public ingress |
 | `funnel-sidecar` | Registers one service with `funnel-ingress` from Kubernetes, with no special privileges. Published for `linux/amd64` and `linux/arm64` | Beside your workload | Only for Kubernetes services |
 | `task-runner-browser` | The Chromium and Playwright container each scheduled browser check runs in | On a VM, started by task-runner under rootless podman | Only for tasks and browser sessions |
 

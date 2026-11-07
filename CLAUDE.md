@@ -269,6 +269,19 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
 `ci` jobs always report (skipped steps say so), so they can be required checks in branch protection. Run the same
 checks locally before pushing; a red CI on `main` is an incident.
 
+### Findings become issues
+
+A finding from a lint, vulncheck, CodeQL or review run becomes a GitHub issue of type *Bug* (labels `AI` and the
+topic label). Do not leave a finding only in a log, a PR comment or the chat.
+
+- Security findings (gosec, govulncheck, CodeQL) are always issues. Add the `security` label if it exists.
+- Write in each issue: the tool, the rule ID, the file and line, and a proposed fix.
+- Put the findings of the same rule in one issue. Search the open issues first and do not open a duplicate.
+  Add new locations to the issue that exists.
+- Example: #159 (GO-2026-6865 in `klauspost/compress`) came from `make vulncheck`.
+
+The existing backlog of `make lint-go-report` is filed only when the owner agrees on how to group it.
+
 ### Incidents
 
 Something that already went wrong: red CI on `main`, a leaked or expired secret, a denylist hit in history,

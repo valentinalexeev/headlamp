@@ -855,7 +855,25 @@ dns:
 
 Get the address with `headscale nodes list`. node-control keeps it while its state volume stays.
 
+### The Serve page
+
+The console has a Serve page (`/serve`, #129) for users with `serve.view`. It has the same layout as the Funnel
+page. It shows these items:
+
+- The zone, the CA fingerprint, a link to download the CA, and the `dns.nameservers.split` lines for headscale.
+- Each service, with its state, its namespace, its keys and when they expire, and its proxies with their addresses.
+
+Users with `serve.admin` also see the controls to add a service, add a key, retire the old key and delete a
+service. A new key shows one time only, in a side panel, with a sample `funnel-sidecar` environment. To delete a
+service, type its name. The Activity page records each change, without the key. The Overview page shows a service
+with no online proxy, and a key that expires within 14 days or has expired.
+
+A service has no rename. To change a name, delete the service and add it again, because the name is in its
+certificate.
+
 ### Add a service
+
+Use the Serve page, or the API below.
 
 1. Open the API on the tailnet, as a user with `serve.admin`:
 
@@ -894,7 +912,8 @@ Give users `http://node-control/serve/ca.crt`. Each device must trust it once (t
 
 | Route | Permission | What it does |
 |---|---|---|
-| `GET /serve/state` | `serve.view` | The zone, the CA fingerprint, each service with its keys and nodes |
+| `GET /serve` | `serve.view` | The Serve page |
+| `GET /serve/state` | `serve.view` | The zone, the CA fingerprint, each service with its keys and nodes, and whether the caller may change them |
 | `POST /serve/services` | `serve.admin` | Add a service. The answer holds the auth key, one time. |
 | `DELETE /serve/services/{id}` | `serve.admin` | Remove a service and expire its keys |
 | `POST /serve/services/{id}/keys` | `serve.admin` | Add a key (rotation) |

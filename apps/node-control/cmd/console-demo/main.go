@@ -1,7 +1,7 @@
 // Command console-demo serves the admin console on loopback with invented data, so the pages can be
 // looked at and checked without a tailnet, a headscale server or any provider account.
 //
-//	go run ./cmd/console-demo -scenario attention|clear|minimal|partial
+//	go run ./cmd/console-demo -scenario attention|clear|minimal|partial|viewer
 //
 // Everything it talks to is a local fake: a headscale API, an enrolment agent, a task runner, a
 // provider, Redis (miniredis) and temp-dir databases. It listens on loopback only, refuses any other
@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 )
 
@@ -36,7 +37,7 @@ type options struct {
 func main() {
 	var o options
 	flag.StringVar(&o.addr, "addr", defaultAddr, "loopback address to serve the console on")
-	flag.StringVar(&o.scenario, "scenario", "attention", "one of: attention, clear, minimal, partial")
+	flag.StringVar(&o.scenario, "scenario", "attention", "one of: attention, clear, minimal, partial, viewer")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -75,7 +76,15 @@ func serve(ctx context.Context, o options, ready func(admin string)) error {
 	}
 	sc, ok := scenarios[o.scenario]
 	if !ok {
-		return fmt.Errorf("unknown scenario %q (want attention, clear, minimal or partial)", o.scenario)
+		return fmt.Errorf("unknown scenario %q (want attention, clear, minimal, partial or viewer)", o.scenario)
+	}
+	pol, err := demoPolicy(sc)
+	if err != nil {
+		return err
+	}
+	if pol != nil {
+		old := authz.SetDefault(pol)
+		defer authz.SetDefault(old)
 	}
 	world, err := newWorld(sc)
 	if err != nil {

@@ -47,6 +47,10 @@ type Store interface {
 	AddKey(serviceID string, k Key) error
 	RetireKey(serviceID string, keyID uint64) error
 
+	// Audit records an admin action; AuditLog returns the newest first, at most limit (#129).
+	Audit(at time.Time, actor, action, detail string) error
+	AuditLog(limit int) ([]AuditEntry, error)
+
 	// GetSecret and PutSecret keep opaque, already-sealed blobs (the CA key).
 	GetSecret(key string) ([]byte, error)
 	PutSecret(key string, v []byte) error
@@ -69,6 +73,13 @@ CREATE TABLE IF NOT EXISTS service_keys (
   created INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS secrets (k TEXT PRIMARY KEY, v BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  detail TEXT NOT NULL
+);
 PRAGMA foreign_keys = ON;
 `
 
@@ -239,4 +250,59 @@ func (s *sqliteStore) GetSecret(key string) ([]byte, error) {
 func (s *sqliteStore) PutSecret(key string, v []byte) error {
 	_, err := s.db.Exec(`INSERT INTO secrets (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`, key, v)
 	return err
+}
+
+// AuditEntry is one admin action: who did what, with a short detail. Never a key secret.
+type AuditEntry struct {
+	At     time.Time
+	Actor  string
+	Action string
+	Detail string
+}
+
+const auditKeep = 1000
+
+var oneLine = strings.NewReplacer("\r", " ", "\n", " ")
+
+func (s *sqliteStore) Audit(at time.Time, actor, action, detail string) error {
+	clip := func(v string, n int) string {
+		v = oneLine.Replace(v)
+		if len(v) > n {
+			v = v[:n]
+		}
+		return v
+	}
+	return s.inTx(func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO audit (ts, actor, action, detail) VALUES (?, ?, ?, ?)`,
+			at.Unix(), clip(actor, 200), clip(action, 64), clip(detail, 500))
+		if err != nil {
+			return err
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`DELETE FROM audit WHERE id <= ?`, id-auditKeep)
+		return err
+	})
+}
+
+func (s *sqliteStore) AuditLog(limit int) ([]AuditEntry, error) {
+	limit = min(max(limit, 1), auditKeep)
+	rows, err := s.db.Query(`SELECT ts, actor, action, detail FROM audit ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditEntry
+	for rows.Next() {
+		var e AuditEntry
+		var ts int64
+		if err := rows.Scan(&ts, &e.Actor, &e.Action, &e.Detail); err != nil {
+			return nil, err
+		}
+		e.At = time.Unix(ts, 0).UTC()
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }

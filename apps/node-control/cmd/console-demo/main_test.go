@@ -68,7 +68,7 @@ func navLabels(t *testing.T, addr string) []string {
 }
 
 func TestDemoServesEveryScenario(t *testing.T) {
-	for _, name := range []string{"attention", "clear", "minimal", "partial"} {
+	for _, name := range []string{"attention", "clear", "minimal", "partial", "viewer"} {
 		t.Run(name, func(t *testing.T) {
 			addr := startDemo(t, name)
 			labels := navLabels(t, addr)
@@ -82,7 +82,14 @@ func TestDemoServesEveryScenario(t *testing.T) {
 				if !slices.Equal(labels, want) {
 					t.Fatalf("partial: want %v, got %v", want, labels)
 				}
+			case "viewer":
+				if !slices.Contains(labels, "Serve") {
+					t.Fatalf("viewer: the Serve page is missing from %v", labels)
+				}
 			default:
+				if !slices.Contains(labels, "Serve") {
+					t.Fatalf("%s: the Serve page is missing from %v", name, labels)
+				}
 				if len(labels) < 6 {
 					t.Fatalf("%s: want the full menu, got %v", name, labels)
 				}
@@ -313,5 +320,54 @@ func TestAttentionScenarioShowsIntermittentBridgeAndAcknowledgedItem(t *testing.
 	_, body = get(t, addr, "/enroll/ingresses")
 	if !strings.Contains(string(body), `"node":"vm-4"`) || !strings.Contains(string(body), `"intermittent":true`) {
 		t.Errorf("%s", body)
+	}
+}
+
+// The Serve page (#129) has its fixtures in the full scenarios: a wildcard, a rotation in progress and an offline
+// service. The admin may change them; in the viewer scenario the same data reads as view only.
+func TestServeSeeded(t *testing.T) {
+	for name, admin := range map[string]bool{"attention": true, "viewer": false} {
+		t.Run(name, func(t *testing.T) {
+			addr := startDemo(t, name)
+			code, data, err := call(t.Context(), &http.Client{Timeout: 10 * time.Second}, addr, "GET", "/serve/state", nil)
+			if err != nil || code != 200 {
+				t.Fatalf("%d %v", code, err)
+			}
+			var st struct {
+				CanAdmin bool `json:"can_admin"`
+				Services []struct {
+					Name  string            `json:"name"`
+					Keys  []json.RawMessage `json:"keys"`
+					Nodes []struct {
+						Online bool `json:"online"`
+					} `json:"nodes"`
+				} `json:"services"`
+			}
+			if err := json.Unmarshal(data, &st); err != nil {
+				t.Fatal(err)
+			}
+			if st.CanAdmin != admin {
+				t.Fatalf("can_admin %v, want %v", st.CanAdmin, admin)
+			}
+			by := map[string]int{}
+			for i, s := range st.Services {
+				by[s.Name] = i
+			}
+			apps, ok1 := by["*.apps.svc.example.net"]
+			wiki, ok2 := by["wiki.svc.example.net"]
+			_, ok3 := by["grafana.svc.example.net"]
+			if !ok1 || !ok2 || !ok3 {
+				t.Fatalf("services %v", by)
+			}
+			if len(st.Services[apps].Keys) != 2 {
+				t.Error("*.apps is not in a rotation")
+			}
+			if n := st.Services[wiki].Nodes; len(n) != 1 || n[0].Online {
+				t.Error("wiki is not offline")
+			}
+			if code, _, _ := call(t.Context(), &http.Client{Timeout: 10 * time.Second}, addr, "GET", "/serve", nil); code != 200 {
+				t.Errorf("the page: %d", code)
+			}
+		})
 	}
 }

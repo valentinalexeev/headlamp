@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serve</title>
+</head>
+<body>
+<div class="hl" id="serve">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>Serve</h1>
+        <p class="t2" id="sub" aria-live="polite">Tailnet-only names with HTTPS, for services behind a proxy.</p>
+      </div>
+      <div class="rowbtns">
+        <a class="btn" href="/serve/ca.crt" download="serve-ca.crt">Download CA</a>
+        <span id="addslot"></span>
+      </div>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note plain" id="notice" role="status" hidden></div>
+    <section class="note" id="dnsnote" role="status" hidden></section>
+
+    <section class="panel" aria-label="Zone">
+      <dl class="kv" id="zone"></dl>
+    </section>
+
+    <div class="cols">
+      <section class="colmain">
+        <div id="panel"></div>
+        <div class="note plain" id="empty" hidden>
+          <h2>No services yet</h2>
+          <p class="t2" id="emptytext"></p>
+        </div>
+        <div class="tw" id="tablewrap" hidden>
+          <table>
+            <thead><tr><th>Name</th><th>State</th><th>Namespace</th><th>Keys</th><th>Proxies</th><th><span class="sr">Actions</span></th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+      <aside class="colside" id="side" aria-label="New key"></aside>
+    </div>
+  </div>
+</div>
+<script src="/serve/static/serve.js" defer></script>
+</body>
+</html>

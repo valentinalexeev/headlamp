@@ -102,7 +102,9 @@ const rowFor = (e, name) => e.rows.children.find((tr) => tr.children[0] && tr.ch
     const ctrl = serve.mount(e, { now: () => NOW });
     ctrl.update(state({ dns_error: 'headscale: timeout' }));
     const z = textOf(e.zone);
-    assert.ok(z.includes('svc.example.net') && z.includes('ab:cd'));
+    const dd = e.zone.children.filter((n) => n.tag === 'dd').map((n) => n.textContent);
+    assert.strictEqual(dd[0], 'svc.example.net', 'the zone row');
+    assert.strictEqual(dd[1], 'ab:cd', 'the fingerprint row');
     assert.ok(z.includes('split:') && z.includes('- 100.64.0.1'), 'the split line names node-control');
     assert.ok(!e.dnsnote.hidden && textOf(e.dnsnote).includes('headscale: timeout'));
     assert.ok(textOf(e.sub).startsWith('4 services, 2 online.'));

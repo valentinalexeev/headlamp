@@ -15,6 +15,10 @@ import (
 const (
 	// InboundTag is the VLESS Reality inbound the base config must have.
 	InboundTag = "reality-in"
+	// TailnetOut is the outbound for granted tailnet traffic (#132): a SOCKS outbound to the bridge's own
+	// tailscaled, which routes tailnet addresses itself (the headscale ACL applies). Needed only when a credential
+	// has a tailnet grant.
+	TailnetOut = "via-tailnet"
 	// HY2Tag is the optional Hysteria 2 inbound (#110). When the base has it, every credential is a user there
 	// too: the uuid is the Hysteria auth and the label is the same, so routing rules and stats cover both.
 	HY2Tag = "hy2-in"
@@ -23,6 +27,8 @@ const (
 
 var (
 	blockedIPs = []any{"geoip:private", "100.64.0.0/10"}
+	// tailnetIPs are the headscale address ranges a granted client may reach through via-tailnet.
+	tailnetIPs = []any{"100.64.0.0/10", "fd7a:115c:a1e0::/48"}
 	listEntry  = regexp.MustCompile(`^[A-Za-z0-9!@._-]{1,64}$`)
 )
 
@@ -77,7 +83,22 @@ func Render(base []byte, creds []Cred, directGeoIP, directGeoSite []string) ([]b
 		return out
 	}
 	routing["domainStrategy"] = "IPOnDemand" // domain destinations must resolve before the block rule
-	rules := []any{obj{"type": "field", "inboundTag": tags, "ip": blockedIPs, "outboundTag": "blocked"}}
+	var rules []any
+	// Granted tailnet traffic goes first, before the block rule, and only to the tailnet ranges: private ranges
+	// stay blocked for everyone, and so does the tailnet for every other credential.
+	var granted []any
+	for _, c := range creds {
+		if c.Tailnet == "all" {
+			granted = append(granted, EmailFor(c.UUID))
+		}
+	}
+	if granted != nil {
+		if !hasOutbound(cfg, TailnetOut) {
+			return nil, fmt.Errorf("a credential has a tailnet grant, but the base config has no outbound tagged %s", TailnetOut)
+		}
+		rules = append(rules, obj{"type": "field", "inboundTag": tags, "user": granted, "ip": tailnetIPs, "outboundTag": TailnetOut})
+	}
+	rules = append(rules, obj{"type": "field", "inboundTag": tags, "ip": blockedIPs, "outboundTag": "blocked"})
 	if u := users("direct"); u != nil {
 		rules = append(rules, obj{"type": "field", "user": u, "outboundTag": "direct"})
 	}
@@ -98,6 +119,16 @@ func Render(base []byte, creds []Cred, directGeoIP, directGeoSite []string) ([]b
 	}
 	routing["rules"] = rules
 	return json.Marshal(cfg)
+}
+
+func hasOutbound(cfg obj, tag string) bool {
+	outs, _ := cfg["outbounds"].([]any)
+	for _, o := range outs {
+		if m, ok := o.(obj); ok && m["tag"] == tag {
+			return true
+		}
+	}
+	return false
 }
 
 func addClients(in obj, mk func(Cred) obj, creds []Cred) {

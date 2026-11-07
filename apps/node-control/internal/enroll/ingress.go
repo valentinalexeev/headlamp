@@ -32,7 +32,19 @@ type Ingress struct {
 	Hy2Port int `json:"hy2_port,omitempty"`
 	// Hy2Obfs is the Salamander password, from HY2_OBFS_<NAME> (see hy2Var). Never in config, info or fingerprint.
 	Hy2Obfs string `json:"-"`
+	// TailnetAccess is "off" (the default, "" too) or "all": every credential of this bridge may reach the
+	// tailnet through the bridge's tailscaled (#132). The headscale ACL for tag:ingress decides which hosts.
+	TailnetAccess string `json:"tailnet_access,omitempty"`
 }
+
+// Tailnet access values of a bridge.
+const (
+	TailnetOff = "off"
+	TailnetAll = "all"
+)
+
+// GrantsTailnet says whether the bridge gives its clients tailnet access.
+func (in Ingress) GrantsTailnet() bool { return in.TailnetAccess == TailnetAll }
 
 // hy2Var is the variable that holds the Salamander password of a bridge.
 func hy2Var(name string) string {
@@ -233,6 +245,11 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 		}
 		in.Hy2Port = n
 	}
+	if v, present := raw["tailnet_access"]; present {
+		if in.TailnetAccess, ok = rawString(v); !ok || (in.TailnetAccess != TailnetOff && in.TailnetAccess != TailnetAll) {
+			return fail("tailnet_access must be \"off\" or \"all\"")
+		}
+	}
 	if v, present := raw["intermittent"]; present {
 		if json.Unmarshal(v, &in.Intermittent) != nil || string(v) == "null" {
 			return fail("intermittent must be true or false")
@@ -243,7 +260,7 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 
 var (
 	newShapeTopKeys = []string{"profile_name", "link_host", "ingresses"}
-	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids", "node", "intermittent", "hy2_port"}
+	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids", "node", "intermittent", "hy2_port", "tailnet_access"}
 	keyNameRe       = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,40}$`)
 )
 

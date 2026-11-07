@@ -664,3 +664,76 @@ func TestNoPrivateKeyVariable(t *testing.T) {
 }
 
 var _ = http.StatusOK
+
+// --- tailnet grants (#132) ---
+
+func withTailnetOut(t *testing.T) []byte {
+	t.Helper()
+	var b map[string]any
+	_ = json.Unmarshal(base, &b)
+	b["outbounds"] = append(b["outbounds"].([]any), map[string]any{"tag": "via-tailnet", "protocol": "socks"})
+	out, _ := json.Marshal(b)
+	return out
+}
+
+func TestTailnetGrantRuleComesFirstAndOnlyForGranted(t *testing.T) {
+	g := Cred{UUID: u1, Mode: "direct", NotAfter: 9, Tailnet: "all"}
+	cfg := render(t, withTailnetOut(t), []Cred{g, cred(u2, "exit", 9)}, nil, nil)
+	rules := cfg["routing"].(map[string]any)["rules"].([]any)
+	jsonEq(t, rules[0], fmt.Sprintf(`{"type":"field","inboundTag":["reality-in"],"user":[%q],"ip":["100.64.0.0/10","fd7a:115c:a1e0::/48"],"outboundTag":"via-tailnet"}`, EmailFor(u1)))
+	jsonEq(t, rules[1], `{"type":"field","inboundTag":["reality-in"],"ip":["geoip:private","100.64.0.0/10"],"outboundTag":"blocked"}`)
+	// u2 has no grant: it is not in the tailnet rule, so the block rule catches its tailnet traffic
+	if strings.Contains(fmt.Sprint(rules[0]), EmailFor(u2)) {
+		t.Error("an ungranted credential is in the tailnet rule")
+	}
+	// private ranges other than the tailnet are not in the tailnet rule
+	if strings.Contains(fmt.Sprint(rules[0]), "geoip:private") {
+		t.Error("the tailnet rule must not open private ranges")
+	}
+}
+
+func TestNoGrantNoTailnetRule(t *testing.T) {
+	cfg := render(t, base, []Cred{cred(u1, "auto", 9)}, nil, nil)
+	for _, r := range cfg["routing"].(map[string]any)["rules"].([]any) {
+		if r.(map[string]any)["outboundTag"] == "via-tailnet" {
+			t.Fatal("a tailnet rule without any grant")
+		}
+	}
+}
+
+func TestGrantWithoutOutboundIsRefused(t *testing.T) {
+	if _, err := Render(base, []Cred{{UUID: u1, Mode: "auto", NotAfter: 9, Tailnet: "all"}}, nil, nil); err == nil || !strings.Contains(err.Error(), "via-tailnet") {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestTailnetFieldOverTheAPI(t *testing.T) {
+	r := newRig(t)
+	_ = os.WriteFile(r.a.BasePath, withTailnetOut(t), 0o640)
+	body := map[string]any{"credentials": []any{map[string]any{"uuid": u1, "mode": "auto", "not_after": now0 + 1000, "tailnet": "all"},
+		map[string]any{"uuid": u2, "mode": "auto", "not_after": now0 + 1000}}}
+	if c := r.put(body, "").Code; c != 200 {
+		t.Fatalf("%d", c)
+	}
+	s := r.state()
+	if len(s) != 2 || s[0].Tailnet != "all" || s[1].Tailnet != "" {
+		t.Errorf("state %+v", s)
+	}
+	// a changed grant counts as a change and is applied
+	r.proc.reset()
+	body["credentials"].([]any)[0].(map[string]any)["tailnet"] = ""
+	if c := r.put(body, "").Code; c != 200 || len(r.proc.calls) == 0 {
+		t.Errorf("revoking a grant: %d %v", c, r.proc.calls)
+	}
+	for _, bad := range []any{"some", 1, true} {
+		b := map[string]any{"credentials": []any{map[string]any{"uuid": u1, "mode": "auto", "not_after": now0 + 1000, "tailnet": bad}}}
+		if c := r.put(b, "").Code; c != 422 {
+			t.Errorf("tailnet=%v: %d", bad, c)
+		}
+	}
+	// an old state file without the field still loads
+	_ = os.WriteFile(r.a.StatePath, []byte(fmt.Sprintf(`[{"uuid":%q,"mode":"auto","not_after":%d}]`, u3, now0+1000)), 0o600)
+	if s := r.state(); len(s) != 1 || s[0].Tailnet != "" {
+		t.Errorf("old state %+v", s)
+	}
+}

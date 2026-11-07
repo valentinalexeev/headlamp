@@ -91,6 +91,8 @@ type Credential struct {
 	UUID     string `json:"uuid"`
 	Mode     string `json:"mode"`
 	NotAfter int64  `json:"not_after"`
+	// Tailnet is the grant pushed to the agent (#132): "" or "all". Set per bridge by CredentialsFor.
+	Tailnet string `json:"tailnet,omitempty"`
 }
 
 // Store is the enrolment store.

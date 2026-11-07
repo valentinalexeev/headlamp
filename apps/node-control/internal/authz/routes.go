@@ -82,6 +82,8 @@ var Routes = map[string]Rule{
 	"GET /enroll/ingresses":                   need(FeatureEnroll, LevelView),
 	"POST /enroll/ingresses/{name}/approve":   need(FeatureEnroll, LevelAdmin),
 	"POST /enroll/ingresses/{name}/unapprove": need(FeatureEnroll, LevelAdmin),
+	"GET /enroll/tailnet-acl":                 need(FeatureEnroll, LevelView),
+	"POST /enroll/tailnet-acl":                need(FeatureEnroll, LevelAdmin),
 
 	// tasks
 	"GET /tasks":                       need(FeatureTasks, LevelView),

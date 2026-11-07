@@ -75,6 +75,7 @@ type Admin struct {
 	reg      *Registry
 	activity *ActivityTracker
 	tn       core.Tailnet // names the caller for the audit log; nil records "unknown"
+	tacl     *tailnetACL  // the generated bridge-to-tailnet ACL entry (#132); nil: none
 }
 
 // NewAdmin returns the operator API over store and one agent that serves every configured
@@ -114,6 +115,10 @@ func (a *Admin) Register(mux *core.Mux) {
 	mux.HandleFunc("GET /enroll/ingresses", a.listIngresses)
 	mux.HandleFunc("POST /enroll/ingresses/{name}/approve", a.jsonOnly(a.approve))
 	mux.HandleFunc("POST /enroll/ingresses/{name}/unapprove", a.jsonOnly(a.unapprove))
+	if a.tacl != nil {
+		mux.HandleFunc("GET /enroll/tailnet-acl", a.getTailnetACL)
+		mux.HandleFunc("POST /enroll/tailnet-acl", a.jsonOnly(a.applyTailnetACL))
+	}
 }
 
 // actor names the caller for the audit log. A failed WhoIs gives "unknown"; the action still goes ahead.

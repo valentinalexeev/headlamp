@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Copy the ingress TLS certificate for the Hysteria 2 inbound, periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ hy2_cert_sync_interval }}
+
+[Install]
+WantedBy=timers.target

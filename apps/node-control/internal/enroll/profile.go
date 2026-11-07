@@ -202,10 +202,34 @@ const (
 // outboundTag is the tag of one mode's outbound on one ingress. With a single ingress it is the
 // bare mode name, so the profile is the one a single-host deployment always produced.
 func outboundTag(cfg IngressConfig, mode string, i Ingress) string {
-	if cfg.Single() {
+	if !cfg.grouped() {
 		return mode
 	}
 	return mode + "-" + i.Name
+}
+
+// hy2Tag is the tag of one mode's Hysteria 2 outbound on one ingress (#110).
+func hy2Tag(mode string, i Ingress) string { return mode + "-" + i.Name + "-hy2" }
+
+// grouped reports whether each mode is a urltest group: with several ingresses, or with any Hysteria 2
+// inbound (then one bridge offers two outbounds per mode, and the client keeps the one that works).
+func (c IngressConfig) grouped() bool {
+	if !c.Single() {
+		return true
+	}
+	return c.Ingresses[0].Hy2Port != 0
+}
+
+// members are the outbound tags of one mode: VLESS on every ingress, then Hysteria 2 where a bridge has it.
+func members(cfg IngressConfig, m string) []string {
+	var out []string
+	for _, i := range cfg.Ingresses {
+		out = append(out, outboundTag(cfg, m, i))
+		if i.Hy2Port != 0 {
+			out = append(out, hy2Tag(m, i))
+		}
+	}
+	return out
 }
 
 // RenderProfile renders the sing-box profile for a device: compact JSON, raw UTF-8. With several
@@ -217,14 +241,10 @@ func RenderProfile(cfg IngressConfig, d Device) ([]byte, error) {
 	outbounds := []any{
 		obj{{"type", "selector"}, {"tag", "select"}, {"outbounds", strs(Modes)}, {"default", "auto"}},
 	}
-	if !cfg.Single() {
+	if cfg.grouped() {
 		for _, m := range Modes {
-			var members []string
-			for _, i := range cfg.Ingresses {
-				members = append(members, outboundTag(cfg, m, i))
-			}
 			outbounds = append(outbounds, obj{
-				{"type", "urltest"}, {"tag", m}, {"outbounds", strs(members)},
+				{"type", "urltest"}, {"tag", m}, {"outbounds", strs(members(cfg, m))},
 				{"url", probeURL}, {"interval", probeInterval}, {"tolerance", probeTolerance},
 			})
 		}
@@ -245,6 +265,9 @@ func RenderProfile(cfg IngressConfig, d Device) ([]byte, error) {
 					{"reality", obj{{"enabled", true}, {"public_key", i.PublicKey}, {"short_id", i.ShortID}}},
 				}},
 			})
+			if i.Hy2Port != 0 {
+				outbounds = append(outbounds, hy2Outbound(m, i, uuid))
+			}
 		}
 	}
 	outbounds = append(outbounds, obj{{"type", "direct"}, {"tag", "plain"}})
@@ -290,17 +313,21 @@ func RenderClashProfile(cfg IngressConfig, d Device) ([]byte, error) {
 					{"public-key", i.PublicKey}, {"short-id", i.ShortID}, {"support-x25519mlkem768", true},
 				}},
 			})
+			if i.Hy2Port != 0 {
+				p := obj{{"name", hy2Tag(m, i)}, {"type", "hysteria2"}, {"server", i.Host}, {"port", i.Hy2Port},
+					{"password", uuid}, {"sni", i.Host}, {"alpn", []any{"h3"}}}
+				if i.Hy2Obfs != "" {
+					p = append(p, obj{{"obfs", "salamander"}, {"obfs-password", i.Hy2Obfs}}...)
+				}
+				proxies = append(proxies, p)
+			}
 		}
 	}
 	groups := []any{obj{{"name", "select"}, {"type", "select"}, {"proxies", strs(Modes)}}}
-	if !cfg.Single() {
+	if cfg.grouped() {
 		for _, m := range Modes {
-			var members []string
-			for _, i := range cfg.Ingresses {
-				members = append(members, outboundTag(cfg, m, i))
-			}
 			groups = append(groups, obj{
-				{"name", m}, {"type", "url-test"}, {"proxies", strs(members)},
+				{"name", m}, {"type", "url-test"}, {"proxies", strs(members(cfg, m))},
 				{"url", probeURL}, {"interval", probeIntervalS}, {"tolerance", probeTolerance},
 			})
 		}
@@ -391,4 +418,18 @@ func writeString(b *bytes.Buffer, s string, ascii bool) {
 		}
 	}
 	b.WriteByte('"')
+}
+
+// hy2Outbound is the sing-box Hysteria 2 outbound of one mode on one bridge (#110). The password is the
+// same credential as the VLESS uuid, so the bridge routes and counts it as the same user. The certificate
+// is a public one for the bridge host (HTTP-01), so the client verifies it normally.
+func hy2Outbound(mode string, i Ingress, uuid string) obj {
+	o := obj{
+		{"type", "hysteria2"}, {"tag", hy2Tag(mode, i)}, {"server", i.Host}, {"server_port", i.Hy2Port},
+		{"password", uuid},
+	}
+	if i.Hy2Obfs != "" {
+		o = append(o, kv{"obfs", obj{{"type", "salamander"}, {"password", i.Hy2Obfs}}})
+	}
+	return append(o, kv{"tls", obj{{"enabled", true}, {"server_name", i.Host}, {"alpn", strs([]string{"h3"})}}})
 }

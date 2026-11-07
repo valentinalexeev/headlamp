@@ -1,0 +1,25 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# Copies the certificate that Caddy got for {{ ingress_host }} (HTTP-01) to {{ hy2_tls_dir }} for the Hysteria 2
+# inbound of xray (#110), and restarts xray when it changed. Caddy keeps it under
+# {{ caddy_state_dir }}/certificates/<issuer>/{{ ingress_host }}/. The newest pair wins.
+set -eu
+host='{{ ingress_host }}'
+crt=$(find '{{ caddy_state_dir }}/certificates' -type f -name "$host.crt" -path "*/$host/*" -exec ls -t {} + 2>/dev/null | head -n 1)
+if [ -z "$crt" ]; then
+  echo "no certificate for $host yet; Caddy gets it on its first start" >&2
+  exit 0
+fi
+key="${crt%.crt}.key"
+[ -f "$key" ] || { echo "the key of $crt is missing" >&2; exit 1; }
+dir='{{ hy2_tls_dir }}'
+install -d -m 0750 -o root -g '{{ xray_user }}' "$dir"
+if cmp -s "$crt" "$dir/cert.pem" && cmp -s "$key" "$dir/key.pem"; then
+  exit 0
+fi
+install -m 0640 -o root -g '{{ xray_user }}' "$crt" "$dir/cert.pem.new"
+install -m 0640 -o root -g '{{ xray_user }}' "$key" "$dir/key.pem.new"
+mv -f "$dir/cert.pem.new" "$dir/cert.pem"
+mv -f "$dir/key.pem.new" "$dir/key.pem"
+echo "certificate for $host updated"
+if systemctl is-active --quiet xray; then systemctl restart xray; fi

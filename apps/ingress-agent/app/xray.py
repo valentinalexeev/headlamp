@@ -9,6 +9,9 @@ from typing import Callable, Sequence
 from .store import Cred
 
 INBOUND_TAG = "reality-in"
+# Optional Hysteria 2 inbound (#110). When the base config has it, every credential is a user there too: the uuid is
+# the Hysteria auth string and the email is the same, so the per-user routing rules and the stats cover both.
+HY2_TAG = "hy2-in"
 FLOW = "xtls-rprx-vision"
 BLOCKED_IPS = ["geoip:private", "100.64.0.0/10"]
 _LIST_ENTRY = re.compile(r"^[A-Za-z0-9!@._-]{1,64}$")
@@ -37,12 +40,21 @@ def render_config(base: dict, creds: list[Cred], direct_geoip: Sequence[str] = (
     inbound.setdefault("settings", {}).setdefault("clients", []).extend(
         {"id": c.uuid, "email": email_for(c.uuid), "flow": FLOW} for c in creds
     )
+    tags = [INBOUND_TAG]
+    hy2 = next((i for i in cfg["inbounds"] if i.get("tag") == HY2_TAG), None)
+    if hy2 is not None:
+        if hy2.get("protocol") != "hysteria":
+            raise ValueError(f"inbound {HY2_TAG} must use the hysteria protocol")
+        hy2.setdefault("settings", {}).setdefault("clients", []).extend(
+            {"auth": c.uuid, "email": email_for(c.uuid)} for c in creds
+        )
+        tags.append(HY2_TAG)
 
     def users(mode: str) -> list[str]:
         return [email_for(c.uuid) for c in creds if c.mode == mode]
 
     cfg["routing"]["domainStrategy"] = "IPOnDemand"  # domain destinations must resolve before the block rule
-    rules: list[dict] = [{"type": "field", "inboundTag": [INBOUND_TAG], "ip": list(BLOCKED_IPS), "outboundTag": "blocked"}]
+    rules: list[dict] = [{"type": "field", "inboundTag": tags, "ip": list(BLOCKED_IPS), "outboundTag": "blocked"}]
     if u := users("direct"):
         rules.append({"type": "field", "user": u, "outboundTag": "direct"})
     if u := users("exit"):
@@ -63,14 +75,17 @@ def _subprocess_run(args: list[str]) -> tuple[int, str]:
 
 
 class XrayRunner:
-    def __init__(self, bin: str, unit: str, api_addr: str, run: Callable[[list[str]], tuple[int, str]] = _subprocess_run):
+    def __init__(self, bin: str, unit: str, api_addr: str, run: Callable[[list[str]], tuple[int, str]] = _subprocess_run,
+                 restart_cmd: Sequence[str] = ()):
         self.bin, self.unit, self.api_addr, self._run = bin, unit, api_addr, run
+        # restart_cmd replaces `systemctl restart <unit>` where there is no systemd, for example in a container.
+        self.restart_cmd = list(restart_cmd)
 
     def test_config(self, path) -> bool:
         return self._run([self.bin, "run", "-test", "-c", str(path)])[0] == 0
 
     def restart(self) -> None:
-        code, _ = self._run(["systemctl", "restart", self.unit])
+        code, _ = self._run(self.restart_cmd or ["systemctl", "restart", self.unit])
         if code != 0:
             raise RuntimeError("xray restart failed")
 

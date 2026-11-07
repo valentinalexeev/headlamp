@@ -27,6 +27,11 @@ base file. It restarts xray when the set changes.
   reach this bridge (see "Several bridges and discovery"). The status is `503` with an empty body when `INGRESS_NAME`,
   `INGRESS_HOST`, `INGRESS_PUBLIC_KEY` or `INGRESS_SHORT_ID` is unset or empty. An older deployment keeps working for
   everything else. The response never contains the Reality private key, the agent token or any credential.
+  With `INGRESS_HY2_PORT` it also has `hy2_port`. The Salamander password is a secret and is never in it.
+
+Hysteria 2 (#110): the base config can have an inbound with the tag `hy2-in` and the protocol `hysteria`. The agent
+then adds every credential to it as well. The uuid is the Hysteria `auth` value, and the email is the same as on
+`reality-in`. Thus the per-user routing rules, the block rule and the statistics apply to both inbounds.
 
 No other routes exist (docs and OpenAPI are disabled).
 
@@ -74,6 +79,8 @@ the agent removes expired entries and applies the config again.
 | `INGRESS_SNI` | `INGRESS_HOST`. Reality server name, same format as the host |
 | `INGRESS_PUBLIC_KEY` | unset. Public half of the Reality key pair, no whitespace. Needed for `/v1/info` |
 | `INGRESS_SHORT_ID` | unset. Reality short id, no whitespace. Needed for `/v1/info` |
+| `INGRESS_HY2_PORT` | unset. Public UDP port of the Hysteria 2 inbound, 1-65535. When set, `/v1/info` has `hy2_port` |
+| `XRAY_RESTART_CMD` | unset. A command that replaces `systemctl restart <XRAY_UNIT>`, for a host without systemd |
 
 The app validates the `INGRESS_*` values above when it starts. An invalid value stops the start with an error
 that names the variable (never the value). There is no variable for the private key. Do not add one.

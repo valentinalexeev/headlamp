@@ -58,4 +58,28 @@
     ]
   }
 } %}
+{#
+  Hysteria 2 (#110): "hy2-in", on UDP. The agent puts every credential here too (auth = the uuid, the same email),
+  so the per-user rules, the block of private and tailnet ranges, and the stats apply unchanged.
+#}
+{% if hy2_enabled | bool %}
+{% set _ = cfg['inbounds'].insert(1, {
+  'tag': 'hy2-in',
+  'listen': '0.0.0.0',
+  'port': hy2_listen_port | int,
+  'protocol': 'hysteria',
+  'settings': {'version': 2, 'clients': []},
+  'streamSettings': {
+    'network': 'hysteria',
+    'hysteriaSettings': {'version': 2},
+    'security': 'tls',
+    'tlsSettings': {
+      'alpn': ['h3'],
+      'certificates': [{'certificateFile': hy2_tls_dir ~ '/cert.pem', 'keyFile': hy2_tls_dir ~ '/key.pem'}]
+    },
+    'finalmask': {'udp': [{'type': 'salamander', 'settings': {'password': hy2_obfs_password}}]}
+  },
+  'sniffing': {'enabled': true, 'destOverride': ['http', 'tls', 'quic'], 'routeOnly': true}
+}) %}
+{% endif %}
 {{ cfg | to_nice_json }}

@@ -126,3 +126,16 @@
       {{ ingress_resolvers
          | select('match', '^(0[.]|10[.]|127[.]|169[.]254[.]|172[.](1[6-9]|2[0-9]|3[01])[.]|192[.]168[.]|100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.])')
          | reject('in', ingress_guard_resolvers) | list }}
+
+- name: Check the Hysteria 2 settings
+  ansible.builtin.assert:
+    that:
+      - hy2_obfs_password is regex('^[A-Za-z0-9_-]{16,128}\\Z')
+      - 1 <= (hy2_listen_port | int) <= 65535
+      - hy2_tls_dir is regex('^/[A-Za-z0-9._/-]+\\Z')
+    fail_msg: >-
+      reality-ingress: with hy2_enabled, hy2_obfs_password must be 16-128 characters of [A-Za-z0-9_-]
+      (vault; `openssl rand -hex 16`), hy2_listen_port 1-65535 and hy2_tls_dir an absolute path. The values are not shown.
+    quiet: true
+  no_log: true
+  when: hy2_enabled | bool

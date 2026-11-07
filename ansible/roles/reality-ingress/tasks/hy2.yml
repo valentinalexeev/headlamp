@@ -1,0 +1,38 @@
+---
+# Hysteria 2 (#110): its certificate is Caddy's HTTP-01 certificate for ingress_host. Runs after Caddy is up.
+- name: Install the certificate copy script
+  ansible.builtin.template:
+    src: hy2-cert-sync.sh.j2
+    dest: /usr/local/sbin/hy2-cert-sync
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Install the certificate copy units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [hy2-cert-sync.service, hy2-cert-sync.timer]
+  become: true
+
+- name: Enable the certificate copy timer
+  ansible.builtin.systemd:
+    name: hy2-cert-sync.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode
+
+# Caddy gets the certificate on its first start, a few seconds after it can answer on port 80.
+- name: Wait for the certificate and copy it
+  ansible.builtin.command: /usr/local/sbin/hy2-cert-sync
+  register: hy2_sync
+  changed_when: "'updated' in hy2_sync.stdout"
+  until: "'no certificate' not in hy2_sync.stderr"
+  retries: 12
+  delay: 10
+  become: true
+  when: not ansible_check_mode

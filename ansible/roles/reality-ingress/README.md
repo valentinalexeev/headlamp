@@ -59,6 +59,8 @@ Required (no default; preflight fails early):
 - `caddy_version` and `caddy_sha256`
 - `xray_geodata_files`: a list of `{name, url, sha256}` with at least `geoip.dat` and `geosite.dat`. Both are required.
 - `enroll_upstream` (`host:port`, no scheme)
+- `hy2_obfs_password` when `hy2_enabled` is true (the default): 16 to 128 characters of `[A-Za-z0-9_-]`, from a vault.
+  Make it with `openssl rand -hex 16`.
 
 Optional:
 
@@ -75,8 +77,27 @@ Optional:
 - `ingress_guard_file`
 - `nft_bin`
 - `ingress_agent_unit` (`ingress-agent`)
+- `hy2_enabled` (`true`), `hy2_listen_port` (`443`), `hy2_tls_dir` (`/etc/xray/tls`), `hy2_cert_sync_interval` (`6h`)
 
 See `defaults/main.yml`.
+
+## Hysteria 2
+
+The role adds a Hysteria 2 inbound (`hy2-in`) on UDP, next to the Reality inbound on TCP (#110). xray serves both.
+The ingress agent adds every credential to both inbounds. Thus the modes, the block of private and tailnet ranges,
+and the statistics are the same for the two protocols. A client profile has both outbounds for each mode. The
+client uses the first one that works, so it uses VLESS Reality when a network blocks UDP.
+
+- **Certificate.** Hysteria 2 uses the HTTP-01 certificate that Caddy gets for `ingress_host`. The timer
+  `hy2-cert-sync` copies it to `hy2_tls_dir` and restarts xray when the certificate changes.
+- **Obfuscation.** Salamander is on, with `hy2_obfs_password`. Without the password the bridge does not answer.
+  Thus a scan of the UDP port sees nothing. node-control gets the same value in `HY2_OBFS_<NAME>`, for example
+  `HY2_OBFS_INGRESS_1` for the bridge `ingress-1`. It puts the value only into the client profiles.
+- **Discovery.** The agent publishes `hy2_port` in `/v1/info`. A bridge that adds Hysteria 2 publishes a new
+  fingerprint, so an operator must approve it again.
+- To turn it off, set `hy2_enabled: false`. The bridge then serves VLESS Reality only, as before.
+
+`make test-hysteria-e2e` runs the full flow in Docker: tailnet, exit node, bridge, enrolment and real clients.
 
 ## Several bridges and discovery
 
@@ -169,8 +190,11 @@ bring it back. Two additions cover this:
 
 ## Ports
 
-Open these ports in the cloud security group (the role changes no host firewall): TCP **443** (Reality) and
-TCP **80** (ACME HTTP-01 and renewals). The HTTPS listener of Caddy (`127.0.0.1:8443`) and the xray stats
+Open these ports in the cloud security group. The role changes no host firewall.
+
+- TCP **443**: Reality.
+- UDP **443**: Hysteria 2, unless `hy2_enabled` is false.
+- TCP **80**: ACME HTTP-01 and renewals. The HTTPS listener of Caddy (`127.0.0.1:8443`) and the xray stats
 API are loopback only.
 
 ## Caddy front

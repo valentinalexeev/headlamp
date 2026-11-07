@@ -76,6 +76,21 @@ class TestInfoReturnsConfiguredValues(InfoTestBase):
         self.assertEqual(set(c.get("/v1/info", headers=AUTH).json()), {"name", "host", "port", "sni", "public_key", "short_id"})
 
 
+class TestInfoHy2Port(InfoTestBase):
+    def test_hy2_port_only_when_set(self):
+        _, c = self.build({"INGRESS_HY2_PORT": "8443"})
+        self.assertEqual(c.get("/v1/info", headers=AUTH).json()["hy2_port"], 8443)
+        _, c = self.build()
+        self.assertNotIn("hy2_port", c.get("/v1/info", headers=AUTH).json())
+
+    def test_bad_hy2_port_stops_start(self):
+        from app.info import InfoConfigError, load_info
+        for bad in ("0", "70000", "x", " 1"):
+            with self.assertRaises(InfoConfigError) as e:
+                load_info({**INFO_ENV, "INGRESS_HY2_PORT": bad})
+            self.assertEqual(e.exception.var, "INGRESS_HY2_PORT")
+
+
 class TestInfoUnconfigured503(InfoTestBase):
     def test_each_required_missing_or_empty(self):
         for var in ("INGRESS_NAME", "INGRESS_HOST", "INGRESS_PUBLIC_KEY", "INGRESS_SHORT_ID"):

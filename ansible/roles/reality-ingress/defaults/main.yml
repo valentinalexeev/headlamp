@@ -24,6 +24,18 @@ reality_sni: "{{ ingress_host }}"
 # The self-steal target: the loopback TLS site of the Caddy front.
 reality_dest: "127.0.0.1:8443"
 
+# Hysteria 2 inbound (#110), on UDP beside the Reality inbound on TCP. On by default.
+# Its TLS certificate is the HTTP-01 certificate that Caddy already gets for ingress_host:
+# a timer copies it to hy2_tls_dir, readable by xray, and restarts xray when it changes.
+hy2_enabled: true
+hy2_listen_port: 443
+# Salamander obfuscation password (REQUIRED when hy2_enabled, vault). `openssl rand -hex 16`.
+# node-control needs the same value in HY2_OBFS_<NAME> to put it into client profiles.
+hy2_obfs_password: ""
+hy2_tls_dir: /etc/xray/tls
+# How often the certificate copy runs (systemd time span). Caddy renews about 30 days before expiry.
+hy2_cert_sync_interval: 6h
+
 # xray release (REQUIRED). Version without the leading "v", sha256 of the
 # release archive. The archive must be the linux/amd64 zip that holds the
 # `xray` binary.

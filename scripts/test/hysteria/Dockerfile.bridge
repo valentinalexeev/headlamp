@@ -1,0 +1,18 @@
+# Test image of one bridge for the Hysteria 2 e2e (#110): xray, the ingress agent and tailscaled in one container.
+ARG TAILSCALE_IMAGE=tailscale/tailscale:v1.98.10
+FROM ${TAILSCALE_IMAGE} AS ts
+FROM python:3.13-alpine
+ARG XRAY_VERSION=26.10.31
+ARG TARGETARCH
+RUN apk add --no-cache curl unzip iptables ip6tables \
+ && case "$TARGETARCH" in arm64) a=arm64-v8a ;; *) a=64 ;; esac \
+ && curl -fsSL -o /tmp/x.zip "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-${a}.zip" \
+ && mkdir -p /usr/local/share/xray && unzip -q /tmp/x.zip -d /tmp/x \
+ && mv /tmp/x/xray /usr/local/bin/ && mv /tmp/x/*.dat /usr/local/share/xray/ && rm -rf /tmp/x /tmp/x.zip
+COPY --from=ts /usr/local/bin/tailscale /usr/local/bin/tailscaled /usr/local/bin/
+COPY requirements.txt /agent/requirements.txt
+RUN pip install -q --no-cache-dir -r /agent/requirements.txt
+COPY app /agent/app
+COPY bridge.sh /bridge.sh
+ENV XRAY_LOCATION_ASSET=/usr/local/share/xray
+ENTRYPOINT ["sh", "/bridge.sh"]

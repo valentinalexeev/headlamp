@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-serve-e2e test-funnel-tls-e2e test-compose-control test-control-host-aws test-runtime-config lint \
+.PHONY: hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-serve-e2e test-funnel-tls-e2e test-hysteria-e2e test-compose-control test-control-host-aws test-runtime-config lint \
   test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -55,6 +55,10 @@ test-serve-e2e:
 # On demand (#127): funnel on-demand certificates, the real edge with a test ACME server (Pebble) and funnel-ingress.
 test-funnel-tls-e2e:
 	sh scripts/test/funnel-tls/e2e-docker.sh
+
+# On demand (#110): Hysteria 2 beside VLESS Reality. Tailnet, exit node, bridge, enrolment and real clients in docker.
+test-hysteria-e2e:
+	sh scripts/test/hysteria/e2e-docker.sh
 
 # On demand: examples/compose/control on the local docker (TLS edge, headscale, node-control, a client).
 test-compose-control:

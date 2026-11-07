@@ -79,6 +79,10 @@
   become: true
   when: not ansible_check_mode
 
+- name: Hysteria 2 certificate (before xray starts, so the inbound has its files)
+  ansible.builtin.include_tasks: hy2.yml
+  when: hy2_enabled | bool
+
 - name: Enable and start xray
   ansible.builtin.systemd:
     name: xray

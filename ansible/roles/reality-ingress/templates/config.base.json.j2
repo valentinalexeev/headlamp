@@ -48,7 +48,8 @@
   'outbounds': [
     {'tag': 'blocked', 'protocol': 'blackhole'},
     {'tag': 'direct', 'protocol': 'freedom', 'streamSettings': {'sockopt': {'domainStrategy': 'UseIPv4'}}},
-    {'tag': 'via-exit', 'protocol': 'socks', 'settings': {'servers': [{'address': socks_host, 'port': socks_port}]}}
+    {'tag': 'via-exit', 'protocol': 'socks', 'settings': {'servers': [{'address': socks_host, 'port': socks_port}]}},
+    {'tag': 'via-tailnet', 'protocol': 'socks', 'settings': {'servers': [{'address': socks_host, 'port': socks_port}]}}
   ],
   'routing': {
     'domainStrategy': 'IPOnDemand',
@@ -58,6 +59,11 @@
     ]
   }
 } %}
+{#
+  via-tailnet (#132): granted tailnet traffic. It is the same tailscaled SOCKS as via-exit: tailscaled sends
+  tailnet addresses over the tailnet, and the headscale ACL for the bridge's tag decides what answers. The agent
+  routes to it only the tailnet ranges of credentials with a grant; everything else stays blocked.
+#}
 {#
   Hysteria 2 (#110): "hy2-in", on UDP. The agent puts every credential here too (auth = the uuid, the same email),
   so the per-user rules, the block of private and tailnet ranges, and the stats apply unchanged.

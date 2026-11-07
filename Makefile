@@ -118,3 +118,7 @@ test-k8s-connector:
 # The chart in kind against the pinned headscale: join, route approval by policy, a ClusterIP from the tailnet.
 test-k8s-connector-e2e:
 	sh scripts/test/k8s-connector/e2e-kind.sh
+
+# On demand (#123): the Access page (roles and grants) against a real headscale, two tailnet users.
+test-access-e2e:
+	sh scripts/test/access/e2e-docker.sh

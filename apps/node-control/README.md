@@ -70,6 +70,8 @@ Fly.io, `fly.toml`).
 | `FLY_API_TOKEN` | The app-scoped deploy token for the controlled Fly app or apps. |
 | `ADMIN_CONFIG` | Optional. The path of the admin roles file (see "Admin roles"). A file that does not parse, has an unknown field or names an unknown role stops the start. |
 | `ADMIN_USERS` | Optional. Comma-separated tailnet logins that get the `owner` role. |
+| `ADMIN_DB` | Optional. The path of the SQLite file for the roles and grants that you change in the UI (see "Change roles in the UI"). If it is not set and `REDIS_URL` is set, Redis keeps them. If neither is set, the Access page is off. |
+| `ADMIN_REDIS_KEY` | Optional. The Redis key prefix for the roles and grants. The default is `<app>:admin`, with the app named as for the tailnet state. |
 
 ## Admin roles
 
@@ -90,7 +92,8 @@ A permission is a feature and a level. A higher level includes the lower ones:
 | `tasks` | tasks, runs, sessions, config | run now, cancel, start or stop a session | edit config and secrets |
 | `policy` | the policy, preview | | apply, confirm, revert |
 | `funnel` | state, config, audit | | namespaces, keys, routes, blocks |
-| `audit` | the activity page | | |
+| `audit` | the activity page, the change log of roles and grants | | |
+| `admin` | the Access page: roles, grants, export | | change roles and grants, import |
 
 The built-in roles:
 
@@ -98,7 +101,7 @@ The built-in roles:
 |---|---|
 | `viewer` | `view` on every feature |
 | `operator` | `viewer`, plus `operate` on `nodes`, `tasks` and `enroll` |
-| `owner` | `admin` on every feature |
+| `owner` | `admin` on every feature, `admin` included |
 
 A user who holds no permission sees no page and gets `403` everywhere. A tagged node is never a user. The menu shows
 only the pages a user can open. Buttons for actions a user cannot do still show, but the server refuses the request.
@@ -109,7 +112,8 @@ Three sources add up:
 
 1. `ADMIN_USERS`: each login is an `owner`.
 2. `ADMIN_CONFIG`: a JSON file with custom roles and grants. Mount it like `NODES_CONFIG`. The UI cannot change it.
-3. The old lists `POLICY_ADMIN_USERS`, `FUNNEL_ADMIN_USERS` and `TASKS_ADMIN_USERS`: each login is `admin` of that
+3. The roles and grants that you change on the Access page (see "Change roles in the UI").
+4. The old lists `POLICY_ADMIN_USERS`, `FUNNEL_ADMIN_USERS` and `TASKS_ADMIN_USERS`: each login is `admin` of that
    one feature. They keep working.
 
 An example file is in
@@ -128,10 +132,48 @@ An example file is in
 }
 ```
 
-- A custom role is a list of `feature.level`. `*.level` means every feature.
+- A custom role is a list of `feature.level`. `*.level` means every feature, but not `admin`. To give `admin`, write
+  `admin.view` or `admin.admin`.
 - A built-in role name cannot be redefined.
 - A `subject` is a tailnet login, written as in the old lists. The group subject `group:<name>` is reserved for OIDC
   (#102).
+
+### Change roles in the UI
+
+The Access page (`/admin`) shows all roles and grants. A user with `admin.admin` can change them there. The page is
+on when `ADMIN_DB` or `REDIS_URL` is set.
+
+The page shows two types of grant:
+
+- **file**: a grant from `ADMIN_USERS`, `ADMIN_CONFIG` or an old list. The page cannot change or remove it. Use these
+  grants as break-glass owners: if all grants on the page are removed, these users still have their roles.
+- **store**: a grant that is set on the page. node-control keeps it in `ADMIN_DB` or in Redis.
+
+The server checks these rules for each change:
+
+- You cannot change your own grants.
+- You can grant or remove a role only if you hold all its permissions.
+- You can create, change or delete a role only if you hold all its permissions, before and after the change.
+- You cannot change a built-in role or a role from `ADMIN_CONFIG`.
+- You cannot delete a role while a grant uses it.
+
+A change applies at once. Other instances that use the same Redis apply it in 1 second. You do not restart
+node-control. Each change goes into the change log, with the time and the user. The log keeps the 1000 newest
+entries. A user with `audit.view` sees it on the Access page and on the Activity page.
+
+To move the grants from the file to the UI:
+
+1. Open the Access page as an owner.
+2. Click **Import** and select your `ADMIN_CONFIG` file.
+3. Make sure that the grants show as **store**.
+4. Remove the grants from the file, but keep one owner as the break-glass owner.
+5. Restart node-control.
+
+CAUTION: Import replaces all stored roles and grants. The rules above also apply to the imported content.
+
+**Export** gives the stored roles and grants in the `ADMIN_CONFIG` format.
+
+NOTE: With no OIDC sign-in on the console, a `group:<name>` grant has no effect yet. Only tailnet logins match.
 
 ### No admin configured
 

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access</title>
+</head>
+<body>
+<div class="hl" id="access">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>Access</h1>
+        <p class="t2">Roles and who holds them. Grants from ADMIN_CONFIG and ADMIN_USERS are locked here.</p>
+      </div>
+      <div class="rowbtns">
+        <a class="btn" href="/admin/export" download="admin-config.json">Export</a>
+        <span id="importslot"></span>
+      </div>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note plain" id="notice" role="status" hidden></div>
+
+    <section class="panel" aria-label="Grants">
+      <h2>Grants</h2>
+      <div id="grantform"></div>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Subject</th><th>Roles</th><th>Source</th><th><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="grants"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Roles">
+      <h2>Roles</h2>
+      <div id="roleform"></div>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Role</th><th>Permissions</th><th>Source</th><th><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="roles"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Changes">
+      <h2>Changes</h2>
+      <ul id="audit" class="small"></ul>
+    </section>
+  </div>
+</div>
+<script src="/admin/static/access.js" defer></script>
+</body>
+</html>

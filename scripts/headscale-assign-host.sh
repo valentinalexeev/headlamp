@@ -27,7 +27,7 @@ run() {
     echo "[dry-run] $*"
   else
     echo "+ $*"
-    eval "$@"
+    eval "$*"
   fi
 }
 
@@ -41,7 +41,7 @@ run_redacted() {
     echo "[dry-run] $display"
   else
     echo "+ $display"
-    eval "$@"
+    eval "$*"
   fi
 }
 

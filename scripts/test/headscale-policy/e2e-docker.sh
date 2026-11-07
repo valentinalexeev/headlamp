@@ -103,21 +103,21 @@ start config.yaml && ok "headscale (file mode) is up" || { nok "headscale (file 
 
 P1='{"acls":[{"action":"accept","src":["*"],"dst":["*:22"]}]}'
 printf '%s' "$P1" > "$T/p1.json"
-run_cli() { E2E_CTR=$ctr PATH="$T/bin:$PATH" HS_APP=x NODE_CONTROL_URL= sh "$cli" "$@" > "$T/out" 2> "$T/err"; rc=$?; }
+run_cli() { E2E_CTR=$ctr PATH="$T/bin:$PATH" HS_APP=x NODE_CONTROL_URL='' sh "$cli" "$@" > "$T/out" 2> "$T/err"; rc=$?; }
 
 # (1) plain JSON
 run_cli bootstrap --file "$T/p1.json" --yes
-check "bootstrap of a plain JSON policy exits 0 (rc=$rc)" "$([ $rc = 0 ]; echo $?)"
+check "bootstrap of a plain JSON policy exits 0 (rc=$rc)" "$([ "$rc" = 0 ] && echo 0 || echo 1)"
 dbget > "$T/got1" 2>/dev/null; sameJSON "$P1" "$T/got1"; check "the database holds the new policy" $?
 left=$(dk diff "$ctr" 2>/dev/null | grep -c '^A /tmp/' || true)
-[ "$left" = 0 ]; check "bootstrap leaves no files in the container" $?
+check "bootstrap leaves no files in the container" "$([ "$left" = 0 ] && echo 0 || echo 1)"
 hs policy get -c /etc/headscale/config.yaml > "$T/live" 2>/dev/null; sameJSON "$(cat "$T/etc/acl.json")" "$T/live"
 check "the running file-mode server still serves the file ACL" $?
 
 # (2) HuJSON with a comment and a trailing comma
 printf '%s\n' '{ // note' '  "acls": [ {"action":"accept","src":["*"],"dst":["*:443"],},' '  ],' '}' > "$T/p2.json"
 run_cli bootstrap --file "$T/p2.json" --yes
-check "bootstrap of a HuJSON policy exits 0 (rc=$rc)" "$([ $rc = 0 ]; echo $?)"
+check "bootstrap of a HuJSON policy exits 0 (rc=$rc)" "$([ "$rc" = 0 ] && echo 0 || echo 1)"
 grep -q 'warning: the policy file contains comments or trailing commas' "$T/err"; check "bootstrap warns about the dropped comments" $?
 P2='{"acls":[{"action":"accept","src":["*"],"dst":["*:443"]}]}'
 dbget 2>/dev/null | tr '\n' ' ' | sed -E 's/,[[:space:]]*([]}])/\1/g' > "$T/got2"; sameJSON "$P2" "$T/got2"; check "the database holds the HuJSON policy (comment blanked)" $?

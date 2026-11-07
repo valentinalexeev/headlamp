@@ -29,8 +29,8 @@ base file. It restarts xray when the set changes.
   everything else. The response never contains the Reality private key, the agent token or any credential.
   With `INGRESS_HY2_PORT` it also has `hy2_port`. The Salamander password is a secret and is never in it.
 
-Hysteria 2 (#110): when the base config has an inbound with the tag `hy2-in` and the protocol `hysteria`, the agent
-adds every credential to it as well. The uuid is the Hysteria `auth` value, and the email is the same as on
+Hysteria 2 (#110): the base config can have an inbound with the tag `hy2-in` and the protocol `hysteria`. The agent
+then adds every credential to it as well. The uuid is the Hysteria `auth` value, and the email is the same as on
 `reality-in`. Thus the per-user routing rules, the block rule and the statistics apply to both inbounds.
 
 No other routes exist (docs and OpenAPI are disabled).

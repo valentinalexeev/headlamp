@@ -20,11 +20,12 @@ const (
 	FeatureTasks    Feature = "tasks"
 	FeaturePolicy   Feature = "policy"
 	FeatureFunnel   Feature = "funnel"
+	FeatureServe    Feature = "serve"
 	FeatureAudit    Feature = "audit"
 )
 
 // Features lists every feature, in display order.
-var Features = []Feature{FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel, FeatureAudit}
+var Features = []Feature{FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel, FeatureServe, FeatureAudit}
 
 // Level is how much a permission allows inside a feature. A higher level includes every lower one.
 type Level int

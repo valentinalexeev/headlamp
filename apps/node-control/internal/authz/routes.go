@@ -131,6 +131,14 @@ var Routes = map[string]Rule{
 	"DELETE /funnel/blocks/{ns}/{service}": need(FeatureFunnel, LevelAdmin),
 	"GET /ingress/v1/config":               machine,
 	"POST /ingress/v1/state":               machine,
+	// serve (#117): a service is a name plus the pre-auth key its proxies join with
+	"GET /serve/state":                       need(FeatureServe, LevelView),
+	"POST /serve/services":                   need(FeatureServe, LevelAdmin),
+	"DELETE /serve/services/{id}":            need(FeatureServe, LevelAdmin),
+	"POST /serve/services/{id}/keys":         need(FeatureServe, LevelAdmin),
+	"DELETE /serve/services/{id}/keys/{key}": need(FeatureServe, LevelAdmin),
+	"GET /serve/ca.crt":                      open,
+	"POST /serve/v1/cert":                    machine,
 }
 
 // Authorizer is the core.Authorizer of the admin listener. Open is the transition mode of #122 decision 3: when

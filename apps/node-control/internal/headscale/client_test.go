@@ -160,3 +160,26 @@ func TestNodeMachineKey(t *testing.T) {
 		}
 	})
 }
+
+// The shape is from headscale v0.29.3 GET /api/v1/node (#117): the key id is a string under preAuthKey.
+func TestNodePreAuthKeyID(t *testing.T) {
+	var n Node
+	if err := json.Unmarshal([]byte(`{"id":"4","givenName":"grafana-1","preAuthKey":{"user":{"id":"1"},"id":"17","key":"hskey-auth-x-***","aclTags":["tag:serve"]}}`), &n); err != nil {
+		t.Fatal(err)
+	}
+	if n.PreAuthKeyID != 17 || n.GivenName != "grafana-1" {
+		t.Fatalf("got %+v", n)
+	}
+	var snake Node
+	if err := json.Unmarshal([]byte(`{"id":5,"pre_auth_key":{"id":18}}`), &snake); err != nil || snake.PreAuthKeyID != 18 {
+		t.Fatalf("snake: %+v %v", snake, err)
+	}
+	var none Node
+	if err := json.Unmarshal([]byte(`{"id":"6","preAuthKey":null}`), &none); err != nil || none.PreAuthKeyID != 0 {
+		t.Fatalf("none: %+v %v", none, err)
+	}
+	var bad Node
+	if err := json.Unmarshal([]byte(`{"id":"6","preAuthKey":{"id":"x"}}`), &bad); err == nil {
+		t.Fatal("a bad key id must fail")
+	}
+}

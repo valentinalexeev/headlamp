@@ -204,7 +204,7 @@ func NewRegistry(rc RegistryConfig) (*Registry, error) {
 				return nil, fmt.Errorf("bridge %s: no agent_url and no headscale source to find its agent", ing.Name)
 			}
 		}
-		r.configured = append(r.configured, SyncTarget{Name: ing.Name, Agent: agent, State: NewSyncState(r.now), Ingress: ing})
+		r.configured = append(r.configured, SyncTarget{Name: ing.Name, Agent: agent, State: NewSyncState(r.now), Ingress: r.withHy2(ing)})
 	}
 	switch {
 	case r.src == nil:
@@ -213,6 +213,15 @@ func NewRegistry(rc RegistryConfig) (*Registry, error) {
 		r.discoveryOff = "link_host is not set in ENROLL_CONFIG"
 	}
 	return r, nil
+}
+
+// withHy2 adds the Salamander password of a bridge with a Hysteria 2 inbound, from HY2_OBFS_<NAME>.
+// Without the variable the profile offers Hysteria 2 without obfuscation.
+func (r *Registry) withHy2(ing Ingress) Ingress {
+	if ing.Hy2Port != 0 {
+		ing.Hy2Obfs = r.getenv(hy2Var(ing.Name))
+	}
+	return ing
 }
 
 // SetStore attaches the store that holds the approvals.
@@ -622,7 +631,7 @@ func (r *Registry) fetchInfo(ctx context.Context, n headscale.Node, name, token 
 	return info, "", ""
 }
 
-var infoKeys = []string{"name", "host", "port", "sni", "public_key", "short_id"}
+var infoKeys = []string{"name", "host", "port", "sni", "public_key", "short_id", "hy2_port"}
 
 // parseInfo validates the published parameters with the rules of the configuration (only the six
 // published keys are read; an agent cannot choose its own URL, token variable or credential mode).
@@ -649,7 +658,8 @@ func parseInfo(node string, body []byte) (*infoResult, error) {
 }
 
 // fingerprint is the hex SHA-256 of the canonical JSON of the published parameters: the keys name,
-// host, port, sni, public_key, short_id in this order, no whitespace.
+// host, port, sni, public_key, short_id in this order, then hy2_port only when set (#110), so the
+// fingerprint of a bridge without Hysteria 2 is the one it always had. No whitespace.
 func fingerprint(in Ingress) string {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
@@ -661,7 +671,8 @@ func fingerprint(in Ingress) string {
 		SNI       string `json:"sni"`
 		PublicKey string `json:"public_key"`
 		ShortID   string `json:"short_id"`
-	}{in.Name, in.Host, in.Port, in.SNI, in.PublicKey, in.ShortID})
+		Hy2Port   int    `json:"hy2_port,omitempty"`
+	}{in.Name, in.Host, in.Port, in.SNI, in.PublicKey, in.ShortID, in.Hy2Port})
 	sum := sha256.Sum256(bytes.TrimSuffix(b.Bytes(), []byte("\n")))
 	return hex.EncodeToString(sum[:])
 }
@@ -858,7 +869,7 @@ func (r *Registry) buildLocked() Current {
 		if v.Approval == stApproved {
 			v.Active = true
 			p := r.probes[v.Name]
-			t := r.discoveredTarget(v.Name, p.nodeID, p.node.MachineKey, infos[k].ing)
+			t := r.discoveredTarget(v.Name, p.nodeID, p.node.MachineKey, r.withHy2(infos[k].ing))
 			cur.Cfg.Ingresses = append(cur.Cfg.Ingresses, t.Ingress)
 			cur.Targets = append(cur.Targets, t)
 			snap := t.State.Snapshot()

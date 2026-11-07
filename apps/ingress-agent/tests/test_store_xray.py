@@ -154,3 +154,36 @@ class DirectListTests(unittest.TestCase):
     def test_parse_list(self):
         self.assertEqual(parse_list(""), [])
         self.assertEqual(parse_list(" xx, yy ,,zz "), ["xx", "yy", "zz"])
+
+
+class Hy2RenderTests(unittest.TestCase):
+    """#110: an optional Hysteria 2 inbound in the base config gets the same users, rules and block."""
+
+    def base(self):
+        b = copy.deepcopy(BASE)
+        b["inbounds"].append({"tag": "hy2-in", "protocol": "hysteria", "port": 443, "settings": {"version": 2, "clients": []},
+                              "streamSettings": {"network": "hysteria", "security": "tls"}})
+        return b
+
+    def test_same_users_and_block_on_both_inbounds(self):
+        cfg = render_config(self.base(), [cred(U1, "direct"), cred(U2, "exit")])
+        hy2 = next(i for i in cfg["inbounds"] if i["tag"] == "hy2-in")
+        self.assertEqual(hy2["settings"]["clients"], [{"auth": U1, "email": email_for(U1)}, {"auth": U2, "email": email_for(U2)}])
+        self.assertEqual(cfg["routing"]["rules"][0]["inboundTag"], ["reality-in", "hy2-in"])
+        # the per-user rules are by email, so they apply to both protocols without change
+        self.assertEqual(cfg["routing"]["rules"][1], {"type": "field", "user": [email_for(U1)], "outboundTag": "direct"})
+
+    def test_without_hy2_the_config_is_unchanged(self):
+        self.assertEqual(render_config(BASE, [cred(U1)])["routing"]["rules"][0]["inboundTag"], ["reality-in"])
+
+    def test_wrong_protocol_is_refused(self):
+        b = self.base()
+        b["inbounds"][-1]["protocol"] = "vless"
+        with self.assertRaises(ValueError):
+            render_config(b, [])
+
+    def test_restart_command_override(self):
+        calls = []
+        r = XrayRunner("xray", "xray", "x", run=lambda a: (calls.append(a), (0, ""))[1], restart_cmd=["supervisorctl", "restart", "xray"])
+        r.restart()
+        self.assertEqual(calls, [["supervisorctl", "restart", "xray"]])

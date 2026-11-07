@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Copy the ingress TLS certificate for the Hysteria 2 inbound
+After=caddy-ingress.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hy2-cert-sync

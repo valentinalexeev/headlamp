@@ -1,0 +1,72 @@
+# Values for tailnet-connector. Every value that identifies a site is a placeholder: set the real ones in your
+# private repo (a values file there).
+
+# The headscale URL (the control server of the connector node).
+controlURL: https://headscale.example.com
+
+connector:
+  enabled: true
+  # The tailnet node name. The default is the release name.
+  hostname: ""
+  # The CIDRs to advertise (TS_ROUTES). Typically the Service range and the Pod range of the cluster.
+  routes:
+    - 10.96.0.0/12
+  # The pre-auth key: ephemeral, reusable, tagged (for example tag:k8s-connector). The key gives the node its tags;
+  # the policy approves the routes for that tag only. The chart never creates this Secret.
+  #   kubectl create secret generic tailnet-connector-authkey --from-literal=authkey=<key>
+  authKeySecret:
+    name: tailnet-connector-authkey
+    key: authkey
+  # The Kubernetes Secret that keeps the tailscale state. The chart creates it empty, and the Role allows access to
+  # this one Secret only. The default is "<release>-state".
+  stateSecret: ""
+  # More flags for "tailscale up".
+  extraArgs: []
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+image:
+  # apps/tailnet-connector: the tailscale container image at the repo pin TAILSCALE_VERSION (= the chart appVersion,
+  # checked by scripts/check-tailscale-pins.sh). Empty tag: the chart version. Pin a digest in production.
+  repository: ghcr.io/valentinalexeev/headlamp/tailnet-connector
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# Optional: a ConfigMap with a CA bundle (key "ca.crt"), for a headscale with a private CA. Empty: the system roots.
+caBundle:
+  configMap: ""
+  key: ca.crt
+
+# Optional, off by default: serve proxies (#117). Each entry runs funnel-sidecar in serve mode, in front of one
+# in-cluster Service, under a tailnet-only name that node-control answers. Create the service in node-control first.
+# Its key (reusable, ephemeral, tag:serve + tag:ns-<namespace>) goes in a Secret named after the service.
+serve:
+  enabled: false
+  # node-control on the tailnet (FUNNEL_SERVE_URL), for example http://100.64.0.1
+  url: http://100.64.0.1
+  image:
+    repository: ghcr.io/valentinalexeev/headlamp/funnel-sidecar
+    tag: ""          # empty: the chart version
+    digest: ""
+  services: []
+  # - name: grafana                       # the node-control service name; also the Deployment name suffix
+  #   # the key Secret; the default is "<release>-serve-<name>", key "authkey"
+  #   authKeySecret: ""
+  #   # FUNNEL_SERVICES: <port name>=<tailnet port>@<upstream>
+  #   services: "web=443@grafana.monitoring.svc:3000"
+  #   replicas: 1
+  # - name: apps                          # a wildcard service (*.apps) in front of an ingress controller
+  #   services: "web=443@ingress-nginx-controller.ingress-nginx.svc:80"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile: { type: RuntimeDefault }
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

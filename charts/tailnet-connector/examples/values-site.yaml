@@ -1,0 +1,18 @@
+# An example site values file. Copy it to your private repo and set the real values there.
+controlURL: https://headscale.example.com
+connector:
+  hostname: k8s-example
+  routes:
+    - 10.96.0.0/12   # the Service range
+    - 10.244.0.0/16  # the Pod range
+image:
+  digest: ""         # pin sha256:... in production
+serve:
+  enabled: true
+  url: http://100.64.0.1
+  services:
+    - name: grafana
+      services: "web=443@grafana.monitoring.svc:3000"
+    - name: apps
+      services: "web=443@ingress-nginx-controller.ingress-nginx.svc:80"
+      replicas: 2

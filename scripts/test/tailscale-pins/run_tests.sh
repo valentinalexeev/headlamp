@@ -8,7 +8,7 @@ fails=0
 copy() { # a fresh copy of the pinned files
   local d="$tmp/$1"; mkdir -p "$d"
   (cd "$root" && tar -cf - TAILSCALE_VERSION scripts/check-tailscale-pins.sh ansible/roles/tailscale/defaults/main.yml \
-    $(grep -rl --include='Dockerfile*' '^ARG TSVERSION=' apps) $(grep -rlE --include=go.mod '^[[:space:]]*tailscale\.com v' apps)) | tar -xf - -C "$d"
+    charts/tailnet-connector/Chart.yaml $(grep -rl --include='Dockerfile*' '^ARG TSVERSION=' apps) $(grep -rlE --include=go.mod '^[[:space:]]*tailscale\.com v' apps)) | tar -xf - -C "$d"
   echo "$d"
 }
 expect() { # NAME pass|fail DIR
@@ -17,13 +17,14 @@ expect() { # NAME pass|fail DIR
 }
 expect "the repo passes" pass "$root"
 i=0
-for f in TAILSCALE_VERSION ansible/roles/tailscale/defaults/main.yml \
+for f in TAILSCALE_VERSION ansible/roles/tailscale/defaults/main.yml charts/tailnet-connector/Chart.yaml \
   $(cd "$root" && grep -rl --include='Dockerfile*' '^ARG TSVERSION=' apps) \
   $(cd "$root" && grep -rlE --include=go.mod '^[[:space:]]*tailscale\.com v' apps); do
   i=$((i+1)); d=$(copy "c$i")
   case "$f" in
   TAILSCALE_VERSION) echo 0.0.1 > "$d/$f" ;;
   *defaults/main.yml) sed -i.bak 's/^tailscale_version: .*/tailscale_version: "0.0.1"/' "$d/$f" ;;
+  *Chart.yaml) sed -i.bak 's/^appVersion: .*/appVersion: "0.0.1"/' "$d/$f" ;;
   *go.mod) sed -i.bak 's/^\([[:space:]]*tailscale\.com\) v.*/\1 v0.0.1/' "$d/$f" ;;
   *) sed -i.bak 's/^ARG TSVERSION=.*/ARG TSVERSION=0.0.1/' "$d/$f" ;;
   esac

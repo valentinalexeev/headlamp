@@ -110,3 +110,11 @@ lint:
 	  .githooks/pre-commit .githooks/commit-msg \
 	  apps/tailguard/*.sh apps/headscale/*.sh
 	-./scripts/check-statestore-port.sh
+
+# Helm chart charts/tailnet-connector (#103): helm lint, helm template | kubeconform (docker images if not installed).
+test-k8s-connector:
+	bash scripts/test/k8s-connector/validate.sh
+
+# The chart in kind against the pinned headscale: join, route approval by policy, a ClusterIP from the tailnet.
+test-k8s-connector-e2e:
+	sh scripts/test/k8s-connector/e2e-kind.sh

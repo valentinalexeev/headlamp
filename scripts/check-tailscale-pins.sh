@@ -21,4 +21,7 @@ done < <(grep -rlE --include=go.mod '^[[:space:]]*tailscale\.com v' apps)
 # the Ansible role default
 check ansible/roles/tailscale/defaults/main.yml tailscale_version \
   "$(sed -n 's/^tailscale_version: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' ansible/roles/tailscale/defaults/main.yml)"
+# the Helm chart's appVersion (the tailscale in its image, apps/tailnet-connector)
+check charts/tailnet-connector/Chart.yaml appVersion \
+  "$(sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' charts/tailnet-connector/Chart.yaml)"
 exit $bad

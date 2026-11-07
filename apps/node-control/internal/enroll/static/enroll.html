@@ -32,10 +32,22 @@
       </table>
     </div>
     <p class="t3 small" id="foot" hidden>Actions follow the device's state: a link only before first use, Delete only after revoke. Traffic is sampled every 5 minutes and is not a connection log.</p>
+    <section id="people" hidden>
+      <h2>People</h2>
+      <p class="t2">People who enrol their own devices after they sign in with the identity provider. Lock removes all their access at once.</p>
+      <div class="note crit" id="peopleerror" role="alert" hidden></div>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Person</th><th>State</th><th>Active devices</th><th>Last sign-in</th><th>Last check</th><th><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="peoplerows"></tbody>
+        </table>
+      </div>
+    </section>
   </div>
   <div id="drawer"></div>
 </div>
 <script src="/enroll/qrcode.js" defer></script>
 <script src="/enroll/static/enroll.js" defer></script>
+<script src="/enroll/static/people.js" defer></script>
 </body>
 </html>

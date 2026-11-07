@@ -37,15 +37,15 @@ func TestEnrollPageHeaders(t *testing.T) {
 func TestEnrollPageNoInlineScript(t *testing.T) {
 	html := string(enrollHTML)
 	scripts := regexp.MustCompile(`(?i)<script\b[^>]*>`).FindAllString(html, -1)
-	if len(scripts) != 2 {
-		t.Errorf("want the QR library and the page script, got %v", scripts)
+	if len(scripts) != 3 {
+		t.Errorf("want the QR library, the page script and the People script, got %v", scripts)
 	}
 	for _, m := range scripts {
 		if !strings.Contains(m, ` src="/`) || !strings.Contains(m, "defer") {
 			t.Errorf("script tag %q must be a same-origin deferred file", m)
 		}
 	}
-	if !strings.Contains(html, `src="/enroll/qrcode.js"`) || !strings.Contains(html, `src="/enroll/static/enroll.js"`) {
+	if !strings.Contains(html, `src="/enroll/qrcode.js"`) || !strings.Contains(html, `src="/enroll/static/enroll.js"`) || !strings.Contains(html, `src="/enroll/static/people.js"`) {
 		t.Error("page lacks its scripts")
 	}
 	for _, bad := range []string{"<style", " style=", "javascript:", "http://", "https://", " onclick=", " onload=", " onsubmit=", "<template"} {
@@ -142,11 +142,11 @@ func TestEnrollPagesSelfTest(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not installed")
 	}
-	args := []string{"testdata/enroll_selftest.js", "../ui/static/hl.js", "static/approve.js", "static/enroll.js"}
+	args := []string{"testdata/enroll_selftest.js", "../ui/static/hl.js", "static/approve.js", "static/enroll.js", "static/people.js"}
 	if out, err := exec.Command(node, args...).CombinedOutput(); err != nil {
 		t.Fatalf("self-test failed: %v\n%s", err, out)
 	}
-	for _, f := range []string{"static/approve.js", "static/enroll.js"} {
+	for _, f := range []string{"static/approve.js", "static/enroll.js", "static/people.js"} {
 		if out, err := exec.Command(node, "--check", f).CombinedOutput(); err != nil {
 			t.Fatalf("node --check %s: %v\n%s", f, err, out)
 		}

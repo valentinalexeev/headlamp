@@ -44,6 +44,9 @@ var enrollHTML []byte
 //go:embed static/enroll.js
 var enrollJS []byte
 
+//go:embed static/people.js
+var peopleJS []byte
+
 // qrcodeJS is the QR encoder the page draws the enrolment link with (qrcode-generator 2.0.4, MIT, Kazuhiko Arase;
 // the licence header stays in the file).
 //
@@ -103,6 +106,7 @@ func (a *Admin) State() *SyncState { return a.reg.First().State }
 func (a *Admin) Register(mux *core.Mux) {
 	mux.HandleFunc("GET /enroll", asset("text/html; charset=utf-8", enrollHTML))
 	mux.HandleFunc("GET /enroll/static/enroll.js", asset("text/javascript; charset=utf-8", enrollJS))
+	mux.HandleFunc("GET /enroll/static/people.js", asset("text/javascript; charset=utf-8", peopleJS))
 	mux.HandleFunc("GET /enroll/qrcode.js", asset("text/javascript; charset=utf-8", qrcodeJS))
 	mux.HandleFunc("GET /enroll/approve", asset("text/html; charset=utf-8", approveHTML))
 	mux.HandleFunc("GET /enroll/static/approve.js", asset("text/javascript; charset=utf-8", approveJS))

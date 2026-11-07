@@ -119,21 +119,23 @@
           ingress-agent: reality_short_id must be 2-16 lowercase hex characters when ingress_name or reality_public_key is set. The value is not shown.
         quiet: true
 
+# The agent is Go (#133): the role builds ./cmd/ingress-agent with the module in go.mod (#144).
 - name: Stat the agent source on the control host
   ansible.builtin.stat:
-    path: "{{ ingress_agent_src }}/app/main.py"
+    path: "{{ ingress_agent_src }}/{{ item }}"
+  loop: [go.mod, cmd/ingress-agent]
   delegate_to: localhost
   become: false
   # A read-only stat is safe, and the answer is needed in check mode too.
   check_mode: false
-  register: ingress_agent_src_main
+  register: ingress_agent_src_files
 
 - name: Check the agent source exists
   ansible.builtin.assert:
-    that: ingress_agent_src_main.stat.exists
+    that: ingress_agent_src_files.results | map(attribute='stat.exists') | select | list | length == 2
     fail_msg: >-
-      ingress-agent: {{ ingress_agent_src }}/app/main.py not found on the
-      control host; ingress_agent_src must be the apps/ingress-agent directory.
+      ingress-agent: {{ ingress_agent_src }}/go.mod and {{ ingress_agent_src }}/cmd/ingress-agent
+      must exist on the control host; ingress_agent_src must be the apps/ingress-agent directory.
     quiet: true
 
 - name: Stat the xray binary and the base config

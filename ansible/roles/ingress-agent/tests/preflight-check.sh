@@ -9,7 +9,10 @@ fi
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap '[ -n "${KEEP:-}" ] || rm -rf "$tmp"' EXIT
-python3 - "$here/tasks/preflight.yml" "$tmp/pre.yml" <<'PY' || { echo "FAIL: cannot extract the preflight task"; exit 1; }
+# ansible's own interpreter has PyYAML; the system python3 may not.
+py="$(head -1 "$(command -v ansible-playbook)" | sed -n 's/^#! *//p' | awk '{print $NF}')"
+case "$py" in */python*) ;; *) py=python3 ;; esac
+"$py" - "$here/tasks/preflight.yml" "$tmp/pre.yml" <<'PY' || { echo "FAIL: cannot extract the preflight task"; exit 1; }
 import sys, yaml
 tasks = yaml.safe_load(open(sys.argv[1]))
 gate = [t for t in tasks if t.get("name", "").startswith("Validate the public parameters")]

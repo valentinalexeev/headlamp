@@ -23,6 +23,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/nodes"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/overview"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policy"
+	servemod "github.com/valentinalexeev/headlamp/apps/node-control/internal/serve"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tailnet"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tasks"
 )
@@ -110,6 +111,8 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 			return nil
 		}),
 		tasks.New(env, src),
+		// Serve (#117): on with SERVE_DB. It reads nodes uncached, so a new replica answers DNS within one refresh.
+		servemod.New(env, hsClient),
 	}
 	// Overview is last: it counts the navigation of everything before it.
 	others := slices.Clone(mods)

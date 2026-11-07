@@ -11,6 +11,7 @@ require (
 	github.com/aws/smithy-go v1.28.8
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/redis/go-redis/v9 v9.23.0
+	golang.org/x/net v0.56.0
 	modernc.org/sqlite v1.61.0
 	tailscale.com v1.98.10
 )
@@ -68,7 +69,6 @@ require (
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
-	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect

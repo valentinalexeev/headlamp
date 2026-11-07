@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strings"
 
 	"tailscale.com/ipn"
@@ -84,6 +85,25 @@ func upError(err error, authKey string) error {
 
 func (t *Tsnet) ListenAdmin() (net.Listener, error)  { return t.srv.Listen("tcp", ":80") }
 func (t *Tsnet) ListenPublic() (net.Listener, error) { return t.srv.Listen("tcp", ":8081") }
+
+// ListenDNS listens on port 53 of the node's IPv4 tailnet address, UDP and TCP. tsnet needs a concrete address for
+// UDP (it refuses ":53"), so the node must be up first; the spike on #117 showed both paths work through tsnet.
+func (t *Tsnet) ListenDNS() (net.PacketConn, net.Listener, error) {
+	ip4, _ := t.srv.TailscaleIPs()
+	if !ip4.IsValid() {
+		return nil, nil, errors.New("tailnet has no IPv4 address yet")
+	}
+	pc, err := t.srv.ListenPacket("udp", netip.AddrPortFrom(ip4, 53).String())
+	if err != nil {
+		return nil, nil, err
+	}
+	ln, err := t.srv.Listen("tcp", ":53")
+	if err != nil {
+		pc.Close()
+		return nil, nil, err
+	}
+	return pc, ln, nil
+}
 
 func (t *Tsnet) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	return t.srv.Dial(ctx, network, addr)

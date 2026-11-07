@@ -32,6 +32,9 @@ type Node struct {
 	IPAddresses     []string
 	ApprovedRoutes  []string
 	AvailableRoutes []string
+	// PreAuthKeyID is the id of the pre-auth key the node registered with, 0 when it registered otherwise (a
+	// login) or the API omits it. Serve (#117) maps a node to its service through it.
+	PreAuthKeyID uint64
 }
 
 // UnmarshalJSON tolerates the variations between headscale versions: the id
@@ -58,6 +61,12 @@ func (n *Node) UnmarshalJSON(b []byte) error {
 		ForcedSnake     []string        `json:"forced_tags"`
 		ValidTags       []string        `json:"validTags"`
 		ValidSnake      []string        `json:"valid_tags"`
+		PreAuthKey      *struct {
+			ID json.RawMessage `json:"id"`
+		} `json:"preAuthKey"`
+		PreAuthKeySnake *struct {
+			ID json.RawMessage `json:"id"`
+		} `json:"pre_auth_key"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -80,6 +89,15 @@ func (n *Node) UnmarshalJSON(b []byte) error {
 	}
 	if n.LastSeen == nil {
 		n.LastSeen = raw.LastSeenSnake
+	}
+	for _, k := range []*struct {
+		ID json.RawMessage `json:"id"`
+	}{raw.PreAuthKey, raw.PreAuthKeySnake} {
+		if k != nil && n.PreAuthKeyID == 0 {
+			if n.PreAuthKeyID, err = parseID(k.ID); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

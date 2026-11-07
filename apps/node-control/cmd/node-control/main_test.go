@@ -72,7 +72,7 @@ func TestBuildModulesWithoutEnroll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,funnel,tasks,overview" {
+	if got := strings.Join(names(mods), ","); got != "tailnet,nodes,enroll,policy,funnel,tasks,serve,overview" {
 		t.Fatalf("module order %s", got)
 	}
 	tn, _ := serve(t, env, mods)
@@ -101,7 +101,7 @@ func TestBuildModulesIncludesTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := mods[len(mods)-1]; last.Name() != "overview" || mods[len(mods)-2].Name() != "tasks" || mods[len(mods)-3].Name() != "funnel" || mods[len(mods)-4].Name() != "policy" {
+	if last := mods[len(mods)-1]; last.Name() != "overview" || mods[len(mods)-2].Name() != "serve" || mods[len(mods)-3].Name() != "tasks" || mods[len(mods)-4].Name() != "funnel" || mods[len(mods)-5].Name() != "policy" {
 		t.Fatalf("module order %v", names(mods))
 	}
 	// Without its variables the module registers nothing and node-control serves as before.

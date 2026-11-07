@@ -258,6 +258,27 @@ warnings (`tailnet: node status`).
   headscale config). The default is 30 minutes and the minimum is 65 s. A value of 2 to 5 minutes is good here.
   Services behind a subnet router are not supported.
 
+### Serve mode: tailnet-only names (#117)
+
+In serve mode the sidecar publishes nothing on the internet. It serves its ports with TLS on the tailnet, under a
+tailnet-only name that node-control answers. Create the service in node-control first (see "Serve module" in the
+node-control README). Then give the sidecar the key of the service.
+
+| variable | purpose |
+|---|---|
+| `FUNNEL_SERVE_URL` | node-control on the tailnet, for example `http://100.64.0.1`. It turns on serve mode. |
+| `TS_AUTHKEY` | the auth key of the service (node-control shows it when you add the service) |
+| `FUNNEL_SERVICES` | as above. Each port listens with TLS. Use port 443 for HTTPS clients: `web=443@grafana.monitoring.svc:3000`. |
+
+- The sidecar sends no name. node-control knows the service from the key that the node joined with, and returns the
+  name with the certificate. `FUNNEL_NS` is not used, and the sidecar refuses `FUNNEL_SERVE_NAMES`.
+- The sidecar makes its own key. The key never leaves the pod. It renews the certificate at two thirds of its life.
+- Several replicas can use the same key. The name answers all the replicas that are online.
+- For an ingress controller, add a wildcard service, for example `*.apps`. Put one sidecar in front of the
+  controller, with the key of that service. Each new Ingress host under `apps` then needs no change in headlamp.
+- A wildcard certificate covers one label. `grafana.apps.<zone>` works. `a.b.apps.<zone>` does not.
+- Set `FUNNEL_SERVE_URL` or `FUNNEL_API_URL`, not both.
+
 ## Security notes
 
 The registration API is on the tailnet only. Expose only the proxy port to the internet (the `fly.toml` here does

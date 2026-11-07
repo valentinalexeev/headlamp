@@ -90,6 +90,17 @@ jobs:
         if: needs.scope.outputs.shell != 'true'
         run: echo "no shell, script or Makefile change"
 
+  pins:
+    # Cheap, so it runs on every PR and push: a changed pin anywhere must agree with TAILSCALE_VERSION and
+    # HEADSCALE_VERSION (#145, #150, #152).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tailscale and headscale pins agree
+        run: |
+          make check-tailscale-pins test-tailscale-pins
+          make check-headscale-pin test-headscale-pin
+
   terraform:
     needs: scope
     runs-on: ubuntu-24.04
@@ -129,6 +140,9 @@ jobs:
           pipx install --include-deps ansible-core
           ansible-galaxy collection install -r requirements.yml
           for p in playbooks/*.yml; do ANSIBLE_ROLES_PATH=roles ansible-playbook -i localhost, --syntax-check "$p"; done
+      - name: Role preflight tests
+        if: needs.scope.outputs.ansible == 'true'
+        run: make test-ansible-roles
       - name: Skipped
         if: needs.scope.outputs.ansible != 'true'
         run: echo "no Ansible change"

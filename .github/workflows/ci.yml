@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   scope:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       shell: ${{ steps.f.outputs.shell }}
       terraform: ${{ steps.f.outputs.terraform }}
@@ -45,7 +45,7 @@ jobs:
 
   commits:
     needs: scope
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,7 +76,7 @@ jobs:
 
   shell:
     needs: scope
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.scope.outputs.shell == 'true'
@@ -93,7 +93,7 @@ jobs:
   pins:
     # Cheap, so it runs on every PR and push: a changed pin anywhere must agree with TAILSCALE_VERSION and
     # HEADSCALE_VERSION (#145, #150, #152).
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tailscale and headscale pins agree
@@ -104,7 +104,7 @@ jobs:
   go-lint:
     # ADR 0002 checks (#160). New code is strict (--new-from-rev); the full report is warnings only. The Make
     # targets run the pinned golangci-lint image.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -117,7 +117,7 @@ jobs:
         run: make lint-go-report
 
   vulncheck:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -126,7 +126,7 @@ jobs:
       - run: make vulncheck
 
   config-lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
@@ -134,7 +134,7 @@ jobs:
 
   terraform:
     needs: scope
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.scope.outputs.terraform == 'true'
@@ -160,7 +160,7 @@ jobs:
 
   ansible:
     needs: scope
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.scope.outputs.ansible == 'true'

@@ -22,7 +22,7 @@ concurrency:
 jobs:
   gate:
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: read
@@ -40,7 +40,7 @@ jobs:
   detect:
     needs: gate
     if: always() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read
@@ -88,7 +88,7 @@ jobs:
   build:
     needs: detect
     if: always() && needs.detect.result == 'success' && needs.detect.outputs.build != '[]'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -146,7 +146,7 @@ jobs:
     if: >-
       always() && github.event_name != 'pull_request' && needs.detect.result == 'success' &&
       (needs.build.result == 'success' || needs.build.result == 'skipped')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write # the GitHub release of a tag
       packages: write

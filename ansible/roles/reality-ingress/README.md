@@ -145,6 +145,10 @@ before the agent has ever run.
   (`network: tcp,udp` -> `blocked`) behind the api rule. A client that matches none of the (prepended) rules of the agent
   is dropped (fail closed).
 
+## Tailnet access (`via-tailnet`)
+
+The base config has the outbound `via-tailnet`, a second name for the SOCKS port of `socks_listen` (#132). The agent uses it only for credentials with a tailnet grant, and only for tailnet addresses. node-control gives the grant per bridge (`"tailnet_access": "all"`). The headscale ACL for the tag of `socks_authkey` decides which hosts answer. The kernel backstop does not change, because xray dials only the loopback SOCKS port.
+
 ## Kernel backstop (nftables)
 
 The xray rule of the agent blocks `geoip:private` and `100.64.0.0/10` for phone users. It acts on

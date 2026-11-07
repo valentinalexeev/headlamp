@@ -53,6 +53,8 @@ Fly.io, `fly.toml`).
 | `ENROLL_SECRET_KEY` | Secret, at least 16 bytes. It derives subscription secrets. It is required with `ENROLL_DB` or `ENROLL_REDIS=1`. |
 | `AGENT_URL`, `AGENT_TOKEN` | The address (dialled through the tailnet) and bearer token of the agent of the first bridge. They are required with `ENROLL_DB` or `ENROLL_REDIS=1` only for the old single-host `enroll.json`. In the list shape, they are the optional fallback of the FIRST entry (no `agent_url`, no `AGENT_TOKEN_<NAME>`). |
 | `HY2_OBFS_<NAME>` | The Salamander password of a bridge with `hy2_port`, the same as its `hy2_obfs_password`. Same name rule as `AGENT_TOKEN_<NAME>`. Without it, the profile has no obfuscation, and a bridge with Salamander does not answer. |
+| `ENROLL_TAILNET_DST` | The ACL destinations that clients of a bridge with `"tailnet_access": "all"` may reach, comma-separated, for example `tag:lan:*,tag:db:5432`. Empty by default. See "Tailnet access through a bridge". |
+| `ENROLL_INGRESS_TAG` | The ACL source of the generated tailnet access rule. The default is `tag:ingress`. Set it to the tag of the bridge's SOCKS tailscaled, which comes from `socks_authkey`. |
 | `AGENT_TOKEN_<NAME>` | One bearer token for each bridge. `<NAME>` is the bridge name in upper case, with `-` as `_` (`ingress-2` reads `AGENT_TOKEN_INGRESS_2`). The `token_env` of an entry names another variable in its place. |
 | `POLICY_DB` | The path of the SQLite change history. It enables the policy console (`/policy`). Put it on the state volume: `/var/lib/tailscale/policy.db`. It needs `HEADSCALE_LOGIN_SERVER` and `HEADSCALE_API_KEY`. |
 | `POLICY_ADMIN_USERS` | Comma-separated tailnet logins that can use the console (required with `POLICY_DB`). Tagged nodes never have access. |
@@ -389,6 +391,7 @@ The file gives one or more bridge nodes. Each entry is a bridge host with its ow
   - `node`: the tailnet name of the machine that runs the bridge, a lowercase DNS name. It is necessary when it is different from `name`. Otherwise, the stopped check, the online flag and the Nodes page match the bridge by name.
   - `intermittent`: `true` or `false`. The default is `false`. See "Intermittent bridges".
   - `hy2_port`: the UDP port of the Hysteria 2 inbound of the bridge (#110), 1-65535. Without it the bridge has no Hysteria 2. A discovered bridge publishes it in `/v1/info`.
+  - `tailnet_access`: `"off"` or `"all"`. The default is `"off"`. See "Tailnet access through a bridge". Only `enroll.json` can set it. A discovered bridge cannot give it to itself.
 - `sni`, `short_id` and `public_key` must equal these values of the `reality-ingress` role: `reality_sni`, `reality_short_id` and the public half of `reality_private_key` (`xray x25519 -i <private>`). `port` must equal its `ingress_listen_port`.
 - `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>` and `/e/<token>`. Thus the name must resolve to a bridge whose front serves it and proxies to `:8081` of node-control, with a certificate for it. Prerequisite: before you enrol the first device, make DNS for `link_host` available, and a certificate that works on the bridge that it points at. The front of every bridge must be able to serve it, so you can fail over if you move the name to another bridge.
 - The old single-host file has `host`, `public_key`, `short_id`, `sni` and `port` at the top level, and no `ingresses`. It still loads as one bridge with the name `default` and `"uuids": "base"`, and uses `AGENT_TOKEN`. A file with both shapes is an error.
@@ -400,6 +403,23 @@ The file gives one or more bridge nodes. Each entry is a bridge host with its ow
 > **WARNING:** Mark a bridge as intermittent only if you accept this risk for it. `unreachable` over the tailnet does not prove that the bridge no longer serves clients. Its tailnet connection can be down while its front still accepts connections. Revocations and extensions that you make during that time are then not in effect on it. A revoked device can continue to work there until the agent answers again.
 
 A bridge that you stopped at its provider does not need this setting. It serves nobody, and it is already an info item.
+
+### Tailnet access through a bridge
+
+By default, a client of a bridge cannot reach the tailnet. The agent blocks tailnet and private addresses for every credential (#132).
+
+`"tailnet_access": "all"` on a bridge changes this for the clients of that bridge. Every credential that node-control pushes to the bridge then has a tailnet grant. The agent sends the tailnet addresses of these clients to the outbound `via-tailnet`. This outbound is the SOCKS port of the bridge's tailscaled. Private addresses that are not on the tailnet stay blocked. The kernel backstop on the bridge stays the same, because xray dials only the loopback SOCKS port.
+
+The headscale ACL decides which tailnet hosts answer. node-control makes one rule for this: `accept`, source `ENROLL_INGRESS_TAG`, destinations `ENROLL_TAILNET_DST`. To apply it, do these steps:
+
+1. Set `ENROLL_TAILNET_DST`, for example `tag:lan:*`.
+2. Set `"tailnet_access": "all"` on the bridge, and restart node-control.
+3. Send `POST /enroll/tailnet-acl` with the body `{}`. node-control sends the rule to the policy console as one change. The answer has the `change_id`.
+4. Confirm the change in the policy console. If you do not confirm it, the console reverts it at the deadline.
+
+`GET /enroll/tailnet-acl` shows the rule and its status: `in_sync`, `out_of_sync`, `no_console` or `not_plain_json`. When no bridge grants access, the same `POST` removes the rule. The policy console must be active (`POLICY_DB`). Without it, add the rule to the policy yourself.
+
+> **WARNING:** The rule applies to every node with the source tag. Thus, all bridges with that tag can reach the destinations through their own SOCKS port. A client of a bridge with `"off"` still cannot reach them, because its agent blocks the tailnet.
 
 ### Credentials per bridge (`uuids`)
 

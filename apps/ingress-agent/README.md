@@ -15,7 +15,8 @@ base file. It restarts xray when the set changes.
 ## API (bearer token in `Authorization: Bearer <AGENT_TOKEN>`; wrong or missing -> `401`, empty body)
 
 - `PUT /v1/credentials` body `{"credentials":[{"uuid":"<uuid>","mode":"auto|direct|exit","not_after":<unix seconds>}]}`
-  replaces the whole set. The status is `422` for a bad mode, a non-UUID string or a non-integer `not_after`.
+  replaces the whole set. An entry can also have `"tailnet": "all"`, the tailnet grant (#132). The status is `422` for a
+  bad mode, a non-UUID string, a non-integer `not_after` or a `tailnet` value other than `""` or `"all"`.
   Duplicate UUIDs in one push give `422`. The agent drops entries that already expired first. Then an empty
   list gives `409`, unless the request has `?confirm_empty=true`.
   The status is `503` if xray rejects the generated config. In that case, the old config, the old set and the running xray do not change.
@@ -44,6 +45,9 @@ The agent starts from the base file (`XRAY_BASE_CONFIG`). The base file must con
 - `routing.domainStrategy` is set to `IPOnDemand`. This overrides the base value. Xray must resolve domain destinations
   before the block rule. If it does not, a hostname that points to a private address bypasses the rule.
 - Routing rules, put before the base rules, in this order:
+  0. This rule exists only when a credential has the tailnet grant (#132). It sends the tailnet ranges of these
+     clients to the outbound `via-tailnet`. The ranges are `100.64.0.0/10` and `fd7a:115c:a1e0::/48`. The base config must then have this outbound, or the push gives
+     `503`. Other private ranges are not in this rule, so they stay blocked.
   1. Block `geoip:private` and `100.64.0.0/10` for everyone on the `reality-in` inbound. Phone
      users then cannot reach the LAN of the bridge host or the tailnet. This rule is present even with zero clients.
   2. Send clients of mode `direct` to the outbound `direct`. Send clients of mode `exit` to the outbound `via-exit`.

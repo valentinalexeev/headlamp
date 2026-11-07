@@ -126,6 +126,39 @@ func (c *Client) ListPreAuthKeys(ctx context.Context) ([]PreAuthKey, error) {
 	return keys, nil
 }
 
+// CreateUser calls POST /api/v1/user. email and displayName are optional.
+func (c *Client) CreateUser(ctx context.Context, name, displayName, email string) (User, error) {
+	const op = "creating a user"
+	req := map[string]string{"name": name}
+	if displayName != "" {
+		req["displayName"] = displayName
+	}
+	if email != "" {
+		req["email"] = email
+	}
+	body, err := c.call(ctx, op, http.MethodPost, "/api/v1/user", req, maxBody)
+	if err != nil {
+		return User{}, err
+	}
+	var out struct {
+		User apiUser `json:"user"`
+	}
+	if err := decode(op, body, &out); err != nil {
+		return User{}, err
+	}
+	id, err := parseID(out.User.ID)
+	if err != nil {
+		return User{}, err
+	}
+	return User{ID: id, Name: out.User.Name}, nil
+}
+
+// ExpireNode calls POST /api/v1/node/{id}/expire: the node must log in again, which a locked person cannot.
+func (c *Client) ExpireNode(ctx context.Context, id uint64) error {
+	_, err := c.call(ctx, "expiring a node", http.MethodPost, "/api/v1/node/"+uintString(id)+"/expire", map[string]string{}, maxBody)
+	return err
+}
+
 // ExpirePreAuthKey calls POST /api/v1/preauthkey/expire.
 func (c *Client) ExpirePreAuthKey(ctx context.Context, id uint64) error {
 	_, err := c.call(ctx, "expiring a pre-auth key", http.MethodPost, "/api/v1/preauthkey/expire",

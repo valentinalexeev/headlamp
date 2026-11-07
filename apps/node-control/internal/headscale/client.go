@@ -35,6 +35,9 @@ type Node struct {
 	// PreAuthKeyID is the id of the pre-auth key the node registered with, 0 when it registered otherwise (a
 	// login) or the API omits it. Serve (#117) maps a node to its service through it.
 	PreAuthKeyID uint64
+	// UserID is the id of the node's headscale user, 0 when the API omits it. Self-enrolment (#102) finds a
+	// person's nodes through it.
+	UserID uint64
 }
 
 // UnmarshalJSON tolerates the variations between headscale versions: the id
@@ -67,6 +70,9 @@ func (n *Node) UnmarshalJSON(b []byte) error {
 		PreAuthKeySnake *struct {
 			ID json.RawMessage `json:"id"`
 		} `json:"pre_auth_key"`
+		User *struct {
+			ID json.RawMessage `json:"id"`
+		} `json:"user"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
@@ -89,6 +95,11 @@ func (n *Node) UnmarshalJSON(b []byte) error {
 	}
 	if n.LastSeen == nil {
 		n.LastSeen = raw.LastSeenSnake
+	}
+	if raw.User != nil && len(raw.User.ID) > 0 {
+		if n.UserID, err = parseID(raw.User.ID); err != nil {
+			return err
+		}
 	}
 	for _, k := range []*struct {
 		ID json.RawMessage `json:"id"`

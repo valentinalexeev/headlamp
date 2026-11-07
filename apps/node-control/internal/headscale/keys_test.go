@@ -99,3 +99,34 @@ func TestExpirePreAuthKeyBody(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+func TestCreateUser(t *testing.T) {
+	c, got := recorder(t, 200, `{"user":{"id":"7","name":"oidc-abc"}}`)
+	u, err := c.CreateUser(context.Background(), "oidc-abc", "Anna", "anna@example.test")
+	if err != nil || u.ID != 7 || u.Name != "oidc-abc" {
+		t.Fatalf("%+v %v", u, err)
+	}
+	if got.method != "POST" || got.path != "/api/v1/user" || !strings.Contains(got.body, `"email":"anna@example.test"`) {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestExpireNode(t *testing.T) {
+	c, got := recorder(t, 200, `{"node":{"id":"5"}}`)
+	if err := c.ExpireNode(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	if got.method != "POST" || got.path != "/api/v1/node/5/expire" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestNodeUserID(t *testing.T) {
+	var n Node
+	if err := json.Unmarshal([]byte(`{"id":"1","user":{"id":"7","name":"x"}}`), &n); err != nil || n.UserID != 7 {
+		t.Fatalf("%+v %v", n, err)
+	}
+	if err := json.Unmarshal([]byte(`{"id":"1"}`), &n); err != nil || n.UserID != 0 {
+		t.Fatalf("%+v %v", n, err)
+	}
+}

@@ -20,7 +20,13 @@ type Cred struct {
 	UUID     string `json:"uuid"`
 	Mode     string `json:"mode"`
 	NotAfter int64  `json:"not_after"`
+	// Tailnet is the tailnet grant of the credential (#132): "" (none, the default) or "all". With "all", the
+	// client may reach tailnet addresses through the bridge's tailscaled; the headscale ACL decides which.
+	Tailnet string `json:"tailnet,omitempty"`
 }
+
+// TailnetGrants are the accepted values of Cred.Tailnet.
+var TailnetGrants = []string{"", "all"}
 
 // Modes are the routing modes a credential can have.
 var Modes = []string{"auto", "direct", "exit"}

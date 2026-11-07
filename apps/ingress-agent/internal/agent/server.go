@@ -213,8 +213,11 @@ func parseCreds(body []byte) ([]Cred, bool) {
 	out := make([]Cred, 0, len(*raw.Credentials))
 	seen := map[string]bool{}
 	for _, item := range *raw.Credentials {
-		var u, m string
+		var u, m, tn string
 		if json.Unmarshal(item["uuid"], &u) != nil || json.Unmarshal(item["mode"], &m) != nil {
+			return nil, false
+		}
+		if raw, ok := item["tailnet"]; ok && (json.Unmarshal(raw, &tn) != nil || !slices.Contains(TailnetGrants, tn)) {
 			return nil, false
 		}
 		u = canonUUID(u)
@@ -233,7 +236,7 @@ func parseCreds(body []byte) ([]Cred, bool) {
 			return nil, false
 		}
 		seen[u] = true
-		out = append(out, Cred{UUID: u, Mode: m, NotAfter: n})
+		out = append(out, Cred{UUID: u, Mode: m, NotAfter: n, Tailnet: tn})
 	}
 	return out, true
 }

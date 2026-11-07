@@ -4,9 +4,12 @@
 # go.mod, so a version bump in one place cannot drift from the other. The tailscale client itself is
 # compiled into the binary (tsnet); there is no tailscaled and no start script.
 ARG TSVERSION=1.98.10
+# VERSION is the headlamp release the image is built from (the repo's VERSION file, passed by CI). The console shows it.
+ARG VERSION=dev
 
 FROM golang:1.26.5-alpine AS build
 ARG TSVERSION
+ARG VERSION
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN grep -q "tailscale.com v${TSVERSION}$" go.mod \
@@ -14,7 +17,7 @@ RUN grep -q "tailscale.com v${TSVERSION}$" go.mod \
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/node-control ./cmd/node-control
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/valentinalexeev/headlamp/apps/node-control/internal/core.Version=${VERSION}" -o /out/node-control ./cmd/node-control
 
 # alpine rather than a bare image: `fly ssh console` needs a shell.
 FROM alpine:3.22

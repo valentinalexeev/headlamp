@@ -3,7 +3,8 @@
     "image": "node-control",
     "context": "apps/node-control",
     "dockerfile": "Dockerfile",
-    "paths": ["apps/node-control"],
+    "paths": ["apps/node-control", "VERSION"],
+    "args_from_files": {"VERSION": "VERSION"},
     "go": true,
     "test": "make test-node-control"
   },

@@ -121,6 +121,7 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 		f(&o)
 	}
 	log := slog.Default()
+	log.Info("node-control starting", "version", DisplayVersion())
 
 	// The enrolment module owns its database; the core only decides whether a
 	// public listener exists.

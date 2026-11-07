@@ -91,9 +91,11 @@ data "aws_iam_policy_document" "assume" {
 }
 
 resource "aws_iam_role" "this" {
-  name               = "${var.name}-host"
-  assume_role_policy = data.aws_iam_policy_document.assume.json
-  tags               = local.tags
+  name                 = "${var.name}-host"
+  path                 = var.iam_path
+  permissions_boundary = var.iam_permissions_boundary
+  assume_role_policy   = data.aws_iam_policy_document.assume.json
+  tags                 = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "ssm" {
@@ -122,6 +124,7 @@ resource "aws_iam_role_policy" "dns01" {
 
 resource "aws_iam_instance_profile" "this" {
   name = "${var.name}-host"
+  path = var.iam_path
   role = aws_iam_role.this.name
 }
 
@@ -258,10 +261,12 @@ data "aws_iam_policy_document" "dlm_assume" {
 }
 
 resource "aws_iam_role" "dlm" {
-  count              = var.snapshot_retain_days > 0 ? 1 : 0
-  name               = "${var.name}-dlm"
-  assume_role_policy = data.aws_iam_policy_document.dlm_assume.json
-  tags               = local.tags
+  count                = var.snapshot_retain_days > 0 ? 1 : 0
+  name                 = "${var.name}-dlm"
+  path                 = var.iam_path
+  permissions_boundary = var.iam_permissions_boundary
+  assume_role_policy   = data.aws_iam_policy_document.dlm_assume.json
+  tags                 = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "dlm" {

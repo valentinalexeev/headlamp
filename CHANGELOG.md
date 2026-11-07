@@ -6,6 +6,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
+- `terraform/modules/control-host/aws` has two optional inputs, `iam_path` and `iam_permissions_boundary` (#148). They let the module run in accounts that allow new roles only under a fixed path and with a boundary. The defaults keep the plan of an existing host unchanged.
 - The node-control console shows the headlamp version it runs (for example `v0.10.0`) at the foot of the sidebar, or in the top bar of the compact console. The start-up log has it too. The image takes it from the `VERSION` file; a local build shows `dev`.
 
 ### Changed

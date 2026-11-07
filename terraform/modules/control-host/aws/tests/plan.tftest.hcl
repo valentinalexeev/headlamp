@@ -98,3 +98,50 @@ run "rejects_unknown_arch" {
   }
   expect_failures = [var.ami_arch]
 }
+
+run "iam_defaults_keep_the_root_path_and_no_boundary" {
+  command = plan
+
+  assert {
+    condition     = aws_iam_role.this.path == "/" && aws_iam_instance_profile.this.path == "/" && aws_iam_role.dlm[0].path == "/"
+    error_message = "the default IAM path must stay /"
+  }
+  assert {
+    condition     = aws_iam_role.this.permissions_boundary == null && aws_iam_role.dlm[0].permissions_boundary == null
+    error_message = "no permissions boundary unless asked for"
+  }
+}
+
+run "iam_path_and_permissions_boundary" {
+  command = plan
+  variables {
+    iam_path                 = "/headlamp/"
+    iam_permissions_boundary = "arn:aws:iam::123456789012:policy/example-boundary"
+  }
+
+  assert {
+    condition     = aws_iam_role.this.path == "/headlamp/" && aws_iam_role.dlm[0].path == "/headlamp/" && aws_iam_instance_profile.this.path == "/headlamp/"
+    error_message = "both roles and the instance profile must use iam_path"
+  }
+  assert {
+    condition = alltrue([for b in [aws_iam_role.this.permissions_boundary, aws_iam_role.dlm[0].permissions_boundary] :
+    b == "arn:aws:iam::123456789012:policy/example-boundary"])
+    error_message = "both roles must carry the permissions boundary"
+  }
+}
+
+run "rejects_a_malformed_iam_path" {
+  command = plan
+  variables {
+    iam_path = "headlamp"
+  }
+  expect_failures = [var.iam_path]
+}
+
+run "rejects_a_boundary_that_is_not_a_policy_arn" {
+  command = plan
+  variables {
+    iam_permissions_boundary = "example-boundary"
+  }
+  expect_failures = [var.iam_permissions_boundary]
+}

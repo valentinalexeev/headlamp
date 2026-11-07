@@ -14,7 +14,7 @@
 #     bridge-off  -> allowed, denied and the LAN address are all refused
 #   the public web server works through both bridges.
 #   E2E_HEADSCALE_IMAGE  default jauderho/headscale:v0.29.3
-#   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.98.10
+#   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.104.4
 #   E2E_SINGBOX_IMAGE    default ghcr.io/sagernet/sing-box:v1.14.4
 #   E2E_MIHOMO_IMAGE     default metacubex/mihomo:v1.19.33
 #   E2E_XRAY_VERSION     default 26.10.31
@@ -23,7 +23,7 @@ set -u
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 hyd="$root/scripts/test/hysteria"
 hs_image=${E2E_HEADSCALE_IMAGE:-jauderho/headscale:v0.29.3}
-ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.98.10}
+ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 sb_image=${E2E_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:v1.14.4}
 mh_image=${E2E_MIHOMO_IMAGE:-metacubex/mihomo:v1.19.33}
 xray_version=${E2E_XRAY_VERSION:-26.10.31}

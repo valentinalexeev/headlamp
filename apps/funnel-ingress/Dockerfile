@@ -4,9 +4,9 @@
 # go.mod, so a version bump in one place cannot drift from the other. The tailscale client itself is
 # compiled into the binary (tsnet); there is no tailscaled and no start script. No volume: the node's
 # state lives in the shared Redis (see README "State").
-ARG TSVERSION=1.98.10
+ARG TSVERSION=1.104.5
 
-FROM golang:1.26.5-alpine AS build
+FROM golang:1.27.3-alpine AS build
 ARG TSVERSION
 WORKDIR /src
 COPY go.mod go.sum ./

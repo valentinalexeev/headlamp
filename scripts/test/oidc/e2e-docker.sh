@@ -9,7 +9,7 @@
 #   - a person outside the allowed group cannot sign in
 #   - an admin locks the person: the relay client is refused, the tailnet node is expired, and sign-in is refused
 #   E2E_HEADSCALE_IMAGE  default jauderho/headscale:v0.29.3
-#   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.98.10
+#   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.104.4
 #   E2E_SINGBOX_IMAGE    default ghcr.io/sagernet/sing-box:v1.14.4
 #   E2E_DEX_IMAGE        default ghcr.io/dexidp/dex:v2.44.0
 #   E2E_XRAY_VERSION     default 26.10.31
@@ -18,7 +18,7 @@ set -u
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 hyd="$root/scripts/test/hysteria"
 hs_image=${E2E_HEADSCALE_IMAGE:-jauderho/headscale:v0.29.3}
-ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.98.10}
+ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 sb_image=${E2E_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:v1.14.4}
 dex_image=${E2E_DEX_IMAGE:-ghcr.io/dexidp/dex:v2.44.0}
 xray_version=${E2E_XRAY_VERSION:-26.10.31}

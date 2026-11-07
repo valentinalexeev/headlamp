@@ -5,9 +5,9 @@ It is for a self-hosted headscale network. headscale does not implement Funnel. 
 control-issued certificates and no relay fleet. For this reason, `tailscale funnel` on a client cannot work here. This app is
 the equivalent.
 
-It is a small public reverse proxy. It joins the tailnet as one more node. It serves plain HTTP. Put a TLS edge with
-wildcard certificates in front of it. On Fly.io, the Fly edge does this (see the `fly.toml` here). Elsewhere, use a
-cloud load balancer or a reverse proxy such as Caddy.
+It is a small public reverse proxy. It joins the tailnet as one more node. It serves plain HTTP. Put a TLS edge in
+front of it. On AWS or any Docker host, use the Caddy edge in `examples/compose/control/` (on-demand certificates).
+You can also use a cloud load balancer, or the Fly edge on Fly.io (see the `fly.toml` here).
 
 ```
 Internet -> TLS edge (wildcard certs) -> funnel-ingress (Go, embedded tailscale node)

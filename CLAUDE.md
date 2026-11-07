@@ -5,9 +5,10 @@ headlamp is infrastructure code for a self-hosted Tailscale-compatible network: 
 Yandex / OCI / AWS / OpenStack), split-tunnel route provisioning, a small **node-control** web app that
 starts/stops the VM nodes, and **tailguard** (a WireGuard server that egresses through a
 tailnet exit node, so a plain-WireGuard device such as a home router can use it). The central
-components are container images that run on any container host. Fly.io is the reference platform, with ready
-`fly.toml` files and the overlay deploy below. On other hosts, run the published images with your config mounted
-(`docs/images.md`).
+components are container images that run on any container host, and no host is the default. Three targets are
+ready: AWS (`terraform/modules/control-host/aws` with `examples/compose/control/`), any Docker host (the same
+compose files), and Fly.io (`fly.toml` files and the overlay deploy below). `docs/images.md` lists what each image
+needs from its host.
 
 This file tells you (a) the rules for changing this repo, and (b) how to bootstrap your own
 infrastructure from it with **your own private repo that vendors this one as a git
@@ -283,12 +284,14 @@ that costs money or touches a real account.
 
 ### 2.0 Prerequisites
 
-- Accounts: a container host for headscale with a public HTTPS name and persistent storage. This guide uses Fly.io
-  (the reference platform, steps 2.4 and 2.5). On another host, run the published images (`docs/images.md`). If you
+- Accounts: a container host for headscale with a public HTTPS name and persistent storage. Choose one:
+  AWS with `terraform/modules/control-host/aws` and `examples/compose/control/` (its README is the guide).
+  Or any Docker host with the same compose files, or Fly.io (steps 2.4 and 2.5 show it). If you
   want VM exit nodes, get at least one VM provider
   (Yandex Cloud, Oracle Cloud, AWS or an OpenStack cloud). A domain that you control is recommended
   (MagicDNS base domain, stable node names).
-- Tools: `git`, `sops`, `age`, `terraform` (>= 1.5), `ansible` (+ collections, below), `flyctl` (for Fly.io),
+- Tools: `git`, `sops`, `age`, `terraform` (>= 1.5), `ansible` (+ collections, below), `docker` (for compose) or
+  `flyctl` (for Fly.io),
   `jq`, `python3`, `shellcheck`. Add the provider CLIs that you use (`yc`, `oci`, `aws`). Optional:
   1Password CLI `op`. Without it, supply `SOPS_AGE_KEY` from a file or keychain (see 2.3).
 - Dedicated cloud credentials with narrow scope for each provider (a separate CLI profile such as
@@ -371,9 +374,11 @@ To create an encrypted secrets file:
 
 The hook refuses plaintext secret files and unencrypted `*.enc.*` and `*.sops.*` files.
 
-### 2.4 headscale control server (Fly.io shown)
+### 2.4 headscale control server
 
-These steps use Fly.io. On another host, run the `headscale` image with `HEADSCALE_CONFIG` and
+On AWS or any Docker host, follow `examples/compose/control/README.md`. It runs headscale, node-control and an
+optional funnel-ingress behind a TLS edge. On AWS, `terraform/modules/control-host/aws` builds the host. The steps
+below show Fly.io. On another host, run the `headscale` image with `HEADSCALE_CONFIG` and
 `HEADSCALE_POLICY_PATH` pointing at your mounted files, a persistent `/data` (the placeholder config keeps its keys and
 database there), and TLS in front of it
 (`docs/images.md`). Step 3 is the same everywhere: run the `headscale` commands inside the container.
@@ -485,8 +490,9 @@ vars_plugins_enabled = host_group_vars, community.sops.sops
 
 ### 2.8 Exit node image and node-control (optional)
 
-The steps below use Fly.io. On another host, run the same images with the same variables. `apps/exit-node/README.md`
-has a `docker run` example and the host requirements.
+With the compose files (AWS or any Docker host), node-control is already in `examples/compose/control/`. The steps
+below show Fly.io. On another host, run the same images with the same variables. `apps/exit-node/README.md` has a
+`docker run` example and the host requirements.
 
 - `apps/exit-node`: copy `fly.toml` and `direct-hosts.txt` to `fly/exit-node/`. Set your app name.
   Run `flyctl volumes create tailscale_state …`. Run `flyctl secrets set TAILSCALE_AUTH_KEY=… HEADSCALE_LOGIN_SERVER=…`.

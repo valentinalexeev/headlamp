@@ -59,7 +59,14 @@ variable "boot_disk_type" {
 
 variable "image_id" {
   type        = string
-  description = "Boot disk source image ID."
+  default     = null
+  description = "Boot disk source image ID. When set, it overrides image_family. Set it to keep a pinned image."
+}
+
+variable "image_family" {
+  type        = string
+  default     = "ubuntu-2604-lts"
+  description = "Public image family in the standard-images folder. The module uses the newest image of the family when image_id is null."
 }
 
 variable "ssh_public_key" {

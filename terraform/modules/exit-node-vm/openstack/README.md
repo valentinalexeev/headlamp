@@ -122,6 +122,14 @@ openstack server set --tag preemptible --os-compute-api-version 2.72 <name>
 
 You can switch an existing server to preemptible once in 24 hours.
 
+## Boot image
+
+The default of `image_name` is `Ubuntu 26.04 LTS 64-bit`, the Selectel name of Ubuntu 26.04 LTS. Other clouds use
+different image names. Set `image_name` to the name of your cloud.
+
+Terraform ignores a change of the image after the server exists. Thus a new default does not replace a running server.
+To make new servers with the old image, set `image_name = "Ubuntu 22.04 LTS 64-bit"` in your root stack.
+
 ## Replacing the server
 
 Terraform ignores `user_data` after creation, because it runs only on first boot. Redeploy on purpose with

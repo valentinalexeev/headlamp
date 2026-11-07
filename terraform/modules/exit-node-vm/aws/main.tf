@@ -9,13 +9,13 @@ data "aws_subnets" "default" {
   }
 }
 
-data "aws_ami" "ubuntu_noble" {
+data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-${var.ami_arch}-server-*"]
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-${var.ubuntu_series}-${var.ami_arch}-server-*"]
   }
 
   filter {
@@ -66,7 +66,7 @@ resource "aws_key_pair" "this" {
 
 resource "aws_launch_template" "this" {
   name_prefix   = "${var.name}-"
-  image_id      = data.aws_ami.ubuntu_noble.id
+  image_id      = data.aws_ami.ubuntu.id
   instance_type = var.instance_type
   key_name      = aws_key_pair.this.key_name
 

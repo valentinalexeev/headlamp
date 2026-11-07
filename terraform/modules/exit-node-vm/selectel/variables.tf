@@ -32,8 +32,8 @@ variable "disk_size_gb" {
 
 variable "image_name" {
   type        = string
-  default     = "Ubuntu 22.04 LTS 64-bit"
-  description = "Public image name, matched exactly (most recent)."
+  default     = "Ubuntu 26.04 LTS 64-bit"
+  description = "Public image name, matched exactly (most recent). Set \"Ubuntu 22.04 LTS 64-bit\" to keep the old image for a new server."
 }
 
 variable "subnet_cidr" {

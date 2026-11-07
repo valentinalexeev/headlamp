@@ -53,6 +53,13 @@ When the node is on the tailnet, you can drop `admin_ssh_cidr`. Set
 
 As of v2.1.5, the Cloud.ru Evolution provider has no preemptible or spot option, so this node is a regular VM.
 
+## Boot image
+
+The default of `image_name` is `ubuntu-22.04`. The default stays because no public source confirms a Ubuntu 26.04
+image in Cloud.ru Evolution. To find the images of your project, use the
+`cloudru_evolution_compute_image_collection` data source. If your project has a 26.04 image, set `image_name` to its
+name.
+
 ## Replacing the VM
 
 Terraform ignores `cloud_init_userdata` after creation, because it runs only on first boot. Redeploy on purpose with

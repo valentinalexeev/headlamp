@@ -57,5 +57,5 @@ variable "extra_tcp_ingress_ports" {
 variable "ubuntu_version" {
   type        = string
   default     = "24.04"
-  description = "Canonical Ubuntu release for the boot image (the newest image of that release is picked at creation). An existing instance keeps its image: changing this does not replace it, use terraform -replace for a deliberate rebuild."
+  description = "Canonical Ubuntu release for the boot image. Stays \"24.04\" until OCI publishes 26.04 platform images (#164) (the newest image of that release is picked at creation). An existing instance keeps its image: changing this does not replace it, use terraform -replace for a deliberate rebuild."
 }

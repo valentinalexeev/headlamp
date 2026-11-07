@@ -8,6 +8,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 - The node-control console shows the headlamp version it runs (for example `v0.10.0`) at the foot of the sidebar, or in the top bar of the compact console. The start-up log has it too. The image takes it from the `VERSION` file; a local build shows `dev`.
 
+### Fixed
+
+- The `ingress-agent` Ansible role no longer fails its preflight on every bridge (#144). In 0.10.0 it still looked for the removed Python agent (`app/main.py`), so no bridge could install the Go agent. It now checks `go.mod` and `cmd/ingress-agent`. `make test-ansible-roles` runs the role checks with real ansible against the real tree.
+
 ## 0.10.0 - 2026-11-07
 
 ### Added

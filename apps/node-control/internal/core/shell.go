@@ -110,6 +110,7 @@ func navGroup(b *bytes.Buffer, items []NavItem, activePath, label string) {
 // visible entries, a compact header with the theme control), the top bar, the empty status strip
 // and the deferred scripts. Entries the login may not see are left out.
 func renderShell(items []NavItem, actions []NavAction, login, reqPath string, now time.Time) []byte {
+	ver := `<span class="t3 small mono" data-version title="headlamp version">` + esc(DisplayVersion()) + `</span>`
 	visible := visibleItems(items, login)
 	compact := len(visible) < 2
 	var b bytes.Buffer
@@ -138,7 +139,7 @@ func renderShell(items []NavItem, actions []NavAction, login, reqPath string, no
 		navGroup(&b, ungrouped, activePath, "")
 		navGroup(&b, operate, activePath, "Operate")
 		navGroup(&b, configure, activePath, "Configure")
-		b.WriteString(`<div class="sidefoot"><div class="navlabel">Theme</div>` + themeControl() + `</div></nav>`)
+		b.WriteString(`<div class="sidefoot"><div class="navlabel">Theme</div>` + themeControl() + ver + `</div></nav>`)
 		b.WriteString(`<div class="hl shellbar">`)
 	} else {
 		b.WriteString(`<div ` + navMarker + ` class="hl shellbar">`)
@@ -156,7 +157,7 @@ func renderShell(items []NavItem, actions []NavAction, login, reqPath string, no
 		b.WriteString(`<a class="btn primary" href="` + esc(a.Path) + `">` + ui.Icon(a.Icon) + `<span>` + esc(a.Label) + `</span></a>`)
 	}
 	if compact {
-		b.WriteString(themeControl())
+		b.WriteString(ver + themeControl())
 	}
 	b.WriteString(`</div></div>`)
 	b.WriteString(`<script src="/_ui/hl.js" defer></script><script src="/_ui/shell.js" defer></script><script src="/_ui/palette.js" defer></script>`)

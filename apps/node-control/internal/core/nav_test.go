@@ -975,3 +975,17 @@ func TestNavMiddlewareUntypedOverRealServer(t *testing.T) {
 		t.Fatalf("no nosniff on the wire: %v", resp.Header)
 	}
 }
+
+func TestShellShowsVersion(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	for v, want := range map[string]string{"0.10.0": "v0.10.0", "v1.2.3": "v1.2.3", "": "dev", "dev": "dev", "<b>": "v&lt;b&gt;"} {
+		Version = v
+		for name, items := range map[string][]NavItem{"sidebar": richItems(), "compact": {{Label: "X", Path: "/x"}}} {
+			out := string(renderShell(items, nil, "alice", "/", time.Unix(0, 0)))
+			if !strings.Contains(out, `data-version title="headlamp version">`+want+`</span>`) {
+				t.Errorf("%s %q: no %q in %s", name, v, want, out)
+			}
+		}
+	}
+}

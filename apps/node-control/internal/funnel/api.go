@@ -15,6 +15,7 @@ import (
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/dnsrec"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policy"
 )
@@ -673,9 +674,20 @@ type checklist struct {
 	Records  []map[string]string `json:"records"`
 	Commands []string            `json:"commands"`
 	Notes    []string            `json:"notes"`
+	// Auto is set when node-control manages the public record (FUNNEL_DNS_PROVIDER, #127): nothing to do by hand.
+	Auto *dnsrec.Status `json:"auto,omitempty"`
 }
 
 func (m *Module) checklistFor(ns string) checklist {
+	if m.dns != nil {
+		st := m.dns.snapshot()
+		note := "node-control keeps *." + m.s.PublicDomain + " in the " + st.Provider + " zone, and the edge gets each certificate on demand. Nothing to do for this namespace."
+		if !st.InSync {
+			note = "node-control manages the record, but the last check failed: " + st.Error
+		}
+		return checklist{Records: []map[string]string{{"type": st.Record.Type, "name": st.Record.Name + ".", "value": st.Record.Target}},
+			Commands: []string{}, Notes: []string{note}, Auto: &st}
+	}
 	// FUNNEL_INGRESS_HOSTNAME is the name the wildcard record points at: the TLS edge in front of the ingress, for
 	// example <app>.fly.dev or a load balancer name. The Fly.io commands are shown only for a Fly.io target (or when
 	// the name is unset, as a placeholder): other edges have their own certificate procedure.

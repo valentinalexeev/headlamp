@@ -1,0 +1,5 @@
+# The default for funnel (#127): a certificate for each host, on its first TLS connection, with HTTP-01. funnel-ingress
+# approves each host first (on_demand_tls ask, in the global block). No DNS plugin and no credentials.
+tls {
+	on_demand
+}

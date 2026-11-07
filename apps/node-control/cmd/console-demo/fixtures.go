@@ -20,6 +20,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/enroll"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/funnel"
@@ -37,15 +38,28 @@ type scenario struct {
 	login     string // the WhoIs answer once the data is in place
 	nodesOnly bool   // only the nodes module is switched on
 	problems  bool   // seed the attention state
+	// policy installs an admin policy as ADMIN_CONFIG would: alice is owner and carol a viewer. Serve (#129) has no
+	// open mode, so its page needs one.
+	policy bool
 }
 
 // scenarios: attention seeds one of every kind of problem and an acknowledged item, clear seeds none, minimal switches on the
 // nodes module only, partial is clear for a caller who is in no *_ADMIN_USERS list.
 var scenarios = map[string]scenario{
-	"attention": {login: "alice", problems: true},
-	"clear":     {login: "alice"},
+	"attention": {login: "alice", problems: true, policy: true},
+	"clear":     {login: "alice", policy: true},
 	"minimal":   {login: "alice", nodesOnly: true},
 	"partial":   {login: "bob"},
+	"viewer":    {login: "carol", problems: true, policy: true},
+}
+
+// demoPolicy is the policy of a scenario with policy set, or nil.
+func demoPolicy(sc scenario) (*authz.Policy, error) {
+	if !sc.policy {
+		return nil, nil
+	}
+	return authz.NewPolicy(authz.Config{Grants: []authz.Grant{
+		{Subject: adminLogin, Roles: []string{"owner"}}, {Subject: "carol", Roles: []string{"viewer"}}}})
 }
 
 const (
@@ -282,6 +296,8 @@ func newFakeHeadscale(sc scenario) *fakeHeadscale {
 		node(8, "vm-4", true, "100.64.0.24", time.Minute, "tag:exit", "tag:cloud-oci"), // the machine of bridge-4
 		// runner-1 also publishes into the two funnel namespaces, so manual routes can point at it.
 		node(7, "runner-1", true, "100.64.0.31", time.Minute, "tag:task-runner", "tag:browser-session", "tag:funnel", "tag:ns-demo", "tag:ns-lab"),
+		// node-control itself: the Serve page shows its address in the headscale split line.
+		node(9, "node-control", true, "100.64.0.1", time.Minute, "tag:node-control"),
 	}
 	return &fakeHeadscale{nodes: ns, policy: basePolicy, updatedAt: now.Add(-24 * time.Hour), nextKey: 1}
 }
@@ -567,6 +583,7 @@ func (w *world) seed(ctx context.Context, admin string, ingress *http.Client) er
 	keep(w.seedTasks(ctx, hc, admin, must))
 	keep(w.seedFunnelReport(ctx, ingress, admin))
 	keep(w.seedAcknowledged(must))
+	keep(w.seedServe(must))
 	return firstErr
 }
 
@@ -825,5 +842,63 @@ func (w *world) seedFunnelReport(ctx context.Context, hc *http.Client, admin str
 			}
 		}
 	}()
+	return nil
+}
+
+// seedServe creates services through the serve API (#129), as an administrator would, and attaches proxies to
+// their keys in the fake headscale: grafana online, a wildcard for an ingress controller in the middle of a key
+// rotation, and wiki, whose only proxy is offline where problems are seeded. The key secrets go nowhere.
+func (w *world) seedServe(must mustFn) error {
+	if !w.sc.policy {
+		return nil // serve answers nobody without a policy
+	}
+	create := func(name, ns string) (string, uint64, error) {
+		data, err := must("creating service "+name, 201, "POST", "/serve/services", map[string]any{"name": name, "namespace": ns})
+		if err != nil {
+			return "", 0, err
+		}
+		var out struct {
+			Service struct {
+				ID   string `json:"id"`
+				Keys []struct {
+					ID uint64 `json:"id"`
+				} `json:"keys"`
+			} `json:"service"`
+		}
+		if err := json.Unmarshal(data, &out); err != nil || len(out.Service.Keys) == 0 {
+			return "", 0, fmt.Errorf("creating service %s: unreadable answer", name)
+		}
+		return out.Service.ID, out.Service.Keys[0].ID, nil
+	}
+	_, gk, err := create("grafana", "mon")
+	if err != nil {
+		return err
+	}
+	appsID, ak, err := create("*.apps", "k8s")
+	if err != nil {
+		return err
+	}
+	if _, err := must("rotating the key of *.apps", 201, "POST", "/serve/services/"+appsID+"/keys", nil); err != nil {
+		return err
+	}
+	_, wk, err := create("wiki", "docs")
+	if err != nil {
+		return err
+	}
+	f := w.hsState
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := time.Now().UTC()
+	proxy := func(id int, name, ip string, online bool, key uint64) {
+		f.nodes = append(f.nodes, map[string]any{
+			"id": fmt.Sprint(id), "machineKey": fmt.Sprintf("mkey:%064d", id), "name": name, "givenName": name,
+			"online": online, "lastSeen": now.Add(-time.Minute).Format(time.RFC3339), "ipAddresses": []string{ip},
+			"tags": []string{"tag:serve"}, "preAuthKey": map[string]any{"id": fmt.Sprint(key)},
+		})
+	}
+	proxy(40, "grafana-a", "100.64.0.40", true, gk)
+	proxy(41, "grafana-b", "100.64.0.41", true, gk)
+	proxy(42, "ingress-1", "100.64.0.42", true, ak)        // still on the old key of the rotation
+	proxy(43, "wiki-a", "100.64.0.43", !w.sc.problems, wk) // offline only where problems are seeded
 	return nil
 }

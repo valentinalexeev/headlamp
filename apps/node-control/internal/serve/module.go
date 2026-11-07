@@ -41,17 +41,19 @@ type Headscale interface {
 // by the key it registered with, asks nothing of the node, and answers DNS for the zone itself: headscale sends the
 // zone to node-control with dns.nameservers.split.
 type Module struct {
-	env  core.Env
-	hs   Headscale
-	log  *slog.Logger
-	st   Store
-	ca   *CA
-	dns  *servedns.Server
-	tn   core.Tailnet
-	now  func() time.Time
-	cfg  config
-	mu   sync.Mutex // serialises service changes against headscale and the store
-	last struct {
+	env core.Env
+	hs  Headscale
+	log *slog.Logger
+	st  Store
+	ca  *CA
+	dns *servedns.Server
+	tn  core.Tailnet
+	now func() time.Time
+	cfg config
+	// selfName is this node's tailnet name, to find its address for the split line the page shows.
+	selfName string
+	mu       sync.Mutex // serialises service changes against headscale and the store
+	last     struct {
 		sync.Mutex
 		at  time.Time
 		err string
@@ -146,6 +148,7 @@ func (m *Module) Register(r *core.Routes) error {
 		return errors.New(on + " but the core has no tailnet node to identify callers")
 	}
 	m.cfg, m.tn = c, r.Tailnet
+	m.selfName = m.env.Default("TAILNET_HOSTNAME", "node-control")
 	st, err := OpenSQLite(path)
 	if err != nil {
 		return err
@@ -166,6 +169,8 @@ func (m *Module) Register(r *core.Routes) error {
 	r.Admin.Handle("POST /serve/services/{id}/keys", admin(http.HandlerFunc(m.addKey)))
 	r.Admin.Handle("DELETE /serve/services/{id}/keys/{key}", admin(http.HandlerFunc(m.retireKey)))
 	r.Admin.HandleFunc("GET /serve/ca.crt", m.caCert)
+	r.Admin.Handle("GET /serve", view(asset("text/html; charset=utf-8", pageHTML)))
+	r.Admin.Handle("GET /serve/static/serve.js", view(asset("text/javascript; charset=utf-8", pageJS)))
 	r.Admin.Handle("POST /serve/v1/cert", authz.TagGate(r.Tailnet, c.nodeTag, m.log)(json(m.cert)))
 	return nil
 }
@@ -419,6 +424,7 @@ func (m *Module) createService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.log.Info("serve: service created", "id", svc.ID, "name", name, "namespace", ns, "by", authz.LoginFrom(r.Context()))
+	m.audit(r, "service.create", name+" in "+ns)
 	m.refreshDNS(r.Context())
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, keyResp{Service: svc, AuthKey: key.Key})
@@ -450,6 +456,7 @@ func (m *Module) addKey(w http.ResponseWriter, r *http.Request) {
 	}
 	svc, _ = m.st.Service(svc.ID)
 	m.log.Info("serve: key added", "id", svc.ID, "key", key.ID, "by", authz.LoginFrom(r.Context()))
+	m.audit(r, "key.add", fmt.Sprintf("%s: key %d", svc.Name, key.ID))
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, keyResp{Service: svc, AuthKey: key.Key})
 }
@@ -467,10 +474,12 @@ func (m *Module) retireKey(w http.ResponseWriter, r *http.Request) {
 	if err := m.hs.ExpirePreAuthKey(r.Context(), keyID); err != nil {
 		m.log.Warn("serve: expiring a key", "key", keyID, "error", err)
 	}
+	svc, _ := m.st.Service(r.PathValue("id"))
 	if err := m.st.RetireKey(r.PathValue("id"), keyID); err != nil {
 		notFound(w, err)
 		return
 	}
+	m.audit(r, "key.retire", fmt.Sprintf("%s: key %d", svc.Name, keyID))
 	m.log.Info("serve: key retired", "id", r.PathValue("id"), "key", keyID, "by", authz.LoginFrom(r.Context()))
 	m.refreshDNS(r.Context())
 	w.WriteHeader(http.StatusNoContent)
@@ -494,6 +503,7 @@ func (m *Module) deleteService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.log.Info("serve: service deleted", "id", svc.ID, "name", svc.Name, "by", authz.LoginFrom(r.Context()))
+	m.audit(r, "service.delete", svc.Name)
 	m.refreshDNS(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -516,6 +526,13 @@ type stateResp struct {
 	Services      []serviceView `json:"services"`
 	DNSRefreshed  time.Time     `json:"dns_refreshed,omitzero"`
 	DNSError      string        `json:"dns_error,omitempty"`
+	// DNSServer is the tailnet address of node-control that headscale's split must name (#129), when headscale
+	// reports it: the node with the node-control tag, else the given name of this node.
+	DNSServer string `json:"dns_server,omitempty"`
+	// CanAdmin says whether the caller may change services; the page shows the admin controls only then.
+	CanAdmin bool `json:"can_admin"`
+	// KeyTTL is how long a new service key lives, for the page to say so before an admin mints one.
+	KeyTTLHours int `json:"key_ttl_hours"`
 }
 
 func (m *Module) state(w http.ResponseWriter, r *http.Request) {
@@ -525,7 +542,9 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodes, nerr := m.hs.ListNodes(r.Context())
-	out := stateResp{Zone: m.cfg.zone, CAFingerprint: m.ca.Fingerprint(), Services: []serviceView{}}
+	out := stateResp{Zone: m.cfg.zone, CAFingerprint: m.ca.Fingerprint(), Services: []serviceView{},
+		CanAdmin:    authz.Can(authz.LoginFrom(r.Context()), authz.P(authz.FeatureServe, authz.LevelAdmin), authz.Allowed{}),
+		KeyTTLHours: int(m.cfg.keyTTL / time.Hour), DNSServer: selfAddr(nodes, m.selfName)}
 	for _, s := range svcs {
 		v := serviceView{Service: s, Nodes: []nodeView{}}
 		for _, n := range nodes {

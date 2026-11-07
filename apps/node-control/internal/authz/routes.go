@@ -138,6 +138,8 @@ var Routes = map[string]Rule{
 	"POST /serve/services/{id}/keys":         need(FeatureServe, LevelAdmin),
 	"DELETE /serve/services/{id}/keys/{key}": need(FeatureServe, LevelAdmin),
 	"GET /serve/ca.crt":                      open,
+	"GET /serve":                             need(FeatureServe, LevelView),
+	"GET /serve/static/serve.js":             need(FeatureServe, LevelView),
 	"POST /serve/v1/cert":                    machine,
 }
 

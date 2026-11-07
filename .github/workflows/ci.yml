@@ -101,6 +101,37 @@ jobs:
           make check-tailscale-pins test-tailscale-pins
           make check-headscale-pin test-headscale-pin
 
+  go-lint:
+    # ADR 0002 checks (#160). New code is strict (--new-from-rev); the full report is warnings only. The Make
+    # targets run the pinned golangci-lint image.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: golangci-lint (new code, strict)
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: make lint-go LINT_BASE_REV="origin/$BASE_REF"
+      - name: golangci-lint (full report, warnings)
+        run: make lint-go-report
+
+  vulncheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+      - run: make vulncheck
+
+  config-lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - run: make lint-config
+
   terraform:
     needs: scope
     runs-on: ubuntu-24.04

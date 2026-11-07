@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.11.0 - 2026-11-07
+
 ### Added
 
 - `terraform/modules/control-host/aws` has two optional inputs, `iam_path` and `iam_permissions_boundary` (#148). They let the module run in accounts that allow new roles only under a fixed path and with a boundary. The defaults keep the plan of an existing host unchanged.

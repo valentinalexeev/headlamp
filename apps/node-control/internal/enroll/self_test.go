@@ -98,14 +98,14 @@ type selfFx struct {
 }
 
 func newSelfFx(t *testing.T, cfg SelfConfig) *selfFx {
-	is := oidctest.New(t, "nc", "sec")
-	f := &selfFx{t: t, is: is, hs: &fakeHS{}}
+	mux := http.NewServeMux()
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	is := oidctest.New(t, "nc", "sec", srv.URL+"/oidc/callback")
+	f := &selfFx{t: t, is: is, hs: &fakeHS{}, srv: srv}
 	f.store = newStore(t, adminNow)
 	f.agent = &stubAgent{}
 	f.admin = NewAdmin(f.store, adminCfg, f.agent)
-	mux := http.NewServeMux()
-	f.srv = httptest.NewTLSServer(mux)
-	t.Cleanup(f.srv.Close)
 	rp, err := oidc.Discover(context.Background(), oidc.Config{Issuer: is.URL, ClientID: "nc", ClientSecret: "sec", RedirectURL: f.srv.URL + "/oidc/callback"})
 	if err != nil {
 		t.Fatal(err)

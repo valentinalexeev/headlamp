@@ -20,7 +20,7 @@ import (
 const redirect = "https://links.example.test/oidc/callback"
 
 func setup(t *testing.T, secret string) (*oidctest.Issuer, *oidc.Provider) {
-	is := oidctest.New(t, "nc", secret)
+	is := oidctest.New(t, "nc", secret, redirect)
 	p, err := oidc.Discover(context.Background(), oidc.Config{Issuer: is.URL, ClientID: "nc", ClientSecret: secret, RedirectURL: redirect})
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestRefreshAndDisable(t *testing.T) {
 }
 
 func TestDiscoveryIssuerMismatch(t *testing.T) {
-	is := oidctest.New(t, "nc", "")
+	is := oidctest.New(t, "nc", "", redirect)
 	if _, err := oidc.Discover(context.Background(), oidc.Config{Issuer: is.URL + "/", ClientID: "nc", RedirectURL: redirect}); err == nil {
 		t.Error("a different issuer string must be refused")
 	}
@@ -208,5 +208,21 @@ func TestForgedKidsDoNotHammerTheIssuer(t *testing.T) {
 	}
 	if n := fetches() - before; n > 1 {
 		t.Errorf("%d JWKS fetches for 5 forged kids, want at most 1", n)
+	}
+}
+
+func TestFakeIssuerRefusesUnregisteredRedirect(t *testing.T) {
+	is := oidctest.New(t, "nc", "", redirect)
+	hc := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for _, target := range []string{"https://evil.example/cb", redirect + "x", ""} {
+		q := url.Values{"client_id": {"nc"}, "response_type": {"code"}, "code_challenge_method": {"S256"}, "redirect_uri": {target}}
+		resp, err := hc.Get(is.URL + "/authorize?" + q.Encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || resp.Header.Get("Location") != "" {
+			t.Errorf("%q: %d %q", target, resp.StatusCode, resp.Header.Get("Location"))
+		}
 	}
 }

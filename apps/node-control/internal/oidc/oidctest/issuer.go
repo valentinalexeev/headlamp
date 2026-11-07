@@ -32,6 +32,8 @@ type Issuer struct {
 	*httptest.Server
 	ClientID     string
 	ClientSecret string
+	// redirects are the registered redirect URIs. As at a real issuer, /authorize refuses any other.
+	redirects []string
 
 	mu      sync.Mutex
 	key     *rsa.PrivateKey
@@ -52,10 +54,10 @@ type codeGrant struct {
 	challenge, nonce, redirect string
 }
 
-// New starts an issuer for clientID. It is closed with the test.
-func New(t testing.TB, clientID, clientSecret string) *Issuer {
+// New starts an issuer for clientID with its registered redirect URIs. It is closed with the test.
+func New(t testing.TB, clientID, clientSecret string, redirects ...string) *Issuer {
 	t.Helper()
-	is, err := Start(clientID, clientSecret)
+	is, err := Start(clientID, clientSecret, redirects...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,12 +66,12 @@ func New(t testing.TB, clientID, clientSecret string) *Issuer {
 }
 
 // Start starts an issuer outside a test (the console demo); the caller closes it.
-func Start(clientID, clientSecret string) (*Issuer, error) {
+func Start(clientID, clientSecret string, redirects ...string) (*Issuer, error) {
 	k, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
 	}
-	is := &Issuer{ClientID: clientID, ClientSecret: clientSecret, key: k, kid: "k1",
+	is := &Issuer{ClientID: clientID, ClientSecret: clientSecret, redirects: redirects, key: k, kid: "k1",
 		user:  User{Subject: "sub-1", Email: "anna@example.test", Groups: []string{"staff"}},
 		codes: map[string]codeGrant{}, refresh: map[string]string{}, Now: time.Now}
 	mux := http.NewServeMux()
@@ -112,18 +114,34 @@ func (is *Issuer) jwks(w http.ResponseWriter, r *http.Request) {
 		"n": b64(pub.N.Bytes()), "e": b64(big.NewInt(int64(pub.E)).Bytes())}}})
 }
 
-// authorize approves at once: it redirects to redirect_uri with a code and the state.
+// registered returns the registered redirect URI equal to got, ok=false for any other.
+func (is *Issuer) registered(got string) (string, bool) {
+	for _, r := range is.redirects {
+		if r == got {
+			return r, true
+		}
+	}
+	return "", false
+}
+
+// authorize approves at once: it redirects to the registered redirect_uri with a code and the state. An
+// unregistered redirect_uri is refused, as a real issuer does: the redirect target is always a registered value.
 func (is *Issuer) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if q.Get("client_id") != is.ClientID || q.Get("response_type") != "code" || q.Get("code_challenge_method") != "S256" {
+	target, ok := is.registered(q.Get("redirect_uri"))
+	if !ok || q.Get("client_id") != is.ClientID || q.Get("response_type") != "code" || q.Get("code_challenge_method") != "S256" {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	code := randStr()
 	is.mu.Lock()
-	is.codes[code] = codeGrant{challenge: q.Get("code_challenge"), nonce: q.Get("nonce"), redirect: q.Get("redirect_uri")}
+	is.codes[code] = codeGrant{challenge: q.Get("code_challenge"), nonce: q.Get("nonce"), redirect: target}
 	is.mu.Unlock()
-	u, _ := url.Parse(q.Get("redirect_uri"))
+	u, err := url.Parse(target)
+	if err != nil {
+		http.Error(w, "bad redirect_uri", http.StatusBadRequest)
+		return
+	}
 	v := u.Query()
 	v.Set("code", code)
 	v.Set("state", q.Get("state"))

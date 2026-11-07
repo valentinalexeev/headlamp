@@ -111,7 +111,7 @@ func newWorld(sc scenario) (*world, error) {
 			w.close()
 			return nil, err
 		}
-		if w.idp, err = oidctest.Start("console-demo", ""); err != nil {
+		if w.idp, err = oidctest.Start("console-demo", "", "https://links.example.net/oidc/callback"); err != nil {
 			w.close()
 			return nil, err
 		}

@@ -263,13 +263,15 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
 
 | Workflow | Runs on | Checks |
 |---|---|---|
-| `ci` | PRs and pushes to `main` | conventional subject of every commit, gitleaks on the new commits, `make lint` and the script tests, `terraform fmt` + `validate` of the modules (cloudru: format only, its provider is not on the public registry), Ansible syntax |
+| `ci` | PRs and pushes to `main` | conventional subject of every commit, gitleaks on the new commits, `make lint` and the script tests, `terraform fmt` + `validate` of the modules (cloudru: format only, its provider is not on the public registry), Ansible syntax and `make test-ansible-roles`, the tailscale and headscale pins (`pins`), `make lint-go` (new code strict) and `make lint-go-report` (`go-lint`), `make vulncheck`, `make lint-config` (actionlint, hadolint, kubeconform) |
 | `pr-title` | PRs | the title is a Conventional Commit |
 | `manuals` | PRs changing `*.md` | STE check of the changed manuals |
-| `images` | PRs (build + test), `main` and tags (publish) | per-component build and tests, release gate on tags |
+| `images` | PRs (build + test), `main` and tags (publish) | per-component build and tests, release gate on tags; on tags it also publishes each chart under `charts/` to `oci://ghcr.io/valentinalexeev/headlamp/charts` with the release version |
 | `test-task-runner`, `test-ingress-agent` | PRs touching those apps | their Go tests |
 | `wiki` | release tags | publishes the docs of that release |
+| `upstream-versions` | Mondays, and by hand | opens one issue when a newer stable tailscale or headscale exists than `TAILSCALE_VERSION` or `HEADSCALE_VERSION` |
 
+All jobs run on `ubuntu-26.04`. `.github/actionlint.yaml` lists the label until the bundled actionlint knows it.
 `ci` jobs always report (skipped steps say so), so they can be required checks in branch protection. Run the same
 checks locally before pushing; a red CI on `main` is an incident.
 

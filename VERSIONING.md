@@ -69,7 +69,29 @@ One tailscale version applies to the whole repo (#145). The file `TAILSCALE_VERS
 - the `tailscale.com` module in every `go.mod` under `apps/`;
 - `tailscale_version` in `ansible/roles/tailscale/defaults/main.yml`.
 
-`scripts/check-tailscale-pins.sh` compares them, and `make check-tailscale-pins` runs it. To move to a new version, change all the pins in one PR. Run `go get tailscale.com@v<x.y.z>` and `go mod tidy` in each module, then run the unit tests and the end-to-end tests.
+`scripts/check-tailscale-pins.sh` compares them, and `make check-tailscale-pins` runs it. CI runs it on each PR. To move to a new version, change all the pins in one PR. Run `go get tailscale.com@v<x.y.z>` and `go mod tidy` in each module, then run the unit tests and the end-to-end tests.
+
+## The headscale version
+
+The file `HEADSCALE_VERSION` holds the headscale version (#152). The default of `ARG HEADSCALE_VERSION` in
+`apps/headscale/Dockerfile` and the default image of each e2e test must have the same version.
+`make check-headscale-pin` compares them, and CI runs it on each PR.
+
+## New upstream versions
+
+Each Monday, the `upstream-versions` workflow compares `TAILSCALE_VERSION` and `HEADSCALE_VERSION` with the latest
+stable releases. If a newer release exists, the workflow opens one issue for it. It does not open a second issue for the
+same version.
+
+## Charts
+
+A release tag also publishes each chart under `charts/` to `oci://ghcr.io/valentinalexeev/headlamp/charts`. The chart
+has the version of the release, and its default image tag is the same version. The `version` field in the repo is a
+placeholder that CI replaces. Install a released chart:
+
+```sh
+helm install tc oci://ghcr.io/valentinalexeev/headlamp/charts/tailnet-connector --version X.Y.Z -f values-site.yaml
+```
 
 ## Cutting a release
 

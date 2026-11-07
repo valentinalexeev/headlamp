@@ -5,6 +5,12 @@
 {
 	email {$ACME_EMAIL}
 	acme_ca {$CADDY_ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+	# Funnel (#127): Caddy gets a certificate for a funnel host at its first TLS connection, with HTTP-01. Before
+	# that, it asks funnel-ingress, which says yes only for <service>.<namespace>.<FUNNEL_DOMAIN> with a live route.
+	# No DNS credentials and no Caddyfile line per namespace are needed.
+	on_demand_tls {
+		ask http://funnel-ingress:8080/.well-known/headlamp/tls-ask
+	}
 }
 
 # headscale: the control API, the noise protocol and DERP over HTTPS (all on one name).
@@ -22,10 +28,11 @@
 	respond 404
 }
 
-# Optional, funnel-ingress: one wildcard per namespace. Wildcards need DNS-01, so FUNNEL_DNS names the file in dns/
-# for your DNS provider (route53, cloudflare, rfc2136; default none). FUNNEL_DOMAIN is the public domain, for example
-# funnel.example.com; namespaces are *.pdl.funnel.example.com. Add one line per namespace.
-*.{$FUNNEL_DOMAIN:funnel.invalid} {
-	import dns/{$FUNNEL_DNS:none}.caddy
+# Optional, funnel-ingress: every host under FUNNEL_DOMAIN (for example admin.pdl.funnel.example.com). With the
+# default FUNNEL_DNS=ondemand, each host gets its own certificate on demand (see the global block). To use one
+# wildcard certificate per namespace instead, set FUNNEL_DNS to a DNS-01 provider file in dns/ (route53, cloudflare,
+# googleclouddns, rfc2136).
+*.*.{$FUNNEL_DOMAIN:funnel.invalid} {
+	import dns/{$FUNNEL_DNS:ondemand}.caddy
 	reverse_proxy funnel-ingress:8080
 }

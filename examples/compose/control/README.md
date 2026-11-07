@@ -69,10 +69,9 @@ The node-control console is on the tailnet only, at `http://node-control/`. It h
 
 1. Make a pre-auth key with `tag:funnel-ingress`, and put it into `funnel-ingress.env`.
 2. Set `FUNNEL_CONFIG_URL` to the tailnet address of node-control.
-3. Set `FUNNEL_DOMAIN` in `.env`. Each namespace is then `*.<namespace>.<FUNNEL_DOMAIN>`.
-4. For each namespace, add a line `*.<namespace>.{$FUNNEL_DOMAIN}` to the funnel block of `caddy/Caddyfile`.
-5. Point a wildcard DNS record for each namespace at the host or the load balancer.
-6. Start it:
+3. Set `FUNNEL_DOMAIN` in `.env`. A service is then `<service>.<namespace>.<FUNNEL_DOMAIN>`.
+4. Point one DNS record, `*.<FUNNEL_DOMAIN>`, at the host or the load balancer. A new namespace needs no new record.
+5. Start it:
 
    ```sh
    docker compose --profile funnel up -d
@@ -86,14 +85,21 @@ only when you ask for one. Caddy gets each certificate from Let's Encrypt with t
 All names on the edge are public names on the internet. They are the headscale name, the enrolment name and the
 funnel names. Let's Encrypt checks each name in one of two ways:
 
-- HTTP-01, for a fixed name such as the headscale name. Let's Encrypt connects to the name on port 80. Caddy answers.
-  This needs only port 80 open and a public DNS record. It works on any host, in any cloud, with no plugin.
-- DNS-01, for a wildcard name such as `*.pdl.<FUNNEL_DOMAIN>`. Let's Encrypt does not accept HTTP-01 for a wildcard.
-  Caddy must write a TXT record in the public DNS zone of the name, through the API of your DNS provider.
+- HTTP-01. Let's Encrypt connects to the name on port 80, and Caddy answers. This needs only port 80 open and a
+  public DNS record. It works on any host, in any cloud, with no plugin and no credentials.
+- DNS-01, for a wildcard certificate such as `*.pdl.<FUNNEL_DOMAIN>`. Let's Encrypt does not accept HTTP-01 for a
+  wildcard. Caddy must write a TXT record in the public DNS zone, through the API of your DNS provider.
 
-You need DNS-01 only for funnel. Without funnel, the edge is the plain Caddy image, and it needs no credentials.
+**Funnel uses HTTP-01 by default (`FUNNEL_DNS=ondemand`).** Caddy gets a certificate for each funnel host at the
+first TLS connection to it. Before it asks Let's Encrypt, it asks funnel-ingress whether the host is a live route.
+funnel-ingress says yes only for `<service>.<namespace>.<FUNNEL_DOMAIN>` with a route. Thus a client cannot make the
+edge request certificates for names that you did not publish. A new namespace or service needs no change on the edge.
 
-For funnel, set these values in `.env` for the DNS provider of `FUNNEL_DOMAIN`:
+The first request to a new host waits a few seconds for the certificate. Let's Encrypt limits the number of new
+certificates for each domain each week. If you have many services, use one wildcard certificate for each namespace
+instead (DNS-01, below).
+
+To use DNS-01 wildcards, set these values in `.env` for the DNS provider of `FUNNEL_DOMAIN`:
 
 | DNS provider | `EDGE_DNS_PLUGINS` | `FUNNEL_DNS` | Credentials in `edge.env` |
 |---|---|---|---|
@@ -103,7 +109,8 @@ For funnel, set these values in `.env` for the DNS provider of `FUNNEL_DOMAIN`:
 | Your own DNS server (BIND, PowerDNS, Knot) | `github.com/caddy-dns/rfc2136@v1.0.0` | `rfc2136` | `RFC2136_KEY_NAME`, `RFC2136_KEY_ALG`, `RFC2136_KEY`, `RFC2136_SERVER` |
 
 Then run `docker compose build edge`. Each value of `FUNNEL_DNS` is a file in `caddy/dns/`. For another provider,
-add its plugin to `EDGE_DNS_PLUGINS` and copy one of those files. The Caddy documentation lists the plugins.
+add its plugin to `EDGE_DNS_PLUGINS` and copy one of those files. The Caddy documentation lists the plugins. With
+DNS-01, put one line for each namespace, `*.<namespace>.{$FUNNEL_DOMAIN}`, into the funnel block of `caddy/Caddyfile`.
 
 **WARNING:** Give the credentials the right to change the one zone of `FUNNEL_DOMAIN` only. A key that can change
 other zones can also take the certificates of other names.
@@ -186,6 +193,9 @@ If the new version does not work, put the old digests back and run `docker compo
 - The pre-auth keys are used only at the first start. The nodes keep their identity in the data directory.
 
 ## Test
+
+`make test-funnel-tls-e2e` runs the edge with a test ACME server (Pebble) and funnel-ingress. It checks that a
+published host gets a certificate at its first request, and that other hosts get none.
 
 `make test-compose-control` runs this directory on the local Docker with the images built from this tree. It uses
 the internal CA of Caddy in place of Let's Encrypt. A client then joins the tailnet through the edge and reaches

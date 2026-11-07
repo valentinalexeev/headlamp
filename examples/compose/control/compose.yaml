@@ -22,7 +22,7 @@ services:
       ENROLL_DOMAIN: ${ENROLL_DOMAIN:-enroll.invalid}
       FUNNEL_DOMAIN: ${FUNNEL_DOMAIN:-funnel.invalid}
       CADDY_ACME_CA: ${CADDY_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
-      FUNNEL_DNS: ${FUNNEL_DNS:-none}
+      FUNNEL_DNS: ${FUNNEL_DNS:-ondemand}
     # Credentials of the DNS provider, for funnel wildcards only (see caddy/dns/). Optional.
     env_file:
       - path: ./edge.env

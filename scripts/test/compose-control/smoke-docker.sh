@@ -63,7 +63,7 @@ cat > "$T/override.yaml" <<EOF
 services:
   edge:
     build: !reset null
-    image: hl-compose-edge-none:local
+    image: hl-compose-edge-ondemand:local
     ports: !override
       - "127.0.0.1::443"
     volumes: !override
@@ -84,7 +84,7 @@ services:
 EOF
 mkdir -p "$T/ca"
 # the production Caddyfile with the ACME issuer swapped for the internal CA (the global options block only). The
-# funnel block stays: with the default FUNNEL_DNS=none it runs on the plain image.
+# funnel block stays: with the default FUNNEL_DNS=ondemand it runs on the plain image.
 awk '/^\{$/ && !done { print; print "\tlocal_certs"; skip = 1; next } skip && /^\}$/ { skip = 0; done = 1 } !skip { print }' \
   "$src/caddy/Caddyfile" > "$T/app/Caddyfile.test"
 
@@ -94,7 +94,7 @@ tmo 600 docker build -q -t hl-compose-node-control:local "$root/apps/node-contro
 docker image inspect "$ts_image" >/dev/null 2>&1 || tmo 300 docker pull -q "$ts_image" >/dev/null || die "pull $ts_image"
 # The production edge image: the default build (no plugin) and each documented DNS provider build, each with the
 # full Caddyfile (funnel block included) for its FUNNEL_DNS value.
-for v in "none|" "route53|github.com/caddy-dns/route53@v1.6.0" "googleclouddns|github.com/caddy-dns/googleclouddns@v1.1.0" "rfc2136|github.com/caddy-dns/rfc2136@v1.0.0"; do
+for v in "ondemand|" "none|" "route53|github.com/caddy-dns/route53@v1.6.0" "googleclouddns|github.com/caddy-dns/googleclouddns@v1.1.0" "rfc2136|github.com/caddy-dns/rfc2136@v1.0.0"; do
   dns=${v%%|*}; mods=${v#*|}
   if tmo 900 docker build -q --build-arg DNS_PLUGINS="$mods" -t "hl-compose-edge-$dns:local" "$src/caddy" >/dev/null 2>&1 && \
      docker run --rm -e HEADSCALE_DOMAIN=h.example.test -e ACME_EMAIL=a@example.test -e FUNNEL_DOMAIN=f.example.test \

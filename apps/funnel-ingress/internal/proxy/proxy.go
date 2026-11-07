@@ -162,6 +162,10 @@ func forwardedProto(r *http.Request, trustedPeer bool) string {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == askPath && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+		h.ask(w, r)
+		return
+	}
 	ns, service, ok := ParseHost(r.Host, h.domain())
 	if !ok {
 		if r.URL.Path == "/healthz" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {

@@ -166,7 +166,8 @@ func opaqueID(d Device) string {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
+	// HTML escaping stays on (<, >, & as \u003c and so on): the JSON is the same to a parser, and an answer that
+	// echoes request text cannot carry markup, even through a writer that inspects it (code scanning alerts 6 and 7).
 	if err := enc.Encode(v); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return

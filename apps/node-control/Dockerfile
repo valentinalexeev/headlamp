@@ -3,11 +3,11 @@
 # TSVERSION documents which tailscale.com module the image is built against and is checked against
 # go.mod, so a version bump in one place cannot drift from the other. The tailscale client itself is
 # compiled into the binary (tsnet); there is no tailscaled and no start script.
-ARG TSVERSION=1.98.10
+ARG TSVERSION=1.104.5
 # VERSION is the headlamp release the image is built from (the repo's VERSION file, passed by CI). The console shows it.
 ARG VERSION=dev
 
-FROM golang:1.26.5-alpine AS build
+FROM golang:1.27.3-alpine AS build
 ARG TSVERSION
 ARG VERSION
 WORKDIR /src

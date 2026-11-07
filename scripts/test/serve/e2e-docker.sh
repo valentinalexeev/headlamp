@@ -8,12 +8,12 @@
 # joins with its service's key and names nothing. From the client the test checks that the names resolve to the
 # sidecars and that HTTPS verifies against the serve CA and reaches the right backend.
 #   E2E_HEADSCALE_IMAGE  default jauderho/headscale:v0.29.3
-#   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.98.10
+#   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.104.4
 #   E2E_KEEP=1           keep the containers on exit, for debugging
 set -u
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 hs_image=${E2E_HEADSCALE_IMAGE:-jauderho/headscale:v0.29.3}
-ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.98.10}
+ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 base=tailnet.e2e.test
 zone=svc.e2e.example
 

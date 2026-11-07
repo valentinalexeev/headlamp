@@ -61,6 +61,16 @@ Only a component whose source changed is rebuilt. A release reuses the images `m
 ships. Deploy by digest, or at least by `X.Y.Z`. The images hold placeholders where a site's config belongs: a deployment
 adds its own in a private overlay.
 
+## The tailscale version
+
+One tailscale version applies to the whole repo (#145). The file `TAILSCALE_VERSION` holds it. These pins must have the same version:
+
+- `ARG TSVERSION` in every Dockerfile under `apps/` (the exit-node image and the images with an embedded client);
+- the `tailscale.com` module in every `go.mod` under `apps/`;
+- `tailscale_version` in `ansible/roles/tailscale/defaults/main.yml`.
+
+`scripts/check-tailscale-pins.sh` compares them, and `make check-tailscale-pins` runs it. To move to a new version, change all the pins in one PR. Run `go get tailscale.com@v<x.y.z>` and `go mod tidy` in each module, then run the unit tests and the end-to-end tests.
+
 ## Cutting a release
 
 All work merges into `main` through pull requests. There is no other long-lived branch.

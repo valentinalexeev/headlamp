@@ -340,8 +340,8 @@ func (r *Registry) resolve(pick func([]headscale.Node) (headscale.Node, error)) 
 // autoDerivedGivenName reports whether headscale treats a given name as derived from the node's own
 // hostname, which it re-derives whenever the hostname changes. It is headscale's own rule
 // (hscontrol/state isAutoDerivedGivenName, v0.29.3) over the same sanitiser (tailscale.com
-// util/dnsname.SanitizeHostname; the file is identical in v1.98.10, which this module pins, and
-// v1.101.0-pre, which headscale v0.29.3 pins): the given name equals the sanitised hostname, or that
+// util/dnsname.SanitizeHostname; the function is identical in the version this module pins (v1.104.5)
+// and in v1.101.0-pre, which headscale v0.29.3 pins): the given name equals the sanitised hostname, or that
 // plus "-<integer>" (the suffix of a collision). When the sanitised hostname is empty headscale
 // names the node "node" (and "node-1"...); such a node is refused too, because nothing the
 // operator sees then ties its name to it.

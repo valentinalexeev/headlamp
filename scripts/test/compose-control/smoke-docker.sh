@@ -11,7 +11,7 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 src="$root/examples/compose/control"
-ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.98.10}
+ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 domain=headscale.compose.test
 
 skip() { echo "SKIP: $*"; exit 0; }

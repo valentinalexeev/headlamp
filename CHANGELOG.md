@@ -8,6 +8,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 - The node-control console shows the headlamp version it runs (for example `v0.10.0`) at the foot of the sidebar, or in the top bar of the compact console. The start-up log has it too. The image takes it from the `VERSION` file; a local build shows `dev`.
 
+### Changed
+
+- Every tailscale client in the repo is now 1.104.5, and the pins agree (#145). This covers `TAILSCALE_VERSION` (was 1.102.2), the exit-node image, the Ansible `tailscale` role default (was 1.98.10) and the embedded `tailscale.com` module of node-control and funnel-ingress (was 1.98.10). 1.104.4 fixes security issues in Tailscale SSH, Serve and Funnel. The node-control and funnel-ingress images now build with Go 1.27.3, which `tailscale.com` 1.104 needs. `scripts/check-tailscale-pins.sh` (`make check-tailscale-pins`) fails when one pin differs from `TAILSCALE_VERSION`. The Ansible `tailscale` role holds the package and turns off self-update (`tailscale_pin_version`, default `true`), so the pin is the only source of the version.
+
 ### Fixed
 
 - The `ingress-agent` Ansible role no longer fails its preflight on every bridge (#144). In 0.10.0 it still looked for the removed Python agent (`app/main.py`), so no bridge could install the Go agent. It now checks `go.mod` and `cmd/ingress-agent`. `make test-ansible-roles` runs the role checks with real ansible against the real tree.

@@ -1,8 +1,8 @@
 # Test image of one bridge for the Hysteria 2 e2e (#110): xray, the ingress agent and tailscaled in one container.
-ARG TAILSCALE_IMAGE=tailscale/tailscale:v1.98.10
+ARG TAILSCALE_IMAGE=tailscale/tailscale:v1.104.4
 FROM ${TAILSCALE_IMAGE} AS ts
 # The ingress agent is a Go binary (#133).
-FROM golang:1.26-alpine AS agent
+FROM golang:1.27-alpine AS agent
 WORKDIR /src
 COPY agent/ .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /ingress-agent ./cmd/ingress-agent

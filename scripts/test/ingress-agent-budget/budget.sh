@@ -6,7 +6,7 @@
 set -eu
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || { echo "SKIP: docker is not running"; exit 0; }
-img=golang:1.26-alpine
+img=golang:1.27-alpine
 docker run --rm -v "$root/apps/ingress-agent:/src:ro" -w /src -e CGO_ENABLED=0 -e GOFLAGS=-mod=mod "$img" sh -euc '
   go build -trimpath -ldflags="-s -w" -o /tmp/ingress-agent ./cmd/ingress-agent
   apk add -q --no-cache curl python3 >/dev/null

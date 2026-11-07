@@ -1,0 +1,41 @@
+# golangci-lint v2 configuration (pinned: v2.15.0, see GOLANGCI_LINT_VERSION in the Makefile).
+# `make lint-go` is strict for new code only (--new-from-rev); `make lint-go-report` prints the
+# full report as warnings. Cleanup of existing findings is tracked by the ADR 0002 work.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - contextcheck
+    - errorlint
+    - funlen
+    - gocognit
+    - gosec
+    - lll
+    - mnd
+    - nilerr
+    - noctx
+  settings:
+    funlen:
+      lines: 70
+      statements: -1
+    gocognit:
+      min-complexity: 30
+    lll:
+      line-length: 100
+      tab-width: 4
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters: [funlen, mnd, gosec, lll, noctx, bodyclose]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

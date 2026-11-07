@@ -7,6 +7,7 @@ trap 'rm -rf "$tmp"' EXIT
 fails=0
 copy() { # a fresh copy of the pinned files
   local d="$tmp/$1"; mkdir -p "$d"
+  # shellcheck disable=SC2046 # file lists from grep are split on purpose (paths have no spaces)
   (cd "$root" && tar -cf - TAILSCALE_VERSION scripts/check-tailscale-pins.sh ansible/roles/tailscale/defaults/main.yml \
     charts/tailnet-connector/Chart.yaml $(grep -rl --include='Dockerfile*' '^ARG TSVERSION=' apps) $(grep -rlE --include=go.mod '^[[:space:]]*tailscale\.com v' apps)) | tar -xf - -C "$d"
   echo "$d"

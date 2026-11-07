@@ -82,6 +82,7 @@ while :; do
   if [ ! -S "$SOCK" ]; then note "waiting for tailscaled socket"; sleep 5; continue; fi
 
   [ $((n % 10)) -eq 0 ] && derp_guard; n=$((n + 1))
+  # shellcheck disable=SC2046 # word splitting of decide's output into positional args is intended
   set -- $(nodes | decide)
   case "${1:-}" in
     keep) note "ok: exit node $2 selected and online" ;;

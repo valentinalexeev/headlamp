@@ -103,7 +103,7 @@ check-statestore-port:
 	./scripts/check-statestore-port.sh
 
 lint:
-	shellcheck -S error -x scripts/*.sh scripts/test/tf-run/run_tests.sh scripts/test/check-denylist/run_tests.sh \
+	shellcheck -S warning -x scripts/*.sh scripts/test/tf-run/run_tests.sh scripts/test/check-denylist/run_tests.sh \
 	  scripts/test/exit-node-state/run_tests.sh scripts/test/runtime-config/run_tests.sh scripts/test/headscale-policy/run.sh scripts/test/headscale-policy/e2e-docker.sh apps/exit-node/*.sh \
 	  scripts/tasks.sh scripts/test/tasks/run.sh \
 	  scripts/headscale-tag-node.sh scripts/test/headscale-tag-node/run.sh \
@@ -122,3 +122,55 @@ test-k8s-connector-e2e:
 # On demand (#123): the Access page (roles and grants) against a real headscale, two tailnet users.
 test-access-e2e:
 	sh scripts/test/access/e2e-docker.sh
+
+# --- Go / config linting (#160) --------------------------------------------------------------
+# Each tool runs natively when installed, else through its pinned docker image.
+GO_APPS              := $(patsubst %/go.mod,%,$(wildcard apps/*/go.mod))
+GOLANGCI_LINT_VERSION := v2.15.0
+GOVULNCHECK_VERSION  := v1.1.4
+LINT_BASE_REV        ?= origin/main
+HADOLINT_VERSION     := v2.12.0
+KUBECONFORM_VERSION  := v0.6.7
+ACTIONLINT_VERSION   := 1.7.7
+DOCKERFILES          := $(shell git ls-files '*Dockerfile*')
+# git dir mounted into the golangci-lint container so --new-from-rev works in worktrees too
+GIT_COMMON_DIR       := $(abspath $(shell git rev-parse --git-common-dir))
+# govulncheck scans with the toolchain the images ship (FROM golang:1.27.3 in the Dockerfiles)
+GO_VULN_TOOLCHAIN    ?= go1.27.3
+
+GOLANGCI_LINT = $(if $(shell command -v golangci-lint 2>/dev/null),golangci-lint,\
+  docker run --rm -v "$(CURDIR)":"$(CURDIR)" -v "$(GIT_COMMON_DIR)":"$(GIT_COMMON_DIR)" -w "$(CURDIR)/$$app" \
+    -v headlamp-golangci-cache:/root/.cache -v headlamp-gomod-cache:/go/pkg/mod \
+    -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+    golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) golangci-lint)
+
+.PHONY: lint-go lint-go-report vulncheck lint-config
+
+lint-go:
+	@rc=0; for app in $(GO_APPS); do echo "== golangci-lint (new since $(LINT_BASE_REV)) $$app"; \
+	  (cd $$app && $(GOLANGCI_LINT) run --config ../../.golangci.yml --new-from-rev=$(LINT_BASE_REV) ./...) || rc=1; \
+	done; exit $$rc
+
+lint-go-report:
+	@for app in $(GO_APPS); do echo "== golangci-lint (full report, warnings only) $$app"; \
+	  (cd $$app && $(GOLANGCI_LINT) run --config ../../.golangci.yml --issues-exit-code=0 ./...) || echo "WARNING: golangci-lint failed to run in $$app"; \
+	done
+
+vulncheck:
+	@rc=0; for app in $(GO_APPS); do echo "== govulncheck $$app"; \
+	  if command -v govulncheck >/dev/null 2>&1; then (cd $$app && GOTOOLCHAIN=$(GO_VULN_TOOLCHAIN) govulncheck ./...) || rc=1; \
+	  else (cd $$app && GOTOOLCHAIN=$(GO_VULN_TOOLCHAIN) go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...) || rc=1; fi; \
+	done; exit $$rc
+
+lint-config:
+	@rc=0; echo "== actionlint"; \
+	if command -v actionlint >/dev/null 2>&1; then actionlint || rc=1; \
+	else docker run --rm -v "$(CURDIR)":/repo -w /repo rhysd/actionlint:$(ACTIONLINT_VERSION) -color || rc=1; fi; \
+	echo "== hadolint"; \
+	if command -v hadolint >/dev/null 2>&1; then hadolint --failure-threshold error $(DOCKERFILES) || rc=1; \
+	else for f in $(DOCKERFILES); do echo "-- $$f"; docker run --rm -i hadolint/hadolint:$(HADOLINT_VERSION) hadolint --failure-threshold error - < $$f || rc=1; done; fi; \
+	echo "== kubeconform"; \
+	for c in charts/*/; do echo "-- $$c"; helm template lint $$c > /tmp/hl-kubeconform.yaml || { rc=1; continue; }; \
+	  if command -v kubeconform >/dev/null 2>&1; then kubeconform -strict -summary -ignore-missing-schemas /tmp/hl-kubeconform.yaml || rc=1; \
+	  else docker run --rm -i ghcr.io/yannh/kubeconform:$(KUBECONFORM_VERSION) -strict -summary -ignore-missing-schemas - < /tmp/hl-kubeconform.yaml || rc=1; fi; \
+	done; exit $$rc

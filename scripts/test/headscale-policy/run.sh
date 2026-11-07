@@ -91,7 +91,7 @@ printf '%s' "$POL" > "$FILE"
 # --- check
 reset; fx POST_policy_preview 200 "$OK_PREVIEW"
 run check --file "$FILE"
-expect "check valid exits 0" "$([ $rc = 0 ]; echo $?)"
+expect "check valid exits 0" "$([ "$rc" = 0 ] && echo 0 || echo 1)"
 [ "$(order)" = "POST /policy/preview," ] && ok "check posts to /policy/preview once (trailing slash stripped)" || bad "check calls: $(order)"
 jq -e --arg p "$POL" '.policy == $p' "$FIX/lastbody.POST_policy_preview" >/dev/null && ok "check sends the file as {policy}" || bad "check body"
 
@@ -232,7 +232,7 @@ printf 'old' > "$T/pulled.json"
 run pull --file "$T/pulled.json"
 { [ $rc = 0 ] && [ "$(cat "$T/pulled.json"; echo x)" = '{"acls":[]}
 x' ]; } && ok "pull writes the exact bytes" || bad "pull rc=$rc content=$(cat "$T/pulled.json")"
-[ -z "$(ls -A "$T" | grep -F '.pulled.json')" ] && ok "pull leaves no temp file" || bad "pull temp file left"
+[ -z "$(find "$T" -mindepth 1 -maxdepth 1 -name '*.pulled.json*')" ] && ok "pull leaves no temp file" || bad "pull temp file left"
 
 reset; fx GET_policy_state 200 "$(state_json '{"acls":[]}')"
 printf 'old' > "$T/mode.json"; chmod 640 "$T/mode.json"
@@ -264,7 +264,6 @@ reset
 export HS_APP=hs-app
 cp "$FILE" "$FIX/flyctl.get.out"
 run bootstrap --yes --file "$FILE"
-b64=$(base64 < "$FILE" | tr -d '\n')
 [ $rc = 0 ] && has "switch the server to policy.mode: database" "$T/err" && ok "bootstrap with an equal read-back exits 0 with the next-step message" || bad "bootstrap rc=$rc err=$(cat "$T/err")"
 { has 'ssh' "$FLY" && has 'hs-app' "$FLY"; } && ok "bootstrap runs flyctl ssh console for the app" || bad "bootstrap args=$(cat "$FLY" 2>/dev/null)"
 G="$FLY.get"

@@ -5,3 +5,6 @@
 tailscale_version: "1.104.5"
 headscale_login_server: "https://headscale.example.com"
 tailscale_advertise_exit_node: true
+# The pin is the only source of the version (#145): the node does not update its own client, and apt does not upgrade
+# the package. Set to false to let the node update itself.
+tailscale_pin_version: true

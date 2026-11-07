@@ -54,6 +54,30 @@
   delegate_to: localhost
   when: tailscale_dpkg.stdout != tailscale_version
 
+# The pinned version stays the installed version (#145): apt does not upgrade the package, and tailscaled does not
+# update itself. A pin bump installs the new .deb above, which works on a held package (apt: deb ignores the hold).
+- name: Hold the tailscale package at the pinned version
+  ansible.builtin.dpkg_selections:
+    name: tailscale
+    selection: "{{ 'hold' if tailscale_pin_version | bool else 'install' }}"
+  become: true
+
+- name: Check the tailscale auto-update setting
+  ansible.builtin.command: tailscale debug prefs
+  become: true
+  register: tailscale_prefs
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Turn off tailscale self-update
+  ansible.builtin.command: tailscale set --auto-update=false
+  become: true
+  when:
+    - tailscale_pin_version | bool
+    - tailscale_prefs.rc == 0
+    - (tailscale_prefs.stdout | from_json).AutoUpdate.Apply | default(false)
+
 # Ubuntu 26.04 no longer reads /etc/sysctl.conf at boot; use a sysctl.d drop-in so it persists.
 - name: Enable IPv4 forwarding
   ansible.posix.sysctl:

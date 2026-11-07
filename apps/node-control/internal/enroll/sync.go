@@ -100,7 +100,7 @@ type SyncTarget struct {
 
 // CredentialsFor maps the store's base credentials to the credentials of one ingress: every UUID
 // goes through UUIDFor (the identity for a "base" ingress); mode and not_after are unchanged. The
-// first error is returned and no partial set.
+// first error is returned and no partial set. A bridge with tailnet_access "all" grants every credential.
 func (c IngressConfig) CredentialsFor(ing Ingress, base []Credential) ([]Credential, error) {
 	out := make([]Credential, 0, len(base))
 	for _, cr := range base {
@@ -108,7 +108,11 @@ func (c IngressConfig) CredentialsFor(ing Ingress, base []Credential) ([]Credent
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, Credential{UUID: u, Mode: cr.Mode, NotAfter: cr.NotAfter})
+		c := Credential{UUID: u, Mode: cr.Mode, NotAfter: cr.NotAfter}
+		if ing.GrantsTailnet() {
+			c.Tailnet = TailnetAll
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }

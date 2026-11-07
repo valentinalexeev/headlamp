@@ -301,3 +301,33 @@ func TestParseBridgeNodeAndIntermittent(t *testing.T) {
 		}
 	}
 }
+
+func TestTailnetAccessOption(t *testing.T) {
+	mk := func(extra string) string {
+		return `{"profile_name":"p","link_host":"l.example","ingresses":[{"name":"a","host":"a.example","public_key":"k","short_id":"ab","sni":"s.example","port":443,"agent_url":"http://a:8090","token_env":"T","uuids":"base"` + extra + `}]}`
+	}
+	for extra, want := range map[string]string{"": "", `,"tailnet_access":"off"`: "off", `,"tailnet_access":"all"`: "all"} {
+		c, err := ParseIngressConfig([]byte(mk(extra)))
+		if err != nil || c.Ingresses[0].TailnetAccess != want {
+			t.Errorf("%q: %v %+v", extra, err, c)
+		}
+	}
+	for _, bad := range []string{`,"tailnet_access":"some"`, `,"tailnet_access":true`, `,"tailnet_access":null`} {
+		if _, err := ParseIngressConfig([]byte(mk(bad))); err == nil || !strings.Contains(err.Error(), "tailnet_access") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	base := []Credential{{UUID: "11111111-1111-4111-8111-111111111111", Mode: "auto", NotAfter: 9}}
+	var cfg IngressConfig
+	got, _ := cfg.CredentialsFor(Ingress{UUIDs: uuidsBase, TailnetAccess: TailnetAll}, base)
+	if got[0].Tailnet != "all" {
+		t.Errorf("all: %+v", got)
+	}
+	got, _ = cfg.CredentialsFor(Ingress{UUIDs: uuidsBase}, base)
+	if got[0].Tailnet != "" {
+		t.Errorf("off: %+v", got)
+	}
+	if b, _ := json.Marshal(got[0]); strings.Contains(string(b), "tailnet") {
+		t.Errorf("an off grant must not be on the wire: %s", b)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Feature is one area of the console. Every admin route belongs to exactly one.
@@ -22,10 +23,24 @@ const (
 	FeatureFunnel   Feature = "funnel"
 	FeatureServe    Feature = "serve"
 	FeatureAudit    Feature = "audit"
+	// FeatureAdmin is the roles and grants page (#123). "*" does not include it: a viewer must not read who holds
+	// what, and a "*.admin" role must not hand out roles. Name it explicitly ("admin.admin").
+	FeatureAdmin Feature = "admin"
 )
 
 // Features lists every feature, in display order.
-var Features = []Feature{FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel, FeatureServe, FeatureAudit}
+var Features = []Feature{FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel, FeatureServe, FeatureAudit, FeatureAdmin}
+
+// wildcard lists the features "*" stands for: every feature except admin.
+func wildcard() []Feature {
+	out := make([]Feature, 0, len(Features))
+	for _, f := range Features {
+		if f != FeatureAdmin {
+			out = append(out, f)
+		}
+	}
+	return out
+}
 
 // Level is how much a permission allows inside a feature. A higher level includes every lower one.
 type Level int
@@ -73,7 +88,7 @@ func (p Perm) String() string { return string(p.Feature) + "." + p.Level.String(
 // P builds a Perm; it is for route tables.
 func P(f Feature, l Level) Perm { return Perm{f, l} }
 
-// ParsePerm reads "feature.level", or "*.level" for every feature.
+// ParsePerm reads "feature.level", or "*.level" for every feature except admin.
 func ParsePerm(s string) ([]Perm, error) {
 	f, l, ok := strings.Cut(strings.TrimSpace(s), ".")
 	if !ok {
@@ -85,7 +100,7 @@ func ParsePerm(s string) ([]Perm, error) {
 	}
 	if f == "*" {
 		out := make([]Perm, 0, len(Features))
-		for _, ft := range Features {
+		for _, ft := range wildcard() {
 			out = append(out, Perm{ft, lv})
 		}
 		return out, nil
@@ -126,13 +141,19 @@ func roleOf(perms ...string) Role {
 var BuiltinRoles = map[string]Role{
 	"viewer":   roleOf("*.view"),
 	"operator": roleOf("*.view", "nodes.operate", "tasks.operate", "enroll.operate"),
-	"owner":    roleOf("*.admin"),
+	"owner":    roleOf("*.admin", "admin.admin"),
 }
 
 // Policy maps users to roles. The zero value grants nothing.
 type Policy struct {
+	mu     sync.RWMutex
 	roles  map[string]Role
 	grants map[string][]string // subject -> role names
+	// dyn is the layer of roles and grants stored by the UI (#123). It adds to the file grants above, which
+	// the UI cannot change: they are the break-glass owners.
+	dynRoles  map[string]Role
+	dynGrants map[string][]string
+	dynCfg    Config
 }
 
 // Config is the ADMIN_CONFIG file: custom roles and grants. A subject is a tailnet login ("alice@" or
@@ -231,6 +252,8 @@ func normalizeSubject(s string) string {
 // AddLegacy grants one feature at admin level to each login in a legacy *_ADMIN_USERS list, under a role named
 // "legacy-<feature>". It keeps those lists working when ADMIN_CONFIG is not set.
 func (p *Policy) AddLegacy(f Feature, logins Allowed) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	name := "legacy-" + string(f)
 	p.roles[name] = Role{f: LevelAdmin}
 	for sub := range logins.set {
@@ -242,6 +265,8 @@ func (p *Policy) AddLegacy(f Feature, logins Allowed) {
 
 // AddOwners grants the built-in owner role to each login (ADMIN_USERS).
 func (p *Policy) AddOwners(logins Allowed) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for sub := range logins.set {
 		if !slices.Contains(p.grants[sub], "owner") {
 			p.grants[sub] = append(p.grants[sub], "owner")
@@ -261,6 +286,8 @@ func (p *Policy) Role(s Subject) Role {
 	if p == nil {
 		return out
 	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	keys := []string{NormalizeLogin(s.Login)}
 	for _, g := range s.Groups {
 		keys = append(keys, "group:"+strings.TrimSpace(g))
@@ -274,6 +301,11 @@ func (p *Policy) Role(s Subject) Role {
 				out.add(Perm{f, l})
 			}
 		}
+		for _, rn := range p.dynGrants[k] {
+			for f, l := range p.lookupRole(rn) {
+				out.add(Perm{f, l})
+			}
+		}
 	}
 	return out
 }
@@ -282,4 +314,11 @@ func (p *Policy) Role(s Subject) Role {
 func (p *Policy) Can(s Subject, perm Perm) bool { return p.Role(s).Grants(perm) }
 
 // Empty reports whether the policy grants anything to anyone.
-func (p *Policy) Empty() bool { return p == nil || len(p.grants) == 0 }
+func (p *Policy) Empty() bool {
+	if p == nil {
+		return true
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.grants) == 0 && len(p.dynGrants) == 0
+}

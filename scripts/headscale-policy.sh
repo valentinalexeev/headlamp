@@ -223,14 +223,6 @@ do_pull() {
   fi
 }
 
-# Rewrites the top-level `policy:` block of a headscale config to `policy:` + `  mode: database`; every other line is kept
-# (blank lines before the next key included). Runs on the headscale machine, see do_bootstrap.
-AWK_POLICY='/^policy:/ { print; print "  mode: database"; skip = 1; nb = 0; next }
-skip && /^[[:space:]]+[^[:space:]]/ { nb = 0; next }
-skip && /^[[:space:]]*$/ { nb++; next }
-{ if (skip) for (i = 0; i < nb; i++) print ""; skip = 0; nb = 0; print }
-END { if (skip) for (i = 0; i < nb; i++) print "" }'
-
 is_object() { jq -e 'type == "object" and length > 0' "$1" >/dev/null 2>&1; }
 
 # The direct-database path keeps trailing commas (it only blanks comments); drop them for the lenient check.
@@ -244,23 +236,17 @@ do_bootstrap() {
   need_file
   _size=$(wc -c < "$file" | tr -d ' ')
   [ "$_size" -le "$MAX_BOOTSTRAP_BYTES" ] || die 2 "$file is larger than $MAX_BOOTSTRAP_BYTES bytes"
-  _b64=$(base64 < "$file" | tr -d '\n')
-  # The remote script goes over as base64 so that no quoting survives the ssh/sh layers. It writes the policy straight
-  # into headscale's database with a copy of the config whose policy block says `mode: database`; this works while the
-  # server still runs in file mode. It then prints a marker and the stored policy for the local comparison.
-  _rs=$(printf '%s\n' \
-    'set -u' \
-    'trap '"'"'rm -f /tmp/policy-bootstrap.json /tmp/hs-bootstrap-config.yaml'"'"' EXIT' \
-    "echo '$_b64' | base64 -d > /tmp/policy-bootstrap.json" \
-    "awk '$AWK_POLICY' /etc/headscale/config.yaml > /tmp/hs-bootstrap-config.yaml" \
-    'headscale policy set -f /tmp/policy-bootstrap.json --bypass-grpc-and-access-database-directly --force -c /tmp/hs-bootstrap-config.yaml || exit $?' \
-    'echo ---POLICY---' \
-    'headscale policy get --bypass-grpc-and-access-database-directly --force -c /tmp/hs-bootstrap-config.yaml')
-  _sb64=$(printf '%s\n' "$_rs" | base64 | tr -d '\n')
-  flyctl ssh console -a "$app" -C "sh -c 'echo $_sb64 | base64 -d > /tmp/hs-bootstrap.sh && sh /tmp/hs-bootstrap.sh; rc=\$?; rm -f /tmp/hs-bootstrap.sh; exit \$rc'" > "$tmp/out" \
-    || die 3 "flyctl ssh failed; the policy was NOT loaded"
-  grep -qx -e '---POLICY---' "$tmp/out" || die 3 "no policy read back; the policy was NOT loaded"
-  sed -n -e '/^---POLICY---$/,$p' "$tmp/out" | sed -e 1d > "$tmp/got"
+  # The headscale image is distroless (no shell), so both steps exec the headscale binary directly. The policy goes over
+  # stdin and is written straight into headscale's database (--bypass-grpc-and-access-database-directly); this works
+  # while the server still runs in file mode. The second call reads the stored policy back for the local comparison.
+  _hs='headscale -c /etc/headscale/config.yaml policy'
+  flyctl ssh console --pty=false -a "$app" -C "$_hs set -f /dev/stdin --bypass-grpc-and-access-database-directly --force" \
+    < "$file" > "$tmp/set.out" 2>&1 || die 3 "flyctl ssh failed; the policy was NOT loaded"
+  flyctl ssh console --pty=false -a "$app" -C "$_hs get --bypass-grpc-and-access-database-directly --force" > "$tmp/out" \
+    || die 3 "flyctl ssh failed while reading the policy back; check it with: headscale policy get"
+  # headscale may log to the same stream: the policy starts at the first line that opens a JSON object.
+  sed -n -e '/^[[:space:]]*{/,$p' "$tmp/out" > "$tmp/got"
+  [ -s "$tmp/got" ] || die 3 "no policy read back; the policy was NOT loaded"
   # The direct-database path stores the policy standardized (comments blanked, trailing commas dropped), so a file with
   # comments cannot be compared byte for byte or through jq: accept a non-empty JSON object read back in that case.
   if jq -e . "$file" >/dev/null 2>&1; then

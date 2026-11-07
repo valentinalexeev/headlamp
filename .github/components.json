@@ -29,8 +29,8 @@
     "image": "headscale",
     "context": "apps/headscale",
     "dockerfile": "Dockerfile",
-    "paths": ["apps/headscale"],
-    "test": "make test-headscale-policy && make test-runtime-config IMAGE=headscale"
+    "paths": ["apps/headscale", "HEADSCALE_VERSION"],
+    "test": "make test-headscale-policy && make test-runtime-config IMAGE=headscale && make test-headscale-pin && make check-headscale-pin"
   },
   {
     "image": "exit-node",

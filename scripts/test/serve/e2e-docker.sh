@@ -7,12 +7,12 @@
 # and a tailscale client. An admin creates an exact service and a wildcard service through the API; each sidecar
 # joins with its service's key and names nothing. From the client the test checks that the names resolve to the
 # sidecars and that HTTPS verifies against the serve CA and reaches the right backend.
-#   E2E_HEADSCALE_IMAGE  default jauderho/headscale:v0.29.3
+#   E2E_HEADSCALE_IMAGE  default ghcr.io/juanfont/headscale:v0.29.7
 #   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.104.4
 #   E2E_KEEP=1           keep the containers on exit, for debugging
 set -u
 root=$(cd "$(dirname "$0")/../../.." && pwd)
-hs_image=${E2E_HEADSCALE_IMAGE:-jauderho/headscale:v0.29.3}
+hs_image=${E2E_HEADSCALE_IMAGE:-ghcr.io/juanfont/headscale:v0.29.7}
 ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 base=tailnet.e2e.test
 zone=svc.e2e.example
@@ -102,8 +102,8 @@ JSON
 dk network create "$net" >/dev/null || die "network"
 
 echo "# headscale"
-dk run -d --name "$hs" --network "$net" --entrypoint "" -v "$T/etc:/etc/headscale:ro" "$hs_image" \
-  sh -c 'mkdir -p /data && exec headscale serve -c /etc/headscale/config.yaml' >/dev/null || die "start headscale"
+dk run -d --name "$hs" --network "$net" -v "$T/etc:/etc/headscale:ro" "$hs_image" \
+  serve -c /etc/headscale/config.yaml >/dev/null || die "start headscale"
 wait_for 40 docker exec "$hs" headscale -c /etc/headscale/config.yaml users list || die "headscale not ready"
 hsx() { dk exec "$hs" headscale -c /etc/headscale/config.yaml "$@"; }
 hsx users create e2e --email e2e@example.test >/dev/null || die "user"
@@ -122,7 +122,7 @@ dk run -d --name "$nc" --network "$net" \
   serve-e2e-node-control >/dev/null || die "start node-control"
 wait_for 60 sh -c "docker exec $hs headscale -c /etc/headscale/config.yaml nodes list | grep -q node-control" || die "node-control did not join"
 # the headscale CLI prints snake_case JSON; the node-control client also accepts it
-NC=$(docker exec "$hs" sh -c "headscale -c /etc/headscale/config.yaml nodes list -o json" | python3 -c 'import json,sys;print([n["ip_addresses"][0] for n in json.load(sys.stdin) if n.get("given_name")=="node-control"][0])' 2>/dev/null)
+NC=$(docker exec "$hs" headscale -c /etc/headscale/config.yaml nodes list -o json | python3 -c 'import json,sys;print([n["ip_addresses"][0] for n in json.load(sys.stdin) if n.get("given_name")=="node-control"][0])' 2>/dev/null)
 [ "$NC" = 100.64.0.1 ] && ok "node-control is 100.64.0.1, the address the split names" || nok "node-control is 100.64.0.1 (got $NC)"
 
 echo "# client"

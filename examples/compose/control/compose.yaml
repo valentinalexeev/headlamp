@@ -40,7 +40,8 @@ services:
   headscale:
     image: ${HEADSCALE_IMAGE:?pin ghcr.io/valentinalexeev/headlamp/headscale:<version>@sha256:<digest> in .env}
     restart: unless-stopped
-    command: ["headscale", "serve"]
+    # The image is the stock, distroless headscale: its entrypoint is the binary.
+    command: ["serve"]
     environment:
       HEADSCALE_CONFIG: /config/headscale.yaml
       HEADSCALE_POLICY_PATH: /config/acl.json
@@ -52,7 +53,8 @@ services:
       - ./config/acl.json:/config/acl.json:ro
       - ${DATA_DIR:-/srv/headlamp/data}/headscale:/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      # No curl in the distroless image: ask headscale itself (over its unix socket).
+      test: ["CMD", "headscale", "health"]
       interval: 10s
       timeout: 3s
       retries: 30

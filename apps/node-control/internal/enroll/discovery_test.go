@@ -1096,8 +1096,8 @@ func configuredByHeadscale(t *testing.T, nodes *nodeList) *Registry {
 }
 
 func TestAutoDerivedGivenName(t *testing.T) {
-	// Every case is decided by headscale v0.29.3 (state.go isAutoDerivedGivenName over
-	// dnsname.SanitizeHostname; tailscale.com SanitizeHostname is identical in v1.104.5 and v1.101.0-pre).
+	// Every case is decided by headscale v0.29.3 and v0.29.7 (state.go isAutoDerivedGivenName over
+	// dnsname.SanitizeHostname; tailscale.com SanitizeHostname is identical in v1.104.5, v1.104.4 and v1.101.0-pre).
 	cases := []struct {
 		given, hostname string
 		want            bool

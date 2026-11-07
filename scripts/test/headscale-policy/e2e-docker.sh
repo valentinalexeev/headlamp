@@ -1,11 +1,11 @@
 #!/bin/sh
 # On-demand end-to-end test of `headscale-policy.sh bootstrap` against a real headscale container. Not part of the unit
 # tests (make test-headscale-policy); run it with `make test-headscale-policy-e2e`. Needs docker, curl and jq.
-#   E2E_HEADSCALE_IMAGE  image to run, default jauderho/headscale:v0.29.3
+#   E2E_HEADSCALE_IMAGE  image to run, default ghcr.io/juanfont/headscale:v0.29.7
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 cli="$here/../../headscale-policy.sh"
-image=${E2E_HEADSCALE_IMAGE:-jauderho/headscale:v0.29.3}
+image=${E2E_HEADSCALE_IMAGE:-ghcr.io/juanfont/headscale:v0.29.7}
 
 skip() { echo "SKIP: $*"; exit 0; }
 command -v docker >/dev/null 2>&1 || skip "docker is not available"
@@ -72,8 +72,8 @@ printf '%s\n' '{"acls":[{"action":"accept","src":["*"],"dst":["*:80"]}]}' > "$T/
 port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])' 2>/dev/null || echo $((20000 + $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 20000)))
 
 start() { # config file name in /etc/headscale
-  dk run -d --name "$ctr" --entrypoint "" -p "127.0.0.1:$port:8080" -v "$vol:/var/lib/headscale" \
-    -v "$T/etc:/etc/headscale:ro" "$image" sh -c "mkdir -p /var/run/headscale && exec headscale serve -c /etc/headscale/$1" >/dev/null 2>&1 || return 1
+  dk run -d --name "$ctr" -p "127.0.0.1:$port:8080" -v "$vol:/var/lib/headscale" \
+    -v "$T/etc:/etc/headscale:ro" "$image" serve -c "/etc/headscale/$1" >/dev/null 2>&1 || return 1
   i=0
   while [ "$i" -lt 40 ]; do
     tmo 5 curl -fs "http://127.0.0.1:$port/health" >/dev/null 2>&1 && return 0
@@ -87,12 +87,14 @@ sameJSON() { # expected-json-text actual-file
   printf '%s' "$1" | jq -S . > "$T/exp.n" 2>/dev/null && jq -S . "$2" > "$T/act.n" 2>/dev/null && cmp -s "$T/exp.n" "$T/act.n"
 }
 
-# the flyctl shim: `flyctl ssh console -a APP -C CMD` -> docker exec in the scratch container
+# the flyctl shim: `flyctl ssh console [--pty=false] -a APP -C CMD` -> docker exec in the scratch container
 cat > "$T/bin/flyctl" <<'SHIM'
 #!/bin/sh
 cmd=
 while [ $# -gt 0 ]; do case $1 in -C) cmd=$2; shift ;; esac; shift; done
-exec docker exec "$E2E_CTR" sh -c "$cmd"
+# The image has no shell: like flyctl, split the command on spaces and exec it directly, stdin passed through.
+# shellcheck disable=SC2086
+exec docker exec -i "$E2E_CTR" $cmd
 SHIM
 chmod +x "$T/bin/flyctl"
 
@@ -107,8 +109,8 @@ run_cli() { E2E_CTR=$ctr PATH="$T/bin:$PATH" HS_APP=x NODE_CONTROL_URL= sh "$cli
 run_cli bootstrap --file "$T/p1.json" --yes
 check "bootstrap of a plain JSON policy exits 0 (rc=$rc)" "$([ $rc = 0 ]; echo $?)"
 dbget > "$T/got1" 2>/dev/null; sameJSON "$P1" "$T/got1"; check "the database holds the new policy" $?
-left=$(dk exec "$ctr" sh -c 'ls /tmp/policy-bootstrap.json /tmp/hs-bootstrap-config.yaml /tmp/hs-bootstrap.sh 2>/dev/null | wc -l' | tr -d ' ')
-[ "$left" = 0 ]; check "the temp files are gone" $?
+left=$(dk diff "$ctr" 2>/dev/null | grep -c '^A /tmp/' || true)
+[ "$left" = 0 ]; check "bootstrap leaves no files in the container" $?
 hs policy get -c /etc/headscale/config.yaml > "$T/live" 2>/dev/null; sameJSON "$(cat "$T/etc/acl.json")" "$T/live"
 check "the running file-mode server still serves the file ACL" $?
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check and rotate the headscale API key that the route approver (and optionally other apps) use. The key value is
+# Check and rotate the headscale API key that node-control (and optionally other apps) use. The key value is
 # never printed and never passed on a command line.
 #
 #   rotate-headscale-api-key.sh --status      list the server's keys with days left (read-only)
@@ -15,7 +15,7 @@
 #   STAGE_APPS     space-separated Fly apps that get HEADSCALE_API_KEY staged (required to rotate)
 #   DEPLOY_CMD     shell command that redeploys those apps (used by --deploy; otherwise it is only printed)
 #   HS_MACHINE     machine id for the headscale CLI; default: the started machine of process group PROCESS_GROUP
-#   PROCESS_GROUP  default "app" (the group that runs `headscale serve`; a standby approver machine has no CLI socket)
+#   PROCESS_GROUP  default "app" (the group that runs `headscale serve`)
 #   KEY_LIFETIME   default 365d;  WARN_DAYS  default 30
 #   SECRET_FILE / SECRET_FIELD   optional sops file and top-level field that also receive the new key (needs sops and
 #                  SOPS_AGE_KEY); --expire-old then keeps the key stored there. Without it the newest key is kept.
@@ -124,7 +124,7 @@ unset key
 if [ "$mode" = "--deploy" ] && [ -n "${DEPLOY_CMD:-}" ]; then
   echo "== deploying: $DEPLOY_CMD"
   sh -c "$DEPLOY_CMD"
-  echo "deployed. Check the approver logs for 200s, then run with --expire-old"
+  echo "deployed. Check that the apps reach headscale, then run with --expire-old"
 else
   echo "staged, not deployed. Redeploy: ${DEPLOY_CMD:-<the staged apps>}, then run with --expire-old"
 fi

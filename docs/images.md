@@ -110,8 +110,12 @@ Example:
 docker run -d --name headscale \
   -v ./config:/config:ro -v headscale-data:/data \
   -e HEADSCALE_CONFIG=/config/headscale.yaml -e HEADSCALE_POLICY_PATH=/config/acl.json \
-  ghcr.io/valentinalexeev/headlamp/headscale:0.9.0@sha256:<digest> headscale serve
+  ghcr.io/valentinalexeev/headlamp/headscale:0.9.0@sha256:<digest> serve
 ```
+
+The `headscale` image is the stock, distroless headscale image with the placeholder settings. Its entrypoint is the
+`headscale` binary, so give only the arguments (`serve`). The image has no shell. Use `docker exec <container> headscale
+<command>` to run a command in it.
 
 Pin the digest as well as the version. If you do not set a variable, the image uses its placeholder.
 

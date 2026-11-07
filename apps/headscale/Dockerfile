@@ -1,18 +1,13 @@
-# Pin the headscale image: the build needs a shell and apk (route approver scripts, `flyctl ssh console -C`).
-# jauderho/headscale:latest is NOT usable from v0.29.5 on (that image has no /bin/sh), so the default is the
-# last Alpine-based tag we ran. Override with: fly/deploy.sh headscale --build-arg HEADSCALE_VERSION=<tag>
-ARG HEADSCALE_VERSION=v0.29.3
-FROM jauderho/headscale:${HEADSCALE_VERSION}
-
-RUN apk add --no-cache curl bash jq ca-certificates
-
-COPY approve-gateway-routes.sh /usr/local/bin/approve-gateway-routes.sh
-COPY cron-approve-routes.sh /usr/local/bin/cron-approve-routes.sh
-
-RUN chmod +x /usr/local/bin/approve-gateway-routes.sh \
-    /usr/local/bin/cron-approve-routes.sh
+# The headscale image: the stock upstream image, unchanged, with the placeholder site config for the Fly overlay
+# (the overlay copies the site's headscale.yaml and acl.json over these). The upstream image is distroless: it has
+# no shell, so run commands with `flyctl ssh console -C "headscale ..."` or `docker exec <ctr> headscale ...`.
+# Routes are approved by the policy (autoApprovers in acl.json), so the image needs no API key and no scripts.
+# HEADSCALE_VERSION must equal the HEADSCALE_VERSION file (scripts/check-headscale-pin.sh).
+ARG HEADSCALE_VERSION=v0.29.7
+FROM ghcr.io/juanfont/headscale:${HEADSCALE_VERSION}
 
 COPY ./headscale.yaml /etc/headscale/config.yaml
 COPY ./acl.json /etc/headscale/acl.json
 
-ENTRYPOINT []
+ENTRYPOINT ["/ko-app/headscale"]
+CMD ["serve"]

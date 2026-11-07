@@ -1,0 +1,45 @@
+{{- if .Values.connector.enabled }}
+# The connector may read and write its own state Secret, and nothing else. The Secret is created by the chart, so the
+# Role needs no "create" (which cannot be limited by name).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "tc.name" . }}
+  labels: {{- include "tc.labels" . | nindent 4 }}
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "tc.stateSecret" . }}
+  labels: {{- include "tc.labels" . | nindent 4 }}
+  annotations:
+    # tailscale writes the node state here; keep it when the release is upgraded or removed by mistake
+    helm.sh/resource-policy: keep
+type: Opaque
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "tc.name" . }}
+  labels: {{- include "tc.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ include "tc.stateSecret" . | quote }}]
+    verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "tc.name" . }}
+  labels: {{- include "tc.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "tc.name" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "tc.name" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

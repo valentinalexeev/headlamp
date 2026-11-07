@@ -33,14 +33,7 @@ func Can(login string, perm Perm, legacy Allowed) bool {
 // whether the legacy list names anyone. A module uses it to decide whether it can be operated at all.
 func AnyoneCan(perm Perm, legacy Allowed) bool {
 	if p := current.Load(); p != nil {
-		for _, roles := range p.grants {
-			for _, rn := range roles {
-				if p.roles[rn].Grants(perm) {
-					return true
-				}
-			}
-		}
-		return false
+		return AnyoneCanIn(p, perm)
 	}
 	return len(legacy.set) > 0
 }

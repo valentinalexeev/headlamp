@@ -1,0 +1,11 @@
+apiVersion: v2
+name: tailnet-connector
+description: A tailscale subnet router for one Kubernetes cluster, joined to a headscale tailnet (and optional serve proxies)
+type: application
+# The chart version follows the repo VERSION; appVersion is the tailscale version (TAILSCALE_VERSION, checked by
+# scripts/check-tailscale-pins.sh).
+version: 0.11.0
+appVersion: "1.104.5"
+home: https://github.com/valentinalexeev/headlamp
+sources:
+  - https://github.com/valentinalexeev/headlamp

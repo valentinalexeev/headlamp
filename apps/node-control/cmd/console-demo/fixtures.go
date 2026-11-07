@@ -20,6 +20,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/access"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/enroll"
@@ -251,6 +252,7 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 		}),
 		tasks.New(env, src),
 		servemod.New(env, client),
+		access.New(env),
 	}
 	others := slices.Clone(mods)
 	return append(mods, overview.New(func() []core.Module { return others })), env, nil

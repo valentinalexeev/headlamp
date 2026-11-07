@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-serve-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles check-tailscale-pins test-tailscale-pins test-compose-control test-control-host-aws test-runtime-config lint \
+.PHONY: hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-serve-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-control-host-aws test-runtime-config lint \
   test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -40,6 +40,17 @@ check-tailscale-pins:
 
 test-tailscale-pins:
 	scripts/test/tailscale-pins/run_tests.sh
+
+check-headscale-pin:
+	scripts/check-headscale-pin.sh
+
+test-headscale-pin:
+	scripts/test/headscale-pin/run_tests.sh
+
+# Route approval by policy (autoApprovers) with real tailscale clients on the pinned headscale; needs docker.
+# FROM=<image> first builds the state on that image, then upgrades in place to the pinned one.
+test-route-approval:
+	sh scripts/test/route-approval/e2e-docker.sh $(if $(FROM),$(FROM) ghcr.io/juanfont/headscale:$$(tr -d '[:space:]' < HEADSCALE_VERSION))
 
 test-task-runner:
 	cd apps/task-runner && go vet ./... && go test -race -count=1 ./...
@@ -99,3 +110,15 @@ lint:
 	  .githooks/pre-commit .githooks/commit-msg \
 	  apps/tailguard/*.sh apps/headscale/*.sh
 	-./scripts/check-statestore-port.sh
+
+# Helm chart charts/tailnet-connector (#103): helm lint, helm template | kubeconform (docker images if not installed).
+test-k8s-connector:
+	bash scripts/test/k8s-connector/validate.sh
+
+# The chart in kind against the pinned headscale: join, route approval by policy, a ClusterIP from the tailnet.
+test-k8s-connector-e2e:
+	sh scripts/test/k8s-connector/e2e-kind.sh
+
+# On demand (#123): the Access page (roles and grants) against a real headscale, two tailnet users.
+test-access-e2e:
+	sh scripts/test/access/e2e-docker.sh

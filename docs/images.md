@@ -51,6 +51,7 @@ Every node, image or not, joins the tailnet through headscale. `exit-node`, `nod
 | `funnel-ingress` | Publishes tailnet services under public names, as a reverse proxy | A public container behind a TLS edge (a reverse proxy such as the Caddy edge in `examples/compose/control/`, a load balancer, or the Fly.io edge) | Only for public ingress |
 | `funnel-sidecar` | Registers one service with `funnel-ingress` from Kubernetes, with no special privileges. Published for `linux/amd64` and `linux/arm64` | Beside your workload | Only for Kubernetes services |
 | `task-runner-browser` | The Chromium and Playwright container each scheduled browser check runs in | On a VM, started by task-runner under rootless podman | Only for tasks and browser sessions |
+| `tailnet-connector` | tailscale at the repo pin, for the Helm chart `charts/tailnet-connector`: a subnet router for a Kubernetes cluster. Published for `linux/amd64` and `linux/arm64` | A Deployment in the cluster, in userspace mode, with no special privileges | Only for Kubernetes clusters that the tailnet must reach |
 
 ### What each one needs
 
@@ -64,6 +65,7 @@ The images are generic. Where a site's settings belong they hold placeholders, o
 | `funnel-ingress` | Environment settings and an auth key | Its tailnet identity and registered routes; namespaces and blocks come from node-control |
 | `funnel-sidecar` | Environment settings naming the namespace and service | None: its node is ephemeral |
 | `task-runner-browser` | Nothing: the caller sends each script | None: each container is thrown away |
+| `tailnet-connector` | A tagged ephemeral pre-auth key in a Secret, and the routes in the chart values | Its tailscale identity, in a Kubernetes Secret |
 
 Each app's README has the full settings.
 
@@ -110,8 +112,12 @@ Example:
 docker run -d --name headscale \
   -v ./config:/config:ro -v headscale-data:/data \
   -e HEADSCALE_CONFIG=/config/headscale.yaml -e HEADSCALE_POLICY_PATH=/config/acl.json \
-  ghcr.io/valentinalexeev/headlamp/headscale:0.9.0@sha256:<digest> headscale serve
+  ghcr.io/valentinalexeev/headlamp/headscale:0.9.0@sha256:<digest> serve
 ```
+
+The `headscale` image is the stock, distroless headscale image with the placeholder settings. Its entrypoint is the
+`headscale` binary, so give only the arguments (`serve`). The image has no shell. Use `docker exec <container> headscale
+<command>` to run a command in it.
 
 Pin the digest as well as the version. If you do not set a variable, the image uses its placeholder.
 

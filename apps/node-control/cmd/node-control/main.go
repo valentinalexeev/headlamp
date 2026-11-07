@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/access"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/enroll"
@@ -126,6 +127,8 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		tasks.New(env, src),
 		// Serve (#117): on with SERVE_DB. It reads nodes uncached, so a new replica answers DNS within one refresh.
 		servemod.New(env, hsClient),
+		// Access (#123): roles and grants stored by the UI, on with ADMIN_DB or REDIS_URL.
+		access.New(env),
 	}
 	// Overview is last: it counts the navigation of everything before it.
 	others := slices.Clone(mods)

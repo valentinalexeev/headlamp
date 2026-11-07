@@ -97,7 +97,7 @@ commits on top of it or attempt a rewrite on your own.
 | `.github/components.json`, `.github/workflows/`, `VERSIONING.md`, `docs/images.md` | images CI publishes to GHCR, rebuilt per component; the release rules and their checks (`scripts/check-release.sh`); what each image is and how they fit together |
 | `terraform/modules/exit-node-vm/{yandex,oci,aws,cloudru,openstack}` | reusable VM exit-node modules (root stacks live in YOUR repo); `openstack` serves Selectel and other OpenStack clouds, and `selectel` is its old name, kept as a wrapper |
 | `ansible/roles/{tailscale,route-provisioner,task-runner}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; the task runner on a VM node (rootless podman, nftables guard for its user; see the role README); version bump / key rotation playbooks |
-| `apps/headscale` | headscale server image; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. The route approver (`approve-gateway-routes.sh`, `cron-approve-routes.sh`) is shipped but OFF by default (commented `route_approver` process in `fly.toml`); prefer `autoApprovers.routes` in `acl.json` |
+| `apps/headscale` | headscale server image: the stock, distroless `ghcr.io/juanfont/headscale` (pin in `HEADSCALE_VERSION`, checked by `make check-headscale-pin`) plus the config; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. Routes are approved by the policy (`autoApprovers.routes` in `acl.json`, tested by `make test-route-approval`); there is no approver script and no shell in the image |
 | `apps/exit-node` | tailscale exit node image (any container host; a `fly.toml` for Fly.io); `fly.toml`, `direct-hosts.txt` are **placeholders** |
 | `apps/node-control` | Go service (embedded tailscale): start/stop UI and API for the exit nodes (discovered from headscale), tailnet status, optional device enrolment, optional policy console, optional scheduled browser-script tasks (`internal/tasks`, see its README section "Tasks module"); `fly.toml` is a **placeholder**, `app/nodes.json` is an optional overlay |
 | `apps/funnel-ingress` | Go service (embedded tailscale): public name-based reverse proxy into the tailnet (`<service>.<ns>.<domain>`), tag-authorised self-registration API, a Kubernetes registration sidecar (`funnel-sidecar`), config pulled from node-control; `fly.toml` is a **placeholder** |
@@ -105,10 +105,11 @@ commits on top of it or attempt a rewrite on your own.
 | `apps/tailguard` | WireGuard server → tailnet exit node (Docker, operator-run) |
 | `scripts/tf-run.sh`, `.githooks/`, `scripts/test/` | state-in-git workflow, commit hook, tests |
 | `scripts/headscale-assign-host.sh` | helper to register a host under an existing pre-auth key (`HEADSCALE_APP`, `HEADSCALE_LOGIN_SERVER` env) |
-| `scripts/rotate-headscale-api-key.sh` | check (`--check`) and rotate the headscale API key used by the route approver and other apps; all site values come from env vars (`HS_APP`, `HS_URL`, `STAGE_APPS`, `DEPLOY_CMD`, optional sops `SECRET_FILE`/`SECRET_FIELD`). API keys expire: the approver logs `ERROR ... HTTP 401` when its key has, and keeps retrying |
+| `scripts/rotate-headscale-api-key.sh` | check (`--check`) and rotate the headscale API key used by node-control and other apps; all site values come from env vars (`HS_APP`, `HS_URL`, `STAGE_APPS`, `DEPLOY_CMD`, optional sops `SECRET_FILE`/`SECRET_FIELD`). API keys expire: `--check` warns before that |
 | `scripts/tasks.sh`, `scripts/test/tasks/` | CLI client of the node-control tasks API: check/diff/push (secrets first, from a sops file)/pull the task config and scripts (env: `NODE_CONTROL_URL`, `TASKS_FILE`, `TASKS_SCRIPTS_DIR`, `TASKS_SECRETS_FILE`); tests run against fake `curl` and `sops` (`make test-tasks-cli`) |
 | `scripts/headscale-policy.sh` | CLI client of the node-control policy console: check/diff/apply (with confirm-or-revert)/pull the headscale ACL; `bootstrap` loads the first policy through `fly ssh` (env: `NODE_CONTROL_URL`, `POLICY_FILE`, `HS_APP`) |
 | `scripts/headscale-tag-node.sh` | show, add or remove an admin-held tag on one headscale node by its given name, keeping its other tags (the API replaces the whole set). Prints the tag model: unified (headscale 0.28+, one `tags` list; tagging a user-owned node drops its user ownership, so that needs `--allow-ownership-change`) or legacy (only forced tags change). Plan without `--yes`, verify after applying (env: `HEADSCALE_URL`, `HEADSCALE_API_KEY` or `HEADSCALE_API_KEY_CMD`). Used to tag task runners |
+| `charts/tailnet-connector`, `apps/tailnet-connector` | Helm chart: a userspace subnet router for one Kubernetes cluster (routes approved by policy, state in a kube Secret) and optional serve proxies; its image is tailscale at `TAILSCALE_VERSION` (`make test-k8s-connector`, `make test-k8s-connector-e2e`) |
 | `examples/private-repo/` | the skeleton of the private site repo (Makefile, terraform, ansible, fly deploy) |
 
 Anything that identifies a deployment is a placeholder here (`example.com`, `<your-...>`). The
@@ -412,8 +413,12 @@ fly/deploy.sh exit-node --build-arg TSVERSION=<x.y.z>
 fly/deploy.sh headscale --build-arg HEADSCALE_VERSION=<tag>   # default is pinned in the Dockerfile
 ```
 
-The headscale image tag is pinned on purpose. `jauderho/headscale:latest` stopped shipping a shell in
-v0.29.5, and this breaks the `apk add` step of the Dockerfile. Before you bump the tag, check that the new tag has `/bin/sh`.
+The headscale image is the stock upstream image, pinned in `HEADSCALE_VERSION` (the Dockerfile default and the e2e
+harnesses must name the same tag: `make check-headscale-pin`). The image is distroless, so there is no shell in it:
+`flyctl ssh console -a <app>` without `-C` cannot open one. Run the binary directly, for example
+`flyctl ssh console -a <app> -C "headscale nodes list"`. To bump the version, edit `HEADSCALE_VERSION` and the
+Dockerfile default, run `make check-headscale-pin`, every headscale e2e suite and `make test-route-approval
+FROM=ghcr.io/juanfont/headscale:<old tag>` (an in-place upgrade), and take a database snapshot before the deploy.
 
 Deploying is a real change, so confirm with the operator first. Afterwards, `git -C vendor/headlamp status` must
 be clean.

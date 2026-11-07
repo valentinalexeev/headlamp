@@ -147,6 +147,17 @@ var Routes = map[string]Rule{
 	"GET /serve":                             need(FeatureServe, LevelView),
 	"GET /serve/static/serve.js":             need(FeatureServe, LevelView),
 	"POST /serve/v1/cert":                    machine,
+
+	// admin: roles and grants (#123)
+	"GET /admin":                  need(FeatureAdmin, LevelView),
+	"GET /admin/static/access.js": need(FeatureAdmin, LevelView),
+	"GET /admin/state":            need(FeatureAdmin, LevelView),
+	"GET /admin/export":           need(FeatureAdmin, LevelView),
+	"GET /admin/audit":            need(FeatureAudit, LevelView),
+	"POST /admin/grants":          need(FeatureAdmin, LevelAdmin),
+	"PUT /admin/roles/{name}":     need(FeatureAdmin, LevelAdmin),
+	"DELETE /admin/roles/{name}":  need(FeatureAdmin, LevelAdmin),
+	"POST /admin/import":          need(FeatureAdmin, LevelAdmin),
 }
 
 // Authorizer is the core.Authorizer of the admin listener. Open is the transition mode of #122 decision 3: when

@@ -1,0 +1,59 @@
+{{- if .Values.serve.enabled }}
+{{- range .Values.serve.services }}
+{{- $name := printf "%s-serve-%s" (include "tc.name" $) .name | trunc 63 | trimSuffix "-" }}
+---
+# Serve proxy for the node-control service "{{ .name }}" (#117). Its key is the reusable, ephemeral key of that
+# service; all replicas share it, and the service name answers every online replica.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "tc.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: serve
+spec:
+  replicas: {{ .replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: serve
+      headlamp.io/serve: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/component: serve
+        headlamp.io/serve: {{ .name }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: funnel-sidecar
+          image: {{ include "tc.image" (list $ $.Values.serve.image) | quote }}
+          env:
+            - { name: FUNNEL_SERVE_URL, value: {{ $.Values.serve.url | quote }} }
+            - { name: FUNNEL_CONTROL_URL, value: {{ $.Values.controlURL | quote }} }
+            - { name: FUNNEL_SERVICES, value: {{ .services | quote }} }
+            - name: TS_AUTHKEY
+              valueFrom: { secretKeyRef: { name: {{ default $name .authKeySecret | quote }}, key: authkey } }
+            {{- if $.Values.caBundle.configMap }}
+            - { name: SSL_CERT_FILE, value: /etc/tailnet-ca/ca.crt }
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8081 }
+            periodSeconds: 10
+          securityContext: {{- include "tc.containerSecurity" $ | nindent 12 }}
+          volumeMounts:
+            - { name: state, mountPath: /tmp/funnel-sidecar }
+            {{- if $.Values.caBundle.configMap }}
+            - { name: ca, mountPath: /etc/tailnet-ca, readOnly: true }
+            {{- end }}
+      volumes:
+        - { name: state, emptyDir: {} }
+        {{- if $.Values.caBundle.configMap }}
+        - name: ca
+          configMap:
+            name: {{ $.Values.caBundle.configMap }}
+            items: [{ key: {{ $.Values.caBundle.key | quote }}, path: ca.crt }]
+        {{- end }}
+{{- end }}
+{{- end }}

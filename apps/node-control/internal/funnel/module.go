@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"slices"
 	"sync"
 	"time"
@@ -48,6 +49,8 @@ type Module struct {
 
 	// mu serialises every namespace operation: read the namespaces, change the ACL, write the store.
 	mu sync.Mutex
+
+	dns *dnsManager // nil: no DNS provider, the checklist is manual (#127)
 }
 
 // New returns the module. pol is called at Register time, after the policy module registered.
@@ -104,7 +107,12 @@ func (m *Module) Register(r *core.Routes) error {
 	if err != nil {
 		return err
 	}
-	m.s, m.st, m.svc = s, st, svc
+	dns, err := dnsFromEnv(m.env, s, &http.Client{Timeout: 30 * time.Second})
+	if err != nil {
+		st.Close()
+		return fmt.Errorf("funnel: %w", err)
+	}
+	m.s, m.st, m.svc, m.dns = s, st, svc, dns
 	m.log = r.Log
 	if m.log == nil {
 		m.log = slog.Default()
@@ -122,7 +130,13 @@ func (m *Module) Register(r *core.Routes) error {
 // outcome adapts the policy service's outcome type to the string the config builder takes.
 func (m *Module) outcome(id int64) string { return string(m.svc.Outcome(id)) }
 
-func (m *Module) Start(context.Context) error { return nil }
+// Start keeps the public record in step when a DNS provider is set.
+func (m *Module) Start(ctx context.Context) error {
+	if m.dns != nil {
+		go m.dns.run(ctx)
+	}
+	return nil
+}
 
 // Stop closes the store after the HTTP servers have drained.
 func (m *Module) Stop(context.Context) error {

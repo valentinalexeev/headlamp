@@ -99,6 +99,21 @@ The first request to a new host waits a few seconds for the certificate. Let's E
 certificates for each domain each week. If you have many services, use one wildcard certificate for each namespace
 instead (DNS-01, below).
 
+**node-control can write the public record.** The edge needs one record, `*.<FUNNEL_DOMAIN>`, that points at the
+edge. Set these values in `node-control.env` and node-control creates the record. It checks the record every 10
+minutes and puts it back if it changed:
+
+| Variable | Value |
+|---|---|
+| `FUNNEL_INGRESS_HOSTNAME` | The address of the edge (an A or AAAA record) or its name (a CNAME record) |
+| `FUNNEL_DNS_PROVIDER` | `route53` or `cloudflare` |
+| `FUNNEL_DNS_ZONE` | The ID of the zone of `FUNNEL_DOMAIN` |
+| `FUNNEL_DNS_CLOUDFLARE_TOKEN` | Cloudflare only: a token that can edit DNS in that zone |
+
+On AWS, set `route53_zone_id` in the Terraform module. The instance role then gets the necessary rights. The funnel
+page in the console shows the status of the record. Without `FUNNEL_DNS_PROVIDER`, the page shows the record to add
+manually. On Fly.io, keep the manual checklist, because Fly gets the certificates with `fly certs`.
+
 To use DNS-01 wildcards, set these values in `.env` for the DNS provider of `FUNNEL_DOMAIN`:
 
 | DNS provider | `EDGE_DNS_PLUGINS` | `FUNNEL_DNS` | Credentials in `edge.env` |

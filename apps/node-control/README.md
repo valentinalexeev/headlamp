@@ -768,7 +768,70 @@ The policy console records how each applied change ended, in the `outcomes` tabl
 - `partial` is `clear` as a caller sees it who is in none of the `*_ADMIN_USERS` lists. The policy, tasks and funnel entries and systems are hidden.
 - `minimal` switches on the nodes module only, so the console is the compact one.
 
-## Policy console (optional)
+## Self-enrolment with OIDC (optional)
+
+With self-enrolment, people of your organisation add their own devices after they sign in with your identity provider (#102). One enrolment gives two ways in:
+
+- a relay device, the same as a device that an operator enrols, with the owner `oidc:<subject>`;
+- a one-time headscale pre-auth key for a regular tailnet client, for a headscale user of that person only.
+
+Set `OIDC_ISSUER` to turn it on. It needs the enrolment store (`ENROLL_DB` or `ENROLL_REDIS=1`) and the headscale API.
+
+### Environment
+
+| Variable | Meaning |
+|---|---|
+| `OIDC_ISSUER` | The issuer URL, exactly as in the `iss` claim. The app reads `/.well-known/openid-configuration` at start. |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | The client at the identity provider. The secret is optional for a public client. The app always uses PKCE. |
+| `OIDC_REDIRECT_URL` | `https://<link_host>/oidc/callback`. It must be on the `link_host` of `enroll.json`. Register it at the identity provider. |
+| `OIDC_DB` | The path of a small SQLite file for people and sessions, for example `/var/lib/tailscale/oidc.db`. Keep it on persistent storage. |
+| `OIDC_ALLOWED_GROUPS` | Comma-separated values of the groups claim that may enrol. Empty: every person who can sign in. |
+| `OIDC_GROUPS_CLAIM` | The claim with the groups. The default is `groups`. |
+| `OIDC_SCOPES` | The scopes, separated by spaces. The default is `openid profile email`. Add `offline_access` if your identity provider needs it for a refresh token. |
+| `OIDC_MAX_DEVICES` | The active devices per person, 1 to 100. The default is 3. |
+| `OIDC_DEVICE_DAYS` | The lifetime of a relay device, 1 to 3650 days. The default is 90. |
+| `OIDC_KEY_MINUTES` | The lifetime of the tailnet key, 5 to 1440 minutes. The default is 60. |
+| `OIDC_RECHECK_MINUTES` | How often each person is checked again at the identity provider, 5 to 1440 minutes. The default is 60. |
+| `OIDC_SESSION_MINUTES` | The browser session, 5 to 1440 minutes. The default is 480. |
+
+### How a person enrols
+
+1. The person opens `https://<link_host>/me` and selects **Sign in**.
+2. The identity provider signs the person in and sends the browser back to `/oidc/callback`.
+3. The person names the device, selects the relay app and selects **Add device**.
+4. The page shows the import link, the subscription URL and the tailnet key one time only. A reload does not show them again.
+
+The page lists the person's devices. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*` and `/oidc/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`.
+
+### Locks
+
+On the Devices page, the **People** section lists the people who enrolled themselves. **Lock** does these steps at once:
+
+1. It refuses new sign-ins and ends the person's sessions.
+2. It revokes all relay devices of the person and pushes the change to every bridge.
+3. It expires every tailnet node of the person's headscale user and the unused keys of that user.
+
+If a headscale step fails, the answer says so, and the relay devices are revoked anyway. Lock again to retry. **Unlock** lets the person sign in again. Revoked devices stay revoked, and expired nodes stay expired.
+
+The app also checks each person again at the identity provider, every `OIDC_RECHECK_MINUTES`. It uses the person's refresh token. The app locks the person in these cases:
+
+- The identity provider refuses the refresh token, for example because it disabled the person.
+- The groups claim no longer has an allowed group.
+
+If the identity provider does not answer, the app locks nobody. The People section shows the failed check, and the app tries again. If the identity provider gives no refresh token, the app cannot do this check. Then only a lock in the console removes access.
+
+API: `GET /enroll/people`, `POST /enroll/people/{subject}/lock` (body `{"reason": "..."}`, optional) and `POST /enroll/people/{subject}/unlock`. Lock and unlock need `enroll.admin`.
+
+### Threat model
+
+- The public pages are on the enrolment listener, behind the front of the link host. They set a strict Content-Security-Policy and run no script.
+- The session cookie is `__Host-`, `Secure`, `HttpOnly` and `SameSite=Lax`. The app stores only the hash of the session id. Every form needs the CSRF token of the session.
+- The app checks the signature of the ID token with the keys of the issuer. It also checks `iss`, `aud`, `azp` (with more than one audience), `exp`, `iat` and `nonce`. It does not accept the `none` algorithm. It reads the keys again at most once a minute for an unknown key id.
+- The login state is single-use and expires after 10 minutes. The PKCE verifier stays on the server.
+- The app seals the refresh tokens with a key derived from `ENROLL_SECRET_KEY`. The `OIDC_DB` file alone gives no access.
+- The tailnet key is single-use, not reusable and not ephemeral. It has no tags, so the node gets only the ACL of its own user.
+- A person sees and revokes only their own devices.
+
 
 Set `POLICY_DB` to serve `/policy` on the admin listener for the logins in `POLICY_ADMIN_USERS`. Use the console to edit the headscale policy, preview the diff, apply and confirm. An applied change reverts by itself after `POLICY_REVERT_SECONDS` unless you confirm it. This also covers a restart of this app during that time.
 

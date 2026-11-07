@@ -40,6 +40,25 @@
 	# segments, no encoded slashes, no dot-only tokens ("." / "..").
 	@enroll path_regexp `^/(e|sub)/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}$`
 
+{% if enroll_self_service | bool %}
+	# Self-enrolment (#102): the exact pages of /me and the OIDC login, nothing below them.
+	@self path_regexp `^/(me|me/devices|me/devices/[0-9]{1,18}/revoke|me/logout|oidc/login|oidc/callback)$`
+	handle @self {
+		reverse_proxy http://{{ enroll_upstream }} {
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Proto
+			header_up -X-Forwarded-Host
+			header_up Host {{ ingress_host }}
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 20s
+				read_timeout 15s
+				write_timeout 15s
+			}
+		}
+	}
+{% endif %}
+
 	handle @enroll {
 		reverse_proxy http://{{ enroll_upstream }} {
 			header_up -X-Forwarded-For

@@ -59,6 +59,7 @@ Required (no default; preflight fails early):
 - `caddy_version` and `caddy_sha256`
 - `xray_geodata_files`: a list of `{name, url, sha256}` with at least `geoip.dat` and `geosite.dat`. Both are required.
 - `enroll_upstream` (`host:port`, no scheme)
+- `enroll_self_service` (default `false`): also proxy the self-enrolment pages (see "Caddy front")
 - `hy2_obfs_password` when `hy2_enabled` is true (the default): 16 to 128 characters of `[A-Za-z0-9_-]`, from a vault.
   Make it with `openssl rand -hex 16`.
 
@@ -210,6 +211,8 @@ to `http://<enroll_upstream>`. The token is 1-80 characters of
 `A-Za-z0-9_.-` and does not start with a dot. No trailing slash, no extra segments and no encoded
 slashes are allowed. The proxy strips `X-Forwarded-*`, sets `Host` to `ingress_host`
 and uses short timeouts. Anything else gets an empty `404`.
+
+With `enroll_self_service: true`, the front also proxies the pages of self-enrolment with OIDC (#102). These are `/me`, `/me/devices`, `/me/devices/<id>/revoke`, `/me/logout`, `/oidc/login` and `/oidc/callback`, and nothing below them. The default is `false`.
 
 There is no access log. Runtime and ACME errors of Caddy go to the journal (level ERROR). The logged request is removed,
 so enrolment tokens in paths never appear. `journalctl -u caddy-ingress`

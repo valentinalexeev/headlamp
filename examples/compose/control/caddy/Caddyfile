@@ -21,7 +21,8 @@
 # Optional, the public enrolment links of node-control (/e/<token>, /sub/<secret>). Remove the block if you do not
 # use enrolment, or if a bridge serves the link host (see the node-control README, "Enrolment").
 {$ENROLL_DOMAIN:enroll.invalid} {
-	@public path /e/* /sub/*
+	# /me and /oidc/*: self-enrolment with OIDC (#102). Remove them if you do not set OIDC_ISSUER.
+	@public path /e/* /sub/* /me /me/* /oidc/login /oidc/callback
 	handle @public {
 		reverse_proxy node-control:8081
 	}

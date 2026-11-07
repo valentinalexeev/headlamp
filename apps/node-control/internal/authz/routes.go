@@ -69,6 +69,7 @@ var Routes = map[string]Rule{
 	// enroll
 	"GET /enroll":                             need(FeatureEnroll, LevelView),
 	"GET /enroll/static/enroll.js":            open,
+	"GET /enroll/static/people.js":            open,
 	"GET /enroll/qrcode.js":                   open,
 	"GET /enroll/approve":                     need(FeatureEnroll, LevelOperate),
 	"GET /enroll/static/approve.js":           open,
@@ -83,6 +84,9 @@ var Routes = map[string]Rule{
 	"POST /enroll/ingresses/{name}/approve":   need(FeatureEnroll, LevelAdmin),
 	"POST /enroll/ingresses/{name}/unapprove": need(FeatureEnroll, LevelAdmin),
 	"GET /enroll/tailnet-acl":                 need(FeatureEnroll, LevelView),
+	"GET /enroll/people":                      need(FeatureEnroll, LevelView),
+	"POST /enroll/people/{sub}/lock":          need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/people/{sub}/unlock":        need(FeatureEnroll, LevelAdmin),
 	"POST /enroll/tailnet-acl":                need(FeatureEnroll, LevelAdmin),
 
 	// tasks

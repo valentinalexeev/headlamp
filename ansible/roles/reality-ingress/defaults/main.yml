@@ -57,6 +57,9 @@ caddy_url: "https://github.com/caddyserver/caddy/releases/download/v{{ caddy_ver
 # (REQUIRED), e.g. "node-control.example.net:8081" or "<tailnet-ip>:8081".
 # No scheme, no path.
 enroll_upstream: ""
+# Self-enrolment with OIDC (#102): also proxy /me, /me/devices[/<id>/revoke], /me/logout and /oidc/{login,callback}
+# to enroll_upstream. Off by default: the front then serves only /e/ and /sub/.
+enroll_self_service: false
 
 # Loopback SOCKS5 port of the `tailscale-userspace-socks` role: the xray
 # outbound `via-exit` dials it. Must be loopback.

@@ -811,5 +811,59 @@ const fieldValue = (els, label) => {
     assert.ok(/Could not load the devices/.test(fresh.els.sub.textContent));
   }
 
+  // ----- People (#102)
+  if (process.argv[5]) {
+    require(path.resolve(process.argv[5]));
+    const people = global.window.hl.people;
+    const calls = [];
+    let list = [
+      { subject: 's1', owner: 'oidc:s1', email: 'anna@example.test', locked: false, active_devices: 2, last_login: 1, last_check: 1 },
+      { subject: 's2', owner: 'oidc:s2', email: '<b>x</b>', locked: true, lock_reason: 'left', active_devices: 0, last_login: 1, last_check: 1 },
+      { subject: 's/3', owner: 'oidc:s/3', email: '', locked: false, check_failed: 5, active_devices: 1, last_login: 0, last_check: 0 },
+    ];
+    let failWith = null;
+    global.window.hl.api = (method, url, body) => {
+      calls.push([method, url, body]);
+      if (failWith) { const e = new Error('nf'); e.status = failWith; return Promise.reject(e); }
+      if (method === 'GET') { return Promise.resolve({ people: list }); }
+      return Promise.resolve({ ok: true });
+    };
+    const root = new FakeNode('section'); root.hidden = true; root.isRoot = true;
+    const rows = root.appendChild(new FakeNode('tbody'));
+    const error = root.appendChild(new FakeNode('div')); error.hidden = true;
+    const ctrl = people.mount({ root, rows, error });
+    await ctrl.load();
+    assert.strictEqual(root.hidden, false);
+    assert.strictEqual(rows.children.length, 3);
+    const t = rows.children.map(textOf);
+    assert.ok(t[0].includes('anna@example.test') && t[0].includes('Active') && t[0].includes('Lock'));
+    assert.ok(t[1].includes('<b>x</b>') && t[1].includes('Locked: left') && t[1].includes('Unlock'));
+    assert.ok(t[2].includes('oidc:s/3') && /unreachable/.test(t[2]));
+    // Lock asks first, then posts with the subject encoded
+    buttonNamed(rows.children[2], 'Lock').click();
+    assert.strictEqual(calls.filter((c) => c[0] === 'POST').length, 0, 'lock must confirm first');
+    // no redraw while the confirmation is open
+    await ctrl.load();
+    assert.ok(findAll(rows, (n) => hasClass(n, 'confirm')).length === 1);
+    findAll(rows, (n) => n.tag === 'button' && hasClass(n, 'danger') && n.textContent === 'Lock').pop().click();
+    await new Promise((r) => setTimeout(r, 0));
+    const post = calls.find((c) => c[0] === 'POST');
+    assert.deepStrictEqual(post.slice(0, 2), ['POST', '/enroll/people/s%2F3/lock']);
+    // Unlock posts at once
+    buttonNamed(rows.children[1], 'Unlock').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(calls.some((c) => c[1] === '/enroll/people/s2/unlock'));
+    // a partial lock shows the detail
+    global.window.hl.api = (m) => Promise.resolve(m === 'GET' ? { people: list } : { ok: false, detail: 'locked, but a tailnet step failed: down' });
+    buttonNamed(rows.children[1], 'Unlock').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(/tailnet step failed/.test(error.textContent) && !error.hidden);
+    // self-enrolment off: 404 keeps the section hidden
+    const root2 = new FakeNode('section'); root2.hidden = true;
+    global.window.hl.api = () => { const e = new Error('nf'); e.status = 404; return Promise.reject(e); };
+    await people.mount({ root: root2, rows: new FakeNode('tbody'), error: new FakeNode('div') }).load();
+    assert.strictEqual(root2.hidden, true);
+  }
+
   console.log('enroll self-test ok');
 })().catch((e) => { console.error(e); process.exit(1); });

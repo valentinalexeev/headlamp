@@ -9,6 +9,5 @@ i=0; until tailscale status >/dev/null 2>&1 || tailscale up --login-server="$LOG
 cp /etc/xray/config.base.json /etc/xray/config.json
 ( while true; do xray run -c /etc/xray/config.json >>/var/log/xray.log 2>&1; sleep 0.3; done ) &
 printf '#!/bin/sh\npkill -x xray; exit 0\n' > /usr/local/bin/xray-restart; chmod +x /usr/local/bin/xray-restart
-cd /agent
-exec env XRAY_RESTART_CMD=/usr/local/bin/xray-restart XRAY_BIN=/usr/local/bin/xray \
-  python3 -m uvicorn app.main:create_app_from_env --factory --host 127.0.0.1 --port 9000 --no-access-log
+exec env XRAY_RESTART_CMD=/usr/local/bin/xray-restart XRAY_BIN=/usr/local/bin/xray AGENT_LISTEN=127.0.0.1:9000 \
+  /usr/local/bin/ingress-agent

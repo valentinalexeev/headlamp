@@ -20,6 +20,4 @@ if [ -z "$TS_IP" ]; then
 fi
 
 echo "ingress-agent-run: binding to $TS_IP:{{ ingress_agent_port }}"
-cd {{ ingress_agent_dir }}
-exec python3 -m uvicorn app.main:create_app_from_env --factory \
-  --host "$TS_IP" --port {{ ingress_agent_port }} --no-access-log
+AGENT_LISTEN="$TS_IP:{{ ingress_agent_port }}" exec {{ ingress_agent_bin }}

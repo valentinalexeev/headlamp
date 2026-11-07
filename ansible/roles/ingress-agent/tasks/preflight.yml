@@ -36,6 +36,7 @@
       - ingress_agent_port | string is regex('^[0-9]{1,5}\\Z')
       - 1 <= (ingress_agent_port | int) <= 65535
       - ingress_agent_dir is regex('^/[A-Za-z0-9._/-]+\\Z')
+      - ingress_agent_bin is regex('^/[A-Za-z0-9._/-]+\\Z')
       - ingress_agent_state_dir is regex('^/var/lib/[A-Za-z0-9._-]+\\Z')
       - ingress_agent_env_file is regex('^/[A-Za-z0-9._/-]+\\Z')
       - xray_bin is regex('^/[A-Za-z0-9._/-]+\\Z')

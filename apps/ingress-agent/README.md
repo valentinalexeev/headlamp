@@ -1,6 +1,6 @@
 # ingress-agent (the bridge agent)
 
-A small service that runs next to xray on the Reality bridge host. It holds **only opaque
+A small Go service (one static binary, no runtime) that runs next to xray on the Reality bridge host. It holds **only opaque
 credentials** (`uuid`, `mode`, `not_after`), never names or owners. A compromised bridge host
 does not learn who the clients are. The operator side (the enrolment code of node-control) pushes the
 full list of valid credentials over an API that is only on the tailnet. The agent renders the xray config from a
@@ -81,6 +81,7 @@ the agent removes expired entries and applies the config again.
 | `INGRESS_SHORT_ID` | unset. Reality short id, no whitespace. Needed for `/v1/info` |
 | `INGRESS_HY2_PORT` | unset. Public UDP port of the Hysteria 2 inbound, 1-65535. When set, `/v1/info` has `hy2_port` |
 | `XRAY_RESTART_CMD` | unset. A command that replaces `systemctl restart <XRAY_UNIT>`, for a host without systemd |
+| `AGENT_LISTEN` | `127.0.0.1:9000`. The address to listen on. The Ansible wrapper sets the host's tailnet IPv4 |
 
 The app validates the `INGRESS_*` values above when it starts. An invalid value stops the start with an error
 that names the variable (never the value). There is no variable for the private key. Do not add one.
@@ -99,16 +100,28 @@ See "Compromised bridge" in the node-control README for what this does and does 
 
 ## Run
 
-Bind to the tailnet address only. Disable the access log, because it records client addresses:
+Bind to the tailnet address only. The agent keeps no access log:
 
-    pip install -r requirements.txt
-    AGENT_TOKEN=... uvicorn app.main:create_app_from_env --factory \
-        --host <tailnet-ip> --port 9000 --no-access-log
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ingress-agent ./cmd/ingress-agent
+    AGENT_TOKEN=... AGENT_LISTEN=<tailnet-ip>:9000 ./ingress-agent
 
 Run the service as a user that can write `XRAY_CONFIG` and run `systemctl restart`.
 Logs contain counts only (`applied: +2 -1`), never UUIDs, emails or the token.
 
+## Resources (#133)
+
+The agent was a Python service (FastAPI and uvicorn) until 0.11.0. The Go port has the same API, the same
+environment and the same files, so node-control and a running xray see no change. Measured on Linux with
+`scripts/test/ingress-agent-budget/budget.sh`:
+
+| | Python (before) | Go (now) | Budget |
+|---|---|---|---|
+| Idle memory (RSS) | about 52 MB | about 12 to 14 MB | 15 MB or less |
+| Memory with 1,000 credentials | not measured | about 16 to 18 MB | 20 MB or less |
+| Start to the first `/v1/info` answer | not measured | about 60 ms | less than 200 ms |
+| On disk | about 79 MB (Python and packages) | about 6 MB (one binary) | |
+
 ## Tests
 
-    python3 -m pip install fastapi httpx uvicorn
-    python3 -m unittest discover -s tests
+    go test -race ./...
+    sh ../../scripts/test/ingress-agent-budget/budget.sh   # the resource budget, in Docker

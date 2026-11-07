@@ -1,6 +1,6 @@
 #!/bin/sh
 # On-demand end-to-end spike of Hysteria 2 beside VLESS Reality (#110). Run it with `make test-hysteria-e2e`.
-# Needs docker. It builds node-control and a bridge test image (xray, the ingress agent, tailscaled) from this tree.
+# Needs docker. It builds node-control and a bridge test image (xray, the Go ingress agent, tailscaled) from this tree.
 #
 # Three docker networks. "pub" stands for the internet near the bridge: headscale, node-control, the bridge, the
 # clients and a web server that answers with the caller's address. "far" is the internet that only the exit node
@@ -67,8 +67,8 @@ wait_for() { n=$1; shift; i=0; while [ "$i" -lt "$n" ]; do "$@" >/dev/null 2>&1 
 
 echo "# images"
 dk build -q -t hy2-e2e-node-control "$root/apps/node-control" >/dev/null || die "node-control image"
-mkdir -p "$T/bctx"
-cp -R "$root/apps/ingress-agent/app" "$root/apps/ingress-agent/requirements.txt" "$T/bctx/"
+mkdir -p "$T/bctx/agent"
+cp -R "$root/apps/ingress-agent/go.mod" "$root/apps/ingress-agent/cmd" "$root/apps/ingress-agent/internal" "$T/bctx/agent/"
 cp "$here/Dockerfile.bridge" "$here/bridge.sh" "$T/bctx/"
 dk build -q --build-arg XRAY_VERSION="$xray_version" --build-arg TAILSCALE_IMAGE="$ts_image" -f "$T/bctx/Dockerfile.bridge" \
   -t hy2-e2e-bridge "$T/bctx" >/dev/null || die "bridge image"

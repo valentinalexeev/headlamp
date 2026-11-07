@@ -6,7 +6,6 @@ Wants=network-online.target tailscaled.service
 
 [Service]
 # Root: the agent runs `systemctl restart {{ xray_unit }}`.
-WorkingDirectory={{ ingress_agent_dir }}
 EnvironmentFile={{ ingress_agent_env_file }}
 ExecStart=/usr/local/sbin/ingress-agent-run
 Restart=on-failure

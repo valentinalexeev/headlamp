@@ -4,8 +4,8 @@
 # early if they are missing. Real values live in the private repo / vault.
 
 # Path ON THE CONTROL HOST to the apps/ingress-agent directory (REQUIRED),
-# e.g. "{{ playbook_dir }}/../vendor/headlamp/apps/ingress-agent". Its app/
-# subdirectory is copied to the host.
+# e.g. "{{ playbook_dir }}/../vendor/headlamp/apps/ingress-agent". The Go agent
+# is built from it on the control host (Go 1.26 or later there) and copied.
 ingress_agent_src: ""
 # Bearer token the operator side uses to push credentials (REQUIRED, vault,
 # at least 32 characters). Never logged, never on a command line.
@@ -13,16 +13,15 @@ ingress_agent_token: ""
 # TCP port, bound on the host's tailnet address only.
 ingress_agent_port: 9000
 
-# Install locations.
+# Install locations. <ingress_agent_dir>/app held the former Python agent; the role removes that tree.
+ingress_agent_bin: /usr/local/bin/ingress-agent
 ingress_agent_dir: /opt/ingress-agent
+# Where the control host keeps the built binaries (one for each architecture).
+ingress_agent_build_dir: "{{ lookup('env', 'TMPDIR') | default('/tmp', true) }}/ingress-agent-build"
 # Must be under /var/lib/ (the unit derives StateDirectory= from it).
 ingress_agent_state_dir: /var/lib/ingress-agent
 ingress_agent_env_file: /etc/ingress-agent/env
 
-# Minimum OS-package versions (from apps/ingress-agent/requirements.txt,
-# where the floors are fastapi>=0.110 and uvicorn>=0.30).
-ingress_agent_fastapi_min: "0.110"
-ingress_agent_uvicorn_min: "0.30"
 
 # What the agent drives. The defaults match the reality-ingress role.
 xray_bin: /usr/local/bin/xray

@@ -30,8 +30,12 @@ gives the full procedure.
 | `admin_cidrs` | none | Addresses that can use SSH |
 | `ssh_public_key` | none | An optional key pair |
 | `route53_zone_id` | none | The zone for ACME DNS-01 |
+| `iam_path` | `/` | The IAM path of both roles and the instance profile |
+| `iam_permissions_boundary` | none | The ARN of a policy to set as the permissions boundary of both roles |
 | `user_data_extra` | none | Shell commands that cloud-init runs at the end |
 | `tags` | none | Tags for all resources |
+
+Some accounts let the deploying identity create roles only under a fixed IAM path, and only with a permissions boundary. In such an account, set `iam_path` and `iam_permissions_boundary`. With the defaults, the plan of an existing host shows no change.
 
 ## Outputs
 

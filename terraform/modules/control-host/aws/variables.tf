@@ -88,3 +88,23 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "iam_path" {
+  type        = string
+  default     = "/"
+  description = "The IAM path of the host role, the snapshot role and the instance profile. Set it when the deploying identity may create roles only under a fixed path."
+  validation {
+    condition     = can(regex("^/([\\x21-\\x7e]+/)*$", var.iam_path)) && length(var.iam_path) <= 512
+    error_message = "iam_path must start and end with /, for example /headlamp/."
+  }
+}
+
+variable "iam_permissions_boundary" {
+  type        = string
+  default     = null
+  description = "Optional ARN of a managed policy that is set as the permissions boundary of both roles. Set it when the account requires a boundary on new roles."
+  validation {
+    condition     = var.iam_permissions_boundary == null || can(regex("^arn:aws[a-z-]*:iam::(aws|[0-9]{12}):policy/.+$", var.iam_permissions_boundary))
+    error_message = "iam_permissions_boundary must be an IAM policy ARN, for example arn:aws:iam::123456789012:policy/name."
+  }
+}

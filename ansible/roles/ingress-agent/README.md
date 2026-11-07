@@ -1,6 +1,6 @@
 # ingress-agent
 
-This role deploys the Python bridge agent (`apps/ingress-agent/` in this repo) as the systemd service
+This role deploys the Go bridge agent (`apps/ingress-agent/` in this repo) as the systemd service
 `ingress-agent.service` on the Reality bridge host. The operator side pushes opaque credentials to the agent
 over the tailnet. The agent holds them and renders `/etc/xray/config.json` from
 `/etc/xray/config.base.json`. It validates the config with `xray run -test`, replaces it atomically and
@@ -22,13 +22,14 @@ changes. The unit is ordered `After=xray.service` but does not require it.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ingress_agent_src` | `""` | Required. Path on the **control host** to the `apps/ingress-agent` directory (its `app/` is copied). |
+| `ingress_agent_src` | `""` | Required. Path on the **control host** to the `apps/ingress-agent` directory. The role builds the agent from it there (Go 1.26 or later on the control host). |
+| `ingress_agent_bin` | `/usr/local/bin/ingress-agent` | Where the binary goes on the bridge. |
+| `ingress_agent_build_dir` | `$TMPDIR/ingress-agent-build` | Where the control host keeps the built binaries, one for each architecture. |
 | `ingress_agent_token` | `""` | Required, vault. At least 32 characters, no whitespace, quotes, backslash, `$` or backtick. Never logged. |
 | `ingress_agent_port` | `9000` | 1-65535, bound on the tailnet address only. |
-| `ingress_agent_dir` | `/opt/ingress-agent` | Code lands in `<dir>/app/`. |
+| `ingress_agent_dir` | `/opt/ingress-agent` | The former Python agent was in `<dir>/app/`. The role removes that tree. |
 | `ingress_agent_state_dir` | `/var/lib/ingress-agent` | Must be `/var/lib/<dir>` (becomes `StateDirectory`, mode 0700). |
 | `ingress_agent_env_file` | `/etc/ingress-agent/env` | Mode 0600 root:root. |
-| `ingress_agent_fastapi_min` / `ingress_agent_uvicorn_min` | `0.110` / `0.30` | Floors checked against the OS packages. |
 | `xray_bin`, `xray_unit`, `xray_api`, `xray_base_config`, `xray_config`, `xray_asset_dir` | see `defaults/main.yml` | Must match `reality-ingress`. `xray_asset_dir` is passed as `XRAY_LOCATION_ASSET` so `xray run -test` finds the geodata. |
 
 ## Public parameters and discovery (`GET /v1/info`)
@@ -60,33 +61,25 @@ not affected. `/v1/info` stays `503` there until you set the two new variables.
 Use a token for each bridge host (`ingress_agent_token` differs on every host). The
 operator approves a discovered bridge in node-control before anyone uses it.
 
-## Python dependencies
+## No runtime on the bridge
 
-The role installs the dependencies from the OS packages (`python3-fastapi`, `python3-uvicorn`, `python3-pydantic`),
-because hosts in restricted networks may not reach PyPI. `apps/ingress-agent/requirements.txt` asks for
-`fastapi>=0.110,<1.0` and `uvicorn>=0.30,<1.0`.
-
-The role runs
-`python3 -c "import fastapi, uvicorn, pydantic"` and prints the versions. It fails with a clear
-message if the import fails or if fastapi or uvicorn are older than the floors. A distro whose
-packages are older (for example Ubuntu 22.04) fails here by design. Use a newer release.
-`httpx` is a test-only dependency. The role does not install it.
+The agent is one static Go binary (#133). The role builds it on the control host, for the architecture of the
+bridge (`x86_64` or `aarch64`), and copies it. The bridge needs no Python, no package and no network access for
+the agent. Before 0.11.0 the agent was a Python service. The role removes its tree, `<ingress_agent_dir>/app`.
 
 ## What it does
 
 1. Preflight, before the role writes anything. It checks required variables, token length and charset, port
    range, absolute paths and gathered facts. It also checks that the source exists on the control host.
-2. Install the packages.
-3. Copy `app/*.py` (no `__pycache__`, no tests; root, 0755/0644).
-   The role removes anything else under the app directory on the host. `ingress_agent_src` can contain `..`.
+2. Build the agent on the control host and copy the binary to `ingress_agent_bin` (root, 0755).
+3. Remove the tree of the former Python agent.
 4. Install the wrapper `/usr/local/sbin/ingress-agent-run` and the unit.
 5. Write the env file, apply handlers, and enable and start the service.
 
 The wrapper waits up to 60 s for `tailscale ip -4` (the main tailscaled of the host). If there is none, it exits 1 with
 a message. Then it `exec`s
-`python3 -m uvicorn app.main:create_app_from_env --factory --host <tailnet ip> --port <port> --no-access-log`.
-It never binds 0.0.0.0. Check mode is safe: the role templates files normally. It skips package checks,
-handlers and the service start.
+the binary with `AGENT_LISTEN=<tailnet ip>:<port>`. It never binds 0.0.0.0. Check mode is safe: the role
+templates files normally. It skips the handlers and the service start.
 
 ## Security notes
 

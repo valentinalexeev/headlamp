@@ -55,9 +55,19 @@ type codeGrant struct {
 // New starts an issuer for clientID. It is closed with the test.
 func New(t testing.TB, clientID, clientSecret string) *Issuer {
 	t.Helper()
-	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	is, err := Start(clientID, clientSecret)
 	if err != nil {
 		t.Fatal(err)
+	}
+	t.Cleanup(is.Close)
+	return is
+}
+
+// Start starts an issuer outside a test (the console demo); the caller closes it.
+func Start(clientID, clientSecret string) (*Issuer, error) {
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
 	}
 	is := &Issuer{ClientID: clientID, ClientSecret: clientSecret, key: k, kid: "k1",
 		user:  User{Subject: "sub-1", Email: "anna@example.test", Groups: []string{"staff"}},
@@ -68,8 +78,7 @@ func New(t testing.TB, clientID, clientSecret string) *Issuer {
 	mux.HandleFunc("GET /authorize", is.authorize)
 	mux.HandleFunc("POST /token", is.token)
 	is.Server = httptest.NewServer(mux)
-	t.Cleanup(is.Close)
-	return is
+	return is, nil
 }
 
 // SetUser sets who logs in next.

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>Your devices</title>
+<style>
+body{font:16px/1.5 system-ui,sans-serif;margin:0;background:#f6f7f9;color:#14171a}
+main{max-width:40rem;margin:0 auto;padding:1.5rem}
+h1{font-size:1.4rem;margin:.2em 0 1em}
+section{background:#fff;border:1px solid #dde1e6;border-radius:.6rem;padding:1rem 1.2rem;margin:0 0 1rem}
+.err{background:#fdecec;border-color:#f3b4b4}
+.ok{background:#eaf6ee;border-color:#a9d8b8}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:.35rem .3rem;border-bottom:1px solid #eef0f3}
+button,.btn{font:inherit;padding:.5em 1em;border-radius:.5em;border:1px solid #0a66ff;background:#0a66ff;color:#fff;cursor:pointer;text-decoration:none;display:inline-block}
+button.quiet{background:#fff;color:#0a66ff}
+input,select{font:inherit;padding:.4em;border:1px solid #c7ccd3;border-radius:.4em}
+code{word-break:break-all;background:#f1f3f5;padding:.1em .3em;border-radius:.3em}
+.muted{color:#5b6570}
+</style></head><body><main>
+<h1>Your devices</h1>
+{{if .Error}}<section class="err" role="alert">{{.Error}}</section>{{end}}
+{{if not .SignedIn}}
+<section><p>Sign in with your organisation account to add a device.</p>
+<a class="btn" href="/oidc/login">Sign in</a></section>
+{{else}}
+<section><p class="muted">Signed in as {{.Email}}.</p>
+<form method="post" action="/me/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="quiet">Sign out</button></form></section>
+{{with .Enrolment}}
+<section class="ok"><p><strong>{{$.Name}} is ready.</strong> This page shows these values one time only.</p>
+<p>1. Relay app: <a class="btn" href="{{.Link}}">Add to the app</a></p>
+<p>Or import this subscription: <code>{{.Subscription}}</code></p>
+<p>2. Tailnet app: use this key to sign in. It works one time, until {{.KeyExpires.UTC.Format "2006-01-02 15:04"}} UTC.</p>
+<p><code>{{.TailnetKey}}</code></p></section>
+{{end}}
+<section><h2>Devices</h2>
+{{if .Devices}}<table><tr><th>Name</th><th>App</th><th>Until</th><th></th></tr>
+{{range .Devices}}<tr><td>{{.Name}}</td><td>{{.Client}}</td><td>{{if .Active}}{{date .Expires}}{{else}}<span class="muted">ended</span>{{end}}</td>
+<td>{{if .Active}}<form method="post" action="/me/devices/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="quiet">Revoke</button></form>{{end}}</td></tr>{{end}}
+</table>{{else}}<p class="muted">No devices yet.</p>{{end}}
+</section>
+<section><h2>Add a device</h2><p class="muted">You can have up to {{.Max}} active devices.</p>
+<form method="post" action="/me/devices"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<p><label>Name <input name="name" maxlength="100" required></label></p>
+<p><label>Relay app <select name="client">{{range .Clients}}<option>{{.}}</option>{{end}}</select></label></p>
+<button>Add device</button></form></section>
+{{end}}
+</main></body></html>

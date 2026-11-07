@@ -26,6 +26,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/funnel"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/nodes"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/oidc/oidctest"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/overview"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policy"
 	servemod "github.com/valentinalexeev/headlamp/apps/node-control/internal/serve"
@@ -84,6 +85,7 @@ type world struct {
 	agent  *httptest.Server
 	runner *httptest.Server
 	redis  *miniredis.Miniredis
+	idp    *oidctest.Issuer // a fake OIDC issuer, so self-enrolment (#102) is on in the demo
 
 	wg sync.WaitGroup // background loops started by the seeding
 
@@ -109,6 +111,10 @@ func newWorld(sc scenario) (*world, error) {
 			w.close()
 			return nil, err
 		}
+		if w.idp, err = oidctest.Start("console-demo", ""); err != nil {
+			w.close()
+			return nil, err
+		}
 	}
 	return w, nil
 }
@@ -125,6 +131,9 @@ func (w *world) close() {
 	}
 	if w.redis != nil {
 		w.redis.Close()
+	}
+	if w.idp != nil {
+		w.idp.Close()
 	}
 	os.RemoveAll(w.dir)
 }
@@ -192,6 +201,10 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			"SERVE_BASE_DOMAIN":      "tailnet.example.net",
 			"SERVE_USER":             "demo",
 			"SERVE_DNS":              "off",
+			"OIDC_ISSUER":            w.idp.URL,
+			"OIDC_CLIENT_ID":         "console-demo",
+			"OIDC_REDIRECT_URL":      "https://links.example.net/oidc/callback",
+			"OIDC_DB":                filepath.Join(w.dir, "oidc.db"),
 		} {
 			m[k] = v
 		}
@@ -226,7 +239,7 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 	mods := []core.Module{
 		tailnet.New(src, tracked),
 		nm,
-		enroll.New(env, enroll.WithNodeSource(src)),
+		enroll.New(env, enroll.WithNodeSource(src), enroll.WithSelfHeadscale(client)),
 		pol,
 		funnel.New(env, client, func() funnel.PolicyService {
 			if p, ok := pol.(interface{ Service() *policy.Service }); ok {

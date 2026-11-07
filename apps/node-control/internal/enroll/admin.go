@@ -76,6 +76,7 @@ type Admin struct {
 	activity *ActivityTracker
 	tn       core.Tailnet // names the caller for the audit log; nil records "unknown"
 	tacl     *tailnetACL  // the generated bridge-to-tailnet ACL entry (#132); nil: none
+	self     *Self        // OIDC self-enrolment (#102); nil: off
 }
 
 // NewAdmin returns the operator API over store and one agent that serves every configured

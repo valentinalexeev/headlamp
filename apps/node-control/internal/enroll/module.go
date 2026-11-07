@@ -19,13 +19,16 @@ import (
 // Module is the enrolment module: the operator API on the admin mux and the public handler on the
 // public mux, active only when ENROLL_DB (SQLite) or ENROLL_REDIS=1 (Redis, no volume) is set. Errors never carry secret values.
 type Module struct {
-	env   core.Env
-	src   headscale.NodeSource
-	now   func() time.Time
-	store Backend
-	admin *Admin
-	reg   *Registry
-	pol   func() PolicyService // the policy console, for the tailnet ACL entry (#132); nil result: not active
+	env      core.Env
+	src      headscale.NodeSource
+	now      func() time.Time
+	store    Backend
+	admin    *Admin
+	reg      *Registry
+	selfHS   SelfHeadscale // the headscale API for OIDC self-enrolment (#102); nil: not available
+	self     *Self         // OIDC self-enrolment; nil when OIDC_ISSUER is unset
+	selfDone chan struct{}
+	pol      func() PolicyService // the policy console, for the tailnet ACL entry (#132); nil result: not active
 	// stopped names the machines stopped at their provider; nil when nothing can say.
 	stopped func(context.Context) map[string]bool
 
@@ -166,6 +169,9 @@ func (m *Module) Register(r *core.Routes) error {
 	m.admin.SetTailnet(r.Tailnet)
 	m.admin.tacl = m.tailnetACL()
 	m.admin.Register(r.Admin)
+	if err := m.registerSelf(r, []byte(key)); err != nil {
+		return err
+	}
 	NewPublicFor(store, reg).Register(r.Public)
 	return nil
 }
@@ -191,6 +197,13 @@ func (m *Module) Start(ctx context.Context) error {
 		defer close(m.activityDone)
 		ActivityLoop(ctx, m.admin)
 	}()
+	if m.self != nil {
+		m.selfDone = make(chan struct{})
+		go func() {
+			defer close(m.selfDone)
+			m.self.RecheckLoop(ctx)
+		}()
+	}
 	m.loopDone = make(chan struct{})
 	go func() {
 		defer close(m.loopDone)
@@ -207,13 +220,16 @@ func (m *Module) Stop(ctx context.Context) error {
 	if m.store == nil {
 		return nil
 	}
-	for _, done := range []chan struct{}{m.loopDone, m.activityDone} {
+	for _, done := range []chan struct{}{m.loopDone, m.activityDone, m.selfDone} {
 		if done != nil {
 			select {
 			case <-done:
 			case <-ctx.Done():
 			}
 		}
+	}
+	if m.self != nil {
+		_ = m.self.users.Close()
 	}
 	return m.store.Close()
 }

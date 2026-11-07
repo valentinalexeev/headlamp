@@ -61,10 +61,13 @@ func (p *Provider) AuthURL(f Flow) string {
 
 // Identity is what a verified login yields.
 type Identity struct {
-	Subject      string
-	Email        string
-	Name         string
-	Groups       []string
+	Subject string
+	Email   string
+	Name    string
+	Groups  []string
+	// GroupsKnown is true when an ID token was verified with a groups claim name: then a missing claim means no
+	// groups. A refresh without an ID token leaves it false, and the groups are unknown.
+	GroupsKnown  bool
 	RefreshToken string // empty when the issuer gave none
 	Expiry       time.Time
 }
@@ -185,6 +188,7 @@ func (p *Provider) Verify(ctx context.Context, raw, nonce, groupsClaim string) (
 	}
 	if groupsClaim != "" {
 		id.Groups = stringsOf(claims[groupsClaim])
+		id.GroupsKnown = true
 	}
 	return id, nil
 }

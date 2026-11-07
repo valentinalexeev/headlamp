@@ -8,7 +8,7 @@
 set -u
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 src="$root/examples/compose/control"
-hs_image=${E2E_HEADSCALE_IMAGE:-jauderho/headscale:v0.29.3}
+hs_image=${E2E_HEADSCALE_IMAGE:-ghcr.io/juanfont/headscale:v0.29.7}
 pebble_image=${E2E_PEBBLE_IMAGE:-ghcr.io/letsencrypt/pebble:2.7.0}
 domain=funnel.e2e.test
 
@@ -77,13 +77,12 @@ policy:
   mode: database
 unix_socket: /data/hs.sock
 YAML
-dk run -d --name "$hs" --network "$net" --entrypoint "" -v "$T/hs:/etc/headscale:ro" "$hs_image" \
-  sh -c 'mkdir -p /data && exec headscale serve -c /etc/headscale/config.yaml' >/dev/null || die headscale
+dk run -d --name "$hs" --network "$net" -v "$T/hs:/etc/headscale:ro" "$hs_image" \
+  serve -c /etc/headscale/config.yaml >/dev/null || die headscale
 wait_for 40 docker exec "$hs" headscale -c /etc/headscale/config.yaml users list || die "headscale not ready"
 hsx() { dk exec -i "$hs" headscale -c /etc/headscale/config.yaml "$@"; }
 hsx users create e2e >/dev/null
-printf '%s' '{"tagOwners":{"tag:funnel-ingress":["e2e@"]},"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}' | docker exec -i "$hs" sh -c 'cat > /tmp/p.json'
-hsx policy set -f /tmp/p.json >/dev/null || die policy
+printf '%s' '{"tagOwners":{"tag:funnel-ingress":["e2e@"]},"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}' | hsx policy set -f /dev/stdin >/dev/null || die policy
 key=$(hsx preauthkeys create -u 1 --tags tag:funnel-ingress -e 1h -o json | sed -n 's/.*"key": *"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$key" ] || die "auth key"
 

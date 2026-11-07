@@ -161,7 +161,7 @@ func TestNodeMachineKey(t *testing.T) {
 	})
 }
 
-// The shape is from headscale v0.29.3 GET /api/v1/node (#117): the key id is a string under preAuthKey.
+// The shape is from headscale v0.29.3 GET /api/v1/node (#117), unchanged in v0.29.7: the key id is a string under preAuthKey.
 func TestNodePreAuthKeyID(t *testing.T) {
 	var n Node
 	if err := json.Unmarshal([]byte(`{"id":"4","givenName":"grafana-1","preAuthKey":{"user":{"id":"1"},"id":"17","key":"hskey-auth-x-***","aclTags":["tag:serve"]}}`), &n); err != nil {

@@ -8,7 +8,7 @@
 #   - the tailnet key works: a tailscale client joins as the person's own headscale user
 #   - a person outside the allowed group cannot sign in
 #   - an admin locks the person: the relay client is refused, the tailnet node is expired, and sign-in is refused
-#   E2E_HEADSCALE_IMAGE  default jauderho/headscale:v0.29.3
+#   E2E_HEADSCALE_IMAGE  default ghcr.io/juanfont/headscale:v0.29.7
 #   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.104.4
 #   E2E_SINGBOX_IMAGE    default ghcr.io/sagernet/sing-box:v1.14.4
 #   E2E_DEX_IMAGE        default ghcr.io/dexidp/dex:v2.44.0
@@ -17,7 +17,7 @@
 set -u
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 hyd="$root/scripts/test/hysteria"
-hs_image=${E2E_HEADSCALE_IMAGE:-jauderho/headscale:v0.29.3}
+hs_image=${E2E_HEADSCALE_IMAGE:-ghcr.io/juanfont/headscale:v0.29.7}
 ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 sb_image=${E2E_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:v1.14.4}
 dex_image=${E2E_DEX_IMAGE:-ghcr.io/dexidp/dex:v2.44.0}
@@ -176,8 +176,8 @@ YAML
 cat > "$T/etc/acl.json" <<'JSON'
 {"tagOwners": {"tag:node-control": ["e2e@"], "tag:ingress": ["e2e@"]}, "acls": [{"action": "accept", "src": ["*"], "dst": ["*:*"]}]}
 JSON
-dk run -d --name "$hs" --network "$net" --entrypoint "" -v "$T/etc:/etc/headscale:ro" "$hs_image" \
-  sh -c 'mkdir -p /data && exec headscale serve -c /etc/headscale/config.yaml' >/dev/null || die "start headscale"
+dk run -d --name "$hs" --network "$net" -v "$T/etc:/etc/headscale:ro" "$hs_image" \
+  serve -c /etc/headscale/config.yaml >/dev/null || die "start headscale"
 wait_for 40 docker exec "$hs" headscale -c /etc/headscale/config.yaml users list || die "headscale not ready"
 hsx() { dk exec "$hs" headscale -c /etc/headscale/config.yaml "$@"; }
 hsx users create e2e --email e2e@example.test >/dev/null || die "user"

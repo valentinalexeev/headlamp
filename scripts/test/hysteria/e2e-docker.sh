@@ -13,7 +13,7 @@
 #   direct    -> the pub web server sees the bridge, and the far one is out of reach.
 #   exit/auto -> the far web server sees the exit node.
 #   Private and tailnet destinations are refused on both protocols.
-#   E2E_HEADSCALE_IMAGE  default jauderho/headscale:v0.29.3
+#   E2E_HEADSCALE_IMAGE  default ghcr.io/juanfont/headscale:v0.29.7
 #   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.104.4
 #   E2E_SINGBOX_IMAGE    default ghcr.io/sagernet/sing-box:v1.14.4
 #   E2E_MIHOMO_IMAGE     default metacubex/mihomo:v1.19.33
@@ -22,7 +22,7 @@
 set -u
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 here="$root/scripts/test/hysteria"
-hs_image=${E2E_HEADSCALE_IMAGE:-jauderho/headscale:v0.29.3}
+hs_image=${E2E_HEADSCALE_IMAGE:-ghcr.io/juanfont/headscale:v0.29.7}
 ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 sb_image=${E2E_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:v1.14.4}
 mh_image=${E2E_MIHOMO_IMAGE:-metacubex/mihomo:v1.19.33}
@@ -159,8 +159,8 @@ cat > "$T/etc/acl.json" <<'JSON'
   "acls": [{"action": "accept", "src": ["*"], "dst": ["*:*"]}]
 }
 JSON
-dk run -d --name "$hs" --network "$net" --entrypoint "" -v "$T/etc:/etc/headscale:ro" "$hs_image" \
-  sh -c 'mkdir -p /data && exec headscale serve -c /etc/headscale/config.yaml' >/dev/null || die "start headscale"
+dk run -d --name "$hs" --network "$net" -v "$T/etc:/etc/headscale:ro" "$hs_image" \
+  serve -c /etc/headscale/config.yaml >/dev/null || die "start headscale"
 wait_for 40 docker exec "$hs" headscale -c /etc/headscale/config.yaml users list || die "headscale not ready"
 hsx() { dk exec "$hs" headscale -c /etc/headscale/config.yaml "$@"; }
 hsx users create e2e --email e2e@example.test >/dev/null || die "user"

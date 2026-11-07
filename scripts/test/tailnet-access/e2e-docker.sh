@@ -13,7 +13,7 @@
 #     bridge-all  -> allowed answers and sees the bridge; denied is refused; a private LAN address is refused
 #     bridge-off  -> allowed, denied and the LAN address are all refused
 #   the public web server works through both bridges.
-#   E2E_HEADSCALE_IMAGE  default jauderho/headscale:v0.29.3
+#   E2E_HEADSCALE_IMAGE  default ghcr.io/juanfont/headscale:v0.29.7
 #   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.104.4
 #   E2E_SINGBOX_IMAGE    default ghcr.io/sagernet/sing-box:v1.14.4
 #   E2E_MIHOMO_IMAGE     default metacubex/mihomo:v1.19.33
@@ -22,7 +22,7 @@
 set -u
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 hyd="$root/scripts/test/hysteria"
-hs_image=${E2E_HEADSCALE_IMAGE:-jauderho/headscale:v0.29.3}
+hs_image=${E2E_HEADSCALE_IMAGE:-ghcr.io/juanfont/headscale:v0.29.7}
 ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 sb_image=${E2E_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:v1.14.4}
 mh_image=${E2E_MIHOMO_IMAGE:-metacubex/mihomo:v1.19.33}
@@ -142,16 +142,15 @@ unix_socket: /data/headscale.sock
 log:
   level: info
 YAML
-dk run -d --name "$hs" --network "$net" --entrypoint "" -v "$T/etc:/etc/headscale:ro" "$hs_image" \
-  sh -c 'mkdir -p /data && exec headscale serve -c /etc/headscale/config.yaml' >/dev/null || die "start headscale"
+dk run -d --name "$hs" --network "$net" -v "$T/etc:/etc/headscale:ro" "$hs_image" \
+  serve -c /etc/headscale/config.yaml >/dev/null || die "start headscale"
 wait_for 40 docker exec "$hs" headscale -c /etc/headscale/config.yaml users list || die "headscale not ready"
 hsx() { dk exec -i "$hs" headscale -c /etc/headscale/config.yaml "$@"; }
 hsx users create e2e --email e2e@example.test >/dev/null || die "user"
 # No rule for tag:ingress: the bridges reach nothing on the tailnet until node-control adds one. The admin (an
 # untagged node of e2e@) and node-control reach everything, so node-control can talk to the agents.
 printf '%s' '{"tagOwners":{"tag:node-control":["e2e@"],"tag:ingress":["e2e@"],"tag:lan":["e2e@"],"tag:other":["e2e@"]},"acls":[{"action":"accept","src":["e2e@","tag:node-control"],"dst":["*:*"]}]}' \
-  | docker exec -i "$hs" sh -c 'cat > /tmp/p.json'
-hsx policy set -f /tmp/p.json >/dev/null || die "bootstrap policy"
+  | hsx policy set -f /dev/stdin >/dev/null || die "bootstrap policy"
 uid=$(hsx users list -o json | sed -n 's/.*"id": *\([0-9]*\).*/\1/p' | head -1)
 key() { hsx preauthkeys create -u "$uid" -e 1h ${1:+--tags "$1"} -o json | sed -n 's/.*"key": *"\([^"]*\)".*/\1/p' | head -1; }
 k_nc=$(key tag:node-control); k_bo=$(key tag:ingress); k_ba=$(key tag:ingress); k_al=$(key tag:lan); k_de=$(key tag:other)

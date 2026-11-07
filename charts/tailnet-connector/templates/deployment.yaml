@@ -1,0 +1,65 @@
+{{- if .Values.connector.enabled }}
+{{- $c := .Values.connector }}
+{{- /* No --advertise-tags: the tagged key gives the tags (headscale rejects a tag request on top of it). */}}
+{{- $args := concat (list (printf "--login-server=%s" .Values.controlURL)) $c.extraArgs }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tc.name" . }}
+  labels: {{- include "tc.labels" . | nindent 4 }}
+spec:
+  # One replica: one node owns the state Secret. Recreate, so two pods never share it.
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tailnet-connector
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels: {{- include "tc.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "tc.name" . }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: tailscale
+          image: {{ include "tc.image" (list . .Values.image) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: TS_USERSPACE, value: "true" }
+            - { name: TS_KUBE_SECRET, value: {{ include "tc.stateSecret" . | quote }} }
+            - { name: TS_HOSTNAME, value: {{ default (include "tc.name" .) $c.hostname | quote }} }
+            - { name: TS_ROUTES, value: {{ join "," $c.routes | quote }} }
+            - { name: TS_EXTRA_ARGS, value: {{ join " " $args | quote }} }
+            - { name: TS_SOCKET, value: /tmp/tailscaled.sock }
+            - { name: TS_ACCEPT_DNS, value: "false" }
+            - name: TS_AUTHKEY
+              valueFrom: { secretKeyRef: { name: {{ $c.authKeySecret.name | quote }}, key: {{ $c.authKeySecret.key | quote }} } }
+            {{- if .Values.caBundle.configMap }}
+            - { name: SSL_CERT_FILE, value: /etc/tailnet-ca/ca.crt }
+            {{- end }}
+          securityContext: {{- include "tc.containerSecurity" . | nindent 12 }}
+          resources: {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            {{- if .Values.caBundle.configMap }}
+            - { name: ca, mountPath: /etc/tailnet-ca, readOnly: true }
+            {{- end }}
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        {{- if .Values.caBundle.configMap }}
+        - name: ca
+          configMap:
+            name: {{ .Values.caBundle.configMap }}
+            items: [{ key: {{ .Values.caBundle.key | quote }}, path: ca.crt }]
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

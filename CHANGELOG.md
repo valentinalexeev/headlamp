@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.10.0 - 2026-11-07
+
 ### Added
 
 - Serve page in the console (#129). `/serve` shows the zone, the CA fingerprint and download, the headscale split lines, and each service with its state, keys, expiry and proxies. It has the same design and controls as the other pages. A `serve.admin` user can add a service, add a key, retire the old key and delete a service (with the name typed). A new key shows one time, with a sample `funnel-sidecar` environment. Viewers see no admin controls. Changes go to the Activity page, without the key. The Overview page shows a service with no online proxy, and a key that expires within 14 days or has expired. Services show in the search. The console demo has Serve fixtures, and a new `viewer` scenario.
@@ -40,6 +42,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Security
 
+- The admin JSON answers of the enrolment, funnel, policy and tasks modules keep HTML escaping (`<`, `>` and `&` as `\u003c` and so on). An answer that echoes request text cannot carry markup (code scanning alerts 6 and 7, #141).
 - node-control no longer guesses the type of an answer without a `Content-Type`, and sends `X-Content-Type-Options: nosniff`. Before, an untyped answer that started with markup got the navigation shell and was sent as HTML (#108).
 
 ## 0.9.0 - 2026-11-05

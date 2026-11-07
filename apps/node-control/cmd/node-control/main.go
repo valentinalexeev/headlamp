@@ -66,8 +66,21 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		StoppedNames(context.Context) map[string]bool
 	}
 	// The audit log lives in the enrolment store, which opens at Register, after nodes.New: hence a function.
+	var pol core.Module // set below; the enrolment module reads it only after Register
+	policyService := func() *policy.Service {
+		if p, ok := pol.(interface{ Service() *policy.Service }); ok {
+			return p.Service()
+		}
+		return nil
+	}
 	enr := enroll.New(env, enroll.WithNodeSource(src), enroll.WithStoppedNodes(func(ctx context.Context) map[string]bool {
 		return nm.StoppedNames(ctx)
+	}), enroll.WithPolicy(func() enroll.PolicyService {
+		// A typed nil must not become a non-nil interface.
+		if svc := policyService(); svc != nil {
+			return svc
+		}
+		return nil
 	}))
 	audit := func() core.AuditLog {
 		if p, ok := enr.(interface{ AuditLog() core.AuditLog }); ok {
@@ -95,7 +108,7 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		APIKey:  env.Getenv("HEADSCALE_API_KEY"),
 		HTTP:    hc,
 	}
-	pol := policy.New(env, hsClient)
+	pol = policy.New(env, hsClient)
 	mods := []core.Module{
 		tailnet.New(src, tracked, tailnet.WithKeyExpiry(hsClient.APIKeyExpiry), tailnet.WithKeyViewers(keyViewers(env))),
 		nm,

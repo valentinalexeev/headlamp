@@ -25,6 +25,7 @@ type Module struct {
 	store Backend
 	admin *Admin
 	reg   *Registry
+	pol   func() PolicyService // the policy console, for the tailnet ACL entry (#132); nil result: not active
 	// stopped names the machines stopped at their provider; nil when nothing can say.
 	stopped func(context.Context) map[string]bool
 
@@ -163,9 +164,20 @@ func (m *Module) Register(r *core.Routes) error {
 	m.store, m.reg = store, reg
 	m.admin = NewAdminFor(store, reg)
 	m.admin.SetTailnet(r.Tailnet)
+	m.admin.tacl = m.tailnetACL()
 	m.admin.Register(r.Admin)
 	NewPublicFor(store, reg).Register(r.Public)
 	return nil
+}
+
+// tailnetACL builds the generated tailnet ACL entry: always, so the console can report it, with the tag from
+// ENROLL_INGRESS_TAG (default tag:ingress) and the destinations from ENROLL_TAILNET_DST.
+func (m *Module) tailnetACL() *tailnetACL {
+	tag := m.env.Getenv("ENROLL_INGRESS_TAG")
+	if tag == "" {
+		tag = defaultIngressTag
+	}
+	return &tailnetACL{Tag: tag, Dst: parseTailnetDst(m.env.Getenv("ENROLL_TAILNET_DST")), pol: m.pol}
 }
 
 // Start launches the reconcile loop and returns at once. The loop stops with ctx; the store stays

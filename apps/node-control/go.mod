@@ -10,10 +10,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.344.0
 	github.com/aws/aws-sdk-go-v2/service/route53 v1.70.9
 	github.com/aws/smithy-go v1.28.8
-	github.com/golang-jwt/jwt/v5 v5.2.2
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/redis/go-redis/v9 v9.23.0
-	golang.org/x/net v0.60.0
-	modernc.org/sqlite v1.61.0
+	golang.org/x/net v0.62.0
+	modernc.org/sqlite v1.61.1
 	tailscale.com v1.104.5
 )
 

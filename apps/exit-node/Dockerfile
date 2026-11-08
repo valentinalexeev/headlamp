@@ -1,7 +1,7 @@
 ARG TSVERSION=1.104.5
 ARG TSFILE=tailscale_${TSVERSION}_amd64.tgz
 
-FROM alpine:3.18 AS tailscale
+FROM alpine:3.20 AS tailscale
 ARG TSFILE
 WORKDIR /app
 
@@ -10,7 +10,7 @@ RUN wget https://pkgs.tailscale.com/stable/${TSFILE} && \
 COPY . ./
 
 
-FROM alpine:3.18
+FROM alpine:3.20
 RUN apk update && apk add ca-certificates iptables ip6tables iproute2 ethtool bind-tools redis age && rm -rf /var/cache/apk/*
 
 # creating directories for tailscale

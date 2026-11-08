@@ -1,0 +1,51 @@
+---
+# Tailnet grant groups (#139). Each entry of socks_grant_groups gets its own tailscaled and SOCKS port; the units
+# of groups no longer listed are stopped and removed.
+- name: Check the grant groups
+  ansible.builtin.assert:
+    that:
+      - socks_grant_groups | length <= 8
+      - socks_grant_groups | map(attribute='id') | select('match', '^g-[0-9a-f]{8}$') | list | length == socks_grant_groups | length
+      - socks_grant_groups | map(attribute='id') | unique | list | length == socks_grant_groups | length
+      - socks_grant_port_base | int + 8 <= 65535
+    fail_msg: >-
+      tailscale-userspace-socks: socks_grant_groups must be at most 8 entries with unique ids g-<8 hex>.
+    quiet: true
+
+- name: Set up each grant group
+  ansible.builtin.include_tasks: group.yml
+  loop: "{{ socks_grant_groups }}"
+  loop_control:
+    loop_var: socks_group
+    index_var: socks_group_index
+    label: "{{ socks_group.id }}"
+  vars:
+    socks_group_port: "{{ socks_grant_port_base | int + socks_group_index }}"
+
+- name: Find the units of grant groups
+  ansible.builtin.find:
+    paths: /etc/systemd/system
+    patterns: "tailscaled-socks-g-*.service"
+  register: socks_group_units
+
+- name: Stop and remove the units of groups that are no longer listed
+  ansible.builtin.systemd:
+    name: "{{ item.path | basename }}"
+    state: stopped
+    enabled: false
+  become: true
+  loop: "{{ socks_group_units.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: (item.path | basename | regex_replace('^tailscaled-socks-(g-[0-9a-f]{8})\\.service$', '\\1')) not in (socks_grant_groups | map(attribute='id') | list)
+  failed_when: false
+
+- name: Delete the unit files of groups that are no longer listed
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  become: true
+  loop: "{{ socks_group_units.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: (item.path | basename | regex_replace('^tailscaled-socks-(g-[0-9a-f]{8})\\.service$', '\\1')) not in (socks_grant_groups | map(attribute='id') | list)

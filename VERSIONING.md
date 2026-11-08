@@ -52,6 +52,8 @@ Before 1.0.0, a minor release must not change a running site that has no config 
   to an older line.
 - It bumps at least as much as the commits since the previous release need.
 - A milestone named after the version, if there is one, has no open issues.
+- [`UPGRADING.md`](UPGRADING.md) at that commit has a section for the version (`## X.Y.Z`). It lists what a site repo
+  must change, or says "No action required". Rename the `## Unreleased (X.Y.Z)` section in the release PR.
 
 A published version never changes. If a release is wrong, fix it in a new one: never move or delete its tag.
 

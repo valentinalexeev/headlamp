@@ -22,7 +22,7 @@ concurrency:
 jobs:
   gate:
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: read
@@ -40,7 +40,7 @@ jobs:
   detect:
     needs: gate
     if: always() && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read
@@ -88,7 +88,7 @@ jobs:
   build:
     needs: detect
     if: always() && needs.detect.result == 'success' && needs.detect.outputs.build != '[]'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -146,7 +146,7 @@ jobs:
     if: >-
       always() && github.event_name != 'pull_request' && needs.detect.result == 'success' &&
       (needs.build.result == 'success' || needs.build.result == 'skipped')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write # the GitHub release of a tag
       packages: write
@@ -178,6 +178,27 @@ jobs:
             for t in "${tags[@]}"; do args+=(-t "$name:$t"); done
             docker buildx imagetools create "${args[@]}" "$name:src-$(jq -r .hash <<<"$c")"
           done < <(jq -c '.[]' <<<"$ALL")
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        if: github.ref_type == 'tag'
+      - name: Publish the Helm charts (#158)
+        # Each chart under charts/ is published as an OCI artifact with the release version, so a chart version
+        # always names the images of the same release. The chart in the repo keeps a placeholder version.
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=${TAG#v}
+          registry="oci://ghcr.io/${GITHUB_REPOSITORY,,}/charts"
+          printf '%s' "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+          mkdir -p "$RUNNER_TEMP/charts"
+          for chart in charts/*/; do
+            helm lint "$chart"
+            helm package "$chart" --version "$version" -d "$RUNNER_TEMP/charts"
+          done
+          for pkg in "$RUNNER_TEMP"/charts/*.tgz; do helm push "$pkg" "$registry"; done
       - name: Create the GitHub release
         if: github.ref_type == 'tag'
         env:

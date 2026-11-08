@@ -6,8 +6,14 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
+- Each release publishes the Helm charts to `oci://ghcr.io/valentinalexeev/headlamp/charts`, with the release version (#158).
+- CI runs more checks on each PR: the tailscale and headscale pins (#150), the Ansible role tests, `make lint-go` for new Go code, `make vulncheck` and `make lint-config` (#160). A weekly workflow opens an issue when a newer tailscale or headscale is out.
 - Helm chart `charts/tailnet-connector` (#103): a subnet router for one Kubernetes cluster, so tailnet devices reach its Service and Pod ranges. One userspace tailscale replica joins with an ephemeral tagged key from a Secret, advertises `connector.routes`, and keeps its state in a Kubernetes Secret; its Role can touch only that Secret. headscale approves the routes through `autoApprovers.routes` for the connector tag. Optional, off by default: serve proxies (`funnel-sidecar` in serve mode, #117), one Deployment per node-control service. New image `tailnet-connector` (tailscale at `TAILSCALE_VERSION`, from the official static tarball); the chart `appVersion` is in `make check-tailscale-pins`. `make test-k8s-connector` runs helm lint and kubeconform; `make test-k8s-connector-e2e` runs it in kind against the pinned headscale.
 - node-control has an Access page (`/admin`) to change roles and grants in the console (#123). It is on when `ADMIN_DB` (SQLite) or `REDIS_URL` is set. Grants from `ADMIN_USERS`, `ADMIN_CONFIG` and the old lists still apply and are locked on the page, so they work as break-glass owners. Nobody can change their own grants or give more than they hold. Every change goes to a change log. Import and export use the `ADMIN_CONFIG` format. A new permission feature `admin` gates the page; only `owner` has it, and `*.level` does not include it.
+
+### Changed
+
+- CI runs on `ubuntu-26.04` runners.
 
 ### Fixed
 

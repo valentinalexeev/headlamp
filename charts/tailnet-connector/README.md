@@ -79,8 +79,12 @@ The ACL must also let the users reach the ranges, for example `{"action": "accep
 6. Install the chart:
 
    ```sh
-   helm upgrade --install tc charts/tailnet-connector -n tailnet -f values-site.yaml
+   helm upgrade --install tc oci://ghcr.io/valentinalexeev/headlamp/charts/tailnet-connector --version X.Y.Z \
+     -n tailnet -f values-site.yaml
    ```
+
+   Use the version of a headlamp release. To install the chart from a checkout of the repo, use
+   `charts/tailnet-connector` as the chart.
 
 7. Make sure that the node is online with the routes approved:
 

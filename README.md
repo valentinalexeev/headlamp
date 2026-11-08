@@ -39,6 +39,9 @@ ready to use, and none of them is the default:
 - **Any Docker host:** the same compose files, with the published images and your config mounted.
 - **Fly.io:** a `fly.toml` per app and an overlay deploy in `examples/private-repo/`. [`docs/images.md`](docs/images.md) explains what each image does, how they fit together and what each needs from its host, and [`VERSIONING.md`](VERSIONING.md) covers tags and release rules.
 
+Each release also publishes the Helm chart [`charts/tailnet-connector`](charts/tailnet-connector/README.md) to
+`oci://ghcr.io/valentinalexeev/headlamp/charts`. The chart connects a Kubernetes cluster to the tailnet.
+
 ## Terraform state workflow
 
 State lives in your private repo as `terraform/terraform.tfstate.enc.json` (sops + age). Git has
@@ -59,7 +62,16 @@ enforces the discipline:
 
 ## Development
 
-`make hooks` enables the commit hook; `make lint` runs shellcheck; `make test-tf-run` runs the
-state-wrapper tests. See `CLAUDE.md` for the rules about what may never be committed here.
+`make hooks` enables the commit hook. `make test-tf-run` runs the state-wrapper tests. CI runs these checks on each
+pull request, and you can run them before you push:
+
+| Target | Check |
+|---|---|
+| `make lint` | shellcheck, warnings included |
+| `make lint-go` | golangci-lint on new and changed Go code ([ADR 0002](docs/adr/0002-adopt-a-subset-of-tigerstyle.md)) |
+| `make lint-go-report` | golangci-lint on all Go code, as warnings |
+| `make vulncheck` | govulncheck on each Go module |
+| `make lint-config` | actionlint, hadolint and kubeconform |
+| `make check-tailscale-pins`, `make check-headscale-pin` | the version pins agree with `TAILSCALE_VERSION` and `HEADSCALE_VERSION` | See `CLAUDE.md` for the rules about what may never be committed here.
 
 Third-party notices: [`THIRD_PARTY.md`](THIRD_PARTY.md). License: [MIT](LICENSE).

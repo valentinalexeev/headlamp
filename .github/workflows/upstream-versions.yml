@@ -1,0 +1,37 @@
+# Weekly check (#150): open an issue when a newer stable tailscale or headscale exists than the repo pins
+# (TAILSCALE_VERSION, HEADSCALE_VERSION). One open issue per component and version: a repeat run does not duplicate it.
+name: upstream-versions
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  check:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compare pins with the latest stable releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          open_issue() { # component pinned latest
+            title="chore($1): $1 $3 is available (pinned: $2)"
+            if gh issue list --state open --search "in:title \"$title\"" --json title --jq '.[].title' | grep -qxF "$title"; then
+              echo "$1: issue already open"; return
+            fi
+            gh issue create --title "$title" --body "Weekly check: the latest stable $1 is $3, the repo pins $2. Bump the pin file and run the pin checks and the e2e suites (see CLAUDE.md)."
+          }
+          ts_pin=$(tr -d '[:space:]' < TAILSCALE_VERSION)
+          ts_new=$(curl -fsSL --retry 3 'https://pkgs.tailscale.com/stable/?mode=json' | jq -r .Version)
+          echo "tailscale: pinned $ts_pin, latest $ts_new"
+          [[ $ts_new =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected tailscale version '$ts_new'"; exit 1; }
+          if [ "$(printf '%s\n%s\n' "$ts_pin" "$ts_new" | sort -V | tail -1)" != "$ts_pin" ]; then open_issue tailscale "$ts_pin" "$ts_new"; fi
+          hs_pin=$(tr -d '[:space:]' < HEADSCALE_VERSION)
+          hs_new=$(gh api repos/juanfont/headscale/releases/latest --jq .tag_name)
+          echo "headscale: pinned $hs_pin, latest $hs_new"
+          [[ $hs_new =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected headscale version '$hs_new'"; exit 1; }
+          if [ "$(printf '%s\n%s\n' "${hs_pin#v}" "${hs_new#v}" | sort -V | tail -1)" != "${hs_pin#v}" ]; then open_issue headscale "$hs_pin" "$hs_new"; fi

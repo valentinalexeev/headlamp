@@ -1,0 +1,5 @@
+# GitHub-hosted runner labels newer than the bundled actionlint list (Ubuntu 26.04 is GA since 2026-09-17).
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04
+    - ubuntu-26.04-arm

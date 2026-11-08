@@ -3,6 +3,8 @@
   ansible.builtin.apt:
     name:
       - bgpq4
+      # Minimal images (Ubuntu Minimal, Debian genericcloud) have no cron daemon and no crontab (#170).
+      - cron
       - dnsutils
       - python3
     state: present
@@ -52,7 +54,14 @@
     mode: "0755"
   become: true
 
+# In check mode on a fresh minimal host the cron package is not installed yet, and the cron module needs crontab.
+- name: Look for crontab
+  ansible.builtin.stat:
+    path: /usr/bin/crontab
+  register: route_crontab
+
 - name: Schedule the route-provisioning cron job
+  when: route_crontab.stat.exists or not ansible_check_mode
   ansible.builtin.cron:
     name: "update tailscale split-tunnel routes"
     minute: "0"

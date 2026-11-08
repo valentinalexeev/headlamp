@@ -173,3 +173,31 @@ jobs:
       - name: Skipped
         if: needs.scope.outputs.ansible != 'true'
         run: echo "no Ansible change"
+
+  ansible-os:
+    # The roles on each supported OS image, in a systemd container with a real headscale (#170). Only the roles that
+    # pass a full apply in a container are listed; #178 tracks the others.
+    needs: scope
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ubuntu-minimal, ubuntu-server, debian13]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.scope.outputs.ansible == 'true'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: needs.scope.outputs.ansible == 'true'
+        with:
+          go-version-file: apps/ingress-agent/go.mod
+      - name: OS matrix
+        if: needs.scope.outputs.ansible == 'true'
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          pipx install --include-deps ansible-core
+          ansible-galaxy collection install community.docker ansible.posix
+          make test-ansible-os IMAGE="$IMAGE" ROLES="route-provisioner ingress-agent"
+      - name: Skipped
+        if: needs.scope.outputs.ansible != 'true'
+        run: echo "no Ansible change"

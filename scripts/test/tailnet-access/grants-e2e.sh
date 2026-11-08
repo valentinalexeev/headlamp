@@ -7,7 +7,7 @@
 # server that answers with the caller's address: A (tag:nas), B (tag:printer) and C (tag:other, no target names it).
 # Targets: nas -> tag:nas:8000, printer -> tag:printer:8000. Devices:
 #   d1 granted nas, d2 granted printer, d3 has both through an owner grant, d4 has no grant.
-# Matrix, on VLESS Reality and Hysteria 2 (sing-box): each device to A, B, C and a private LAN address,
+# Matrix, on VLESS Reality (mihomo, as in e2e-docker.sh) and Hysteria 2 (sing-box): each device to A, B, C and a private LAN address,
 #   before the ACL is applied (all denied), and after node-control writes the group rules and an admin confirms
 #   them (only the granted pairs answer). Then the grant of d1 is revoked: the next sync denies it, and the ACL
 #   preview shows the rule removal.
@@ -19,6 +19,7 @@ hyd="$root/scripts/test/hysteria"
 hs_image=${E2E_HEADSCALE_IMAGE:-ghcr.io/juanfont/headscale:v0.29.7}
 ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 sb_image=${E2E_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:v1.14.4}
+mh_image=${E2E_MIHOMO_IMAGE:-metacubex/mihomo:v1.19.33}
 xray_version=${E2E_XRAY_VERSION:-26.10.31}
 front=front.e2e.example
 
@@ -59,13 +60,13 @@ gid() { printf '%s' "$1" | tr ' ' '\n' | sort | python3 -c 'import hashlib,sys;p
 G_NAS=$(gid nas); G_PRN=$(gid printer); G_BOTH=$(gid "nas printer")
 
 echo "# images"
-dk build -q -t tng-e2e-node-control "$root/apps/node-control" >/dev/null || die "node-control image"
+tmo 900 docker build -q -t tng-e2e-node-control "$root/apps/node-control" >/dev/null || die "node-control image"
 mkdir -p "$T/bctx/agent"
 cp -R "$root/apps/ingress-agent/go.mod" "$root/apps/ingress-agent/cmd" "$root/apps/ingress-agent/internal" "$T/bctx/agent/"
 cp "$hyd/Dockerfile.bridge" "$T/bctx/"; cp "$here/grants-bridge.sh" "$T/bctx/bridge.sh"
-dk build -q --build-arg XRAY_VERSION="$xray_version" --build-arg TAILSCALE_IMAGE="$ts_image" -f "$T/bctx/Dockerfile.bridge" \
+tmo 900 docker build -q --build-arg XRAY_VERSION="$xray_version" --build-arg TAILSCALE_IMAGE="$ts_image" -f "$T/bctx/Dockerfile.bridge" \
   -t tng-e2e-bridge "$T/bctx" >/dev/null || die "bridge image"
-for i in "$hs_image" "$ts_image" "$sb_image" python:3.13-alpine caddy:2-alpine curlimages/curl:8.17.0; do
+for i in "$hs_image" "$ts_image" "$sb_image" "$mh_image" python:3.13-alpine caddy:2-alpine curlimages/curl:8.17.0; do
   dk image inspect "$i" >/dev/null 2>&1 || tmo 300 docker pull -q "$i" >/dev/null || die "pull $i"
 done
 
@@ -271,10 +272,28 @@ p["route"]["rules"] = [r for r in p["route"]["rules"] if r.get("action") != "hij
 print(json.dumps(p))
 PY
 }
+# mh: the VLESS Reality outbound of the device's sing-box profile, as one mihomo proxy (the same credential).
+mh() { python3 - "$T/cl/d$1.json" > "$T/cl/mh-d$1/config.yaml" <<'PY'
+import json, sys
+o = [x for x in json.load(open(sys.argv[1]))["outbounds"] if x.get("tag") == "direct-bridge-g"][0]
+t = o["tls"]
+p = {"name": "b", "type": "vless", "server": o["server"], "port": o["server_port"], "uuid": o["uuid"], "network": "tcp",
+     "tls": True, "udp": True, "flow": o.get("flow", "xtls-rprx-vision"), "servername": t["server_name"],
+     "client-fingerprint": "chrome", "reality-opts": {"public-key": t["reality"]["public_key"], "short-id": t["reality"]["short_id"]}}
+print(json.dumps({"mixed-port": 2080, "bind-address": "127.0.0.1", "allow-lan": False, "proxies": [p], "rules": ["MATCH,b"]}))
+PY
+}
 client() { # device protocol -> container name
-  c="tng-e2e-cl-d$1-$2-$sfx"; docker rm -f "$c" >/dev/null 2>&1; pin "$1" "$2"
-  dk run -d --name "$c" --network "$net" --add-host "bridge-g.e2e.example:$BR_IP" -e SSL_CERT_FILE=/ca.pem \
-    -v "$T/tls/ca.pem:/ca.pem:ro" -v "$T/cl/d$1-$2.json:/c.json:ro" "$sb_image" run -c /c.json >/dev/null || return 1
+  c="tng-e2e-cl-d$1-$2-$sfx"; docker rm -f "$c" >/dev/null 2>&1
+  if [ "$2" = vless ]; then
+    mkdir -p "$T/cl/mh-d$1"; mh "$1"
+    dk run -d --name "$c" --network "$net" --add-host "bridge-g.e2e.example:$BR_IP" \
+      -v "$T/cl/mh-d$1:/conf" "$mh_image" -d /conf >/dev/null || return 1
+  else
+    pin "$1" "$2"
+    dk run -d --name "$c" --network "$net" --add-host "bridge-g.e2e.example:$BR_IP" -e SSL_CERT_FILE=/ca.pem \
+      -v "$T/tls/ca.pem:/ca.pem:ro" -v "$T/cl/d$1-$2.json:/c.json:ro" "$sb_image" run -c /c.json >/dev/null || return 1
+  fi
   echo "$c"
 }
 via() { docker run --rm --network "container:$1" curlimages/curl:8.17.0 -fsS --max-time 8 --socks5-hostname 127.0.0.1:2080 "$2" 2>/dev/null; }

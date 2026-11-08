@@ -6,7 +6,9 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
+- `UPGRADING.md` lists, for each release from 0.10.0, what a site repo must change (#193). `scripts/check-release.sh` refuses a tag when `UPGRADING.md` has no section for its version. The wiki publishes it as `UPGRADING`.
 - Dependabot opens update PRs for the Go modules, the base and compose images, the Terraform providers and the GitHub Actions. tailscale and headscale are not in it: their pins move together.
+- Rule for releases before 1.0.0 (#200): a new feature that opens a port, changes an access rule or adds a protocol is off by default. `make check-feature-defaults` (part of `make lint`) fails on a new `<name>_enabled: true` Ansible role default that is not in `scripts/feature-defaults.allow`. See "New features before 1.0.0" in `VERSIONING.md`.
 
 ### Changed
 
@@ -16,6 +18,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Fixed
 
 - All six Ansible roles pass check mode and a real apply in the OS matrix on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13 (#178). Check mode on a fresh host no longer fails in `task-runner` (owner of the state directory before the user exists) and in `tailscale` (`sysctl` before `procps` is installed). `tailscale` no longer fails when `AutoUpdate.Apply` is null on a fresh node. `make test-ansible-os` uses the native architecture of the docker engine (`ANSIBLE_OS_PLATFORM` forces one).
+- The `reality-ingress` preflight error for Hysteria 2 now says that `hy2_enabled` is on by default, which UDP port it opens, and that `hy2_enabled: false` turns it off (#200).
 
 ## 0.12.0 - 2026-11-08
 

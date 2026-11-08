@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-serve-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-control-host-aws test-runtime-config lint \
+.PHONY: check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-serve-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-control-host-aws test-runtime-config lint \
   test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -109,13 +109,21 @@ test-control-host-aws:
 check-statestore-port:
 	./scripts/check-statestore-port.sh
 
+# Before 1.0.0 a new feature is off by default (#200): no new `<name>_enabled: true` role default outside the allowlist.
+check-feature-defaults:
+	scripts/check-feature-defaults.sh
+
+test-feature-defaults:
+	bash scripts/test/feature-defaults/run.sh
+
 lint:
 	shellcheck -S warning -x scripts/*.sh scripts/test/tf-run/run_tests.sh scripts/test/check-denylist/run_tests.sh \
 	  scripts/test/exit-node-state/run_tests.sh scripts/test/runtime-config/run_tests.sh scripts/test/headscale-policy/run.sh scripts/test/headscale-policy/e2e-docker.sh apps/exit-node/*.sh \
 	  scripts/tasks.sh scripts/test/tasks/run.sh scripts/test/ansible-os/run.sh \
 	  scripts/headscale-tag-node.sh scripts/test/headscale-tag-node/run.sh \
 	  .githooks/pre-commit .githooks/commit-msg \
-	  apps/tailguard/*.sh apps/headscale/*.sh
+	  apps/tailguard/*.sh apps/headscale/*.sh scripts/test/feature-defaults/run.sh
+	./scripts/check-feature-defaults.sh
 	-./scripts/check-statestore-port.sh
 
 # Helm chart charts/tailnet-connector (#103): helm lint, helm template | kubeconform (docker images if not installed).

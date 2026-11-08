@@ -1,0 +1,4 @@
+# Role defaults of the form `<name>_enabled: true` that are allowed (#200).
+# Before 1.0.0 a new feature that changes a running site (a port, an access rule, a protocol) is off by default.
+# A line here is `<role> <variable>` and needs a preflight that fails with a message that names the variable.
+reality-ingress hy2_enabled

@@ -138,15 +138,31 @@ jobs:
         if: needs.scope.outputs.terraform == 'true'
         with:
           terraform_wrapper: false
+      # Provider cache: the registry sends some providers (yandex, oci) through GitHub release downloads, which gave
+      # HTTP 503/504 for hours on 2026-11-08. With the cache, init needs no download when the lock files match.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.scope.outputs.terraform == 'true'
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: tf-providers-${{ runner.os }}-${{ hashFiles('terraform/modules/**/versions.tf', 'terraform/modules/**/.terraform.lock.hcl') }}
+          restore-keys: tf-providers-${{ runner.os }}-
       - name: Format and validate the modules
         if: needs.scope.outputs.terraform == 'true'
         run: |
+          TF_PLUGIN_CACHE_DIR="$HOME/.terraform.d/plugin-cache"; export TF_PLUGIN_CACHE_DIR
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform fmt -check -recursive terraform
           for m in terraform/modules/exit-node-vm/*/; do
             # cloudru's provider is not on the public registry (see its versions.tf): format only.
             case $m in */cloudru/) continue ;; esac
             echo "::group::$m"
-            terraform -chdir="$m" init -backend=false -input=false
+            # Up to 3 tries: a provider download can fail on a short CDN error.
+            ok=0
+            for try in 1 2 3; do
+              if terraform -chdir="$m" init -backend=false -input=false; then ok=1; break; fi
+              echo "init failed (try $try of 3)"; sleep $((try * 20))
+            done
+            [ "$ok" = 1 ] || exit 1
             terraform -chdir="$m" validate
             echo "::endgroup::"
           done

@@ -15,6 +15,13 @@ These files are manuals:
 
 These files are not manuals: `CHANGELOG.md`, `THIRD_PARTY.md`, the agent rules in `CLAUDE.md` and `AGENTS.md`, code comments, and commit messages.
 
+Use these rules also for the text on GitHub:
+
+- The body of an issue.
+- The comments on issues and pull requests.
+- The description of a pull request.
+- The replies to a review.
+
 ## Rules
 
 ### Words

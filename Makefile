@@ -86,6 +86,7 @@ test-hysteria-e2e:
 
 test-tailnet-access-e2e:
 	sh scripts/test/tailnet-access/e2e-docker.sh
+	sh scripts/test/tailnet-access/grants-e2e.sh
 
 test-oidc-e2e:
 	sh scripts/test/oidc/e2e-docker.sh

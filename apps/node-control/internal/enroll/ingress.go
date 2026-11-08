@@ -32,8 +32,11 @@ type Ingress struct {
 	Hy2Port int `json:"hy2_port,omitempty"`
 	// Hy2Obfs is the Salamander password, from HY2_OBFS_<NAME> (see hy2Var). Never in config, info or fingerprint.
 	Hy2Obfs string `json:"-"`
-	// TailnetAccess is "off" (the default, "" too) or "all": every credential of this bridge may reach the
-	// tailnet through the bridge's tailscaled (#132). The headscale ACL for tag:ingress decides which hosts.
+	// TailnetAccess is "off" (the default, "" too), "all" or "grants". With "all", every credential
+	// of this bridge may reach the tailnet through the bridge's tailscaled (#132), and the
+	// headscale ACL for tag:ingress decides which hosts. With "grants" (#139), only the credentials
+	// of devices with a grant may, each grant group through its own tailnet identity. The console
+	// can override the value per bridge.
 	TailnetAccess string `json:"tailnet_access,omitempty"`
 }
 
@@ -57,6 +60,8 @@ type IngressConfig struct {
 	ProfileName string    `json:"profile_name"`
 	LinkHost    string    `json:"link_host"`
 	Ingresses   []Ingress `json:"ingresses"`
+	// Targets are the named tailnet targets of enroll.json (#139), for bridges in grants mode.
+	Targets []TailnetTarget `json:"tailnet_targets,omitempty"`
 
 	key []byte // ENROLL_SECRET_KEY, set by WithKey; never serialised
 }
@@ -157,6 +162,13 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 			firstBase = in.Name
 		}
 	}
+	if v, ok := raw["tailnet_targets"]; ok {
+		ts, err := parseTailnetTargets(v)
+		if err != nil {
+			return IngressConfig{}, err
+		}
+		cfg.Targets = ts
+	}
 	if v, ok := raw["link_host"]; ok {
 		s, ok := rawString(v)
 		if !ok || !validDNSName(s) {
@@ -246,8 +258,8 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 		in.Hy2Port = n
 	}
 	if v, present := raw["tailnet_access"]; present {
-		if in.TailnetAccess, ok = rawString(v); !ok || (in.TailnetAccess != TailnetOff && in.TailnetAccess != TailnetAll) {
-			return fail("tailnet_access must be \"off\" or \"all\"")
+		if in.TailnetAccess, ok = rawString(v); !ok || !ValidTailnetMode(in.TailnetAccess) {
+			return fail("tailnet_access must be \"off\", \"all\" or \"grants\"")
 		}
 	}
 	if v, present := raw["intermittent"]; present {
@@ -259,7 +271,7 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 }
 
 var (
-	newShapeTopKeys = []string{"profile_name", "link_host", "ingresses"}
+	newShapeTopKeys = []string{"profile_name", "link_host", "ingresses", "tailnet_targets"}
 	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids", "node", "intermittent", "hy2_port", "tailnet_access"}
 	keyNameRe       = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,40}$`)
 )

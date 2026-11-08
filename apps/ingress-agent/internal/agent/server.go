@@ -30,6 +30,10 @@ type Applier struct {
 	DirectGeoIP, DirectGeoSite      []string
 	Log                             *slog.Logger
 	mu                              sync.Mutex
+	// rendered is the list of grant group outbounds of the base at the last render (#139). When a
+	// playbook run adds one, the next push renders again even if the credentials did not change.
+	// nil: not rendered yet.
+	rendered *string
 }
 
 func (a *Applier) now() int64 {
@@ -41,6 +45,24 @@ func (a *Applier) now() int64 {
 
 // Current is the persisted set.
 func (a *Applier) Current() ([]Cred, error) { return Load(a.StatePath) }
+
+// baseGroups is the grant group outbounds of the base config, as one string.
+func (a *Applier) baseGroups() string {
+	base, err := os.ReadFile(a.BasePath)
+	if err != nil {
+		return ""
+	}
+	return strings.Join(GroupOutbounds(base), ",")
+}
+
+func hasGroupGrant(creds []Cred) bool {
+	for _, c := range creds {
+		if groupIDRe.MatchString(c.Tailnet) {
+			return true
+		}
+	}
+	return false
+}
 
 func (a *Applier) render(creds []Cred) ([]byte, error) {
 	base, err := os.ReadFile(a.BasePath)
@@ -93,7 +115,9 @@ func (a *Applier) applyLocked(ctx context.Context, desired []Cred) (bool, error)
 		return false, fmt.Errorf("%w: state unreadable", ErrApply)
 	}
 	added, removed := Diff(cur, desired)
-	if len(added) == 0 && len(removed) == 0 {
+	groups := a.baseGroups()
+	sameGroups := !hasGroupGrant(desired) || (a.rendered != nil && *a.rendered == groups)
+	if len(added) == 0 && len(removed) == 0 && sameGroups {
 		return false, nil
 	}
 	cfg, err := a.render(desired)
@@ -109,6 +133,7 @@ func (a *Applier) applyLocked(ctx context.Context, desired []Cred) (bool, error)
 	if err := Save(a.StatePath, desired); err != nil {
 		return false, fmt.Errorf("%w: save", ErrApply)
 	}
+	a.rendered = &groups
 	a.Log.Info(fmt.Sprintf("applied: +%d -%d", len(added), len(removed)))
 	return true, nil
 }
@@ -217,7 +242,8 @@ func parseCreds(body []byte) ([]Cred, bool) {
 		if json.Unmarshal(item["uuid"], &u) != nil || json.Unmarshal(item["mode"], &m) != nil {
 			return nil, false
 		}
-		if raw, ok := item["tailnet"]; ok && (json.Unmarshal(raw, &tn) != nil || !slices.Contains(TailnetGrants, tn)) {
+		raw, ok := item["tailnet"]
+		if ok && (json.Unmarshal(raw, &tn) != nil || !ValidTailnet(tn)) {
 			return nil, false
 		}
 		u = canonUUID(u)
@@ -315,7 +341,13 @@ func (s *Server) putCredentials(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, map[string]int{"count": len(creds)})
+	// tailnet_groups tells node-control which grant groups this bridge can serve (#139): a group
+	// without its outbound shows "needs provisioning" in the console. Only opaque group ids.
+	groups := []string{}
+	if base, err := os.ReadFile(s.A.BasePath); err == nil {
+		groups = GroupOutbounds(base)
+	}
+	writeJSON(w, map[string]any{"count": len(creds), "tailnet_groups": groups})
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,44 @@
+#cloud-config
+# Used when authkey_secret_arn or tailscale_version is set. The auth key is not in this file: the node reads it at
+# boot from Secrets Manager with its instance role.
+write_files:
+%{ if authkey_secret_arn != null ~}
+  - path: /usr/local/sbin/headlamp-fetch-secret
+    permissions: "0700"
+    encoding: b64
+    content: ${fetch_secret_b64}
+%{ endif ~}
+  - path: /etc/sysctl.d/99-headlamp-exit-node.conf
+    content: |
+      net.ipv4.ip_forward = 1
+      net.ipv6.conf.all.forwarding = 1
+runcmd:
+  - sysctl --system
+%{ if tailscale_version != null ~}
+  - |
+    set -eu
+    . /etc/os-release
+    install -d -m 0755 /usr/share/keyrings
+    curl -fsSL "https://pkgs.tailscale.com/stable/$ID/$VERSION_CODENAME.noarmor.gpg" -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/$ID $VERSION_CODENAME main" > /etc/apt/sources.list.d/tailscale.list
+    apt-get update -q
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q "tailscale=${tailscale_version}"
+    apt-mark hold tailscale
+%{ else ~}
+  - curl -fsSL https://tailscale.com/install.sh | sh
+%{ endif ~}
+%{ if authkey_secret_arn != null ~}
+  - |
+    set -eu
+    install -d -m 0700 /run/headlamp
+    /usr/local/sbin/headlamp-fetch-secret '${authkey_secret_arn}' /run/headlamp/authkey
+    tailscale up --login-server='${headscale_login_server}' --auth-key=file:/run/headlamp/authkey --hostname='${hostname}' --advertise-exit-node
+    rm -f /run/headlamp/authkey
+%{ else ~}
+  - >-
+    tailscale up
+    --login-server=${headscale_login_server}
+    --authkey=${tailscale_authkey}
+    --hostname=${hostname}
+    --advertise-exit-node
+%{ endif ~}

@@ -2,7 +2,11 @@
 # OS matrix for the Ansible roles (#170). Runs every role in check mode and then for real against a throwaway systemd
 # container that stands for one target image, with a real headscale in a second container.
 # Usage: scripts/test/ansible-os/run.sh <ubuntu-minimal|ubuntu-server|debian13> [role ...]
-# Needs docker (linux/amd64, emulated on arm64), ansible-playbook with community.docker and ansible.posix, go, curl.
+# Needs docker, ansible-playbook with community.docker and ansible.posix, go, curl.
+# The host container uses the native architecture of the docker engine (amd64 on CI, arm64 on an arm64 Mac), #178.
+# Emulated amd64 (qemu-user) has no netfilter netlink (nft, iptables, so tailscaled fails) and no mount namespaces
+# (systemd sandbox settings fail with 226/NAMESPACE): those are limits of the emulator, not of the roles.
+# ANSIBLE_OS_PLATFORM=linux/amd64 forces a platform (for example to check the amd64 download paths).
 # APPLY="<role> ..." limits the real apply to these roles (default: all); the other roles run in check mode only.
 # E2E_KEEP=1 keeps the containers. Prints one "RESULT <os> <role> <check> <apply>" line for each role.
 set -u
@@ -19,6 +23,8 @@ esac
 roles=("$@")
 [ $# -gt 0 ] || roles=(tailscale route-provisioner tailscale-userspace-socks reality-ingress ingress-agent task-runner)
 for c in docker ansible-playbook go curl python3; do command -v "$c" >/dev/null || { echo "SKIP: $c is not installed"; exit 0; }; done
+platform="${ANSIBLE_OS_PLATFORM:-linux/$(docker version -f '{{.Server.Arch}}')}"
+echo "platform $platform"
 
 sfx=$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')
 net="hlos-$sfx"; hs="hlos-hs-$sfx"; host="hlos-$os-$sfx"; img="hl-os-$os"
@@ -32,7 +38,7 @@ cleanup() {
 trap cleanup EXIT
 die() { echo "FATAL: $*"; exit 1; }
 
-docker build -q --platform linux/amd64 -t "$img" --build-arg BASE="$base" --build-arg EXTRA="$extra" "$root/ansible/tests/os-matrix" >/dev/null \
+docker build -q --platform "$platform" -t "$img" --build-arg BASE="$base" --build-arg EXTRA="$extra" "$root/ansible/tests/os-matrix" >/dev/null \
   || die "image build"
 docker network create "$net" >/dev/null || die "network"
 
@@ -86,8 +92,10 @@ key() { hx preauthkeys create -u "$svc_id" -e 1h --tags "$1" -o json | python3 -
 k_exit="$(key tag:exit)"; k_socks="$(key tag:socks)"
 
 # The host: systemd as PID 1. Privileged for /dev/net/tun, nftables and the nested rootless podman.
-docker run -d --platform linux/amd64 --name "$host" --hostname "$host" --network "$net" --privileged --cgroupns=host \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock "$img" >/dev/null || die "host"
+# /var/lib/task-runner is an anonymous volume: Ansible does not report the overlay root of a container in its mount
+# facts, so the free-disk preflight of task-runner finds no mount. A VM has a real root mount (#178).
+docker run -d --platform "$platform" --name "$host" --hostname "$host" --network "$net" --privileged --cgroupns=host \
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock -v /var/lib/task-runner "$img" >/dev/null || die "host"
 for _ in $(seq 60); do
   s="$(docker exec "$host" systemctl is-system-running 2>/dev/null)"; case "$s" in running|degraded) break ;; esac; sleep 1
 done
@@ -121,12 +129,18 @@ task_runner_min_free_mb: 64
 task_runner_min_free_disk_mb: 64
 YAML
 # A tiny stand-in run image: the matrix checks the install, not Chromium.
-docker pull -q --platform linux/amd64 busybox:1.37 >/dev/null && docker save -o "$T/run-image.tar" busybox:1.37 || die "run image"
+docker pull -q --platform "$platform" busybox:1.37 >/dev/null && docker save -o "$T/run-image.tar" busybox:1.37 || die "run image"
 
 # The connection settings go in the inventory, so tasks delegated to localhost keep the local connection.
 printf 'all:\n  hosts:\n    %s:\n      ansible_connection: community.docker.docker\n      ansible_python_interpreter: /usr/bin/python3\n' "$host" > "$T/hosts.yml"
 # Check mode of the apt module needs python3-apt, which a minimal image does not have (README "Supported systems").
-docker exec "$host" sh -c 'apt-get update -qq && apt-get install -y -qq --no-install-recommends python3-apt' >/dev/null 2>&1 || die "python3-apt"
+# One retry: a mirror sometimes fails one apt run (a flake, not a role result).
+for attempt in 1 2; do
+  docker exec "$host" sh -c 'apt-get update -qq && apt-get install -y -qq --no-install-recommends python3-apt' \
+    >"$T/python3-apt.log" 2>&1 && break
+  [ "$attempt" = 2 ] && { tail -n 5 "$T/python3-apt.log"; die "python3-apt"; }
+  sleep 10
+done
 
 play() { # role mode(check|apply) -> rc
   local role="$1" mode="$2" extra=()
@@ -155,7 +169,10 @@ for r in "${roles[@]}"; do
   elif play "$r" apply; then
     a=ok
     case "$r" in
-      tailscale) docker exec "$host" tailscale status --json | grep -q '"BackendState": *"Running"' || a=fail ;;
+      # The restart handler runs last, so give tailscaled a few seconds to reach Running.
+      tailscale) a=fail; for _ in $(seq 20); do
+          docker exec "$host" tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"' && { a=ok; break; }
+          sleep 1; done ;;
       tailscale-userspace-socks) docker exec "$host" systemctl is-active --quiet tailscaled-socks || a=fail ;;
       reality-ingress) for u in xray caddy-ingress ingress-guard; do docker exec "$host" systemctl is-active --quiet "$u" || a=fail; done ;;
       ingress-agent) docker exec "$host" systemctl is-active --quiet ingress-agent || a=fail ;;

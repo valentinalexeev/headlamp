@@ -6,6 +6,17 @@
 # (the operator's dev machine) and copied to the target, rather than having
 # the target fetch pkgs.tailscale.com directly — exit nodes in restricted networks
 # may not have reliable outbound access to it.
+# The .deb matches the node architecture: x86_64 -> amd64, aarch64 -> arm64 (#178; it was amd64 on every node).
+- name: Work out the tailscale package architecture
+  ansible.builtin.set_fact:
+    tailscale_deb_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture | default('')] | default('') }}"
+
+- name: Check the architecture is supported
+  ansible.builtin.assert:
+    that: tailscale_deb_arch | length > 0
+    fail_msg: "tailscale: only x86_64 and aarch64 nodes are supported (got {{ ansible_facts.architecture | default('no facts') }})."
+    quiet: true
+
 - name: Check installed tailscale version
   ansible.builtin.command: dpkg-query -W -f='${Version}' tailscale
   register: tailscale_dpkg
@@ -15,41 +26,41 @@
 
 - name: "Download tailscale {{ tailscale_version }} .deb to the control host"
   ansible.builtin.get_url:
-    url: "https://pkgs.tailscale.com/stable/tailscale_{{ tailscale_version }}_amd64.deb"
+    url: "https://pkgs.tailscale.com/stable/tailscale_{{ tailscale_version }}_{{ tailscale_deb_arch }}.deb"
     # Namespaced by target hostname, not just version: this task is
     # delegate_to: localhost, so its path is shared control-host disk
     # space across every host in the play, not per-target-host storage —
     # without inventory_hostname in the name, two hosts needing the same
     # version at once could race on the same file.
-    dest: "/tmp/tailscale_{{ tailscale_version }}_amd64-{{ inventory_hostname }}.deb"
+    dest: "/tmp/tailscale_{{ tailscale_version }}_{{ tailscale_deb_arch }}-{{ inventory_hostname }}.deb"
   delegate_to: localhost
   when: tailscale_dpkg.stdout != tailscale_version
 
 - name: "Copy tailscale {{ tailscale_version }} .deb to the target host"
   ansible.builtin.copy:
-    src: "/tmp/tailscale_{{ tailscale_version }}_amd64-{{ inventory_hostname }}.deb"
-    dest: "/tmp/tailscale_{{ tailscale_version }}_amd64.deb"
+    src: "/tmp/tailscale_{{ tailscale_version }}_{{ tailscale_deb_arch }}-{{ inventory_hostname }}.deb"
+    dest: "/tmp/tailscale_{{ tailscale_version }}_{{ tailscale_deb_arch }}.deb"
     mode: "0644"
   become: true
   when: tailscale_dpkg.stdout != tailscale_version and not ansible_check_mode
 
 - name: "Install tailscale {{ tailscale_version }} from the copied .deb"
   ansible.builtin.apt:
-    deb: "/tmp/tailscale_{{ tailscale_version }}_amd64.deb"
+    deb: "/tmp/tailscale_{{ tailscale_version }}_{{ tailscale_deb_arch }}.deb"
   become: true
   when: tailscale_dpkg.stdout != tailscale_version and not ansible_check_mode
   notify: Restart tailscaled
 
 - name: Remove the .deb file from the target host
   ansible.builtin.file:
-    path: "/tmp/tailscale_{{ tailscale_version }}_amd64.deb"
+    path: "/tmp/tailscale_{{ tailscale_version }}_{{ tailscale_deb_arch }}.deb"
     state: absent
   become: true
   when: tailscale_dpkg.stdout != tailscale_version and not ansible_check_mode
 
 - name: Remove the downloaded .deb file from the control host
   ansible.builtin.file:
-    path: "/tmp/tailscale_{{ tailscale_version }}_amd64-{{ inventory_hostname }}.deb"
+    path: "/tmp/tailscale_{{ tailscale_version }}_{{ tailscale_deb_arch }}-{{ inventory_hostname }}.deb"
     state: absent
   delegate_to: localhost
   when: tailscale_dpkg.stdout != tailscale_version and not ansible_check_mode
@@ -87,7 +98,8 @@
   when:
     - tailscale_pin_version | bool
     - tailscale_prefs.rc == 0
-    - (tailscale_prefs.stdout | from_json).AutoUpdate.Apply | default(false)
+    # Apply is null on a fresh node (not set yet); a conditional must be a boolean (#178).
+    - (tailscale_prefs.stdout | from_json).AutoUpdate.Apply | default(false, true) | bool
 
 # Minimal images (Ubuntu Minimal, Debian genericcloud, containers) can lack procps, which has the sysctl binary (#170).
 - name: Install procps (the sysctl binary)
@@ -97,6 +109,7 @@
     update_cache: true
     cache_valid_time: 3600
   become: true
+  register: tailscale_procps
 
 # Ubuntu 26.04 no longer reads /etc/sysctl.conf at boot; use a sysctl.d drop-in so it persists.
 - name: Enable IPv4 forwarding
@@ -108,6 +121,8 @@
     state: present
     reload: true
   become: true
+  # Check mode on a host without procps: no sysctl binary yet, a real run installs it first (#178).
+  when: not (ansible_check_mode and tailscale_procps is changed)
 
 - name: Enable IPv6 forwarding
   ansible.posix.sysctl:
@@ -118,6 +133,8 @@
     state: present
     reload: true
   become: true
+  # Check mode on a host without procps: no sysctl binary yet, a real run installs it first (#178).
+  when: not (ansible_check_mode and tailscale_procps is changed)
 
 - name: Check current tailscale connection state
   ansible.builtin.command: tailscale status --json

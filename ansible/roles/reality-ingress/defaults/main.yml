@@ -38,29 +38,35 @@ hy2_cert_sync_interval: 6h
 
 # Binaries and geodata come from the official images, pinned by digest (#182). The control host pulls only the
 # needed files from the registry with files/oci-extract.py (Python standard library; no docker, skopeo or crane).
-# A digest may name an image index (the linux/amd64 manifest is used) or a manifest. Each extracted file is
-# checked against its sha256 below. To update: change the digest and the sha256 values together.
+# The digest names an image index; the manifest of the node architecture is used (amd64 for x86_64, arm64 for
+# aarch64). Each binary is checked against its sha256 for that architecture (#178).
+# To update: change the digest and all sha256 values together.
 xray_image: "ghcr.io/xtls/xray-core@sha256:ceabeac03a89d991d2a247361825c1d1d2e9c91cd5dc010f298c7dc0c2f325c9"  # 26.10.31
 xray_image_path: /usr/local/bin/xray
-xray_image_sha256: 96d903d9b27e45dba5a346159a212a9fc5b3cd91e6023aa99240703e555cfc4f
+xray_image_sha256:
+  amd64: 96d903d9b27e45dba5a346159a212a9fc5b3cd91e6023aa99240703e555cfc4f
+  arm64: ae655aea533856b8c8bfec6c022a93ef8daea1475cfa27baeba709799ef6ee5e
 # Directory of the geodata files in xray_image.
 xray_image_geodata_dir: /usr/local/share/xray
 caddy_image: "docker.io/library/caddy@sha256:0c2243efcf437ab7f7a978f1027fcf0d4f9be8a75df27b1b3fbc5dbe0ffa8cf0"  # 2.11.9
 caddy_image_path: /usr/bin/caddy
-caddy_image_sha256: a563843e11cbce39c557bd429ebb787d56f49d51d9bbb3292cd9b36b37a60cdf
+caddy_image_sha256:
+  amd64: a563843e11cbce39c557bd429ebb787d56f49d51d9bbb3292cd9b36b37a60cdf
+  arm64: 762d7763ed8e303d50bf11fb0274627266907ea8c170720d7d9a6fd0b9bf5c65
 
 # Override: a release archive from a URL (for example a mirror) instead of the image. Empty = use the image.
-# xray: the linux/amd64 zip that holds `xray`; xray_sha256 is the sha256 of the ARCHIVE.
+# The archive must match the node architecture.
+# xray: the linux zip that holds `xray`; xray_sha256 is the sha256 of the ARCHIVE.
 # xray_version is only a convenience for building the URL.
 xray_version: ""
 xray_url: ""
 xray_sha256: ""
-# caddy: the linux/amd64 .tar.gz that holds `caddy`; caddy_sha256 is the sha256 of the ARCHIVE.
+# caddy: the linux .tar.gz that holds `caddy`; caddy_sha256 is the sha256 of the ARCHIVE.
 caddy_version: ""
 caddy_url: ""
 caddy_sha256: ""
 
-# Geodata files, each {name, sha256} and an optional url. Without url the file comes from
+# Geodata files (the same for every architecture), each {name, sha256} and an optional url. Without url the file comes from
 # xray_image:xray_image_geodata_dir/<name>. At least geoip.dat and geosite.dat (the ingress agent's optional
 # direct lists, ingress_direct_geoip / ingress_direct_geosite, refer to entries of these files).
 xray_geodata_files:

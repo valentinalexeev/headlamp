@@ -127,7 +127,7 @@ test-access-e2e:
 # Each tool runs natively when installed, else through its pinned docker image.
 GO_APPS              := $(patsubst %/go.mod,%,$(wildcard apps/*/go.mod))
 GOLANGCI_LINT_VERSION := v2.15.0
-GOVULNCHECK_VERSION  := v1.1.4
+GOVULNCHECK_VERSION  := v1.9.0
 LINT_BASE_REV        ?= origin/main
 HADOLINT_VERSION     := v2.12.0
 KUBECONFORM_VERSION  := v0.6.7

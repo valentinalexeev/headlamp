@@ -125,3 +125,14 @@ variable "ami_id" {
   default     = null
   description = "AMI ID to use instead of the Canonical lookup (image_flavor). The image must run cloud-init, for example a Debian 13 AMI of owner 136693071363. Null (default) uses the lookup."
 }
+
+variable "metadata_hop_limit" {
+  type        = number
+  default     = 1
+  description = "IMDSv2 PUT response hop limit. 1 (default): only processes on the host and host-network containers get the instance role. 2: containers on a bridge network (for example node-control with the aws provider) can also use the role, so give the role only what all containers on the host may do."
+
+  validation {
+    condition     = var.metadata_hop_limit >= 1 && var.metadata_hop_limit <= 64 && floor(var.metadata_hop_limit) == var.metadata_hop_limit
+    error_message = "metadata_hop_limit must be a whole number from 1 to 64."
+  }
+}

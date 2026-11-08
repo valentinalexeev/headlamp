@@ -1,0 +1,79 @@
+# Dependabot version updates for the manifests in this repository. A site's private repository that vendors this one
+# keeps its own configuration.
+#
+# tailscale and headscale are NOT updated here: one version for the whole repo lives in TAILSCALE_VERSION and
+# HEADSCALE_VERSION, `make check-tailscale-pins` / `make check-headscale-pin` keep every pin equal, and the weekly
+# upstream-versions workflow opens an issue for a new release. A Dependabot bump of one pin would fail those checks.
+version: 2
+
+updates:
+  # Go modules of the services.
+  - package-ecosystem: gomod
+    directories:
+      - /apps/funnel-ingress
+      - /apps/ingress-agent
+      - /apps/node-control
+      - /apps/task-runner
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: tailscale.com
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Base images in the Dockerfiles.
+  - package-ecosystem: docker
+    directories:
+      - /ansible/tests/os-matrix
+      - /apps/exit-node
+      - /apps/funnel-ingress
+      - /apps/headscale
+      - /apps/node-control
+      - /apps/tailnet-connector
+      - /examples/compose/control/caddy
+      - /scripts/test/hysteria
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: ghcr.io/juanfont/headscale
+      - dependency-name: tailscale/tailscale
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Images in the compose files.
+  - package-ecosystem: docker-compose
+    directories:
+      - /apps/tailguard
+      - /examples/compose/control
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: ghcr.io/juanfont/headscale
+      - dependency-name: tailscale/tailscale
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Terraform provider constraints.
+  - package-ecosystem: terraform
+    directories:
+      - /terraform/modules/control-host/aws
+      - /terraform/modules/exit-node-vm/*
+      - /examples/private-repo/terraform
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Actions used by the workflows (pinned by SHA; Dependabot keeps the SHA and the version comment in step).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci(deps)"

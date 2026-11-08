@@ -34,11 +34,28 @@ says "No action required".
   - The control host must reach `ghcr.io` and `registry-1.docker.io` over HTTPS.
 
   Check: `grep -rn 'xray_version\|xray_sha256\|caddy_version\|caddy_sha256\|xray_url\|caddy_url' ansible/`.
+- **`exit-node-vm/aws`: an existing node gets a new launch template version** (#203). The launch template now
+  requires IMDSv2 (hop limit 1). `terraform plan` shows `metadata_options` on the launch template and nothing else for a
+  caller that sets `tailscale_authkey` and `ssh_public_key`. The user data does not change. The running instance stays.
+  The group uses the new version at the next start, for example after a stop and start by node-control.
+  - Software on the node that reads instance metadata with IMDSv1 (no token) stops working. headlamp itself does not
+    use IMDSv1.
+  - Recommended, not required: move the auth key out of the state. Put the key in Secrets Manager, set
+    `authkey_secret_arn`, and remove `tailscale_authkey`. The module then makes a node role (`iam_path`,
+    `iam_permissions_boundary` if the account needs them) that can read only that secret. The deploying identity
+    needs `iam:CreateRole`, `iam:PutRolePolicy`, `iam:CreateInstanceProfile`, `iam:AddRoleToInstanceProfile` and
+    `iam:PassRole` for it.
+  - `ssh_public_key` is now optional. If you remove it, the plan destroys the key pair. Nothing uses it.
+
+  Check: `terraform plan` on the exit-node stack shows only `metadata_options` changes on `aws_launch_template`.
 
 ### Defaults that changed
 
 - The exit-node image is built on `alpine:3.20` (was `alpine:3.18`) (#189). A site overlay for `exit-node` that adds
   packages with `apk` must work on Alpine 3.20. Check: `fly/deploy.sh exit-node` builds with no error.
+- `control-host/aws` has `metadata_hop_limit` (default `1`, as before) (#204). Set `2` only if node-control on the
+  compose bridge network must use the instance role with its `aws` provider. Then every container on the host can use
+  the role. The default plan does not change.
 
 ## 0.12.0
 

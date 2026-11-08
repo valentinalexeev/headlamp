@@ -7,6 +7,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Added
 
 - Dependabot opens update PRs for the Go modules, the base and compose images, the Terraform providers and the GitHub Actions. tailscale and headscale are not in it: their pins move together.
+- `control-host/aws`: variable `metadata_hop_limit` (default `1`, 1 to 64) for the IMDSv2 hop limit (#204). Set `2` so that node-control on the compose bridge network can use the instance role with its `aws` provider. The default plan does not change.
 
 ### Changed
 

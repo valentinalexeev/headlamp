@@ -865,5 +865,40 @@ const fieldValue = (els, label) => {
     assert.strictEqual(root2.hidden, true);
   }
 
+  if (process.argv[6]) {
+    // tailnet grants (#139): the devices view lists targets direct and through the owner; Save posts the checked set
+    require(path.resolve(process.argv[6]));
+    const tn = global.window.hl.tailnet;
+    const view = { targets: [{ name: 'nas', dst: ['tag:nas:22'] }, { name: 'printer', dst: ['100.64.0.20:631'] }],
+      grants: [{ bridge: 'b', kind: 'device', subject: '1', target: 'nas' }, { bridge: 'b', kind: 'owner', subject: 'carol', target: 'printer' }],
+      bridges: [{ name: 'b', mode: 'grants', groups: [{ tag: 'tag:ingress-g-0a1b2c3d', targets: ['nas'], devices: [1], status: 'needs_provisioning' }], unresolved: ['group:ops'] }] };
+    assert.deepStrictEqual(tn.targetsOf(view, 'b', { id: 1, owner: 'carol' }), { direct: ['nas'], owner: ['printer'] });
+    const calls = [];
+    global.window.hl.api = (m, u, b) => { calls.push([m, u, b]); return Promise.resolve(u === '/enroll/devices' ? { devices: [{ id: 1, name: '<i>p</i>', owner: 'carol' }, { id: 2, name: 'r', owner: '', revoked: true }] } : view); };
+    const sec = new FakeNode('section'); sec.hidden = true;
+    const rows = new FakeNode('tbody'); const err = new FakeNode('div');
+    await tn.mountDevices({ section: sec, rows: rows, error: err }).load();
+    assert.strictEqual(sec.hidden, false);
+    assert.strictEqual(rows.children.length, 1, 'revoked devices are not listed');
+    assert.ok(textOf(rows).includes('<i>p</i>') && textOf(rows).includes('b: nas, printer'));
+    buttonNamed(rows, 'Edit').click();
+    const boxes = findAll(rows, (n) => n.tag === 'input' && n.attrs.type === 'checkbox');
+    assert.strictEqual(boxes.length, 4);
+    boxes[1].checked = true; // printer, for this device
+    findAll(rows, (n) => n.tag === 'button' && n.textContent === 'Save')[0].click();
+    await flush();
+    const post = calls.find((c) => c[0] === 'POST');
+    assert.deepStrictEqual(post, ['POST', '/enroll/tailnet-grants/subject', { bridge: 'b', kind: 'device', subject: '1', targets: ['nas', 'printer'] }]);
+    // bridge view: the groups, the unresolved subjects and the apply button
+    const acl = { status: 'out_of_sync', changes: [{ op: 'add', src: 'tag:ingress-g-0a1b2c3d', new: ['tag:nas:22'] }] };
+    global.window.hl.api = (m, u) => { calls.push([m, u]); return Promise.resolve(u === '/enroll/tailnet-acl' ? acl : view); };
+    const bsec = new FakeNode('section'); bsec.hidden = true; const root = new FakeNode('div');
+    await tn.mountBridge({ section: bsec, root: root, error: new FakeNode('div') }, 'b').load();
+    assert.ok(textOf(root).includes('needs provisioning') && textOf(root).includes('group:ops') && textOf(root).includes('ACL preview'));
+    buttonNamed(root, 'Apply through policy console').click();
+    await flush();
+    assert.ok(calls.some((c) => c[0] === 'POST' && c[1] === '/enroll/tailnet-acl'));
+  }
+
   console.log('enroll self-test ok');
 })().catch((e) => { console.error(e); process.exit(1); });

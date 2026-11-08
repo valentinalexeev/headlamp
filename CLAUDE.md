@@ -83,6 +83,11 @@ commits on top of it or attempt a rewrite on your own.
 - Versions: strict semver, one version for the repo; see `VERSIONING.md`. Mark a breaking change with `!` or a
   `BREAKING CHANGE:` footer, since releases are checked against commit subjects. Note user-visible changes under
   `Unreleased` in `CHANGELOG.md`. Never move or delete a release tag.
+- New features are off by default before 1.0.0 (#200): a feature that opens a port, changes an access rule or adds a
+  protocol must not turn on for a running site that changes no config. If a default must change, the role or app fails
+  early (in check mode too) with a message that names the variable and what each value does, and the changelog says so.
+  `make check-feature-defaults` (in `make lint`) fails on a new `<name>_enabled: true` role default that is not in
+  `scripts/feature-defaults.allow`. See "New features before 1.0.0" in `VERSIONING.md`.
 - Manuals: write and update them in Simplified Technical English, to `docs/writing-manuals.md`. CI checks each manual a
   PR changes (`make check-manuals`). Accuracy comes first: keep every value, limit, condition and warning.
 - A new or renamed image goes in `.github/components.json`, and in `docs/images.md`; CI builds from that list.

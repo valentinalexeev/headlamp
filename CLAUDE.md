@@ -183,7 +183,7 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
   Names: `<prefix>/<issue>-<slug>`, lower-case, prefixes `feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `ci/`,
   `chore/`, `hotfix/` (incidents), `release/X.Y.Z`. Example: `fix/97-sidecar-retry`. Keep branches short-lived and
   `main` releasable at every merge.
-- Commits and PR titles: Conventional Commits (section 1, checked by `pr-title`), footers `Refs #NN` / `Closes #NN`.
+- Commits, PR titles and issue titles: Conventional Commits (section 1; `pr-title` checks PRs only), footers `Refs #NN` / `Closes #NN`. An issue title names the change that closes it, for example `fix(funnel-sidecar): recover the route registration`.
   Commit and push as you go.
 - PR description (template in `.github/pull_request_template.md`): `🤖 AI agent:`, issue link, what was done,
   **checks run with results**, what remains open (as issue links), files shared with other open PRs.
@@ -232,7 +232,7 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
 
 ### Commits, changelog, manuals and the wiki
 
-- **Conventional Commits 1.0.0** for every commit and PR title: `<type>[(scope)][!]: <description>`, imperative,
+- **Conventional Commits 1.0.0** for every commit, PR title and issue title: `<type>[(scope)][!]: <description>`, imperative,
   lower-case, no trailing period, then an optional body and footers. Types: `feat`, `fix`, `docs`, `style`,
   `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Scope is the component (`node-control`,
   `funnel-ingress`, `headscale`, `exit-node`, `tailguard`, `task-runner`, `route-provisioner`, `terraform`, `ansible`,

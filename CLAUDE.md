@@ -161,6 +161,10 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
 - **Marking.** Issues the bot creates get the `AI` label. Bodies, comments and PR descriptions start with
   `🤖 AI agent:`. Commits are authored by the bot; add
   `Co-authored-by: Valentin Alexeev <valentinalexeev@users.noreply.github.com>` when the owner requested the change.
+- **GitHub text in STE.** Write issue bodies, issue and PR comments, PR descriptions and review replies in ASD-STE100
+  Simplified Technical English, to the rules of [`docs/writing-manuals.md`](docs/writing-manuals.md): short sentences,
+  one instruction in one sentence, approved words, and lists or tables for steps and options. Keep code, commands,
+  file names, versions and quoted tool output exactly as they are.
 - **Queue = assignee.** The agent works only on issues the owner assigned to `valentinalexeev-bot` and never assigns
   itself. When it needs a decision, or is done and waits for review or merge, it reassigns the issue to
   `valentinalexeev` with a comment saying what is needed.
@@ -246,7 +250,7 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   project's technical names. CI checks changed manuals (`make check-manuals`, workflow `manuals`); run it before
   pushing. Accuracy comes first: keep every value, limit and warning when rewriting. The independent reviewer checks STE
   on every PR that changes a manual. Agent rules (this section, `AGENTS.md`), the changelog and code comments use
-  normal technical English.
+  normal technical English. GitHub issues, comments and PR descriptions use STE (see "GitHub text in STE" above).
 - **Wiki.** The documentation is published to the GitHub wiki by the `wiki` workflow when a release tag is pushed, so
   the wiki shows the released docs, not work in progress on `main`: `README.md` → Home, `docs/<name>.md` → `<name>`,
   `VERSIONING.md`, `CHANGELOG.md`, and every component, role and module `README.md` (for example

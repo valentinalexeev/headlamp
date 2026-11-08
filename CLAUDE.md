@@ -270,6 +270,7 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
 | `test-task-runner`, `test-ingress-agent` | PRs touching those apps | their Go tests |
 | `wiki` | release tags | publishes the docs of that release |
 | `upstream-versions` | Mondays, and by hand | opens one issue when a newer stable tailscale or headscale exists than `TAILSCALE_VERSION` or `HEADSCALE_VERSION` |
+| `dependabot` (`.github/dependabot.yml`) | weekly (actions: monthly) | PRs for new Go modules, base images, compose images, Terraform providers and actions; tailscale and headscale are excluded (their pins move together through `TAILSCALE_VERSION` / `HEADSCALE_VERSION`) |
 
 All jobs run on `ubuntu-26.04`. `.github/actionlint.yaml` lists the label until the bundled actionlint knows it.
 `ci` jobs always report (skipped steps say so), so they can be required checks in branch protection. Run the same

@@ -39,7 +39,7 @@ variable "flavor_name" {
 variable "image_name" {
   type        = string
   default     = "ubuntu-22.04"
-  description = "Boot image name, matched exactly against cloudru_evolution_compute_image_collection."
+  description = "Boot image name, matched exactly against cloudru_evolution_compute_image_collection. Stays \"ubuntu-22.04\" until a 26.04 public image is confirmed (#164)."
 }
 
 variable "image_metadata" {

@@ -56,6 +56,12 @@ variable "extra_tcp_ingress_ports" {
 
 variable "ubuntu_version" {
   type        = string
-  default     = "24.04"
-  description = "Canonical Ubuntu release for the boot image (the newest image of that release is picked at creation). An existing instance keeps its image: changing this does not replace it, use terraform -replace for a deliberate rebuild."
+  default     = "26.04 Minimal"
+  description = "OCI operating_system_version of the \"Canonical Ubuntu\" platform image, for example \"26.04 Minimal\", \"24.04 Minimal\" or \"24.04\" (full server image). The newest image of that version is picked at creation. An existing instance keeps its image: a change does not replace it, use terraform -replace for a deliberate rebuild."
+}
+
+variable "ubuntu_version_fallback" {
+  type        = string
+  default     = "24.04 Minimal"
+  description = "operating_system_version to use when OCI has no image of ubuntu_version for the shape. Null turns the fallback off, so a missing image fails the plan."
 }

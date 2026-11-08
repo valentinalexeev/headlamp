@@ -53,6 +53,29 @@ When the node is on the tailnet, you can drop `admin_ssh_cidr`. Set
 
 As of v2.1.5, the Cloud.ru Evolution provider has no preemptible or spot option, so this node is a regular VM.
 
+## Boot image
+
+The default of `image_name` is `ubuntu-22.04`. The default stays because no public source confirms a Ubuntu 26.04
+image in Cloud.ru Evolution. To find the images of your project, use the
+`cloudru_evolution_compute_image_collection` data source. If your project has a 26.04 image, set `image_name` to its
+name.
+
+### Supported images
+
+The table gives the default image and the override for each provider of `exit-node-vm`. All images must run
+cloud-init. The Ansible roles are tested on Ubuntu only.
+
+| Provider | Default image | Override |
+|---|---|---|
+| `aws` | Ubuntu 26.04 Minimal (Canonical AMI) | `image_flavor = "server"` for Ubuntu Server. `ami_id` for a different AMI, for example Debian 13 |
+| `oci` | Ubuntu 26.04 Minimal. If OCI has no such image, Ubuntu 24.04 Minimal | `ubuntu_version`, `ubuntu_version_fallback` |
+| `yandex` | Ubuntu 26.04 LTS (family `ubuntu-2604-lts`) | `image_family` or `image_id`, for example family `debian-13` |
+| `openstack`, `selectel` | `Ubuntu 26.04 LTS 64-bit` | `image_name` |
+| `cloudru` | `ubuntu-22.04` | `image_name` |
+
+Ubuntu Minimal has fewer packages and services than Ubuntu Server, and it has no snapd. Yandex Cloud, Selectel and
+Cloud.ru do not publish a Minimal image, so these modules use the server image.
+
 ## Replacing the VM
 
 Terraform ignores `cloud_init_userdata` after creation, because it runs only on first boot. Redeploy on purpose with

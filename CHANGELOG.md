@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.12.0 - 2026-11-08
+
 ### Added
 
 - `make test-ansible-os IMAGE=<ubuntu-minimal|ubuntu-server|debian13>` runs each Ansible role in check mode and then for real in a throwaway systemd container, with a real headscale (#170). Each role README has a "Supported systems" part.

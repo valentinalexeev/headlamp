@@ -20,8 +20,34 @@ concurrency:
   group: images-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  # Release preflight (#192): every Ansible role in check mode in a systemd container, every image built, and every app
+  # with an example overlay built and started with its fly.toml process commands (also those of the previous release).
+  # Runs on tags and on release/ PRs; a tag cannot pass the gate while it fails.
+  preflight:
+    if: github.ref_type == 'tag' || startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install ansible
+        run: |
+          pipx install --include-deps ansible-core
+          ansible-galaxy collection install -r ansible/requirements.yml
+          ansible-galaxy collection install community.docker
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/ingress-agent/go.mod
+      - name: Run the release preflight
+        run: scripts/release-preflight.sh HEAD
+
   gate:
-    if: github.ref_type == 'tag'
+    needs: preflight
+    # Runs also when preflight failed, and fails then: a skipped gate would let detect publish.
+    if: ${{ !cancelled() && github.ref_type == 'tag' }}
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -30,6 +56,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Require the release preflight
+        env:
+          PREFLIGHT: ${{ needs.preflight.result }}
+        run: |
+          test "$PREFLIGHT" = success || { echo "release preflight result is $PREFLIGHT"; exit 1; }
       - name: Check the release rules
         env:
           GH_TOKEN: ${{ github.token }}

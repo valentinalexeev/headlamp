@@ -1,0 +1,24 @@
+# Example site overlay for the headscale Fly app. Copy it to fly/headscale/fly.toml in your private repo and set the
+# placeholders. fly/deploy.sh lays it over vendor/headlamp/apps/headscale for the build.
+# scripts/release-preflight.sh builds the image with this overlay and starts each process once (#192).
+app = "<your-headscale-app>"
+primary_region = "<region>"
+kill_signal = "SIGINT"
+kill_timeout = 5
+
+[processes]
+# The image entrypoint is the headscale binary (stock distroless image, #152): give only its arguments.
+app = "serve"
+
+[[services]]
+  internal_port = 8080
+  processes = ["app"]
+  protocol = "tcp"
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+[mounts]
+source = "headscale_data"
+destination = "/data"

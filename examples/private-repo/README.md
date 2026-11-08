@@ -14,6 +14,7 @@ Makefile                      glue: sops key, tf-run.sh targets, ansible, versio
 terraform/                    root stack using vendor/headlamp/terraform/modules (+ example vars)
 ansible/                      ansible.cfg, site.yml, inventory + vars examples
 fly/deploy.sh                 overlay deploy for the Fly apps
+fly/headscale/fly.toml        example headscale overlay (checked by make release-preflight)
 fly/node-control/tasks/       placeholder task config and a commented task script (tasks module)
 ```
 

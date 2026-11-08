@@ -6,6 +6,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
+- `UPGRADING.md` lists, for each release from 0.10.0, what a site repo must change (#193). `scripts/check-release.sh` refuses a tag when `UPGRADING.md` has no section for its version. The wiki publishes it as `UPGRADING`.
 - Dependabot opens update PRs for the Go modules, the base and compose images, the Terraform providers and the GitHub Actions. tailscale and headscale are not in it: their pins move together.
 
 ### Changed

@@ -4,7 +4,8 @@
 #   check-release.sh vX.Y.Z[-rc.N] [MAIN_REF]
 #
 # The tag must be strict semver, match the VERSION file at that commit, be on MAIN_REF (default origin/main), be the next
-# version after the highest stable tag, and bump enough for the commits since then. With RELEASE_REPO=owner/name it
+# version after the highest stable tag, bump enough for the commits since then, and have a "## X.Y.Z" section in
+# UPGRADING.md if that file exists. With RELEASE_REPO=owner/name it
 # must also have no open issues in a milestone named after its version.
 set -euo pipefail
 
@@ -57,6 +58,11 @@ if [ -n "$previous" ]; then
 	rank() { case $1 in patch) echo 0 ;; minor) echo 1 ;; major) echo 2 ;; esac; }
 	[ "$(rank "$bump")" -ge "$(rank "$need")" ] ||
 		fail "the commits since $previous need at least a $need release, this is a $bump"
+fi
+
+# A site must know what to change: UPGRADING.md needs a section for the version (once the file exists).
+if upgrading=$(git show "$commit:UPGRADING.md" 2>/dev/null); then
+	grep -qxF "## ${core#v}" <<<"$upgrading" || fail "UPGRADING.md has no '## ${core#v}' section"
 fi
 
 if [ -n "${RELEASE_REPO:-}" ]; then

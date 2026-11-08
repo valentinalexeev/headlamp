@@ -10,6 +10,11 @@
 {% set socks_port = socks_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int %}
 {% set api_host = xray_api_listen | regex_replace('^\\[?(.*?)\\]?:[0-9]+$', '\\1') %}
 {% set api_port = xray_api_listen | regex_replace('^.*:([0-9]+)$', '\\1') | int %}
+{% set group_outbounds = [] %}
+{% for g in socks_grant_groups %}
+{%   set _ = group_outbounds.append({'tag': 'via-tailnet-' ~ g.id, 'protocol': 'socks',
+       'settings': {'servers': [{'address': '127.0.0.1', 'port': socks_grant_port_base | int + loop.index0}]}}) %}
+{% endfor %}
 {% set cfg = {
   'log': {'loglevel': 'warning', 'access': 'none'},
   'stats': {},
@@ -50,7 +55,7 @@
     {'tag': 'direct', 'protocol': 'freedom', 'streamSettings': {'sockopt': {'domainStrategy': 'UseIPv4'}}},
     {'tag': 'via-exit', 'protocol': 'socks', 'settings': {'servers': [{'address': socks_host, 'port': socks_port}]}},
     {'tag': 'via-tailnet', 'protocol': 'socks', 'settings': {'servers': [{'address': socks_host, 'port': socks_port}]}}
-  ],
+  ] + group_outbounds,
   'routing': {
     'domainStrategy': 'IPOnDemand',
     'rules': [
@@ -63,6 +68,9 @@
   via-tailnet (#132): granted tailnet traffic. It is the same tailscaled SOCKS as via-exit: tailscaled sends
   tailnet addresses over the tailnet, and the headscale ACL for the bridge's tag decides what answers. The agent
   routes to it only the tailnet ranges of credentials with a grant; everything else stays blocked.
+  via-tailnet-<group id> (#139): one per tailnet grant group, to its own tailscaled (socks_grant_groups, ports from
+  socks_grant_port_base). Each has its own tailnet tag, so the ACL limits the group. A group without its outbound
+  gets no route from the agent: it stays blocked until a playbook run adds it.
 #}
 {#
   Hysteria 2 (#110): "hy2-in", on UDP. The agent puts every credential here too (auth = the uuid, the same email),

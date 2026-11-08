@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+# Tailnet grant group {{ socks_group.id }} (#139): a userspace tailscaled with its own tag and a loopback SOCKS5 port.
+[Unit]
+Description=Tailscale userspace daemon for tailnet grant group {{ socks_group.id }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ socks_user }}
+Group={{ socks_user }}
+ExecStart={{ socks_tailscaled_bin }} --tun=userspace-networking --socks5-server=127.0.0.1:{{ socks_group_port }} --statedir=/var/lib/tailscaled-socks-{{ socks_group.id }} --socket=/run/tailscaled-socks-{{ socks_group.id }}/tailscaled.sock --port=0 --no-logs-no-support
+RuntimeDirectory=tailscaled-socks-{{ socks_group.id }}
+RuntimeDirectoryMode=0700
+StateDirectory=tailscaled-socks-{{ socks_group.id }}
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=5
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

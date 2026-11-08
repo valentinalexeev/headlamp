@@ -13,6 +13,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Changed
 
+- `control-host/aws` uses Ubuntu 26.04 Minimal by default (was Ubuntu 26.04 Server) (#171). New input `image_flavor`, default `minimal`. Set `server` to keep the old image. New input `ami_id` sets any other AMI. The instance ignores AMI changes, so a running host is not replaced.
 - CI runs on `ubuntu-26.04` runners.
 
 ### Fixed

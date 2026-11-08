@@ -433,7 +433,7 @@ The file gives one or more bridge nodes. Each entry is a bridge host with its ow
   - `node`: the tailnet name of the machine that runs the bridge, a lowercase DNS name. It is necessary when it is different from `name`. Otherwise, the stopped check, the online flag and the Nodes page match the bridge by name.
   - `intermittent`: `true` or `false`. The default is `false`. See "Intermittent bridges".
   - `hy2_port`: the UDP port of the Hysteria 2 inbound of the bridge (#110), 1-65535. Without it the bridge has no Hysteria 2. A discovered bridge publishes it in `/v1/info`.
-  - `tailnet_access`: `"off"` or `"all"`. The default is `"off"`. See "Tailnet access through a bridge". Only `enroll.json` can set it. A discovered bridge cannot give it to itself.
+  - `tailnet_access`: `"off"`, `"all"` or `"grants"`. The default is `"off"`. See "Tailnet access through a bridge" and "Tailnet grants". Only `enroll.json` and the console can set it. A discovered bridge cannot give it to itself.
 - `sni`, `short_id` and `public_key` must equal these values of the `reality-ingress` role: `reality_sni`, `reality_short_id` and the public half of `reality_private_key` (`xray x25519 -i <private>`). `port` must equal its `ingress_listen_port`.
 - `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>` and `/e/<token>`. Thus the name must resolve to a bridge whose front serves it and proxies to `:8081` of node-control, with a certificate for it. Prerequisite: before you enrol the first device, make DNS for `link_host` available, and a certificate that works on the bridge that it points at. The front of every bridge must be able to serve it, so you can fail over if you move the name to another bridge.
 - The old single-host file has `host`, `public_key`, `short_id`, `sni` and `port` at the top level, and no `ingresses`. It still loads as one bridge with the name `default` and `"uuids": "base"`, and uses `AGENT_TOKEN`. A file with both shapes is an error.
@@ -462,6 +462,87 @@ The headscale ACL decides which tailnet hosts answer. node-control makes one rul
 `GET /enroll/tailnet-acl` shows the rule and its status: `in_sync`, `out_of_sync`, `no_console` or `not_plain_json`. When no bridge grants access, the same `POST` removes the rule. The policy console must be active (`POLICY_DB`). Without it, add the rule to the policy yourself.
 
 > **WARNING:** The rule applies to every node with the source tag. Thus, all bridges with that tag can reach the destinations through their own SOCKS port. A client of a bridge with `"off"` still cannot reach them, because its agent blocks the tailnet.
+
+NOTE: `"all"` is deprecated. It stays supported in 0.x. Use `"grants"` for new bridges, and use "Convert to grants" for a bridge that has `"all"`.
+
+### Tailnet grants
+
+With `"tailnet_access": "grants"` (#139), a client of the bridge can reach only the tailnet targets that its device holds. A bridge in grants mode ignores `ENROLL_TAILNET_DST`.
+
+A **target** is a name for a set of ACL destinations. Write the targets once in `enroll.json`, at the top level:
+
+```json
+"tailnet_targets": [
+  {"name": "nas", "dst": ["tag:nas:445,22"]},
+  {"name": "printer", "dst": ["100.64.0.20:631"]}
+]
+```
+
+`dst` uses the headscale ACL syntax: a tag, a host or an address, then `:` and the ports. `*:*` is not accepted. There are at most 32 targets. You can also add targets on the bridge page of the console. A target from `enroll.json` cannot be changed in the console.
+
+A **grant** gives one subject one target on one bridge. The subject is one of these:
+
+- A device.
+- An owner. The grant applies to all devices of the owner, also to devices that the owner enrols later.
+- A group (`group:<name>`). node-control keeps the grant, but it gives no access until node-control knows the group of the device owner (OIDC enrolment, #102). The bridge page shows it as "not resolved".
+
+The bridge sees only credential uuids and opaque group ids. It never sees device names, owners or target names.
+
+#### Grant groups
+
+The credentials with the same set of targets form a **grant group**. Each group has the tag `tag:ingress-g-<8 hex>`. The 8 hex characters are a hash of the sorted target names, so the tag does not change and does not show the names.
+
+Each group has its own tailnet identity on the bridge: one more userspace tailscaled with its own SOCKS port, from `127.0.0.1:1056`. The ACL thus sees a different source for each group, and it is the real limit. The agent sends the tailnet addresses of the group's credentials to the outbound `via-tailnet-<group id>`. A bridge can serve at most 8 groups. The groups after the eighth get no tailnet access, and the console shows an error.
+
+The bridge page shows each group with its status:
+
+| Status | Meaning |
+|---|---|
+| `needs provisioning` | The bridge has no SOCKS instance for the group. Its credentials get no tailnet route (deny by default). |
+| `pending ACL` | The live policy does not have the rule of the group, or has a different rule. |
+| `ok` | The bridge has the instance, and the policy has the rule. |
+| `over the limit` | The bridge already serves 8 groups. |
+
+To give a new group access, do these steps:
+
+1. Give the grants on the Devices page.
+2. On the bridge page, read the tag of the new group.
+3. Make a pre-auth key with that tag. Add the tag to `tagOwners` with the same owners as `ENROLL_INGRESS_TAG`.
+4. Add the group to `socks_grant_groups` of the bridge host, with its key. See the `tailscale-userspace-socks` role.
+5. Run the playbook. The group status changes from `needs provisioning` after the next sync.
+6. On the bridge page, push "Apply through policy console".
+7. Confirm the change in the policy console.
+
+#### Generated ACL rules
+
+node-control makes one rule for each group: `accept`, source the group tag, destinations the union of the `dst` of its targets. It also makes one `tagOwners` entry for each group tag. This entry has the owners of `ENROLL_INGRESS_TAG`. node-control changes only the phase 1 rule and the rules whose source starts with `tag:ingress-g-`. It removes the rules of groups that no credential holds.
+
+`GET /enroll/tailnet-acl` shows the preview: the rules to add, change and remove (`changes`). `POST /enroll/tailnet-acl` sends all of them, with the phase 1 rule, as one policy change. Confirm or revert it in the policy console. The status `no_tag_owner` means that the policy has no `tagOwners` entry for `ENROLL_INGRESS_TAG`.
+
+#### Rights and audit
+
+To read the grants, a user needs `enroll.view`. To change them, a user needs `enroll.admin`. Each change goes to the audit log, with the actions `tailnet.mode`, `tailnet.target`, `tailnet.target_remove`, `tailnet.grant` and `tailnet.convert`.
+
+#### API
+
+| Request | Body | Effect |
+|---|---|---|
+| `GET /enroll/tailnet-grants` | | Targets, grants, and for each bridge the mode, the groups with their status, and the subjects that are not resolved. |
+| `POST /enroll/tailnet-grants/mode` | `{"bridge", "mode"}` | Sets `tailnet_access` of the bridge in the console. This value overrides `enroll.json`. |
+| `POST /enroll/tailnet-grants/targets` | `{"name", "dst"}` | Adds or changes a console target. |
+| `DELETE /enroll/tailnet-grants/targets/{name}` | `{}` | Removes a console target and its grants. |
+| `POST /enroll/tailnet-grants/subject` | `{"bridge", "kind", "subject", "targets"}` | Sets the targets of one subject on one bridge. `kind` is `device` (subject: the device id), `owner` or `group`. An empty list removes the grants. |
+| `POST /enroll/tailnet-grants/convert` | `{"bridge"}` | The one-time migration from `"all"`, see below. |
+
+The grants are not in the enrolment export. After a restore, no device has a grant until you give the grants again.
+
+#### Migration from `"all"`
+
+node-control does not change a bridge with `"all"` automatically. To move it to grants, do these steps:
+
+1. On the bridge page, push "Convert to grants". node-control makes the target `all` from `ENROLL_TAILNET_DST`. It gives the target to every active device on that bridge, and sets the bridge to `"grants"`. Thus the access does not change.
+2. Provision the new group and apply the ACL, as in "Grant groups".
+3. Make the grants smaller on the Devices page.
 
 ### Credentials per bridge (`uuids`)
 

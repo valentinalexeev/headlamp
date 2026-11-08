@@ -351,3 +351,25 @@ func TestBackendAuditIsCapped(t *testing.T) {
 		}
 	})
 }
+
+func TestContractTailnetDoc(t *testing.T) {
+	eachBackend(t, func(t *testing.T, e contractEnv) {
+		if d, err := e.b.TailnetDoc(); err != nil || len(d.Grants) != 0 {
+			t.Fatalf("empty: %+v %v", d, err)
+		}
+		want := TailnetDoc{Targets: []TailnetTarget{{Name: "nas", Dst: []string{"tag:nas:22"}}},
+			Grants: []TailnetGrant{{Bridge: "b", Kind: SubjectDevice, Subject: "1", Target: "nas"}},
+			Modes:  map[string]string{"b": TailnetGrants}}
+		if err := e.b.PutTailnetDoc(want); err != nil {
+			t.Fatal(err)
+		}
+		got, err := e.b.TailnetDoc()
+		if err != nil || len(got.Grants) != 1 || got.Grants[0] != want.Grants[0] || got.Modes["b"] != TailnetGrants || got.Targets[0].Dst[0] != "tag:nas:22" {
+			t.Fatalf("got %+v %v", got, err)
+		}
+		too := TailnetDoc{Grants: make([]TailnetGrant, maxGrants+1)}
+		if err := e.b.PutTailnetDoc(too); err == nil {
+			t.Error("over the limit accepted")
+		}
+	})
+}

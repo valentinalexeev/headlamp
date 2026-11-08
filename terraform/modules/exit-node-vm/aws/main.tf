@@ -9,13 +9,21 @@ data "aws_subnets" "default" {
   }
 }
 
+locals {
+  # Canonical publishes Minimal AMIs under a separate name prefix and product suffix.
+  ami_name_pattern = (var.image_flavor == "minimal"
+    ? "ubuntu-minimal/images/hvm-ssd-gp3/ubuntu-${var.ubuntu_series}-${var.ami_arch}-minimal-*"
+  : "ubuntu/images/hvm-ssd-gp3/ubuntu-${var.ubuntu_series}-${var.ami_arch}-server-*")
+}
+
 data "aws_ami" "ubuntu" {
+  count       = var.ami_id == null ? 1 : 0
   most_recent = true
   owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-${var.ubuntu_series}-${var.ami_arch}-server-*"]
+    values = [local.ami_name_pattern]
   }
 
   filter {
@@ -66,7 +74,7 @@ resource "aws_key_pair" "this" {
 
 resource "aws_launch_template" "this" {
   name_prefix   = "${var.name}-"
-  image_id      = data.aws_ami.ubuntu.id
+  image_id      = coalesce(var.ami_id, try(data.aws_ami.ubuntu[0].id, null))
   instance_type = var.instance_type
   key_name      = aws_key_pair.this.key_name
 

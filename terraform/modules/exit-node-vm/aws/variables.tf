@@ -31,6 +31,23 @@ variable "ubuntu_series" {
   }
 }
 
+variable "image_flavor" {
+  type        = string
+  default     = "minimal"
+  description = "Canonical AMI flavor: \"minimal\" (Ubuntu Minimal, fewer packages and services, no snapd) or \"server\" (the full Ubuntu Server image). A change makes a new launch template version. The running instance stays until the group replaces it."
+
+  validation {
+    condition     = contains(["minimal", "server"], var.image_flavor)
+    error_message = "image_flavor: use \"minimal\" or \"server\"."
+  }
+}
+
+variable "ami_id" {
+  type        = string
+  default     = null
+  description = "AMI ID to use instead of the Canonical lookup (ubuntu_series, image_flavor). The image must run cloud-init, for example a Debian 13 AMI of owner 136693071363. Null (default) uses the lookup."
+}
+
 variable "spot" {
   type        = bool
   default     = true

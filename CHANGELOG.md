@@ -15,10 +15,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 - CI runs on `ubuntu-26.04` runners.
 - The exit-node VM modules use Ubuntu 26.04 "resolute" by default where the cloud publishes an image (#164). Running VMs are not replaced. Each module keeps an input to pin the old image:
-  - `aws`: new input `ubuntu_series`, default `resolute-26.04` (was a fixed `noble-24.04`). To keep the old image, set `ubuntu_series = "noble-24.04"`.
+  - `aws`: new input `ubuntu_series`, default `resolute-26.04` (was a fixed `noble-24.04`). New input `image_flavor`, default `minimal`: the module uses the Canonical Ubuntu Minimal AMI (fewer packages and services, no snapd). New input `ami_id` sets any other AMI. To keep the old image, set `ubuntu_series = "noble-24.04"` and `image_flavor = "server"`.
   - `openstack` and `selectel`: `image_name` default is `Ubuntu 26.04 LTS 64-bit` (was `Ubuntu 22.04 LTS 64-bit`). To keep the old image, set `image_name = "Ubuntu 22.04 LTS 64-bit"`.
   - `yandex`: new input `image_family`, default `ubuntu-2604-lts`. `image_id` is now optional and wins when set, so a stack that sets it keeps its image. The VM now ignores image changes, so a newer image does not replace it.
-  - `oci`: unchanged at `ubuntu_version = "24.04"`, because OCI has no Ubuntu 26.04 platform image yet.
+  - `oci`: `ubuntu_version` default is `26.04 Minimal` (was `24.04`). New input `ubuntu_version_fallback`, default `24.04 Minimal`, is used when OCI has no image of `ubuntu_version`. To keep the old image, set `ubuntu_version = "24.04"`.
   - `cloudru`: unchanged at `image_name = "ubuntu-22.04"`, because no public source confirms a 26.04 image in Cloud.ru Evolution.
 
 ### Fixed

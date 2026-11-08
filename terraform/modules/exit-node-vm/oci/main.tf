@@ -93,7 +93,23 @@ data "oci_core_images" "ubuntu" {
   sort_order               = "DESC"
 }
 
+# Used only when no image of ubuntu_version exists for the shape (for example before OCI publishes
+# "26.04 Minimal").
+data "oci_core_images" "ubuntu_fallback" {
+  count                    = var.ubuntu_version_fallback == null ? 0 : 1
+  compartment_id           = var.compartment_id
+  operating_system         = "Canonical Ubuntu"
+  operating_system_version = var.ubuntu_version_fallback
+  shape                    = var.shape
+  sort_by                  = "TIMECREATED"
+  sort_order               = "DESC"
+}
+
 locals {
+  boot_images = concat(
+    data.oci_core_images.ubuntu.images,
+    try(data.oci_core_images.ubuntu_fallback[0].images, []),
+  )
   # Only *.Flex shapes take an explicit ocpus/memory_in_gbs shape_config
   # block -- fixed shapes like VM.Standard.E2.1.Micro have implicit fixed
   # specs and error if one is supplied.
@@ -121,7 +137,7 @@ resource "oci_core_instance" "this" {
 
   source_details {
     source_type = "image"
-    source_id   = data.oci_core_images.ubuntu.images[0].id
+    source_id   = local.boot_images[0].id
   }
 
   metadata = {
@@ -140,5 +156,10 @@ resource "oci_core_instance" "this" {
   #   terraform apply -replace='module.<name>.oci_core_instance.this'
   lifecycle {
     ignore_changes = [metadata["user_data"], source_details[0].source_id]
+
+    precondition {
+      condition     = length(local.boot_images) > 0
+      error_message = "No \"Canonical Ubuntu\" image for ubuntu_version or ubuntu_version_fallback matches this shape."
+    }
   }
 }

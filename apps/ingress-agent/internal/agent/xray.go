@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -86,18 +87,11 @@ func Render(base []byte, creds []Cred, directGeoIP, directGeoSite []string) ([]b
 	var rules []any
 	// Granted tailnet traffic goes first, before the block rule, and only to the tailnet ranges: private ranges
 	// stay blocked for everyone, and so does the tailnet for every other credential.
-	var granted []any
-	for _, c := range creds {
-		if c.Tailnet == "all" {
-			granted = append(granted, EmailFor(c.UUID))
-		}
+	tailnetRules, err := tailnetRules(cfg, creds, tags)
+	if err != nil {
+		return nil, err
 	}
-	if granted != nil {
-		if !hasOutbound(cfg, TailnetOut) {
-			return nil, fmt.Errorf("a credential has a tailnet grant, but the base config has no outbound tagged %s", TailnetOut)
-		}
-		rules = append(rules, obj{"type": "field", "inboundTag": tags, "user": granted, "ip": tailnetIPs, "outboundTag": TailnetOut})
-	}
+	rules = append(rules, tailnetRules...)
 	rules = append(rules, obj{"type": "field", "inboundTag": tags, "ip": blockedIPs, "outboundTag": "blocked"})
 	if u := users("direct"); u != nil {
 		rules = append(rules, obj{"type": "field", "user": u, "outboundTag": "direct"})
@@ -119,6 +113,60 @@ func Render(base []byte, creds []Cred, directGeoIP, directGeoSite []string) ([]b
 	}
 	routing["rules"] = rules
 	return json.Marshal(cfg)
+}
+
+// tailnetRules gives one rule for the "all" grants (outbound via-tailnet) and one rule per grant group (outbound
+// via-tailnet-<id>, #139). A group without its outbound gets no rule: the block rule denies it until the bridge
+// has the SOCKS instance of the group (deny by default).
+func tailnetRules(cfg obj, creds []Cred, tags []any) ([]any, error) {
+	byGrant := map[string][]any{}
+	var order []string
+	for _, c := range creds {
+		if c.Tailnet == "" {
+			continue
+		}
+		if byGrant[c.Tailnet] == nil {
+			order = append(order, c.Tailnet)
+		}
+		byGrant[c.Tailnet] = append(byGrant[c.Tailnet], EmailFor(c.UUID))
+	}
+	slices.Sort(order)
+	var out []any
+	for _, g := range order {
+		outbound := TailnetOut
+		if g != "all" {
+			outbound = GroupOutbound(g)
+			if !hasOutbound(cfg, outbound) {
+				continue
+			}
+		} else if !hasOutbound(cfg, TailnetOut) {
+			return nil, fmt.Errorf("a credential has a tailnet grant, but the base config has no outbound tagged %s", TailnetOut)
+		}
+		out = append(out, obj{"type": "field", "inboundTag": tags, "user": byGrant[g], "ip": tailnetIPs, "outboundTag": outbound})
+	}
+	return out, nil
+}
+
+// GroupOutbound is the outbound tag of a grant group.
+func GroupOutbound(group string) string { return TailnetOut + "-" + group }
+
+// GroupOutbounds lists the grant groups the base config has an outbound for (#139), sorted.
+func GroupOutbounds(base []byte) []string {
+	var cfg obj
+	if json.Unmarshal(base, &cfg) != nil {
+		return []string{}
+	}
+	outs, _ := cfg["outbounds"].([]any)
+	res := []string{}
+	for _, o := range outs {
+		m, _ := o.(obj)
+		tag, _ := m["tag"].(string)
+		if g := strings.TrimPrefix(tag, TailnetOut+"-"); g != tag && groupIDRe.MatchString(g) {
+			res = append(res, g)
+		}
+	}
+	slices.Sort(res)
+	return res
 }
 
 func hasOutbound(cfg obj, tag string) bool {

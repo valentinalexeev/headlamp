@@ -96,6 +96,15 @@ no try v2.0.1
 rm -f msg
 git reset -q --hard HEAD~1
 
+# once UPGRADING.md exists, it needs a section for the version
+printf '# Upgrading\n\n## Unreleased (2.0.1)\n' >UPGRADING.md
+commit 'fix: a thing' 2.0.1
+no try v2.0.1
+printf '# Upgrading\n\n## 2.0.1\n\nNo action required.\n' >UPGRADING.md
+commit 'docs: upgrading'
+ok try v2.0.1
+git reset -q --hard HEAD~2
+
 # the tag must be on main
 git checkout -qb side
 commit 'fix: side' 2.0.1

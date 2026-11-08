@@ -83,6 +83,11 @@ commits on top of it or attempt a rewrite on your own.
 - Versions: strict semver, one version for the repo; see `VERSIONING.md`. Mark a breaking change with `!` or a
   `BREAKING CHANGE:` footer, since releases are checked against commit subjects. Note user-visible changes under
   `Unreleased` in `CHANGELOG.md`. Never move or delete a release tag.
+- New features are off by default before 1.0.0 (#200): a feature that opens a port, changes an access rule or adds a
+  protocol must not turn on for a running site that changes no config. If a default must change, the role or app fails
+  early (in check mode too) with a message that names the variable and what each value does, and the changelog says so.
+  `make check-feature-defaults` (in `make lint`) fails on a new `<name>_enabled: true` role default that is not in
+  `scripts/feature-defaults.allow`. See "New features before 1.0.0" in `VERSIONING.md`.
 - Manuals: write and update them in Simplified Technical English, to `docs/writing-manuals.md`. CI checks each manual a
   PR changes (`make check-manuals`). Accuracy comes first: keep every value, limit, condition and warning.
 - A new or renamed image goes in `.github/components.json`, and in `docs/images.md`; CI builds from that list.
@@ -213,12 +218,13 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   sections), breaking ones marked **BREAKING** with the migration step.
 - **Cutting a release** (the bot may prepare it, the owner merges and tags):
   1. Branch `release/X.Y.Z` from `main`; commit `chore(release): vX.Y.Z` that sets `VERSION` and moves `Unreleased`
-     under `## X.Y.Z - <date>`. PR into `main` titled `chore(release): vX.Y.Z`; the owner approves and merges.
+     under `## X.Y.Z - <date>`. In `UPGRADING.md`, rename `## Unreleased (X.Y.Z)` to `## X.Y.Z`: it lists what a
+     site repo must change, or "No action required". PR into `main` titled `chore(release): vX.Y.Z`; the owner approves and merges.
   2. The owner, or the bot only with explicit permission in that release's issue or PR, tags the merge commit on `main`:
      `git tag vX.Y.Z <commit> && scripts/check-release.sh vX.Y.Z && git push origin vX.Y.Z`.
      Release candidates use `vX.Y.Z-rc.N`.
   3. CI (`images.yml`) runs `check-release.sh` as a gate: tag format, `VERSION` match, commit on `main`, next version
-     with no skipping, bump at least what the commits need, milestone `X.Y.Z` (if any) has no open issues. Then it
+     with no skipping, bump at least what the commits need, milestone `X.Y.Z` (if any) has no open issues, `UPGRADING.md` has `## X.Y.Z`. Then it
      tags the already-built images and creates the GitHub release. Check the run and report its result on the issue.
 - **Hotfix.** `hotfix/NN-…` from `main`, PR into `main`, then a PATCH release as above. There is no fix release to an
   older line.

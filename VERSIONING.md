@@ -30,6 +30,17 @@ Commits say which is which, using [Conventional Commits](https://www.conventiona
 `feat` needs at least a MINOR. `!` before the colon, or a `BREAKING CHANGE:` footer, needs a MAJOR. PR titles are checked
 because they usually become commit subjects.
 
+## New features before 1.0.0
+
+Before 1.0.0, a minor release must not change a running site that has no config changes. Thus:
+
+- A new feature that opens a port, changes an access rule or adds a protocol is off by default. The operator sets a
+  variable to turn it on.
+- If a default must change, the role or app stops early, also in check mode. The error message names the variable to
+  set and tells what each value does. The changelog entry and the upgrade notes name the variable.
+- `make check-feature-defaults` fails when an Ansible role default `<name>_enabled` is `true` and the role and
+  variable are not in `scripts/feature-defaults.allow`. Each line in that file needs such a preflight.
+
 ## Rules a release must meet
 
 `scripts/check-release.sh` enforces these when a tag is pushed, before anything is published:
@@ -41,6 +52,8 @@ because they usually become commit subjects.
   to an older line.
 - It bumps at least as much as the commits since the previous release need.
 - A milestone named after the version, if there is one, has no open issues.
+- [`UPGRADING.md`](UPGRADING.md) at that commit has a section for the version (`## X.Y.Z`). It lists what a site repo
+  must change, or says "No action required". Rename the `## Unreleased (X.Y.Z)` section in the release PR.
 
 A published version never changes. If a release is wrong, fix it in a new one: never move or delete its tag.
 

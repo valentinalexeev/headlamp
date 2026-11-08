@@ -139,8 +139,10 @@
       - 1 <= (hy2_listen_port | int) <= 65535
       - hy2_tls_dir is regex('^/[A-Za-z0-9._/-]+\\Z')
     fail_msg: >-
-      reality-ingress: with hy2_enabled, hy2_obfs_password must be 16-128 characters of [A-Za-z0-9_-]
-      (vault; `openssl rand -hex 16`), hy2_listen_port 1-65535 and hy2_tls_dir an absolute path. The values are not shown.
+      reality-ingress: Hysteria 2 is on by default (hy2_enabled: true) and opens UDP hy2_listen_port (443).
+      To keep it, set hy2_obfs_password to 16-128 characters of [A-Za-z0-9_-] (vault; `openssl rand -hex 16`),
+      hy2_listen_port 1-65535 and hy2_tls_dir an absolute path, and let the cloud firewall pass that UDP port.
+      To turn it off, set hy2_enabled: false (only the Reality inbound on TCP runs). The values are not shown.
     quiet: true
   no_log: true
   when: hy2_enabled | bool

@@ -19,6 +19,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 - All six Ansible roles pass check mode and a real apply in the OS matrix on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13 (#178). Check mode on a fresh host no longer fails in `task-runner` (owner of the state directory before the user exists) and in `tailscale` (`sysctl` before `procps` is installed). `tailscale` no longer fails when `AutoUpdate.Apply` is null on a fresh node. `make test-ansible-os` uses the native architecture of the docker engine (`ANSIBLE_OS_PLATFORM` forces one).
 - The `reality-ingress` preflight error for Hysteria 2 now says that `hy2_enabled` is on by default, which UDP port it opens, and that `hy2_enabled: false` turns it off (#200).
+- `reality-ingress` keeps the pulled and downloaded files in a control-host cache, `reality_ingress_cache_dir` (default `~/.cache/headlamp/reality-ingress`), keyed by sha256 (#198). Each cached file is hashed again on every run. A run with nothing to do now shows `changed=0`, and `--check` shows only the real changes on the host (it also checks the binaries and geodata on the host, which it skipped before).
 
 ## 0.12.0 - 2026-11-08
 

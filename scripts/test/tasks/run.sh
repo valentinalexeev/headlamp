@@ -291,8 +291,21 @@ script, args = sys.argv[1], sys.argv[2:]
 pid, fd = pty.fork()
 if pid == 0:
     os.execvp('sh', ['sh', '-c', 'exec sh "$0" "$@" >"$OUT" 2>"$ERR"', script] + args)
+answered = 0
 for line in os.environ['IN'].encode().decode('unicode_escape').splitlines(True):
-    time.sleep(0.5)
+    # Answer only after the next prompt ("...?") is on stderr (#168): a fixed sleep raced the script on slow
+    # runners. The wait is bounded; on timeout the answer goes anyway and the test then fails on its checks.
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        try:
+            with open(os.environ['ERR'], 'rb') as f:
+                asked = f.read().count(b'?')
+        except OSError:
+            asked = 0
+        if asked > answered:
+            break
+        time.sleep(0.05)
+    answered += 1
     os.write(fd, line.encode())
 try:
     while os.read(fd, 1024):

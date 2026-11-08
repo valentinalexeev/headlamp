@@ -1,0 +1,9 @@
+# gitleaks config: the default rules, plus one allowlist for release checksums. A sha256 pin such as
+# `xray_sha256: <64 hex>` is not a secret, but the jfrog-identity-token rule matches it (#177).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "sha256 checksum pins of release files"
+regexTarget = "line"
+regexes = ['''^\s*[a-z0-9_]*_sha256:\s*"?[0-9a-f]{64}"?\s*$''']

@@ -6,6 +6,12 @@ over the tailnet. The agent holds them and renders `/etc/xray/config.json` from
 `/etc/xray/config.base.json`. It validates the config with `xray run -test`, replaces it atomically and
 restarts `xray.service`. See `apps/ingress-agent/README.md` for its API.
 
+## Supported systems
+
+The role uses `apt` and systemd. The OS matrix (`make test-ansible-os`, #170) tests it on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13. The PR of #170 gives the result of each test.
+
+For a bridge VM, use Ubuntu 26.04 Minimal. It is the preferred image. Use Debian 13 only when the OS matrix shows a pass for all bridge roles on it.
+
 ## Relation to reality-ingress
 
 Run `reality-ingress` first (and the base `tailscale` role). It installs xray, creates the

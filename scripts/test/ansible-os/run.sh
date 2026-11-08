@@ -3,6 +3,7 @@
 # container that stands for one target image, with a real headscale in a second container.
 # Usage: scripts/test/ansible-os/run.sh <ubuntu-minimal|ubuntu-server|debian13> [role ...]
 # Needs docker (linux/amd64, emulated on arm64), ansible-playbook with community.docker and ansible.posix, go, curl.
+# APPLY="<role> ..." limits the real apply to these roles (default: all); the other roles run in check mode only.
 # E2E_KEEP=1 keeps the containers. Prints one "RESULT <os> <role> <check> <apply>" line for each role.
 set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,14 +18,16 @@ case "$os" in
 esac
 roles=("$@")
 [ $# -gt 0 ] || roles=(tailscale route-provisioner tailscale-userspace-socks reality-ingress ingress-agent task-runner)
-for c in docker ansible-playbook go curl; do command -v "$c" >/dev/null || { echo "SKIP: $c is not installed"; exit 0; }; done
+for c in docker ansible-playbook go curl python3; do command -v "$c" >/dev/null || { echo "SKIP: $c is not installed"; exit 0; }; done
 
 sfx=$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')
 net="hlos-$sfx"; hs="hlos-hs-$sfx"; host="hlos-$os-$sfx"; img="hl-os-$os"
 T="$(mktemp -d)"
 cleanup() {
   if [ "${E2E_KEEP:-}" = 1 ]; then echo "kept: $host $hs $T"; return; fi
-  docker rm -f "$host" "$hs" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1; rm -rf "$T"
+  docker rm -f -v "$host" "$hs" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1; rm -rf "$T"
+  # The image is large; KEEP_IMAGE=1 keeps it for the next run.
+  [ "${KEEP_IMAGE:-}" = 1 ] || docker rmi "$img" >/dev/null 2>&1
 }
 trap cleanup EXIT
 die() { echo "FATAL: $*"; exit 1; }
@@ -155,7 +158,9 @@ fails=0
 for r in "${roles[@]}"; do
   c=fail; a=fail
   play "$r" check && c=ok
-  if play "$r" apply; then
+  if [ -n "${APPLY:-}" ] && ! printf ' %s ' "$APPLY" | grep -q " $r "; then
+    a=skip
+  elif play "$r" apply; then
     a=ok
     case "$r" in
       tailscale) docker exec "$host" tailscale status --json | grep -q '"BackendState": *"Running"' || a=fail ;;
@@ -168,9 +173,10 @@ for r in "${roles[@]}"; do
   fi
   for m in check apply; do
     v=$c; [ $m = apply ] && v=$a
-    [ "$v" = ok ] || { echo "---- $r $m (last 25 lines)"; tail -n 25 "$T/$r-$m.log"; }
+    case "$v" in ok|skip) continue ;; esac; { echo "---- $r $m (last 25 lines)"; tail -n 25 "$T/$r-$m.log"; }
   done
   echo "RESULT $os $r check=$c apply=$a"
-  [ "$c$a" = okok ] || fails=$((fails + 1))
+  case "$c$a" in okok|okskip) ;; *) fails=$((fails + 1)) ;; esac
+
 done
 [ $fails = 0 ] && echo "all roles passed on $os" || { echo "$fails role(s) failed on $os"; exit 1; }

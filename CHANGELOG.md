@@ -6,6 +6,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
+- `make test-ansible-os IMAGE=<ubuntu-minimal|ubuntu-server|debian13>` runs each Ansible role in check mode and then for real in a throwaway systemd container, with a real headscale (#170). Each role README has a "Supported systems" part.
 - Each release publishes the Helm charts to `oci://ghcr.io/valentinalexeev/headlamp/charts`, with the release version (#158).
 - CI runs more checks on each PR: the tailscale and headscale pins (#150), the Ansible role tests, `make lint-go` for new Go code, `make vulncheck` and `make lint-config` (#160). A weekly workflow opens an issue when a newer tailscale or headscale is out.
 - Helm chart `charts/tailnet-connector` (#103): a subnet router for one Kubernetes cluster, so tailnet devices reach its Service and Pod ranges. One userspace tailscale replica joins with an ephemeral tagged key from a Secret, advertises `connector.routes`, and keeps its state in a Kubernetes Secret; its Role can touch only that Secret. headscale approves the routes through `autoApprovers.routes` for the connector tag. Optional, off by default: serve proxies (`funnel-sidecar` in serve mode, #117), one Deployment per node-control service. New image `tailnet-connector` (tailscale at `TAILSCALE_VERSION`, from the official static tarball); the chart `appVersion` is in `make check-tailscale-pins`. `make test-k8s-connector` runs helm lint and kubeconform; `make test-k8s-connector-e2e` runs it in kind against the pinned headscale.
@@ -24,6 +25,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Fixed
 
+- Ansible roles on minimal images (#170): `route-provisioner` installs `cron` (Ubuntu Minimal and Debian 13 have no `crontab`); `tailscale` installs `procps` for `sysctl`, starts `tailscaled` after the install, and its check mode no longer fails on a host without tailscale.
 - `make vulncheck` pins govulncheck v1.9.0. v1.1.4 stopped with a panic on Go 1.27 code (`unexpected expr: *ast.KeyValueExpr`), so the check failed on a clean machine.
 - `apps/exit-node/install.sh` rejected Ubuntu noble and resolute, because it had a fixed list of codenames (#164). It is now synced with the upstream Tailscale script, which asks the package server instead.
 

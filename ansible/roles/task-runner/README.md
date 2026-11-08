@@ -13,6 +13,10 @@ node-control calls the runner over the tailnet.
 
 Not verified against a real host yet. Before the first deploy, read [Not verified](#not-verified-against-a-real-host).
 
+## Supported systems
+
+The role uses `apt` and systemd. The OS matrix (`make test-ansible-os`, #170) tests it on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13. The PR of #170 gives the result of each test.
+
 ## Use
 
 There is no playbook in this repo (like the other node roles). The private repo applies the role to an inventory group,

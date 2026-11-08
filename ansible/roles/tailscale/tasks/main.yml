@@ -61,6 +61,17 @@
     name: tailscale
     selection: "{{ 'hold' if tailscale_pin_version | bool else 'install' }}"
   become: true
+  # In check mode on a fresh host the package is not installed yet.
+  when: tailscale_dpkg.rc == 0 or not ansible_check_mode
+
+# The package enables tailscaled, but it does not always start it (for example when the host has no D-Bus yet, #170).
+- name: Enable and start tailscaled
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+  become: true
+  when: not ansible_check_mode
 
 - name: Check the tailscale auto-update setting
   ansible.builtin.command: tailscale debug prefs

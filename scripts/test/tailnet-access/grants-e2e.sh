@@ -273,14 +273,17 @@ print(json.dumps(p))
 PY
 }
 # mh: the VLESS Reality outbound of the device's sing-box profile, as one mihomo proxy (the same credential).
-mh() { python3 - "$T/cl/d$1.json" > "$T/cl/mh-d$1/config.yaml" <<'PY'
+mh() { python3 - "$T/cl/d$1.json" "$BR_IP" > "$T/cl/mh-d$1/config.yaml" <<'PY'
 import json, sys
 o = [x for x in json.load(open(sys.argv[1]))["outbounds"] if x.get("tag") == "direct-bridge-g"][0]
 t = o["tls"]
 p = {"name": "b", "type": "vless", "server": o["server"], "port": o["server_port"], "uuid": o["uuid"], "network": "tcp",
      "tls": True, "udp": True, "flow": o.get("flow", "xtls-rprx-vision"), "servername": t["server_name"],
-     "client-fingerprint": "chrome", "reality-opts": {"public-key": t["reality"]["public_key"], "short-id": t["reality"]["short_id"]}}
-print(json.dumps({"mixed-port": 2080, "bind-address": "127.0.0.1", "allow-lan": False, "proxies": [p], "rules": ["MATCH,b"]}))
+     "client-fingerprint": "chrome", "reality-opts": {"public-key": t["reality"]["public_key"], "short-id": t["reality"]["short_id"],
+     "support-x25519mlkem768": True}}
+print(json.dumps({"mixed-port": 2080, "bind-address": "127.0.0.1", "allow-lan": False, "proxies": [p], "rules": ["MATCH,b"],
+  "hosts": {o["server"]: sys.argv[2]},
+  "dns": {"enable": True, "use-hosts": True, "nameserver": ["system"], "proxy-server-nameserver": ["system"]}}))
 PY
 }
 client() { # device protocol -> container name

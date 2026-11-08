@@ -34,10 +34,23 @@ gives the full procedure.
 | `route53_zone_id` | none | The zone for ACME DNS-01 |
 | `iam_path` | `/` | The IAM path of both roles and the instance profile |
 | `iam_permissions_boundary` | none | The ARN of a policy to set as the permissions boundary of both roles |
+| `metadata_hop_limit` | `1` | The IMDSv2 hop limit. Set `2` when a container on a bridge network must use the instance role. |
 | `user_data_extra` | none | Shell commands that cloud-init runs at the end |
 | `tags` | none | Tags for all resources |
 
 Some accounts let the deploying identity create roles only under a fixed IAM path, and only with a permissions boundary. In such an account, set `iam_path` and `iam_permissions_boundary`. With the defaults, the plan of an existing host shows no change.
+
+### Instance role for containers
+
+IMDSv2 is required. With the default hop limit `1`, only the host and host-network containers get the instance role. node-control runs on the compose bridge network. So with the default, its `aws` provider gets no role.
+
+To let it use the role (no static access key), set `metadata_hop_limit = 2`. Then every container on the host can use the role. Give the role only what all containers on the host may do, for example the node-control policy in `apps/node-control/README.md` ("AWS permissions"). Check from a bridge-network container:
+
+```sh
+docker run --rm amazon/aws-cli sts get-caller-identity   # shows the host role
+```
+
+The change applies in place, with no new instance.
 
 ## Boot image
 

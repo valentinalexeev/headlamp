@@ -191,3 +191,32 @@ run "rejects_unknown_image_flavor" {
   }
   expect_failures = [var.image_flavor]
 }
+
+run "imds_hop_limit_defaults_to_1" {
+  command = plan
+
+  assert {
+    condition     = aws_instance.this.metadata_options[0].http_put_response_hop_limit == 1 && aws_instance.this.metadata_options[0].http_tokens == "required"
+    error_message = "the default must be IMDSv2 only with hop limit 1"
+  }
+}
+
+run "imds_hop_limit_2_for_bridge_containers" {
+  command = plan
+  variables {
+    metadata_hop_limit = 2
+  }
+
+  assert {
+    condition     = aws_instance.this.metadata_options[0].http_put_response_hop_limit == 2 && aws_instance.this.metadata_options[0].http_tokens == "required"
+    error_message = "metadata_hop_limit must set the hop limit and keep IMDSv2 required"
+  }
+}
+
+run "rejects_a_hop_limit_out_of_range" {
+  command = plan
+  variables {
+    metadata_hop_limit = 0
+  }
+  expect_failures = [var.metadata_hop_limit]
+}

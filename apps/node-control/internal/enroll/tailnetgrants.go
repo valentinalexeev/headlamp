@@ -35,7 +35,7 @@ const (
 var (
 	targetNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 	// aclDstRe is a headscale ACL destination: a tag, a host name, an address or a prefix, then ":" and ports.
-	aclDstRe = regexp.MustCompile(`^(tag:[a-z0-9-]{1,63}|[A-Za-z0-9.-]{1,253}|[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?|\[[0-9a-fA-F:]{2,45}\](/[0-9]{1,3})?):(\*|[0-9]{1,5}(-[0-9]{1,5})?(,[0-9]{1,5}(-[0-9]{1,5})?)*)$`)
+	aclDstRe  = regexp.MustCompile(`^(tag:[a-z0-9-]{1,63}|[A-Za-z0-9.-]{1,253}|[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?|\[[0-9a-fA-F:]{2,45}\](/[0-9]{1,3})?):(\*|[0-9]{1,5}(-[0-9]{1,5})?(,[0-9]{1,5}(-[0-9]{1,5})?)*)$`)
 	groupIDRe = regexp.MustCompile(`^g-[0-9a-f]{8}$`)
 )
 

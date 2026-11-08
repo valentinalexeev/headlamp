@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 )
@@ -43,7 +44,22 @@ type SyncState struct {
 	pending bool
 	state   string
 	since   *int64
-	ver     uint64 // bumped on every outcome: lets a caller tell "no result yet" from "same result"
+	ver     uint64   // bumped on every outcome: lets a caller tell "no result yet" from "same result"
+	groups  []string // grant groups the bridge reported (#139); nil: not known
+}
+
+// SetGroups records the grant groups the bridge can serve.
+func (s *SyncState) SetGroups(g []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.groups = g
+}
+
+// Groups gives the grant groups the bridge reported and whether it reported any list.
+func (s *SyncState) Groups() ([]string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.groups), s.groups != nil
 }
 
 // NewSyncState returns a state in "unknown". A nil clock means time.Now.
@@ -146,7 +162,7 @@ func (p *tailnetPlan) groupOf(bridge, baseUUID string) string {
 }
 
 // newTailnetPlan resolves the grants of every bridge in grants mode. Only active devices take part.
-func newTailnetPlan(cfg IngressConfig, doc TailnetDoc, devices []Device, now int64) *tailnetPlan {
+func newTailnetPlan(cfg IngressConfig, ings []Ingress, doc TailnetDoc, devices []Device, now int64) *tailnetPlan {
 	p := &tailnetPlan{doc: doc, byUUID: map[string]int64{}, bridges: map[string]BridgeGrants{}}
 	var active []Device
 	for _, d := range devices {
@@ -159,7 +175,7 @@ func newTailnetPlan(cfg IngressConfig, doc TailnetDoc, devices []Device, now int
 		}
 	}
 	all := AllTargets(cfg.Targets, doc)
-	for _, in := range cfg.Ingresses {
+	for _, in := range ings {
 		if doc.EffectiveMode(in) == TailnetGrants {
 			p.bridges[in.Name] = ResolveGrants(doc, all, in.Name, active)
 		}
@@ -213,7 +229,11 @@ func SyncAll(ctx context.Context, store Backend, cfg IngressConfig, targets []Sy
 	var wg sync.WaitGroup
 	defer wg.Wait() // runs before the deferred unlock: no push outlives the lock, even on a panic
 	results := make([]bool, len(targets))
-	plan := newTailnetPlan(cfg, doc, devices, store.Clock()().Unix())
+	ings := make([]Ingress, len(targets))
+	for i, t := range targets {
+		ings[i] = t.Ingress
+	}
+	plan := newTailnetPlan(cfg, ings, doc, devices, store.Clock()().Unix())
 	for i, t := range targets {
 		creds, err := safeCredentials(cfg, t, base, plan)
 		if err != nil {
@@ -279,6 +299,11 @@ func pushTo(ctx context.Context, t SyncTarget, creds []Credential) bool {
 		syncLog(t.Name, "enrolment sync failed: error", "error_type", errType(err))
 		t.State.Failed("error")
 		return false
+	}
+	if r, ok := t.Agent.(groupReporter); ok {
+		if g, known := r.TailnetGroups(); known {
+			t.State.SetGroups(g)
+		}
 	}
 	t.State.OK("ok")
 	return true

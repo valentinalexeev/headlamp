@@ -8,7 +8,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -46,6 +48,8 @@ type Agent interface {
 }
 
 type agentClient struct {
+	mu      sync.Mutex
+	groups  []string // the grant groups the agent reported in its last PUT answer (#139); nil: not known
 	base    string
 	resolve func(ctx context.Context) (string, error) // when set, the base URL is resolved on every call
 	token   string
@@ -128,11 +132,44 @@ func (a *agentClient) PutCredentials(ctx context.Context, creds []Credential, co
 		return &AgentUnavailable{Outcome: OutcomeUnreachable}
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, maxAgentBody))
+	answer, _ := io.ReadAll(io.LimitReader(resp.Body, maxAgentBody))
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		a.recordGroups(answer)
 		return nil
 	}
 	return errorFor(resp.StatusCode)
+}
+
+// recordGroups keeps the grant group ids of a PUT answer. An older agent sends none: nil, "not known".
+func (a *agentClient) recordGroups(body []byte) {
+	var r struct {
+		Groups *[]string `json:"tailnet_groups"`
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.groups = nil
+	if json.Unmarshal(body, &r) != nil || r.Groups == nil || len(*r.Groups) > 64 {
+		return
+	}
+	out := []string{}
+	for _, g := range *r.Groups {
+		if groupIDRe.MatchString(g) {
+			out = append(out, g)
+		}
+	}
+	a.groups = out
+}
+
+// TailnetGroups gives the grant groups the agent can serve, as of its last PUT answer.
+func (a *agentClient) TailnetGroups() ([]string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.groups), a.groups != nil
+}
+
+// groupReporter is an Agent that reports its provisioned grant groups (#139).
+type groupReporter interface {
+	TailnetGroups() ([]string, bool)
 }
 
 func errorFor(status int) *AgentUnavailable {

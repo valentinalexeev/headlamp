@@ -3,6 +3,8 @@ package enroll
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -135,5 +137,20 @@ func TestSyncPushesGroupIDsInGrantsMode(t *testing.T) {
 		if c.Tailnet != "" {
 			t.Fatal("mode off still grants")
 		}
+	}
+}
+
+func TestAgentReportsGroupsIntoState(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"count":1,"tailnet_groups":["g-0a1b2c3d","bad"]}`))
+	}))
+	defer srv.Close()
+	e := newEnv(t)
+	e.make("a", 0)
+	cfg := IngressConfig{Ingresses: []Ingress{{Name: "b", UUIDs: uuidsBase}}}.WithKey(multiKey)
+	ts := targetsFor(cfg, NewAgent(srv.URL, "t", nil))
+	SyncAll(context.Background(), e.store, cfg, ts)
+	if g, ok := ts[0].State.Groups(); !ok || len(g) != 1 || g[0] != "g-0a1b2c3d" {
+		t.Errorf("%v %v", g, ok)
 	}
 }

@@ -30,8 +30,9 @@ type Applier struct {
 	DirectGeoIP, DirectGeoSite      []string
 	Log                             *slog.Logger
 	mu                              sync.Mutex
-	// rendered is the list of grant group outbounds of the base at the last render (#139). When a playbook run
-	// adds one, the next push renders again even if the credentials did not change. nil: not rendered yet.
+	// rendered is the list of grant group outbounds of the base at the last render (#139). When a
+	// playbook run adds one, the next push renders again even if the credentials did not change.
+	// nil: not rendered yet.
 	rendered *string
 }
 
@@ -115,7 +116,8 @@ func (a *Applier) applyLocked(ctx context.Context, desired []Cred) (bool, error)
 	}
 	added, removed := Diff(cur, desired)
 	groups := a.baseGroups()
-	if len(added) == 0 && len(removed) == 0 && (!hasGroupGrant(desired) || (a.rendered != nil && *a.rendered == groups)) {
+	sameGroups := !hasGroupGrant(desired) || (a.rendered != nil && *a.rendered == groups)
+	if len(added) == 0 && len(removed) == 0 && sameGroups {
 		return false, nil
 	}
 	cfg, err := a.render(desired)
@@ -240,7 +242,8 @@ func parseCreds(body []byte) ([]Cred, bool) {
 		if json.Unmarshal(item["uuid"], &u) != nil || json.Unmarshal(item["mode"], &m) != nil {
 			return nil, false
 		}
-		if raw, ok := item["tailnet"]; ok && (json.Unmarshal(raw, &tn) != nil || !ValidTailnet(tn)) {
+		raw, ok := item["tailnet"]
+		if ok && (json.Unmarshal(raw, &tn) != nil || !ValidTailnet(tn)) {
 			return nil, false
 		}
 		u = canonUUID(u)
@@ -338,8 +341,8 @@ func (s *Server) putCredentials(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	// tailnet_groups tells node-control which grant groups this bridge can serve (#139): a group without its
-	// outbound shows "needs provisioning" in the console. Only opaque group ids.
+	// tailnet_groups tells node-control which grant groups this bridge can serve (#139): a group
+	// without its outbound shows "needs provisioning" in the console. Only opaque group ids.
 	groups := []string{}
 	if base, err := os.ReadFile(s.A.BasePath); err == nil {
 		groups = GroupOutbounds(base)

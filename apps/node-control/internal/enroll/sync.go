@@ -44,8 +44,9 @@ type SyncState struct {
 	pending bool
 	state   string
 	since   *int64
-	ver     uint64   // bumped on every outcome: lets a caller tell "no result yet" from "same result"
-	groups  []string // grant groups the bridge reported (#139); nil: not known
+	ver     uint64 // bumped on every outcome: lets a caller tell "no result yet" from "same result"
+	// groups are the grant groups the bridge reported (#139); nil: not known.
+	groups []string
 }
 
 // SetGroups records the grant groups the bridge can serve.
@@ -121,9 +122,12 @@ func (c IngressConfig) CredentialsFor(ing Ingress, base []Credential) ([]Credent
 	return c.credentialsWith(ing, base, nil)
 }
 
-// credentialsWith is CredentialsFor with the tailnet plan (#139): it gives the mode of the bridge and, in grants
-// mode, the group of each base uuid. A nil plan uses the bridge's own tailnet_access.
-func (c IngressConfig) credentialsWith(ing Ingress, base []Credential, plan *tailnetPlan) ([]Credential, error) {
+// credentialsWith is CredentialsFor with the tailnet plan (#139): it gives the mode of the bridge
+// and, in grants mode, the group of each base uuid. A nil plan uses the bridge's own
+// tailnet_access.
+func (c IngressConfig) credentialsWith(
+	ing Ingress, base []Credential, plan *tailnetPlan,
+) ([]Credential, error) {
 	mode := ing.TailnetAccess
 	if plan != nil {
 		mode = plan.doc.EffectiveMode(ing)
@@ -146,8 +150,8 @@ func (c IngressConfig) credentialsWith(ing Ingress, base []Credential, plan *tai
 	return out, nil
 }
 
-// tailnetPlan is the grant state of one sync round: the stored document and, per bridge in grants mode, the
-// group of each base uuid.
+// tailnetPlan is the grant state of one sync round: the stored document and, per bridge in grants
+// mode, the group of each base uuid.
 type tailnetPlan struct {
 	doc     TailnetDoc
 	byUUID  map[string]int64
@@ -162,7 +166,9 @@ func (p *tailnetPlan) groupOf(bridge, baseUUID string) string {
 }
 
 // newTailnetPlan resolves the grants of every bridge in grants mode. Only active devices take part.
-func newTailnetPlan(cfg IngressConfig, ings []Ingress, doc TailnetDoc, devices []Device, now int64) *tailnetPlan {
+func newTailnetPlan(
+	cfg IngressConfig, ings []Ingress, doc TailnetDoc, devices []Device, now int64,
+) *tailnetPlan {
 	p := &tailnetPlan{doc: doc, byUUID: map[string]int64{}, bridges: map[string]BridgeGrants{}}
 	var active []Device
 	for _, d := range devices {
@@ -271,7 +277,9 @@ func SyncAll(ctx context.Context, store Backend, cfg IngressConfig, targets []Sy
 var credentialsHook func(Ingress)
 
 // safeCredentials computes a target's set; a panic becomes an error that carries only its type.
-func safeCredentials(cfg IngressConfig, t SyncTarget, base []Credential, plan *tailnetPlan) (creds []Credential, err error) {
+func safeCredentials(
+	cfg IngressConfig, t SyncTarget, base []Credential, plan *tailnetPlan,
+) (creds []Credential, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			creds, err = nil, fmt.Errorf("panic: %s", typeName(r))

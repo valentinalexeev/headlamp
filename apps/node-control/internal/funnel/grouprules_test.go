@@ -1,6 +1,7 @@
 package funnel
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -36,13 +37,13 @@ func TestComposeGroupRulesAddChangeRemove(t *testing.T) {
 
 func TestComposeGroupRulesRefusals(t *testing.T) {
 	w := map[string][]string{"tag:ingress-g-aa": {"tag:nas:22"}}
-	if _, err := ComposeGroupRules(`{"acls":[]}`, "tag:ingress-g-", "tag:ingress", w); err != ErrNoTagOwner {
+	if _, err := ComposeGroupRules(`{"acls":[]}`, "tag:ingress-g-", "tag:ingress", w); !errors.Is(err, ErrNoTagOwner) {
 		t.Errorf("no owner: %v", err)
 	}
-	if _, err := ComposeGroupRules(grpBase, "tag:ingress-g-", "tag:ingress", map[string][]string{"tag:x": {"a"}}); err != ErrPolicyShape {
+	if _, err := ComposeGroupRules(grpBase, "tag:ingress-g-", "tag:ingress", map[string][]string{"tag:x": {"a"}}); !errors.Is(err, ErrPolicyShape) {
 		t.Errorf("foreign tag: %v", err)
 	}
-	if _, err := ComposeGroupRules(`{"acls":[]} // c`, "tag:ingress-g-", "tag:ingress", nil); err != ErrNotPlainJSON {
+	if _, err := ComposeGroupRules(`{"acls":[]} // c`, "tag:ingress-g-", "tag:ingress", nil); !errors.Is(err, ErrNotPlainJSON) {
 		t.Errorf("hujson: %v", err)
 	}
 	// the phase 1 rule (src tag:ingress) is not a group rule

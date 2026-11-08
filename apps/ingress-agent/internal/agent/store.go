@@ -21,10 +21,11 @@ type Cred struct {
 	UUID     string `json:"uuid"`
 	Mode     string `json:"mode"`
 	NotAfter int64  `json:"not_after"`
-	// Tailnet is the tailnet grant of the credential: "" (none, the default), "all" (#132) or a grant group id
-	// "g-<8 hex>" (#139). With "all", the client may reach tailnet addresses through the bridge's tailscaled. With a
-	// group id, it goes through the SOCKS instance of that group (outbound via-tailnet-<id>), which has its own
-	// tailnet tag. The headscale ACL decides which hosts answer.
+	// Tailnet is the tailnet grant of the credential: "" (none, the default), "all" (#132) or a
+	// grant group id "g-<8 hex>" (#139). With "all", the client may reach tailnet addresses through
+	// the bridge's tailscaled. With a group id, it goes through the SOCKS instance of that group
+	// (outbound via-tailnet-<id>), which has its own tailnet tag. The headscale ACL decides which
+	// hosts answer.
 	Tailnet string `json:"tailnet,omitempty"`
 }
 

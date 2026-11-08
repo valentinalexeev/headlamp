@@ -6,8 +6,9 @@ import (
 	"sort"
 )
 
-// GrantGroup is one grant group of one bridge: its id, tag, target names, the union of their dst, and its
-// devices. OverLimit is set for the groups past MaxGroupsPerBridge: they get no tailnet route.
+// GrantGroup is one grant group of one bridge: its id, tag, target names, the union of their dst,
+// and its devices. OverLimit is set for the groups past MaxGroupsPerBridge: they get no tailnet
+// route.
 type GrantGroup struct {
 	ID        string   `json:"id"`
 	Tag       string   `json:"tag"`
@@ -28,7 +29,8 @@ type BridgeGrants struct {
 	Error      string   `json:"error,omitempty"`
 }
 
-// EffectiveMode is the tailnet_access of a bridge: the console override, else enroll.json, else "off".
+// EffectiveMode is the tailnet_access of a bridge: the console override, else enroll.json, else
+// "off".
 func (d TailnetDoc) EffectiveMode(in Ingress) string {
 	if m, ok := d.Modes[in.Name]; ok && ValidTailnetMode(m) {
 		return m
@@ -51,8 +53,8 @@ func AllTargets(config []TailnetTarget, doc TailnetDoc) []TailnetTarget {
 	return out
 }
 
-// DeviceTargets is the set of target names a device holds on a bridge: its own grants and the grants of its
-// owner, limited to targets that exist. Group grants are not resolved.
+// DeviceTargets is the set of target names a device holds on a bridge: its own grants and the
+// grants of its owner, limited to targets that exist. Group grants are not resolved.
 func DeviceTargets(doc TailnetDoc, targets map[string][]string, bridge string, d Device) []string {
 	var out []string
 	for _, g := range doc.Grants {
@@ -69,14 +71,24 @@ func DeviceTargets(doc TailnetDoc, targets map[string][]string, bridge string, d
 	return out
 }
 
-// ResolveGrants computes the grant groups of one bridge from the active devices. Groups are ordered by their
-// smallest device id, so a new device never moves an existing group past the limit.
-func ResolveGrants(doc TailnetDoc, all []TailnetTarget, bridge string, devices []Device) BridgeGrants {
+// ResolveGrants computes the grant groups of one bridge from the active devices. Groups are ordered
+// by their smallest device id, so a new device never moves an existing group past the limit.
+func ResolveGrants(
+	doc TailnetDoc,
+	all []TailnetTarget,
+	bridge string,
+	devices []Device,
+) BridgeGrants {
 	dst := map[string][]string{}
 	for _, t := range all {
 		dst[t.Name] = t.Dst
 	}
-	out := BridgeGrants{Bridge: bridge, ByDevice: map[int64]string{}, Groups: []GrantGroup{}, Unresolved: []string{}}
+	out := BridgeGrants{
+		Bridge:     bridge,
+		ByDevice:   map[int64]string{},
+		Groups:     []GrantGroup{},
+		Unresolved: []string{},
+	}
 	byID := map[string]*GrantGroup{}
 	for _, d := range devices {
 		names := DeviceTargets(doc, dst, bridge, d)
@@ -96,7 +108,10 @@ func ResolveGrants(doc TailnetDoc, all []TailnetTarget, bridge string, devices [
 		slices.Sort(g.Devices)
 		out.Groups = append(out.Groups, *g)
 	}
-	sort.Slice(out.Groups, func(i, j int) bool { return out.Groups[i].Devices[0] < out.Groups[j].Devices[0] })
+	sort.Slice(
+		out.Groups,
+		func(i, j int) bool { return out.Groups[i].Devices[0] < out.Groups[j].Devices[0] },
+	)
 	for i := MaxGroupsPerBridge; i < len(out.Groups); i++ {
 		out.Groups[i].OverLimit = true
 		for _, id := range out.Groups[i].Devices {
@@ -104,10 +119,15 @@ func ResolveGrants(doc TailnetDoc, all []TailnetTarget, bridge string, devices [
 		}
 	}
 	if len(out.Groups) > MaxGroupsPerBridge {
-		out.Error = fmt.Sprintf("%d grant groups, the limit is %d per bridge", len(out.Groups), MaxGroupsPerBridge)
+		out.Error = fmt.Sprintf(
+			"%d grant groups, the limit is %d per bridge",
+			len(out.Groups),
+			MaxGroupsPerBridge,
+		)
 	}
 	for _, g := range doc.Grants {
-		if g.Bridge == bridge && g.Kind == SubjectGroup && !slices.Contains(out.Unresolved, g.Subject) {
+		if g.Bridge == bridge && g.Kind == SubjectGroup &&
+			!slices.Contains(out.Unresolved, g.Subject) {
 			out.Unresolved = append(out.Unresolved, g.Subject)
 		}
 	}
@@ -123,13 +143,17 @@ func unionDst(dst map[string][]string, names []string) []string {
 	return slices.Compact(out)
 }
 
-// WantedGroupRules is the generated ACL entry set of all bridges: tag -> dst, without the over-limit groups.
+// WantedGroupRules is the generated ACL entry set of all bridges: tag -> dst, without the
+// over-limit groups.
 func WantedGroupRules(bridges []BridgeGrants) map[string][]string {
 	out := map[string][]string{}
 	for _, b := range bridges {
 		for _, g := range b.Groups {
 			if !g.OverLimit {
-				out[g.Tag] = unionDst(map[string][]string{"a": out[g.Tag], "b": g.Dst}, []string{"a", "b"})
+				out[g.Tag] = unionDst(
+					map[string][]string{"a": out[g.Tag], "b": g.Dst},
+					[]string{"a", "b"},
+				)
 			}
 		}
 	}

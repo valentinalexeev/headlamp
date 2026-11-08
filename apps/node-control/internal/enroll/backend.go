@@ -59,8 +59,8 @@ type Backend interface {
 	ApproveNode(name, fingerprint string, nodeID uint64, machineKey string) error
 	Unapprove(name string) error
 
-	// TailnetDoc and PutTailnetDoc read and replace the tailnet grant state (#139). An empty store gives an empty
-	// document. It is not part of the enrolment export.
+	// TailnetDoc and PutTailnetDoc read and replace the tailnet grant state (#139). An empty store
+	// gives an empty document. It is not part of the enrolment export.
 	TailnetDoc() (TailnetDoc, error)
 	PutTailnetDoc(d TailnetDoc) error
 

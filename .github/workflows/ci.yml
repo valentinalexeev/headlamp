@@ -63,16 +63,12 @@ jobs:
       - name: Secret scan of the new commits (gitleaks)
         env:
           BASE: ${{ needs.scope.outputs.base }}
-          GITLEAKS_VERSION: 8.30.1
+          # The official image from the gitleaks project, pinned by digest, instead of a tarball from the GitHub release
+          # CDN (that CDN gave HTTP 504 for hours on 2026-11-08 and failed this job).
+          GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
         run: |
-          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
-          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          # GitHub's release CDN answers 504 now and then: retry, and verify what arrived against the release checksums.
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$tarball" "$url/$tarball"
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o checksums.txt "$url/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          grep " $tarball\$" checksums.txt | sha256sum -c -
-          tar xzf "$tarball" gitleaks
-          ./gitleaks git --no-banner --redact --log-opts="$BASE..HEAD" .
+          docker run --rm -v "$PWD:/repo" -w /repo --entrypoint sh "$GITLEAKS_IMAGE" -c \
+            'git config --global --add safe.directory /repo && exec gitleaks git --no-banner --redact --log-opts="$0..HEAD" .' "$BASE"
 
   shell:
     needs: scope
@@ -109,12 +105,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # The golangci-lint analysis cache and the Go module cache, kept between runs (runs on main fill it for PRs).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/lint-cache
+          key: golangci-${{ runner.os }}-${{ hashFiles('.golangci.yml', 'apps/*/go.sum', 'apps/*/go.mod') }}
+          restore-keys: golangci-${{ runner.os }}-
       - name: golangci-lint (new code, strict)
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
-        run: make lint-go LINT_BASE_REV="origin/$BASE_REF"
+          LINT_CACHE_DIR: ${{ runner.temp }}/lint-cache
+        run: make lint-go LINT_BASE_REV="origin/$BASE_REF" LINT_CACHE_DIR="$LINT_CACHE_DIR"
       - name: golangci-lint (full report, warnings)
-        run: make lint-go-report
+        env:
+          LINT_CACHE_DIR: ${{ runner.temp }}/lint-cache
+        run: make lint-go-report LINT_CACHE_DIR="$LINT_CACHE_DIR"
 
   vulncheck:
     runs-on: ubuntu-26.04
@@ -123,6 +128,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.3"
+          # The Go module and build caches (setup-go keeps them): all apps, so one key covers the scan.
+          cache-dependency-path: apps/*/go.sum
       - run: make vulncheck
 
   config-lint:
@@ -142,15 +149,31 @@ jobs:
         if: needs.scope.outputs.terraform == 'true'
         with:
           terraform_wrapper: false
+      # Provider cache: the registry sends some providers (yandex, oci) through GitHub release downloads, which gave
+      # HTTP 503/504 for hours on 2026-11-08. With the cache, init needs no download when the lock files match.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.scope.outputs.terraform == 'true'
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: tf-providers-${{ runner.os }}-${{ hashFiles('terraform/modules/**/versions.tf', 'terraform/modules/**/.terraform.lock.hcl') }}
+          restore-keys: tf-providers-${{ runner.os }}-
       - name: Format and validate the modules
         if: needs.scope.outputs.terraform == 'true'
         run: |
+          TF_PLUGIN_CACHE_DIR="$HOME/.terraform.d/plugin-cache"; export TF_PLUGIN_CACHE_DIR
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           terraform fmt -check -recursive terraform
           for m in terraform/modules/exit-node-vm/*/; do
             # cloudru's provider is not on the public registry (see its versions.tf): format only.
             case $m in */cloudru/) continue ;; esac
             echo "::group::$m"
-            terraform -chdir="$m" init -backend=false -input=false
+            # Up to 3 tries: a provider download can fail on a short CDN error.
+            ok=0
+            for try in 1 2 3; do
+              if terraform -chdir="$m" init -backend=false -input=false; then ok=1; break; fi
+              echo "init failed (try $try of 3)"; sleep $((try * 20))
+            done
+            [ "$ok" = 1 ] || exit 1
             terraform -chdir="$m" validate
             echo "::endgroup::"
           done
@@ -164,6 +187,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.scope.outputs.ansible == 'true'
+      # pipx (ansible-core) and the Galaxy collections, shared by the ansible and ansible-os jobs.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.scope.outputs.ansible == 'true'
+        with:
+          path: |
+            ~/.local/pipx
+            ~/.ansible/collections
+          key: ansible-${{ runner.os }}-${{ hashFiles('ansible/requirements.yml') }}
+          restore-keys: ansible-${{ runner.os }}-
       - name: Syntax check the playbooks
         if: needs.scope.outputs.ansible == 'true'
         working-directory: ansible
@@ -174,6 +206,45 @@ jobs:
       - name: Role preflight tests
         if: needs.scope.outputs.ansible == 'true'
         run: make test-ansible-roles
+      - name: Skipped
+        if: needs.scope.outputs.ansible != 'true'
+        run: echo "no Ansible change"
+
+  ansible-os:
+    # The roles on each supported OS image, in a systemd container with a real headscale (#170). route-provisioner gets
+    # a full apply; ingress-agent runs in check mode until its apply passes in a container (#178).
+    needs: scope
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ubuntu-minimal, ubuntu-server, debian13]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.scope.outputs.ansible == 'true'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: needs.scope.outputs.ansible == 'true'
+        with:
+          go-version-file: apps/ingress-agent/go.mod
+      # pipx (ansible-core) and the Galaxy collections, shared by the ansible and ansible-os jobs.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.scope.outputs.ansible == 'true'
+        with:
+          path: |
+            ~/.local/pipx
+            ~/.ansible/collections
+          key: ansible-${{ runner.os }}-${{ hashFiles('ansible/requirements.yml') }}
+          restore-keys: ansible-${{ runner.os }}-
+      - name: OS matrix
+        if: needs.scope.outputs.ansible == 'true'
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          # The target comes with #170: skip cleanly on a tree that does not have it yet.
+          if ! make -n test-ansible-os >/dev/null 2>&1; then echo "no test-ansible-os target in this tree"; exit 0; fi
+          pipx install --include-deps ansible-core
+          ansible-galaxy collection install community.docker ansible.posix
+          make test-ansible-os IMAGE="$IMAGE" ROLES="route-provisioner ingress-agent" APPLY="route-provisioner"
       - name: Skipped
         if: needs.scope.outputs.ansible != 'true'
         run: echo "no Ansible change"

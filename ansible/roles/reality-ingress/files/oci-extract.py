@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Copy files out of a container image that is pinned by digest (#182).
 
-Usage: oci-extract.py <registry>/<repository>@sha256:<digest> <dest dir> <path in image> [...]
+Usage: oci-extract.py [--arch amd64|arm64] <registry>/<repository>@sha256:<digest> <dest dir> <path in image> [...]
 
 Standard library only, so it runs with the Python of ansible-playbook: no docker, skopeo or crane.
 The registry is accessed anonymously (the Bearer token flow of the OCI distribution spec). The digest
-may name an image index or a linux/amd64 manifest. Every manifest and every layer is checked against
+may name an image index (the linux/<arch> manifest is used, default amd64) or a manifest. Every manifest and every layer is checked against
 its digest before use. A file is taken from the newest layer that has it. Each file goes to
 <dest dir>/<basename>. The caller still checks the sha256 of each file it installs.
 """
@@ -28,7 +28,7 @@ LAYER_SIZE_MAX_BYTES = 1 << 30
 LAYER_COUNT_MAX = 64
 REDIRECT_COUNT_MAX = 5
 CHUNK_BYTES = 1 << 20
-PLATFORM = ("linux", "amd64")
+ARCHITECTURES = ("amd64", "arm64")
 
 MANIFEST_TYPES = ", ".join([
     "application/vnd.oci.image.index.v1+json",
@@ -137,14 +137,14 @@ class Registry:
             fail("layer digest mismatch for %s" % digest)
 
 
-def platform_manifest(registry, digest):
+def platform_manifest(registry, digest, architecture):
     manifest = registry.manifest(digest)
     if manifest.get("mediaType") in INDEX_TYPES or "manifests" in manifest:
         for entry in manifest.get("manifests", []):
             platform = entry.get("platform", {})
-            if (platform.get("os"), platform.get("architecture")) == PLATFORM:
+            if (platform.get("os"), platform.get("architecture")) == ("linux", architecture):
                 return registry.manifest(entry["digest"])
-        fail("image index %s has no %s/%s manifest" % ((digest,) + PLATFORM))
+        fail("image index %s has no linux/%s manifest" % (digest, architecture))
     return manifest
 
 
@@ -173,14 +173,20 @@ def extract(registry, layers, wanted, dest_dir, work_dir):
 
 
 def main(argv):
+    architecture = "amd64"
+    if len(argv) > 2 and argv[1] == "--arch":
+        architecture = argv[2]
+        argv = argv[:1] + argv[3:]
+    if architecture not in ARCHITECTURES:
+        fail("--arch must be one of %s, got %r" % (", ".join(ARCHITECTURES), architecture))
     if len(argv) < 4:
-        fail("usage: oci-extract.py <image@sha256:...> <dest dir> <path> [...]")
+        fail("usage: oci-extract.py [--arch amd64|arm64] <image@sha256:...> <dest dir> <path> [...]")
     registry_name, repository, digest = parse_reference(argv[1])
     dest_dir = argv[2]
     if not os.path.isdir(dest_dir):
         fail("destination %s is not a directory" % dest_dir)
     registry = Registry(registry_name, repository)
-    layers = platform_manifest(registry, digest).get("layers", [])
+    layers = platform_manifest(registry, digest, architecture).get("layers", [])
     if not layers or len(layers) > LAYER_COUNT_MAX:
         fail("image has %d layers (1 to %d allowed)" % (len(layers), LAYER_COUNT_MAX))
     with tempfile.TemporaryDirectory(prefix="oci-extract.", dir=dest_dir) as work_dir:

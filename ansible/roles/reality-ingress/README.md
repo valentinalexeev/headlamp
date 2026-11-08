@@ -23,9 +23,9 @@ client --VLESS+Reality :443--> xray --direct--------------------> destination
 
 ## Supported systems
 
-The role uses `apt` and systemd. The OS matrix (`make test-ansible-os`, #170) tests it on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13. The PR of #170 gives the result of each test.
+The role uses `apt` and systemd. The OS matrix (`make test-ansible-os`, #170) tests it on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13. All six roles pass check mode and a real apply on these three systems, on amd64 and arm64 (#178).
 
-For a bridge VM, use Ubuntu 26.04 Minimal. It is the preferred image. Use Debian 13 only when the OS matrix shows a pass for all bridge roles on it.
+For a bridge VM, use Ubuntu 26.04 Minimal. It is the preferred image. You can also use Debian 13.
 
 ## What it installs
 
@@ -37,7 +37,8 @@ For a bridge VM, use Ubuntu 26.04 Minimal. It is the preferred image. Use Debian
 | nftables backstop | `/etc/ingress-guard.nft`, unit `ingress-guard.service` (table `inet ingress_guard`); package `nftables` if `nft` is missing |
 
 The role gets the binaries on the **control host**, because hosts in restricted networks often cannot reach a
-registry or GitHub. The bridge VM does not need docker. Linux/amd64 only.
+registry or GitHub. The bridge VM does not need docker. The role supports `x86_64` (amd64) and `aarch64` (arm64)
+hosts. It uses the image manifest and the sha256 pin of the host architecture.
 
 By default, the files come from the official images, pinned by digest (#182):
 
@@ -52,19 +53,21 @@ The script `files/oci-extract.py` pulls only the necessary layers from the regis
 digest of each manifest and each layer. Then the role checks the sha256 of each file against the pin
 (`xray_image_sha256`, `caddy_image_sha256`, the `sha256` of each geodata item).
 
+`xray_image_sha256` and
+`caddy_image_sha256` are maps with the keys `amd64` and `arm64`. When you change a digest, change all values.
+
 We use this method because the GitHub release CDN can fail for hours (HTTP 504). The registries of the images are a
 different service. The digest and the sha256 pin the exact content.
 
 To use a mirror, set `xray_url` with `xray_sha256`, or `caddy_url` with `caddy_sha256`. The role then downloads that
 release archive with `get_url` and checks its sha256. xray: the `Xray-linux-64.zip` archive. Caddy: the
-`caddy_<ver>_linux_amd64.tar.gz` archive. A geodata item with a `url` comes from that URL. A geodata item without a
+`caddy_<ver>_linux_<arch>.tar.gz` archive. The archive must agree with the host architecture. A geodata item with a `url` comes from that URL. A geodata item without a
 `url` comes from `xray_image`.
 
 The role stages everything in a fresh temp dir for each run on the control host. It removes the dir afterwards.
 It never reuses anything unpacked earlier. It verifies the checksum of every file before it copies the file.
 
-Only
-x86_64 hosts are supported (asserted from gathered facts). In `--check` mode, the role reports downloads.
+The role asserts the architecture from gathered facts. In `--check` mode, the role reports downloads.
 It skips pulls from the images, unpacking, copying binaries and validation.
 
 Control-host requirements:

@@ -58,10 +58,10 @@
       - 1 <= (reality_dest | regex_replace('^.*:([0-9]+)$', '\\1') | int) <= 65535
       - 1 <= (ingress_listen_port | int) <= 65535
       - caddy_state_dir is regex('^/var/lib/[A-Za-z0-9._-]+\\Z')
-      - (ansible_facts.architecture | default('')) == 'x86_64'
+      - (ansible_facts.architecture | default('')) in ['x86_64', 'aarch64']
     fail_msg: >-
       reality-ingress: every port must be 1-65535; caddy_state_dir must be
-      /var/lib/<dir>; only x86_64 hosts are supported (facts must be gathered).
+      /var/lib/<dir>; only x86_64 and aarch64 hosts are supported (facts must be gathered).
     quiet: true
 
 # Each binary comes from its image (default, #182) or from the URL override; either way a sha256 is checked.
@@ -70,10 +70,10 @@
     that:
       - (xray_url | length > 0 and xray_url is match('https://') and xray_sha256 is regex('^[0-9A-Fa-f]{64}\\Z'))
         or (xray_url | length == 0 and xray_image is regex(reality_image_pattern)
-            and xray_image_sha256 is regex('^[0-9a-f]{64}\\Z'))
+            and (xray_image_sha256[reality_arch] | default('')) is regex('^[0-9a-f]{64}\\Z'))
       - (caddy_url | length > 0 and caddy_url is match('https://') and caddy_sha256 is regex('^[0-9A-Fa-f]{64}\\Z'))
         or (caddy_url | length == 0 and caddy_image is regex(reality_image_pattern)
-            and caddy_image_sha256 is regex('^[0-9a-f]{64}\\Z'))
+            and (caddy_image_sha256[reality_arch] | default('')) is regex('^[0-9a-f]{64}\\Z'))
       - "'geoip.dat' in xray_geodata_files | map(attribute='name', default='')"
       - "'geosite.dat' in xray_geodata_files | map(attribute='name', default='')"
       - xray_geodata_files | map(attribute='name', default='') | select('match', '^[A-Za-z0-9._-]+\\Z') | list | length == xray_geodata_files | length
@@ -82,11 +82,12 @@
       - xray_geodata_files | map(attribute='sha256', default='') | select('match', '^[0-9a-f]{64}\\Z') | list | length == xray_geodata_files | length
     fail_msg: >-
       reality-ingress: for xray and caddy, set either the image (<registry>/<repository>@sha256:<digest>) with
-      xray_image_sha256 / caddy_image_sha256, or the https URL override with xray_sha256 / caddy_sha256
+      xray_image_sha256 / caddy_image_sha256 for '{{ reality_arch }}' (a map: amd64, arm64), or the https URL override with xray_sha256 / caddy_sha256
       (64 hex characters). xray_geodata_files must include geoip.dat and geosite.dat; every item needs name
       (plain file name) and a 64-hex sha256 (lower case), and an optional https url (no url = from xray_image).
     quiet: true
   vars:
+    reality_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture | default('')] | default('') }}"
     # A plain variable is not a Jinja string literal, so one backslash here.
     reality_image_pattern: '^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+@sha256:[0-9a-f]{64}\Z'
 

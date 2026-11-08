@@ -15,6 +15,11 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 - `exit-node-vm/aws`: the launch template requires IMDSv2 (hop limit 1) (#203). The plan of an existing node shows a new launch template version. The running instance stays until the next start.
 - `reality-ingress` takes xray, its geodata and Caddy from the official images, pinned by digest (`ghcr.io/xtls/xray-core`, `docker.io/library/caddy`), not from the GitHub release CDN (#182). The control host pulls only the needed layers with the role's `files/oci-extract.py` (Python standard library; no docker, skopeo or crane on the control host or the bridge VM) and checks the sha256 of each file. New variables `xray_image`, `xray_image_sha256`, `caddy_image`, `caddy_image_sha256` with defaults; `xray_geodata_files` has a default and its `url` is optional. `xray_version`, `xray_sha256`, `caddy_version`, `caddy_sha256` are no longer required. A site that set only the versions and archive sha256 values now gets the image pins, and those values are ignored. To keep the archive downloads (for example from a mirror), set `xray_url` with `xray_sha256` and `caddy_url` with `caddy_sha256`; the URL defaults are now empty. The control host needs access to `ghcr.io` and `registry-1.docker.io`.
+- `reality-ingress` and `tailscale` support `aarch64` nodes (#178): they use the arm64 image manifest or `.deb`. `xray_image_sha256` and `caddy_image_sha256` (new in this release) are maps by architecture: `{amd64: <sha256>, arm64: <sha256>}`.
+
+### Fixed
+
+- All six Ansible roles pass check mode and a real apply in the OS matrix on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13 (#178). Check mode on a fresh host no longer fails in `task-runner` (owner of the state directory before the user exists) and in `tailscale` (`sysctl` before `procps` is installed). `tailscale` no longer fails when `AutoUpdate.Apply` is null on a fresh node. `make test-ansible-os` uses the native architecture of the docker engine (`ANSIBLE_OS_PLATFORM` forces one).
 - The `reality-ingress` preflight error for Hysteria 2 now says that `hy2_enabled` is on by default, which UDP port it opens, and that `hy2_enabled: false` turns it off (#200).
 
 ## 0.12.0 - 2026-11-08

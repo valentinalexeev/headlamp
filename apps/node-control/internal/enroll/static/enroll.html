@@ -43,11 +43,23 @@
         </table>
       </div>
     </section>
+    <section id="tailnet" data-page="devices" hidden>
+      <h2>Tailnet</h2>
+      <p class="t2">The tailnet targets of each device on each bridge in grants mode, from the device and from its owner. An owner grant applies to all devices of the owner, also to devices enrolled later.</p>
+      <div class="note crit" id="tailneterror" role="alert" hidden></div>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Device</th><th>Owner</th><th>Tailnet</th><th><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="tailnetrows"></tbody>
+        </table>
+      </div>
+    </section>
   </div>
   <div id="drawer"></div>
 </div>
 <script src="/enroll/qrcode.js" defer></script>
 <script src="/enroll/static/enroll.js" defer></script>
 <script src="/enroll/static/people.js" defer></script>
+<script src="/enroll/static/tailnet.js" defer></script>
 </body>
 </html>

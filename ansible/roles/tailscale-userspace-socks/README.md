@@ -30,6 +30,8 @@ This role uses a separate socket, state dir and unit (`tailscaled-socks.service`
 | `socks_socket` | `/run/tailscaled-socks/tailscaled.sock` | Must be `/run/<dir>/<file>`; dir becomes `RuntimeDirectory` (mode 0700). |
 | `socks_login_server` | `headscale_login_server` | No fallback: the caller or base role must set `headscale_login_server` (asserted). |
 | `socks_verify_url` | `https://ifconfig.me` | Used by the verify tasks. |
+| `socks_grant_groups` | `[]` | Tailnet grant groups (#139). Each entry has `id` (`g-<8 hex>`, from the bridge page of node-control) and `authkey` (a pre-auth key with the tag `tag:ingress-g-<8 hex>`, needed until the node is logged in). At most 8 entries. |
+| `socks_grant_port_base` | `1056` | The SOCKS port of the first group. The next group uses the next port. |
 
 ## Behaviour
 
@@ -49,6 +51,14 @@ This role uses a separate socket, state dir and unit (`tailscaled-socks.service`
    Without a selected exit node, the SOCKS port would egress
    from this host. In that case, the run fails with a message that names the likely causes: exit node offline,
    route not approved, ACL.
+
+6. For each entry of `socks_grant_groups`, install the unit `tailscaled-socks-<id>.service`. It runs one more
+   userspace tailscaled with its own state dir, socket and loopback SOCKS port. On the first run, it joins with the
+   key of the group as `<socks_hostname>-<id>`. It has no exit node, because it carries only tailnet traffic.
+   The role stops and removes the units of groups that are no longer in the list.
+
+   Keep the order of the list: the port of a group comes from its position. Use the same list in the
+   `reality-ingress` role.
 
 Verification (not run by default): `ansible-playbook ... --tags socks-verify` fetches
 `socks_verify_url` through the SOCKS port and directly. It prints both results. The SOCKS result must

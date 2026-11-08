@@ -92,6 +92,7 @@ test-hysteria-e2e:
 
 test-tailnet-access-e2e:
 	sh scripts/test/tailnet-access/e2e-docker.sh
+	sh scripts/test/tailnet-access/grants-e2e.sh
 
 test-oidc-e2e:
 	sh scripts/test/oidc/e2e-docker.sh
@@ -144,9 +145,15 @@ GIT_COMMON_DIR       := $(abspath $(shell git rev-parse --git-common-dir))
 # govulncheck scans with the toolchain the images ship (FROM golang:1.27.3 in the Dockerfiles)
 GO_VULN_TOOLCHAIN    ?= go1.27.3
 
+# Caches of the golangci-lint container: docker volumes by default. With LINT_CACHE_DIR=<dir> (CI) they are host
+# directories, so actions/cache can keep them between runs.
+LINT_CACHE_MOUNTS = $(if $(LINT_CACHE_DIR),\
+  -v "$(LINT_CACHE_DIR)/golangci":/root/.cache -v "$(LINT_CACHE_DIR)/gomod":/go/pkg/mod,\
+  -v headlamp-golangci-cache:/root/.cache -v headlamp-gomod-cache:/go/pkg/mod)
+
 GOLANGCI_LINT = $(if $(shell command -v golangci-lint 2>/dev/null),golangci-lint,\
   docker run --rm -v "$(CURDIR)":"$(CURDIR)" -v "$(GIT_COMMON_DIR)":"$(GIT_COMMON_DIR)" -w "$(CURDIR)/$$app" \
-    -v headlamp-golangci-cache:/root/.cache -v headlamp-gomod-cache:/go/pkg/mod \
+    $(LINT_CACHE_MOUNTS) \
     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
     golangci/golangci-lint:$(GOLANGCI_LINT_VERSION) golangci-lint)
 

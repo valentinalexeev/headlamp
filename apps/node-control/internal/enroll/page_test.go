@@ -37,8 +37,8 @@ func TestEnrollPageHeaders(t *testing.T) {
 func TestEnrollPageNoInlineScript(t *testing.T) {
 	html := string(enrollHTML)
 	scripts := regexp.MustCompile(`(?i)<script\b[^>]*>`).FindAllString(html, -1)
-	if len(scripts) != 3 {
-		t.Errorf("want the QR library, the page script and the People script, got %v", scripts)
+	if len(scripts) != 4 {
+		t.Errorf("want the QR library, the page script, the People script and the Tailnet script, got %v", scripts)
 	}
 	for _, m := range scripts {
 		if !strings.Contains(m, ` src="/`) || !strings.Contains(m, "defer") {
@@ -128,7 +128,7 @@ func TestApprovePageHasNoInlineCodeOrInjection(t *testing.T) {
 			t.Errorf("page contains %q", bad)
 		}
 	}
-	js := string(approveJS)
+	js := string(approveJS) + string(tailnetJS)
 	for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "confirm(", "prompt(", "XMLHttpRequest"} {
 		if strings.Contains(js, bad) {
 			t.Errorf("script contains %q", bad)
@@ -142,11 +142,11 @@ func TestEnrollPagesSelfTest(t *testing.T) {
 	if err != nil {
 		t.Skip("node is not installed")
 	}
-	args := []string{"testdata/enroll_selftest.js", "../ui/static/hl.js", "static/approve.js", "static/enroll.js", "static/people.js"}
+	args := []string{"testdata/enroll_selftest.js", "../ui/static/hl.js", "static/approve.js", "static/enroll.js", "static/people.js", "static/tailnet.js"}
 	if out, err := exec.Command(node, args...).CombinedOutput(); err != nil {
 		t.Fatalf("self-test failed: %v\n%s", err, out)
 	}
-	for _, f := range []string{"static/approve.js", "static/enroll.js", "static/people.js"} {
+	for _, f := range []string{"static/approve.js", "static/enroll.js", "static/people.js", "static/tailnet.js"} {
 		if out, err := exec.Command(node, "--check", f).CombinedOutput(); err != nil {
 			t.Fatalf("node --check %s: %v\n%s", f, err, out)
 		}

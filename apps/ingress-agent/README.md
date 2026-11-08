@@ -15,8 +15,10 @@ base file. It restarts xray when the set changes.
 ## API (bearer token in `Authorization: Bearer <AGENT_TOKEN>`; wrong or missing -> `401`, empty body)
 
 - `PUT /v1/credentials` body `{"credentials":[{"uuid":"<uuid>","mode":"auto|direct|exit","not_after":<unix seconds>}]}`
-  replaces the whole set. An entry can also have `"tailnet": "all"`, the tailnet grant (#132). The status is `422` for a
-  bad mode, a non-UUID string, a non-integer `not_after` or a `tailnet` value other than `""` or `"all"`.
+  replaces the whole set. An entry can also have `"tailnet"`: `"all"` (the tailnet grant, #132) or a grant group id
+  `"g-<8 hex>"` (#139). The status is `422` for a bad mode, a non-UUID string, a non-integer `not_after` or another
+  `tailnet` value. The answer is `{"count": <n>, "tailnet_groups": [<group ids>]}`. `tailnet_groups` lists the groups
+  that have an outbound in the base config.
   Duplicate UUIDs in one push give `422`. The agent drops entries that already expired first. Then an empty
   list gives `409`, unless the request has `?confirm_empty=true`.
   The status is `503` if xray rejects the generated config. In that case, the old config, the old set and the running xray do not change.
@@ -48,6 +50,10 @@ The agent starts from the base file (`XRAY_BASE_CONFIG`). The base file must con
   0. This rule exists only when a credential has the tailnet grant (#132). It sends the tailnet ranges of these
      clients to the outbound `via-tailnet`. The ranges are `100.64.0.0/10` and `fd7a:115c:a1e0::/48`. The base config must then have this outbound, or the push gives
      `503`. Other private ranges are not in this rule, so they stay blocked.
+     For each grant group (#139), one more rule sends the tailnet ranges of the group's clients to the outbound
+     `via-tailnet-<group id>`. If the base config has no outbound for a group, the group gets no rule. Thus the block
+     rule stops its tailnet traffic until the bridge has the SOCKS instance of the group. A playbook run can add an
+     outbound. Then the next push renders the config again, also if the credentials did not change.
   1. Block `geoip:private` and `100.64.0.0/10` for everyone on the `reality-in` inbound. Phone
      users then cannot reach the LAN of the bridge host or the tailnet. This rule is present even with zero clients.
   2. Send clients of mode `direct` to the outbound `direct`. Send clients of mode `exit` to the outbound `via-exit`.

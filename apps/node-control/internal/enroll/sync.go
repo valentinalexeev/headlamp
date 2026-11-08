@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 )
@@ -44,6 +45,22 @@ type SyncState struct {
 	state   string
 	since   *int64
 	ver     uint64 // bumped on every outcome: lets a caller tell "no result yet" from "same result"
+	// groups are the grant groups the bridge reported (#139); nil: not known.
+	groups []string
+}
+
+// SetGroups records the grant groups the bridge can serve.
+func (s *SyncState) SetGroups(g []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.groups = g
+}
+
+// Groups gives the grant groups the bridge reported and whether it reported any list.
+func (s *SyncState) Groups() ([]string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.groups), s.groups != nil
 }
 
 // NewSyncState returns a state in "unknown". A nil clock means time.Now.
@@ -102,6 +119,19 @@ type SyncTarget struct {
 // goes through UUIDFor (the identity for a "base" ingress); mode and not_after are unchanged. The
 // first error is returned and no partial set. A bridge with tailnet_access "all" grants every credential.
 func (c IngressConfig) CredentialsFor(ing Ingress, base []Credential) ([]Credential, error) {
+	return c.credentialsWith(ing, base, nil)
+}
+
+// credentialsWith is CredentialsFor with the tailnet plan (#139): it gives the mode of the bridge
+// and, in grants mode, the group of each base uuid. A nil plan uses the bridge's own
+// tailnet_access.
+func (c IngressConfig) credentialsWith(
+	ing Ingress, base []Credential, plan *tailnetPlan,
+) ([]Credential, error) {
+	mode := ing.TailnetAccess
+	if plan != nil {
+		mode = plan.doc.EffectiveMode(ing)
+	}
 	out := make([]Credential, 0, len(base))
 	for _, cr := range base {
 		u, err := c.UUIDFor(ing, cr.Mode, cr.UUID)
@@ -109,12 +139,54 @@ func (c IngressConfig) CredentialsFor(ing Ingress, base []Credential) ([]Credent
 			return nil, err
 		}
 		c := Credential{UUID: u, Mode: cr.Mode, NotAfter: cr.NotAfter}
-		if ing.GrantsTailnet() {
+		switch mode {
+		case TailnetAll:
 			c.Tailnet = TailnetAll
+		case TailnetGrants:
+			c.Tailnet = plan.groupOf(ing.Name, cr.UUID)
 		}
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+// tailnetPlan is the grant state of one sync round: the stored document and, per bridge in grants
+// mode, the group of each base uuid.
+type tailnetPlan struct {
+	doc     TailnetDoc
+	byUUID  map[string]int64
+	bridges map[string]BridgeGrants
+}
+
+func (p *tailnetPlan) groupOf(bridge, baseUUID string) string {
+	if p == nil {
+		return ""
+	}
+	return p.bridges[bridge].ByDevice[p.byUUID[baseUUID]]
+}
+
+// newTailnetPlan resolves the grants of every bridge in grants mode. Only active devices take part.
+func newTailnetPlan(
+	cfg IngressConfig, ings []Ingress, doc TailnetDoc, devices []Device, now int64,
+) *tailnetPlan {
+	p := &tailnetPlan{doc: doc, byUUID: map[string]int64{}, bridges: map[string]BridgeGrants{}}
+	var active []Device
+	for _, d := range devices {
+		if d.Revoked || d.ExpiresAt <= now {
+			continue
+		}
+		active = append(active, d)
+		for _, u := range d.UUIDs {
+			p.byUUID[u] = d.ID
+		}
+	}
+	all := AllTargets(cfg.Targets, doc)
+	for _, in := range ings {
+		if doc.EffectiveMode(in) == TailnetGrants {
+			p.bridges[in.Name] = ResolveGrants(doc, all, in.Name, active)
+		}
+	}
+	return p
 }
 
 // Sync pushes the live credentials to one agent. An empty set is confirmed only when the store has
@@ -149,6 +221,10 @@ func SyncAll(ctx context.Context, store Backend, cfg IngressConfig, targets []Sy
 	if err == nil {
 		devices, err = store.ListDevices()
 	}
+	var doc TailnetDoc
+	if err == nil {
+		doc, err = store.TailnetDoc()
+	}
 	if err != nil {
 		for _, t := range targets {
 			syncLog(t.Name, "enrolment sync failed: store unreadable", "error_type", errType(err))
@@ -159,8 +235,13 @@ func SyncAll(ctx context.Context, store Backend, cfg IngressConfig, targets []Sy
 	var wg sync.WaitGroup
 	defer wg.Wait() // runs before the deferred unlock: no push outlives the lock, even on a panic
 	results := make([]bool, len(targets))
+	ings := make([]Ingress, len(targets))
 	for i, t := range targets {
-		creds, err := safeCredentials(cfg, t, base)
+		ings[i] = t.Ingress
+	}
+	plan := newTailnetPlan(cfg, ings, doc, devices, store.Clock()().Unix())
+	for i, t := range targets {
+		creds, err := safeCredentials(cfg, t, base, plan)
 		if err != nil {
 			syncLog(t.Name, "enrolment sync failed: credentials unavailable", "error_type", errType(err))
 			t.State.Failed("error")
@@ -196,7 +277,9 @@ func SyncAll(ctx context.Context, store Backend, cfg IngressConfig, targets []Sy
 var credentialsHook func(Ingress)
 
 // safeCredentials computes a target's set; a panic becomes an error that carries only its type.
-func safeCredentials(cfg IngressConfig, t SyncTarget, base []Credential) (creds []Credential, err error) {
+func safeCredentials(
+	cfg IngressConfig, t SyncTarget, base []Credential, plan *tailnetPlan,
+) (creds []Credential, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			creds, err = nil, fmt.Errorf("panic: %s", typeName(r))
@@ -205,7 +288,7 @@ func safeCredentials(cfg IngressConfig, t SyncTarget, base []Credential) (creds 
 	if credentialsHook != nil {
 		credentialsHook(t.Ingress)
 	}
-	return cfg.CredentialsFor(t.Ingress, base)
+	return cfg.credentialsWith(t.Ingress, base, plan)
 }
 
 // pushTo pushes one target's set and records the outcome in its state.
@@ -224,6 +307,11 @@ func pushTo(ctx context.Context, t SyncTarget, creds []Credential) bool {
 		syncLog(t.Name, "enrolment sync failed: error", "error_type", errType(err))
 		t.State.Failed("error")
 		return false
+	}
+	if r, ok := t.Agent.(groupReporter); ok {
+		if g, known := r.TailnetGroups(); known {
+			t.State.SetGroups(g)
+		}
 	}
 	t.State.OK("ok")
 	return true

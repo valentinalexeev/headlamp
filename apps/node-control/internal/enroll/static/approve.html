@@ -27,8 +27,16 @@
 
     <div class="stack" id="confirm"></div>
     <div class="rowbtns start" id="actions" hidden></div>
+
+    <section id="tailnet" data-page="bridge" hidden>
+      <h2>Tailnet access</h2>
+      <p class="t2 small">Changes need the right enroll.admin. Each change goes to the audit log.</p>
+      <div class="note crit" id="tailneterror" role="alert" hidden></div>
+      <div class="stack" id="tailnetroot"></div>
+    </section>
   </div>
 </div>
 <script src="/enroll/static/approve.js" defer></script>
+<script src="/enroll/static/tailnet.js" defer></script>
 </body>
 </html>

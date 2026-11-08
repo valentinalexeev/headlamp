@@ -201,7 +201,7 @@ func bridgeIntermittent(name string, views []IngressView) bool {
 
 // activityPrefixes are the audit actions this module owns. The shared log also holds node actions, which the nodes
 // module reports.
-var activityPrefixes = []string{"device.", "bridge.", "audit."}
+var activityPrefixes = []string{"device.", "bridge.", "audit.", "tailnet."}
 
 // auditRead is how many log entries Activity reads before filtering by prefix: the whole bounded log.
 const auditRead = 1000

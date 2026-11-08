@@ -6,12 +6,15 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
+- `UPGRADING.md` lists, for each release from 0.10.0, what a site repo must change (#193). `scripts/check-release.sh` refuses a tag when `UPGRADING.md` has no section for its version. The wiki publishes it as `UPGRADING`.
 - Dependabot opens update PRs for the Go modules, the base and compose images, the Terraform providers and the GitHub Actions. tailscale and headscale are not in it: their pins move together.
 - `control-host/aws`: variable `metadata_hop_limit` (default `1`, 1 to 64) for the IMDSv2 hop limit (#204). Set `2` so that node-control on the compose bridge network can use the instance role with its `aws` provider. The default plan does not change.
+- Rule for releases before 1.0.0 (#200): a new feature that opens a port, changes an access rule or adds a protocol is off by default. `make check-feature-defaults` (part of `make lint`) fails on a new `<name>_enabled: true` Ansible role default that is not in `scripts/feature-defaults.allow`. See "New features before 1.0.0" in `VERSIONING.md`.
 
 ### Changed
 
 - `reality-ingress` takes xray, its geodata and Caddy from the official images, pinned by digest (`ghcr.io/xtls/xray-core`, `docker.io/library/caddy`), not from the GitHub release CDN (#182). The control host pulls only the needed layers with the role's `files/oci-extract.py` (Python standard library; no docker, skopeo or crane on the control host or the bridge VM) and checks the sha256 of each file. New variables `xray_image`, `xray_image_sha256`, `caddy_image`, `caddy_image_sha256` with defaults; `xray_geodata_files` has a default and its `url` is optional. `xray_version`, `xray_sha256`, `caddy_version`, `caddy_sha256` are no longer required. A site that set only the versions and archive sha256 values now gets the image pins, and those values are ignored. To keep the archive downloads (for example from a mirror), set `xray_url` with `xray_sha256` and `caddy_url` with `caddy_sha256`; the URL defaults are now empty. The control host needs access to `ghcr.io` and `registry-1.docker.io`.
+- The `reality-ingress` preflight error for Hysteria 2 now says that `hy2_enabled` is on by default, which UDP port it opens, and that `hy2_enabled: false` turns it off (#200).
 
 ## 0.12.0 - 2026-11-08
 

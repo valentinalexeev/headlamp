@@ -3,7 +3,7 @@
 # is a copy, rebuilt from scratch on every run.
 # usage: wiki-render.sh OUT_DIR REPO [REF]     (REPO is owner/name, REF defaults to main)
 # Pages:
-#   README.md -> Home, VERSIONING.md, CHANGELOG.md -> same name, docs/<name>.md -> <name>
+#   README.md -> Home, VERSIONING.md, UPGRADING.md, CHANGELOG.md -> same name, docs/<name>.md -> <name>
 #   <dir>/README.md (an app, role or module manual) -> <dir> with "/" replaced by "-", without a leading "apps-" or
 #   "ansible-roles-" (apps/funnel-ingress/README.md -> funnel-ingress,
 #   ansible/roles/task-runner/README.md -> role-task-runner, terraform/modules/exit-node-vm/oci/README.md ->
@@ -17,7 +17,7 @@ repo=${2:?usage: wiki-render.sh OUT_DIR REPO [REF]}
 ref=${3:-main}
 blob="https://github.com/${repo}/blob/${ref}"
 
-sources=(README.md VERSIONING.md CHANGELOG.md)
+sources=(README.md VERSIONING.md UPGRADING.md CHANGELOG.md)
 while IFS= read -r f; do sources+=("$f"); done < <(
 	git ls-files 'docs/*.md' | grep -v '^docs/superpowers/'
 	git ls-files '*/README.md' | grep -v -E '^(docs|scripts/test)/'

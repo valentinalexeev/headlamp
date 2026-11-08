@@ -8,4 +8,4 @@ if [ $# -gt 0 ]; then
 else
 	files=$(git ls-files)
 fi
-grep -E '(^|/)README\.md$|^docs/.*\.md$|^VERSIONING\.md$' <<<"$files" | grep -v '^docs/superpowers/' || true
+grep -E '(^|/)README\.md$|^docs/.*\.md$|^VERSIONING\.md$|^UPGRADING\.md$' <<<"$files" | grep -v '^docs/superpowers/' || true

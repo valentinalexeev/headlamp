@@ -1,6 +1,7 @@
 ---
-# Binaries are downloaded on the CONTROL host (hosts in restricted networks often cannot reach
-# GitHub), checksum-verified (get_url), unpacked there, then copied to the
+# Binaries are fetched on the CONTROL host (hosts in restricted networks often cannot reach
+# a registry or GitHub): by default pulled from the pinned official images (#182), or from
+# xray_url / caddy_url; sha256-verified, unpacked there, then copied to the
 # target. Everything is staged in a fresh per-run temp dir that is removed in
 # `always:`, so nothing unpacked on an earlier run (a predictable path an
 # attacker could have planted in) is ever installed. Check mode: downloads are
@@ -36,6 +37,13 @@
   become: true
 
 - name: Stage, verify and install the binaries
+  vars:
+    # Files that come from an image, with the sha256 they must have.
+    # Stage path and pinned sha256 of each file that comes from an image (geodata without url: geodata/<name>).
+    reality_image_files: >-
+      {{ ([{'path': 'xray/xray', 'sha256': xray_image_sha256}] if xray_url | length == 0 else [])
+         + ([{'path': 'caddy/caddy', 'sha256': caddy_image_sha256}] if caddy_url | length == 0 else [])
+         + (xray_geodata_files | selectattr('url', 'undefined') | list) }}
   block:
     - name: Create a fresh stage directory on the control host
       ansible.builtin.tempfile:
@@ -52,11 +60,75 @@
         path: "{{ reality_stage.path }}/{{ item }}"
         state: directory
         mode: "0700"
-      loop: [xray, caddy, geodata]
+      loop: [xray, caddy, geodata, image, image-caddy]
       delegate_to: localhost
       become: false
       check_mode: false
 
+    # Default (#182): the files come from the official images, pinned by digest, through a small registry pull
+    # (files/oci-extract.py, standard library) with the Python that runs Ansible. One pull of xray_image gives
+    # the binary and the geodata files without url. The script checks the digest of every manifest and layer.
+    - name: Pull the needed files from the xray image to the control host
+      ansible.builtin.command:
+        argv: >-
+          {{ [ansible_playbook_python, role_path ~ '/files/oci-extract.py', xray_image, reality_stage.path ~ '/image']
+             + ([xray_image_path] if xray_url | length == 0 else [])
+             + (xray_geodata_files | selectattr('url', 'undefined')
+                | map(attribute='name') | map('regex_replace', '^', xray_image_geodata_dir ~ '/') | list) }}
+      changed_when: true
+      delegate_to: localhost
+      become: false
+      when: >-
+        not ansible_check_mode and
+        (xray_url | length == 0 or xray_geodata_files | selectattr('url', 'undefined') | list | length > 0)
+
+    - name: Pull the caddy binary from the caddy image to the control host
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ role_path }}/files/oci-extract.py"
+          - "{{ caddy_image }}"
+          - "{{ reality_stage.path }}/image-caddy"
+          - "{{ caddy_image_path }}"
+      changed_when: true
+      delegate_to: localhost
+      become: false
+      when: not ansible_check_mode and caddy_url | length == 0
+
+    - name: Move the xray binary from the image stage
+      ansible.builtin.command:
+        argv:
+          - mv
+          - "{{ reality_stage.path }}/image/{{ xray_image_path | basename }}"
+          - "{{ reality_stage.path }}/xray/xray"
+      changed_when: true
+      delegate_to: localhost
+      become: false
+      when: not ansible_check_mode and xray_url | length == 0
+
+    - name: Move the caddy binary from the image stage
+      ansible.builtin.command:
+        argv:
+          - mv
+          - "{{ reality_stage.path }}/image-caddy/{{ caddy_image_path | basename }}"
+          - "{{ reality_stage.path }}/caddy/caddy"
+      changed_when: true
+      delegate_to: localhost
+      become: false
+      when: not ansible_check_mode and caddy_url | length == 0
+
+    - name: Move the geodata files from the image stage
+      ansible.builtin.command:
+        argv: [mv, "{{ reality_stage.path }}/image/{{ item.name }}", "{{ reality_stage.path }}/geodata/{{ item.name }}"]
+      changed_when: true
+      loop: "{{ xray_geodata_files | selectattr('url', 'undefined') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      delegate_to: localhost
+      become: false
+      when: not ansible_check_mode
+
+    # Override: release archives from a URL (for example a mirror).
     - name: Download xray (zip) to the control host
       ansible.builtin.get_url:
         url: "{{ xray_url }}"
@@ -65,6 +137,7 @@
         mode: "0600"
       delegate_to: localhost
       become: false
+      when: xray_url | length > 0
 
     - name: Download caddy (tar.gz) to the control host
       ansible.builtin.get_url:
@@ -74,14 +147,15 @@
         mode: "0600"
       delegate_to: localhost
       become: false
+      when: caddy_url | length > 0
 
-    - name: Download the geodata files to the control host
+    - name: Download the geodata files that have a url to the control host
       ansible.builtin.get_url:
         url: "{{ item.url }}"
         dest: "{{ reality_stage.path }}/geodata/{{ item.name }}"
         checksum: "sha256:{{ item.sha256 }}"
         mode: "0600"
-      loop: "{{ xray_geodata_files }}"
+      loop: "{{ xray_geodata_files | selectattr('url', 'defined') | list }}"
       loop_control:
         label: "{{ item.name }}"
       delegate_to: localhost
@@ -94,7 +168,7 @@
         remote_src: true
       delegate_to: localhost
       become: false
-      when: not ansible_check_mode
+      when: not ansible_check_mode and xray_url | length > 0
 
     # Plain `tar`, not ansible.builtin.unarchive: unarchive refuses the BSD tar that macOS control hosts have
     # ("GNU tar required"). `tar -xzf` works with both; only the `caddy` binary is extracted.
@@ -110,6 +184,33 @@
       changed_when: true
       delegate_to: localhost
       become: false
+      when: not ansible_check_mode and caddy_url | length > 0
+
+    # A binary from an image is checked here against its pinned sha256 (an archive was checked by get_url).
+    # Geodata from the image is checked against item.sha256 in the same way.
+    - name: Hash the staged files from the images
+      ansible.builtin.stat:
+        path: "{{ reality_stage.path }}/{{ item.path if 'path' in item else 'geodata/' ~ item.name }}"
+        checksum_algorithm: sha256
+        get_checksum: true
+      loop: "{{ reality_image_files }}"
+      loop_control:
+        label: "{{ item.path if 'path' in item else item.name }}"
+      register: reality_image_hashes
+      delegate_to: localhost
+      become: false
+      when: not ansible_check_mode
+
+    - name: Check the sha256 of each file from an image
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.checksum == item.item.sha256
+        fail_msg: "reality-ingress: sha256 mismatch for {{ item.item.path if 'path' in item.item else item.item.name }} from the image"
+        quiet: true
+      loop: "{{ reality_image_hashes.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.path if 'path' in item.item else item.item.name }}"
       when: not ansible_check_mode
 
     - name: Install the xray binary

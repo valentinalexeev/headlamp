@@ -5,15 +5,10 @@
       - ingress_host | length > 0
       - reality_private_key | length > 0
       - reality_short_id | length > 0
-      - xray_version | length > 0
-      - xray_sha256 | length > 0
-      - caddy_version | length > 0
-      - caddy_sha256 | length > 0
       - enroll_upstream | length > 0
       - xray_geodata_files | length > 0
     fail_msg: >-
-      reality-ingress: ingress_host, reality_private_key, reality_short_id,
-      xray_version, xray_sha256, caddy_version, caddy_sha256, enroll_upstream
+      reality-ingress: ingress_host, reality_private_key, reality_short_id, enroll_upstream
       and a non-empty xray_geodata_files must all be set (secrets from a vault).
     quiet: true
 
@@ -69,21 +64,31 @@
       /var/lib/<dir>; only x86_64 hosts are supported (facts must be gathered).
     quiet: true
 
+# Each binary comes from its image (default, #182) or from the URL override; either way a sha256 is checked.
 - name: Check the downloads are pinned by checksum
   ansible.builtin.assert:
     that:
-      - xray_sha256 is regex('^[0-9A-Fa-f]{64}\\Z')
-      - caddy_sha256 is regex('^[0-9A-Fa-f]{64}\\Z')
+      - (xray_url | length > 0 and xray_url is match('https://') and xray_sha256 is regex('^[0-9A-Fa-f]{64}\\Z'))
+        or (xray_url | length == 0 and xray_image is regex(reality_image_pattern)
+            and xray_image_sha256 is regex('^[0-9a-f]{64}\\Z'))
+      - (caddy_url | length > 0 and caddy_url is match('https://') and caddy_sha256 is regex('^[0-9A-Fa-f]{64}\\Z'))
+        or (caddy_url | length == 0 and caddy_image is regex(reality_image_pattern)
+            and caddy_image_sha256 is regex('^[0-9a-f]{64}\\Z'))
       - "'geoip.dat' in xray_geodata_files | map(attribute='name', default='')"
       - "'geosite.dat' in xray_geodata_files | map(attribute='name', default='')"
       - xray_geodata_files | map(attribute='name', default='') | select('match', '^[A-Za-z0-9._-]+\\Z') | list | length == xray_geodata_files | length
-      - xray_geodata_files | map(attribute='url', default='') | select('match', '^https://') | list | length == xray_geodata_files | length
-      - xray_geodata_files | map(attribute='sha256', default='') | select('match', '^[0-9A-Fa-f]{64}\\Z') | list | length == xray_geodata_files | length
+      - xray_geodata_files | selectattr('url', 'defined') | map(attribute='url') | reject('match', '^https://') | list | length == 0
+      - xray_geodata_files | selectattr('url', 'undefined') | list | length == 0 or xray_image is regex(reality_image_pattern)
+      - xray_geodata_files | map(attribute='sha256', default='') | select('match', '^[0-9a-f]{64}\\Z') | list | length == xray_geodata_files | length
     fail_msg: >-
-      reality-ingress: xray_sha256 / caddy_sha256 must be 64 hex characters, and
-      xray_geodata_files must include geoip.dat and geosite.dat and every item needs name (plain file name), an https url
-      and a 64-hex sha256.
+      reality-ingress: for xray and caddy, set either the image (<registry>/<repository>@sha256:<digest>) with
+      xray_image_sha256 / caddy_image_sha256, or the https URL override with xray_sha256 / caddy_sha256
+      (64 hex characters). xray_geodata_files must include geoip.dat and geosite.dat; every item needs name
+      (plain file name) and a 64-hex sha256 (lower case), and an optional https url (no url = from xray_image).
     quiet: true
+  vars:
+    # A plain variable is not a Jinja string literal, so one backslash here.
+    reality_image_pattern: '^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+@sha256:[0-9a-f]{64}\Z'
 
 - name: Check the nftables backstop inputs
   ansible.builtin.assert:

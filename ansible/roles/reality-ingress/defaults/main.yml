@@ -54,6 +54,10 @@ caddy_image_sha256:
   amd64: a563843e11cbce39c557bd429ebb787d56f49d51d9bbb3292cd9b36b37a60cdf
   arm64: 762d7763ed8e303d50bf11fb0274627266907ea8c170720d7d9a6fd0b9bf5c65
 
+# Control-host cache of the pulled and downloaded files (#198): <dir>/<sha256>/<name>. Each file is hashed again on
+# every run before use. Safe to delete; the next run fills it again.
+reality_ingress_cache_dir: "{{ lookup('env', 'HOME') }}/.cache/headlamp/reality-ingress"
+
 # Override: a release archive from a URL (for example a mirror) instead of the image. Empty = use the image.
 # The archive must match the node architecture.
 # xray: the linux zip that holds `xray`; xray_sha256 is the sha256 of the ARCHIVE.

@@ -1,11 +1,8 @@
 ---
 # Binaries are fetched on the CONTROL host (hosts in restricted networks often cannot reach
 # a registry or GitHub): by default pulled from the pinned official images (#182), or from
-# xray_url / caddy_url; sha256-verified, unpacked there, then copied to the
-# target. Everything is staged in a fresh per-run temp dir that is removed in
-# `always:`, so nothing unpacked on an earlier run (a predictable path an
-# attacker could have planted in) is ever installed. Check mode: downloads are
-# reported, unpack/copy of binaries is skipped.
+# xray_url / caddy_url; sha256-verified there, then copied to the target. Check mode reports
+# only what would change on the target (the control-host cache is filled in check mode too).
 - name: Create the xray and caddy system users
   ansible.builtin.user:
     name: "{{ item }}"
@@ -36,127 +33,223 @@
     mode: "0755"
   become: true
 
+# Control-host cache (#198): every file is kept at <cache>/<sha256>/<name>, keyed by its pinned sha256 (an archive
+# by its archive sha256). A file is pulled or downloaded only when it is missing, and every pinned file is hashed
+# again on each run before it is copied. So a run with nothing to do reports no change, and check mode (which also
+# fills the cache, a control-host-only action) shows only the real changes on the host.
 - name: Stage, verify and install the binaries
   vars:
     # Image platform of the node (preflight allows only these two).
     reality_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] }}"
-    # Files that come from an image, with the sha256 they must have.
-    # Stage path and pinned sha256 of each file that comes from an image (geodata without url: geodata/<name>).
+    reality_xray_key: "{{ xray_image_sha256[reality_arch] if xray_url | length == 0 else xray_sha256 | lower }}"
+    reality_caddy_key: "{{ caddy_image_sha256[reality_arch] if caddy_url | length == 0 else caddy_sha256 | lower }}"
+    reality_xray_src: "{{ reality_ingress_cache_dir }}/{{ reality_xray_key }}/xray"
+    reality_caddy_src: "{{ reality_ingress_cache_dir }}/{{ reality_caddy_key }}/caddy"
+    # Pinned files from the images: cache path, sha256 and path in the image.
     reality_image_files: >-
-      {{ ([{'path': 'xray/xray', 'sha256': xray_image_sha256[reality_arch]}] if xray_url | length == 0 else [])
-         + ([{'path': 'caddy/caddy', 'sha256': caddy_image_sha256[reality_arch]}] if caddy_url | length == 0 else [])
-         + (xray_geodata_files | selectattr('url', 'undefined') | list) }}
+      {%- set files = [] -%}
+      {%- if xray_url | length == 0 -%}
+      {%- set _ = files.append({'name': 'xray', 'sha256': reality_xray_key, 'image': 'xray', 'image_path': xray_image_path}) -%}
+      {%- endif -%}
+      {%- if caddy_url | length == 0 -%}
+      {%- set _ = files.append({'name': 'caddy', 'sha256': reality_caddy_key, 'image': 'caddy', 'image_path': caddy_image_path}) -%}
+      {%- endif -%}
+      {%- for g in xray_geodata_files if g.url is not defined -%}
+      {%- set _ = files.append({'name': g.name, 'sha256': g.sha256, 'image': 'xray',
+                                'image_path': xray_image_geodata_dir ~ '/' ~ g.name}) -%}
+      {%- endfor -%}
+      {{ files }}
   block:
-    - name: Create a fresh stage directory on the control host
-      ansible.builtin.tempfile:
-        state: directory
-        prefix: reality-ingress.
-      delegate_to: localhost
-      become: false
-      register: reality_stage
-      # A real (empty) temp dir even in check mode; removed in `always`.
-      check_mode: false
-
-    - name: Create the stage subdirectories
+    - name: Create the control-host cache directory
       ansible.builtin.file:
-        path: "{{ reality_stage.path }}/{{ item }}"
+        path: "{{ reality_ingress_cache_dir }}"
         state: directory
         mode: "0700"
-      loop: [xray, caddy, geodata, image, image-caddy]
+      delegate_to: localhost
+      become: false
+      check_mode: false
+      changed_when: false
+
+    # One stat for every pinned file in the cache. A missing file or a sha256 mismatch means: get it again.
+    - name: Hash the cached files
+      ansible.builtin.stat:
+        path: "{{ reality_ingress_cache_dir }}/{{ item.sha256 }}/{{ item.name }}"
+        checksum_algorithm: sha256
+        get_checksum: true
+      loop: "{{ reality_image_files }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: reality_cached
       delegate_to: localhost
       become: false
       check_mode: false
 
-    # Default (#182): the files come from the official images, pinned by digest, through a small registry pull
-    # (files/oci-extract.py, standard library) with the Python that runs Ansible. One pull of xray_image gives
-    # the binary and the geodata files without url. The script checks the digest of every manifest and layer.
-    - name: Pull the needed files from the xray image to the control host
-      ansible.builtin.command:
-        argv: >-
-          {{ [ansible_playbook_python, role_path ~ '/files/oci-extract.py', '--arch', reality_arch, xray_image, reality_stage.path ~ '/image']
-             + ([xray_image_path] if xray_url | length == 0 else [])
-             + (xray_geodata_files | selectattr('url', 'undefined')
-                | map(attribute='name') | map('regex_replace', '^', xray_image_geodata_dir ~ '/') | list) }}
-      changed_when: true
+    - name: Work out the files to pull from the images
+      ansible.builtin.set_fact:
+        reality_missing: >-
+          {%- set missing = [] -%}
+          {%- for r in reality_cached.results if r.stat.checksum | default('') != r.item.sha256 -%}
+          {%- set _ = missing.append(r.item) -%}
+          {%- endfor -%}
+          {{ missing }}
       delegate_to: localhost
       become: false
-      when: >-
-        not ansible_check_mode and
-        (xray_url | length == 0 or xray_geodata_files | selectattr('url', 'undefined') | list | length > 0)
 
-    - name: Pull the caddy binary from the caddy image to the control host
-      ansible.builtin.command:
-        argv:
-          - "{{ ansible_playbook_python }}"
-          - "{{ role_path }}/files/oci-extract.py"
-          - --arch
-          - "{{ reality_arch }}"
-          - "{{ caddy_image }}"
-          - "{{ reality_stage.path }}/image-caddy"
-          - "{{ caddy_image_path }}"
-      changed_when: true
+    - name: Pull the missing files from the images to the cache
+      when: reality_missing | length > 0
+      block:
+        - name: Create a fresh pull directory in the cache
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: pull.
+            path: "{{ reality_ingress_cache_dir }}"
+          delegate_to: localhost
+          become: false
+          check_mode: false
+          register: reality_pull
+          # Control host only: not a change on the host (#198).
+          changed_when: false
+
+        # Default (#182): files come from the official images, pinned by digest, through a small registry pull
+        # (files/oci-extract.py, standard library). The script checks the digest of every manifest and layer.
+        - name: Pull the missing files from the xray image
+          ansible.builtin.command:
+            argv: >-
+              {{ [ansible_playbook_python, role_path ~ '/files/oci-extract.py', '--arch', reality_arch, xray_image,
+                  reality_pull.path]
+                 + (reality_missing | selectattr('image', 'equalto', 'xray') | map(attribute='image_path') | list) }}
+          delegate_to: localhost
+          become: false
+          check_mode: false
+          when: reality_missing | selectattr('image', 'equalto', 'xray') | list | length > 0
+          # Control host only: not a change on the host (#198).
+          changed_when: false
+
+        - name: Pull the caddy binary from the caddy image
+          ansible.builtin.command:
+            argv:
+              - "{{ ansible_playbook_python }}"
+              - "{{ role_path }}/files/oci-extract.py"
+              - --arch
+              - "{{ reality_arch }}"
+              - "{{ caddy_image }}"
+              - "{{ reality_pull.path }}"
+              - "{{ caddy_image_path }}"
+          delegate_to: localhost
+          become: false
+          check_mode: false
+          when: reality_missing | selectattr('image', 'equalto', 'caddy') | list | length > 0
+          # Control host only: not a change on the host (#198).
+          changed_when: false
+
+        - name: Hash the pulled files
+          ansible.builtin.stat:
+            path: "{{ reality_pull.path }}/{{ item.image_path | basename }}"
+            checksum_algorithm: sha256
+            get_checksum: true
+          loop: "{{ reality_missing }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: reality_pulled
+          delegate_to: localhost
+          become: false
+          check_mode: false
+
+        - name: Check the sha256 of each pulled file
+          ansible.builtin.assert:
+            that:
+              - item.stat.exists
+              - item.stat.checksum == item.item.sha256
+            fail_msg: "reality-ingress: sha256 mismatch for {{ item.item.name }} from the image"
+            quiet: true
+          loop: "{{ reality_pulled.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+
+        - name: Create the cache directory of each pulled file
+          ansible.builtin.file:
+            path: "{{ reality_ingress_cache_dir }}/{{ item.sha256 }}"
+            state: directory
+            mode: "0700"
+          loop: "{{ reality_missing }}"
+          loop_control:
+            label: "{{ item.name }}"
+          delegate_to: localhost
+          become: false
+          check_mode: false
+          changed_when: false
+
+        - name: Move the verified files into the cache
+          ansible.builtin.command:
+            argv:
+              - mv
+              - -f
+              - "{{ item.stat.path }}"
+              - "{{ reality_ingress_cache_dir }}/{{ item.item.sha256 }}/{{ item.item.name }}"
+          loop: "{{ reality_pulled.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+          changed_when: false
+          delegate_to: localhost
+          become: false
+          check_mode: false
+      always:
+        - name: Remove the pull directory
+          ansible.builtin.file:
+            path: "{{ reality_pull.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          check_mode: false
+          when: reality_pull.path is defined
+          changed_when: false
+
+    # Override: release archives from a URL (for example a mirror). get_url does not download again when the file
+    # is there with the right sha256.
+    - name: Create the cache directories of the downloads
+      ansible.builtin.file:
+        path: "{{ reality_ingress_cache_dir }}/{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: >-
+        {{ ([reality_xray_key] if xray_url | length > 0 else [])
+           + ([reality_caddy_key] if caddy_url | length > 0 else [])
+           + (xray_geodata_files | selectattr('url', 'defined') | map(attribute='sha256') | list) }}
       delegate_to: localhost
       become: false
-      when: not ansible_check_mode and caddy_url | length == 0
+      check_mode: false
+      changed_when: false
 
-    - name: Move the xray binary from the image stage
-      ansible.builtin.command:
-        argv:
-          - mv
-          - "{{ reality_stage.path }}/image/{{ xray_image_path | basename }}"
-          - "{{ reality_stage.path }}/xray/xray"
-      changed_when: true
-      delegate_to: localhost
-      become: false
-      when: not ansible_check_mode and xray_url | length == 0
-
-    - name: Move the caddy binary from the image stage
-      ansible.builtin.command:
-        argv:
-          - mv
-          - "{{ reality_stage.path }}/image-caddy/{{ caddy_image_path | basename }}"
-          - "{{ reality_stage.path }}/caddy/caddy"
-      changed_when: true
-      delegate_to: localhost
-      become: false
-      when: not ansible_check_mode and caddy_url | length == 0
-
-    - name: Move the geodata files from the image stage
-      ansible.builtin.command:
-        argv: [mv, "{{ reality_stage.path }}/image/{{ item.name }}", "{{ reality_stage.path }}/geodata/{{ item.name }}"]
-      changed_when: true
-      loop: "{{ xray_geodata_files | selectattr('url', 'undefined') | list }}"
-      loop_control:
-        label: "{{ item.name }}"
-      delegate_to: localhost
-      become: false
-      when: not ansible_check_mode
-
-    # Override: release archives from a URL (for example a mirror).
-    - name: Download xray (zip) to the control host
+    - name: Download xray (zip) to the cache
       ansible.builtin.get_url:
         url: "{{ xray_url }}"
-        dest: "{{ reality_stage.path }}/xray.zip"
+        dest: "{{ reality_ingress_cache_dir }}/{{ reality_xray_key }}/xray.zip"
         checksum: "sha256:{{ xray_sha256 }}"
         mode: "0600"
       delegate_to: localhost
       become: false
+      check_mode: false
       when: xray_url | length > 0
+      # Control host only: not a change on the host (#198).
+      changed_when: false
 
-    - name: Download caddy (tar.gz) to the control host
+    - name: Download caddy (tar.gz) to the cache
       ansible.builtin.get_url:
         url: "{{ caddy_url }}"
-        dest: "{{ reality_stage.path }}/caddy.tar.gz"
+        dest: "{{ reality_ingress_cache_dir }}/{{ reality_caddy_key }}/caddy.tar.gz"
         checksum: "sha256:{{ caddy_sha256 }}"
         mode: "0600"
       delegate_to: localhost
       become: false
+      check_mode: false
       when: caddy_url | length > 0
+      # Control host only: not a change on the host (#198).
+      changed_when: false
 
-    - name: Download the geodata files that have a url to the control host
+    - name: Download the geodata files that have a url to the cache
       ansible.builtin.get_url:
         url: "{{ item.url }}"
-        dest: "{{ reality_stage.path }}/geodata/{{ item.name }}"
+        dest: "{{ reality_ingress_cache_dir }}/{{ item.sha256 }}/{{ item.name }}"
         checksum: "sha256:{{ item.sha256 }}"
         mode: "0600"
       loop: "{{ xray_geodata_files | selectattr('url', 'defined') | list }}"
@@ -164,73 +257,46 @@
         label: "{{ item.name }}"
       delegate_to: localhost
       become: false
+      check_mode: false
+      # Control host only: not a change on the host (#198).
+      changed_when: false
 
-    - name: Unpack xray on the control host (only the verified archive)
-      ansible.builtin.unarchive:
-        src: "{{ reality_stage.path }}/xray.zip"
-        dest: "{{ reality_stage.path }}/xray"
-        remote_src: true
-      delegate_to: localhost
-      become: false
-      when: not ansible_check_mode and xray_url | length > 0
-
-    # Plain `tar`, not ansible.builtin.unarchive: unarchive refuses the BSD tar that macOS control hosts have
-    # ("GNU tar required"). `tar -xzf` works with both; only the `caddy` binary is extracted.
-    - name: Unpack caddy on the control host (only the verified archive)
+    # Plain `unzip` / `tar`, not ansible.builtin.unarchive: unarchive refuses the BSD tar of macOS control hosts.
+    # Only the binary is extracted, on every run, from the archive that get_url verified, so a file changed in the
+    # cache is overwritten. The install copy below reports a change only when the host file differs.
+    - name: Unpack xray in the cache (only the verified archive)
       ansible.builtin.command:
-        argv:
-          - tar
-          - -xzf
-          - "{{ reality_stage.path }}/caddy.tar.gz"
-          - -C
-          - "{{ reality_stage.path }}/caddy"
-          - caddy
-      changed_when: true
+        argv: [unzip, -o, -q, "{{ reality_ingress_cache_dir }}/{{ reality_xray_key }}/xray.zip", xray, -d,
+               "{{ reality_ingress_cache_dir }}/{{ reality_xray_key }}"]
+      changed_when: false
       delegate_to: localhost
       become: false
-      when: not ansible_check_mode and caddy_url | length > 0
+      check_mode: false
+      when: xray_url | length > 0
 
-    # A binary from an image is checked here against its pinned sha256 (an archive was checked by get_url).
-    # Geodata from the image is checked against item.sha256 in the same way.
-    - name: Hash the staged files from the images
-      ansible.builtin.stat:
-        path: "{{ reality_stage.path }}/{{ item.path if 'path' in item else 'geodata/' ~ item.name }}"
-        checksum_algorithm: sha256
-        get_checksum: true
-      loop: "{{ reality_image_files }}"
-      loop_control:
-        label: "{{ item.path if 'path' in item else item.name }}"
-      register: reality_image_hashes
+    - name: Unpack caddy in the cache (only the verified archive)
+      ansible.builtin.command:
+        argv: [tar, -xzf, "{{ reality_ingress_cache_dir }}/{{ reality_caddy_key }}/caddy.tar.gz", -C,
+               "{{ reality_ingress_cache_dir }}/{{ reality_caddy_key }}", caddy]
+      changed_when: false
       delegate_to: localhost
       become: false
-      when: not ansible_check_mode
-
-    - name: Check the sha256 of each file from an image
-      ansible.builtin.assert:
-        that:
-          - item.stat.exists
-          - item.stat.checksum == item.item.sha256
-        fail_msg: "reality-ingress: sha256 mismatch for {{ item.item.path if 'path' in item.item else item.item.name }} from the image"
-        quiet: true
-      loop: "{{ reality_image_hashes.results | default([]) }}"
-      loop_control:
-        label: "{{ item.item.path if 'path' in item.item else item.item.name }}"
-      when: not ansible_check_mode
+      check_mode: false
+      when: caddy_url | length > 0
 
     - name: Install the xray binary
       ansible.builtin.copy:
-        src: "{{ reality_stage.path }}/xray/xray"
+        src: "{{ reality_xray_src }}"
         dest: "{{ xray_bin }}"
         owner: root
         group: root
         mode: "0755"
       become: true
-      when: not ansible_check_mode
       notify: restart xray
 
     - name: Install the geodata files
       ansible.builtin.copy:
-        src: "{{ reality_stage.path }}/geodata/{{ item.name }}"
+        src: "{{ reality_ingress_cache_dir }}/{{ item.sha256 }}/{{ item.name }}"
         dest: "{{ xray_asset_dir }}/{{ item.name }}"
         owner: root
         group: root
@@ -239,29 +305,17 @@
       loop_control:
         label: "{{ item.name }}"
       become: true
-      when: not ansible_check_mode
       notify: restart xray
 
     - name: Install the caddy binary
       ansible.builtin.copy:
-        src: "{{ reality_stage.path }}/caddy/caddy"
+        src: "{{ reality_caddy_src }}"
         dest: "{{ caddy_bin }}"
         owner: root
         group: root
         mode: "0755"
       become: true
-      when: not ansible_check_mode
       notify: restart caddy-ingress
-
-  always:
-    - name: Remove the control-host stage directory
-      ansible.builtin.file:
-        path: "{{ reality_stage.path }}"
-        state: absent
-      delegate_to: localhost
-      become: false
-      check_mode: false
-      when: reality_stage.path is defined
 
 - name: Create the caddy config directory
   ansible.builtin.file:

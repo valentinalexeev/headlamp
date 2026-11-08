@@ -145,3 +145,49 @@ run "rejects_a_boundary_that_is_not_a_policy_arn" {
   }
   expect_failures = [var.iam_permissions_boundary]
 }
+
+run "image_defaults_to_ubuntu_minimal" {
+  command = plan
+
+  assert {
+    condition     = length(data.aws_ami.ubuntu) == 1 && local.ami_name_pattern == "ubuntu-minimal/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-minimal-*"
+    error_message = "the default image must be the Canonical Ubuntu 26.04 Minimal AMI"
+  }
+  assert {
+    condition     = aws_instance.this.ami == "ami-00000000"
+    error_message = "the instance must use the looked-up AMI"
+  }
+}
+
+run "image_flavor_server" {
+  command = plan
+  variables {
+    image_flavor = "server"
+    ami_arch     = "arm64"
+  }
+
+  assert {
+    condition     = local.ami_name_pattern == "ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-arm64-server-*"
+    error_message = "image_flavor = server must use the Ubuntu Server AMI"
+  }
+}
+
+run "ami_id_skips_the_lookup" {
+  command = plan
+  variables {
+    ami_id = "ami-0123456789abcdef0"
+  }
+
+  assert {
+    condition     = length(data.aws_ami.ubuntu) == 0 && aws_instance.this.ami == "ami-0123456789abcdef0"
+    error_message = "ami_id must set the AMI and skip the lookup"
+  }
+}
+
+run "rejects_unknown_image_flavor" {
+  command = plan
+  variables {
+    image_flavor = "desktop"
+  }
+  expect_failures = [var.image_flavor]
+}

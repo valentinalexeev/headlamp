@@ -13,6 +13,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Changed
 
+- `control-host/aws` uses Ubuntu 26.04 Minimal by default (was Ubuntu 26.04 Server) (#171). New input `image_flavor`, default `minimal`. Set `server` to keep the old image. New input `ami_id` sets any other AMI. The instance ignores AMI changes, so a running host is not replaced.
 - CI runs on `ubuntu-26.04` runners.
 - The exit-node VM modules use Ubuntu 26.04 "resolute" by default where the cloud publishes an image (#164). Running VMs are not replaced. Each module keeps an input to pin the old image:
   - `aws`: new input `ubuntu_series`, default `resolute-26.04` (was a fixed `noble-24.04`). New input `image_flavor`, default `minimal`: the module uses the Canonical Ubuntu Minimal AMI (fewer packages and services, no snapd). New input `ami_id` sets any other AMI. To keep the old image, set `ubuntu_series = "noble-24.04"` and `image_flavor = "server"`.

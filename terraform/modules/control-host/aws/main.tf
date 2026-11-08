@@ -14,13 +14,21 @@ data "aws_subnet" "this" {
   id = coalesce(var.subnet_id, sort(data.aws_subnets.this.ids)[0])
 }
 
+locals {
+  # Canonical publishes Minimal AMIs under a separate name prefix and product suffix.
+  ami_name_pattern = (var.image_flavor == "minimal"
+    ? "ubuntu-minimal/images/hvm-ssd-gp3/ubuntu-resolute-26.04-${var.ami_arch}-minimal-*"
+  : "ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-${var.ami_arch}-server-*")
+}
+
 data "aws_ami" "ubuntu" {
+  count       = var.ami_id == null ? 1 : 0
   most_recent = true
   owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-${var.ami_arch}-server-*"]
+    values = [local.ami_name_pattern]
   }
 
   filter {
@@ -153,7 +161,7 @@ resource "aws_ebs_volume" "data" {
 }
 
 resource "aws_instance" "this" {
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = coalesce(var.ami_id, try(data.aws_ami.ubuntu[0].id, null))
   instance_type          = var.instance_type
   subnet_id              = data.aws_subnet.this.id
   vpc_security_group_ids = [aws_security_group.this.id]
@@ -183,6 +191,7 @@ resource "aws_instance" "this" {
   tags = merge(local.tags, { Name = var.name })
 
   lifecycle {
+    # A new AMI (a newer image, image_flavor or ami_id) does not replace a running host.
     ignore_changes = [ami]
   }
 }

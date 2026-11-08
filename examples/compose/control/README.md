@@ -148,7 +148,7 @@ The edge sends only these two paths to node-control. Any other path gets 404. Se
 
 [`terraform/modules/control-host/aws`](../../../terraform/modules/control-host/aws/) makes these parts:
 
-- one EC2 instance (Ubuntu 26.04 LTS, `t3.small` by default) with Docker and the compose plugin;
+- one EC2 instance (Ubuntu 26.04 LTS Minimal, `t3.small` by default) with Docker and the compose plugin;
 - an encrypted EBS data volume, mounted at `/srv/headlamp/data`, with daily snapshots;
 - a network load balancer that passes 443/tcp, 80/tcp and 3478/udp to the instance, and keeps the client address;
 - a security group with these three ports only, and no SSH unless you set `admin_cidrs`;

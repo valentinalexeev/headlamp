@@ -115,9 +115,9 @@ func Render(base []byte, creds []Cred, directGeoIP, directGeoSite []string) ([]b
 	return json.Marshal(cfg)
 }
 
-// tailnetRules gives one rule for the "all" grants (outbound via-tailnet) and one rule per grant group (outbound
-// via-tailnet-<id>, #139). A group without its outbound gets no rule: the block rule denies it until the bridge
-// has the SOCKS instance of the group (deny by default).
+// tailnetRules gives one rule for the "all" grants (outbound via-tailnet) and one rule per grant
+// group (outbound via-tailnet-<id>, #139). A group without its outbound gets no rule: the block
+// rule denies it until the bridge has the SOCKS instance of the group (deny by default).
 func tailnetRules(cfg obj, creds []Cred, tags []any) ([]any, error) {
 	byGrant := map[string][]any{}
 	var order []string
@@ -140,9 +140,12 @@ func tailnetRules(cfg obj, creds []Cred, tags []any) ([]any, error) {
 				continue
 			}
 		} else if !hasOutbound(cfg, TailnetOut) {
-			return nil, fmt.Errorf("a credential has a tailnet grant, but the base config has no outbound tagged %s", TailnetOut)
+			return nil, fmt.Errorf("a credential has a tailnet grant, "+
+				"but the base config has no outbound tagged %s", TailnetOut)
 		}
-		out = append(out, obj{"type": "field", "inboundTag": tags, "user": byGrant[g], "ip": tailnetIPs, "outboundTag": outbound})
+		rule := obj{"type": "field", "inboundTag": tags, "user": byGrant[g], "ip": tailnetIPs}
+		rule["outboundTag"] = outbound
+		out = append(out, rule)
 	}
 	return out, nil
 }

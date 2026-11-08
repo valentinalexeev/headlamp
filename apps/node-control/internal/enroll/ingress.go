@@ -32,10 +32,11 @@ type Ingress struct {
 	Hy2Port int `json:"hy2_port,omitempty"`
 	// Hy2Obfs is the Salamander password, from HY2_OBFS_<NAME> (see hy2Var). Never in config, info or fingerprint.
 	Hy2Obfs string `json:"-"`
-	// TailnetAccess is "off" (the default, "" too), "all" or "grants". With "all", every credential of this bridge
-	// may reach the tailnet through the bridge's tailscaled (#132), and the headscale ACL for tag:ingress decides
-	// which hosts. With "grants" (#139), only the credentials of devices with a grant may, each grant group through
-	// its own tailnet identity. The console can override the value per bridge.
+	// TailnetAccess is "off" (the default, "" too), "all" or "grants". With "all", every credential
+	// of this bridge may reach the tailnet through the bridge's tailscaled (#132), and the
+	// headscale ACL for tag:ingress decides which hosts. With "grants" (#139), only the credentials
+	// of devices with a grant may, each grant group through its own tailnet identity. The console
+	// can override the value per bridge.
 	TailnetAccess string `json:"tailnet_access,omitempty"`
 }
 

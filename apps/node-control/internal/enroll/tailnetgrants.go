@@ -11,17 +11,20 @@ import (
 	"strings"
 )
 
-// Tailnet grants, phase 2 (#139). A bridge in "grants" mode gives each credential only the tailnet targets that
-// its device holds, directly or through its owner. The credentials with the same set of targets form a grant
-// group. Each group has its own tailnet identity on the bridge (tag GroupTagPrefix+<8 hex>), so the headscale ACL,
-// not only the xray rule, limits what the group reaches.
+// Tailnet grants, phase 2 (#139). A bridge in "grants" mode gives each credential only the tailnet
+// targets that its device holds, directly or through its owner. The credentials with the same set
+// of targets form a grant group. Each group has its own tailnet identity on the bridge (tag
+// GroupTagPrefix+<8 hex>), so the headscale ACL, not only the xray rule, limits what the group
+// reaches.
 
 const (
 	// TailnetGrants is the third tailnet_access value: per-device grants.
 	TailnetGrants = "grants"
-	// GroupTagPrefix starts every generated group tag; node-control changes only ACL rules with this prefix.
+	// GroupTagPrefix starts every generated group tag; node-control changes only ACL rules with
+	// this prefix.
 	GroupTagPrefix = "tag:ingress-g-"
-	// MaxGroupsPerBridge is the number of grant groups one bridge can serve (one SOCKS instance each).
+	// MaxGroupsPerBridge is the number of grant groups one bridge can serve (one SOCKS instance
+	// each).
 	MaxGroupsPerBridge = 8
 	maxTargets         = 32
 	maxTargetDst       = 16
@@ -32,14 +35,22 @@ const (
 	SubjectGroup  = "group"
 )
 
+const (
+	aclHost = `tag:[a-z0-9-]{1,63}|[A-Za-z0-9.-]{1,253}|[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?` +
+		`|\[[0-9a-fA-F:]{2,45}\](/[0-9]{1,3})?`
+	aclPorts = `\*|[0-9]{1,5}(-[0-9]{1,5})?(,[0-9]{1,5}(-[0-9]{1,5})?)*`
+)
+
 var (
 	targetNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
-	// aclDstRe is a headscale ACL destination: a tag, a host name, an address or a prefix, then ":" and ports.
-	aclDstRe  = regexp.MustCompile(`^(tag:[a-z0-9-]{1,63}|[A-Za-z0-9.-]{1,253}|[0-9a-fA-F:.]{2,45}(/[0-9]{1,3})?|\[[0-9a-fA-F:]{2,45}\](/[0-9]{1,3})?):(\*|[0-9]{1,5}(-[0-9]{1,5})?(,[0-9]{1,5}(-[0-9]{1,5})?)*)$`)
+	// aclDstRe is a headscale ACL destination: a tag, a host name, an address or a prefix, then ":"
+	// and ports.
+	aclDstRe  = regexp.MustCompile(`^(` + aclHost + `):(` + aclPorts + `)$`)
 	groupIDRe = regexp.MustCompile(`^g-[0-9a-f]{8}$`)
 )
 
-// TailnetTarget is a named set of ACL destinations. Source is "config" (enroll.json, read-only) or "console".
+// TailnetTarget is a named set of ACL destinations. Source is "config" (enroll.json, read-only) or
+// "console".
 type TailnetTarget struct {
 	Name   string   `json:"name"`
 	Dst    []string `json:"dst"`
@@ -62,7 +73,11 @@ type TailnetDoc struct {
 }
 
 // ValidTailnetMode says whether v is a tailnet_access value.
-func ValidTailnetMode(v string) bool { return v == TailnetOff || v == TailnetAll || v == TailnetGrants }
+func ValidTailnetMode(
+	v string,
+) bool {
+	return v == TailnetOff || v == TailnetAll || v == TailnetGrants
+}
 
 // ValidateTarget checks one target. The error names the field, never more than the target name.
 func ValidateTarget(t TailnetTarget) error {
@@ -74,7 +89,11 @@ func ValidateTarget(t TailnetTarget) error {
 	}
 	for _, d := range t.Dst {
 		if !aclDstRe.MatchString(d) {
-			return fmt.Errorf("target %s: dst %q is not a headscale ACL destination (host or tag, then :ports)", t.Name, d)
+			return fmt.Errorf(
+				"target %s: dst %q is not a headscale ACL destination (host or tag, then :ports)",
+				t.Name,
+				d,
+			)
 		}
 	}
 	return nil
@@ -103,7 +122,8 @@ func parseTailnetTargets(raw json.RawMessage) ([]TailnetTarget, error) {
 	return ts, nil
 }
 
-// GroupID is the stable id of a set of target names: "g-" and 8 hex of the SHA-256 of the sorted names.
+// GroupID is the stable id of a set of target names: "g-" and 8 hex of the SHA-256 of the sorted
+// names.
 func GroupID(names []string) string {
 	s := slices.Clone(names)
 	slices.Sort(s)

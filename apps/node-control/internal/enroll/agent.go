@@ -48,8 +48,9 @@ type Agent interface {
 }
 
 type agentClient struct {
-	mu      sync.Mutex
-	groups  []string // the grant groups the agent reported in its last PUT answer (#139); nil: not known
+	mu sync.Mutex
+	// groups are the grant groups the agent reported in its last PUT answer (#139); nil: not known.
+	groups  []string
 	base    string
 	resolve func(ctx context.Context) (string, error) // when set, the base URL is resolved on every call
 	token   string
@@ -140,7 +141,8 @@ func (a *agentClient) PutCredentials(ctx context.Context, creds []Credential, co
 	return errorFor(resp.StatusCode)
 }
 
-// recordGroups keeps the grant group ids of a PUT answer. An older agent sends none: nil, "not known".
+// recordGroups keeps the grant group ids of a PUT answer. An older agent sends none: nil, "not
+// known".
 func (a *agentClient) recordGroups(body []byte) {
 	var r struct {
 		Groups *[]string `json:"tailnet_groups"`

@@ -12,8 +12,8 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/funnel"
 )
 
-// The tailnet grant API (#139). Reads need enroll view, changes need enroll admin (authz/routes.go). Every
-// change goes to the audit log, and then to the bridges with one sync.
+// The tailnet grant API (#139). Reads need enroll view, changes need enroll admin
+// (authz/routes.go). Every change goes to the audit log, and then to the bridges with one sync.
 
 // grantsMu serialises the read-change-write of the grant document.
 var grantsMu sync.Mutex
@@ -40,25 +40,42 @@ type grantGroupView struct {
 	Status string `json:"status"`
 }
 
-// grantState resolves the grant state of every current bridge. live is the generated rules of the live policy
-// (nil: unknown, then no group reads "pending_acl").
-func (a *Admin) grantState(cur Current, doc TailnetDoc, devs []Device, live map[string][]string) (grantView, []BridgeGrants) {
+// grantState resolves the grant state of every current bridge. live is the generated rules of the
+// live policy (nil: unknown, then no group reads "pending_acl").
+func (a *Admin) grantState(
+	cur Current,
+	doc TailnetDoc,
+	devs []Device,
+	live map[string][]string,
+) (grantView, []BridgeGrants) {
 	now := a.store.Clock()().Unix()
 	plan := newTailnetPlan(cur.Cfg, cur.Cfg.Ingresses, doc, devs, now)
-	view := grantView{Targets: AllTargets(cur.Cfg.Targets, doc), Grants: doc.Grants, Bridges: []grantBridgeView{}}
+	view := grantView{
+		Targets: AllTargets(cur.Cfg.Targets, doc),
+		Grants:  doc.Grants,
+		Bridges: []grantBridgeView{},
+	}
 	if view.Grants == nil {
 		view.Grants = []TailnetGrant{}
 	}
 	var resolved []BridgeGrants
 	for _, in := range cur.Cfg.Ingresses {
-		bv := grantBridgeView{Name: in.Name, Mode: doc.EffectiveMode(in), ConfigMode: Ingress{TailnetAccess: in.TailnetAccess}.modeOrOff(),
-			Groups: []grantGroupView{}, Unresolved: []string{}}
+		bv := grantBridgeView{
+			Name:       in.Name,
+			Mode:       doc.EffectiveMode(in),
+			ConfigMode: Ingress{TailnetAccess: in.TailnetAccess}.modeOrOff(),
+			Groups:     []grantGroupView{},
+			Unresolved: []string{},
+		}
 		if bg, ok := plan.bridges[in.Name]; ok {
 			resolved = append(resolved, bg)
 			bv.Unresolved, bv.Error = bg.Unresolved, bg.Error
 			have, known := stateGroups(cur, in.Name)
 			for _, g := range bg.Groups {
-				bv.Groups = append(bv.Groups, grantGroupView{GrantGroup: g, Status: groupStatus(g, have, known, live)})
+				bv.Groups = append(
+					bv.Groups,
+					grantGroupView{GrantGroup: g, Status: groupStatus(g, have, known, live)},
+				)
 			}
 		}
 		view.Bridges = append(view.Bridges, bv)
@@ -112,7 +129,10 @@ func (a *Admin) liveGroupRules(r *http.Request) map[string][]string {
 }
 
 // loadGrantState reads the store and resolves the grants. ok=false means a response was written.
-func (a *Admin) loadGrantState(w http.ResponseWriter, r *http.Request) (Current, TailnetDoc, grantView, []BridgeGrants, bool) {
+func (a *Admin) loadGrantState(
+	w http.ResponseWriter,
+	r *http.Request,
+) (Current, TailnetDoc, grantView, []BridgeGrants, bool) {
 	cur := a.reg.Current(r.Context(), false)
 	doc, err := a.store.TailnetDoc()
 	var devs []Device
@@ -134,8 +154,14 @@ func (a *Admin) getGrants(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// changeDoc runs fn on the stored document under the lock, saves it, writes the audit entry and syncs.
-func (a *Admin) changeDoc(w http.ResponseWriter, r *http.Request, action string, fn func(cur Current, d *TailnetDoc) (string, int, string)) {
+// changeDoc runs fn on the stored document under the lock, saves it, writes the audit entry and
+// syncs.
+func (a *Admin) changeDoc(
+	w http.ResponseWriter,
+	r *http.Request,
+	action string,
+	fn func(cur Current, d *TailnetDoc) (string, int, string),
+) {
 	grantsMu.Lock()
 	cur := a.reg.Current(r.Context(), false)
 	doc, err := a.store.TailnetDoc()
@@ -164,7 +190,8 @@ func bridgeKnown(cur Current, name string) bool {
 	return slices.ContainsFunc(cur.Cfg.Ingresses, func(in Ingress) bool { return in.Name == name })
 }
 
-// putMode answers POST /enroll/tailnet-grants/mode {"bridge", "mode"}: the console override of tailnet_access.
+// putMode answers POST /enroll/tailnet-grants/mode {"bridge", "mode"}: the console override of
+// tailnet_access.
 func (a *Admin) putMode(w http.ResponseWriter, r *http.Request) {
 	var body struct{ Bridge, Mode string }
 	if !readInto(w, r, &body) {
@@ -185,7 +212,8 @@ func (a *Admin) putMode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// putTarget answers POST /enroll/tailnet-grants/targets {"name", "dst"}: add or change a console target.
+// putTarget answers POST /enroll/tailnet-grants/targets {"name", "dst"}: add or change a console
+// target.
 func (a *Admin) putTarget(w http.ResponseWriter, r *http.Request) {
 	var t TailnetTarget
 	if !readInto(w, r, &t) {
@@ -196,12 +224,18 @@ func (a *Admin) putTarget(w http.ResponseWriter, r *http.Request) {
 		if err := ValidateTarget(t); err != nil {
 			return "", http.StatusUnprocessableEntity, err.Error()
 		}
-		if slices.ContainsFunc(cur.Cfg.Targets, func(c TailnetTarget) bool { return c.Name == t.Name }) {
+		if slices.ContainsFunc(
+			cur.Cfg.Targets,
+			func(c TailnetTarget) bool { return c.Name == t.Name },
+		) {
 			return "", http.StatusConflict, "this target is set in enroll.json; change it there"
 		}
 		i := slices.IndexFunc(d.Targets, func(c TailnetTarget) bool { return c.Name == t.Name })
 		if i < 0 && len(AllTargets(cur.Cfg.Targets, *d)) >= maxTargets {
-			return "", http.StatusUnprocessableEntity, fmt.Sprintf("at most %d tailnet targets", maxTargets)
+			return "", http.StatusUnprocessableEntity, fmt.Sprintf(
+				"at most %d tailnet targets",
+				maxTargets,
+			)
 		}
 		if i < 0 {
 			d.Targets = append(d.Targets, t)
@@ -212,22 +246,31 @@ func (a *Admin) putTarget(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// deleteTarget answers DELETE /enroll/tailnet-grants/targets/{name}: it removes the target and its grants.
+// deleteTarget answers DELETE /enroll/tailnet-grants/targets/{name}: it removes the target and its
+// grants.
 func (a *Admin) deleteTarget(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	a.changeDoc(w, r, "tailnet.target_remove", func(cur Current, d *TailnetDoc) (string, int, string) {
-		i := slices.IndexFunc(d.Targets, func(c TailnetTarget) bool { return c.Name == name })
-		if i < 0 {
-			return "", http.StatusNotFound, "unknown console target"
-		}
-		d.Targets = slices.Delete(d.Targets, i, i+1)
-		d.Grants = slices.DeleteFunc(d.Grants, func(g TailnetGrant) bool { return g.Target == name })
-		return name, 0, ""
-	})
+	a.changeDoc(
+		w,
+		r,
+		"tailnet.target_remove",
+		func(cur Current, d *TailnetDoc) (string, int, string) {
+			i := slices.IndexFunc(d.Targets, func(c TailnetTarget) bool { return c.Name == name })
+			if i < 0 {
+				return "", http.StatusNotFound, "unknown console target"
+			}
+			d.Targets = slices.Delete(d.Targets, i, i+1)
+			d.Grants = slices.DeleteFunc(
+				d.Grants,
+				func(g TailnetGrant) bool { return g.Target == name },
+			)
+			return name, 0, ""
+		},
+	)
 }
 
-// setGrants answers POST /enroll/tailnet-grants/subject {"bridge", "kind", "subject", "targets": [...]}: it
-// replaces the targets that one subject holds on one bridge.
+// setGrants answers POST /enroll/tailnet-grants/subject {"bridge", "kind", "subject", "targets":
+// [...]}: it replaces the targets that one subject holds on one bridge.
 func (a *Admin) setGrants(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Bridge, Kind, Subject string
@@ -237,24 +280,44 @@ func (a *Admin) setGrants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.changeDoc(w, r, "tailnet.grant", func(cur Current, d *TailnetDoc) (string, int, string) {
-		if code, msg := a.checkSubject(cur, *d, body.Bridge, body.Kind, body.Subject, body.Targets); code != 0 {
+		code, msg := a.checkSubject(cur, *d, body.Bridge, body.Kind, body.Subject, body.Targets)
+		if code != 0 {
 			return "", code, msg
 		}
 		d.Grants = slices.DeleteFunc(d.Grants, func(g TailnetGrant) bool {
 			return g.Bridge == body.Bridge && g.Kind == body.Kind && g.Subject == body.Subject
 		})
 		for _, t := range body.Targets {
-			d.Grants = append(d.Grants, TailnetGrant{Bridge: body.Bridge, Kind: body.Kind, Subject: body.Subject, Target: t})
+			d.Grants = append(
+				d.Grants,
+				TailnetGrant{
+					Bridge:  body.Bridge,
+					Kind:    body.Kind,
+					Subject: body.Subject,
+					Target:  t,
+				},
+			)
 		}
 		if len(d.Grants) > maxGrants {
 			return "", http.StatusUnprocessableEntity, fmt.Sprintf("at most %d grants", maxGrants)
 		}
-		return fmt.Sprintf("%s %s %s on %s: [%s]", body.Kind, body.Subject, a.subjectName(body.Kind, body.Subject),
-			body.Bridge, strings.Join(body.Targets, ",")), 0, ""
+		return fmt.Sprintf(
+			"%s %s %s on %s: [%s]",
+			body.Kind,
+			body.Subject,
+			a.subjectName(body.Kind, body.Subject),
+			body.Bridge,
+			strings.Join(body.Targets, ","),
+		), 0, ""
 	})
 }
 
-func (a *Admin) checkSubject(cur Current, d TailnetDoc, bridge, kind, subject string, targets []string) (int, string) {
+func (a *Admin) checkSubject(
+	cur Current,
+	d TailnetDoc,
+	bridge, kind, subject string,
+	targets []string,
+) (int, string) {
 	if !bridgeKnown(cur, bridge) {
 		return http.StatusNotFound, "unknown bridge"
 	}
@@ -291,9 +354,10 @@ func (a *Admin) subjectName(kind, subject string) string {
 	return "(" + a.deviceName(id) + ")"
 }
 
-// convertToGrants answers POST /enroll/tailnet-grants/convert {"bridge"}: the one-time migration from "all". It
-// makes the target "all" from ENROLL_TAILNET_DST, grants it to every active device, and sets the bridge to grants
-// mode, so access does not change. The operator then narrows the grants.
+// convertToGrants answers POST /enroll/tailnet-grants/convert {"bridge"}: the one-time migration
+// from "all". It makes the target "all" from ENROLL_TAILNET_DST, grants it to every active device,
+// and sets the bridge to grants mode, so access does not change. The operator then narrows the
+// grants.
 func (a *Admin) convertToGrants(w http.ResponseWriter, r *http.Request) {
 	var body struct{ Bridge string }
 	if !readInto(w, r, &body) {
@@ -310,7 +374,14 @@ func (a *Admin) convertToGrants(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func convertDoc(cur Current, d *TailnetDoc, tacl *tailnetACL, devs []Device, now int64, bridge string) (string, int, string) {
+func convertDoc(
+	cur Current,
+	d *TailnetDoc,
+	tacl *tailnetACL,
+	devs []Device,
+	now int64,
+	bridge string,
+) (string, int, string) {
 	i := slices.IndexFunc(cur.Cfg.Ingresses, func(in Ingress) bool { return in.Name == bridge })
 	if i < 0 {
 		return "", http.StatusNotFound, "unknown bridge"
@@ -319,13 +390,17 @@ func convertDoc(cur Current, d *TailnetDoc, tacl *tailnetACL, devs []Device, now
 		return "", http.StatusConflict, `the bridge is not in mode "all"`
 	}
 	if tacl == nil || len(tacl.Dst) == 0 {
-		return "", http.StatusUnprocessableEntity, "ENROLL_TAILNET_DST is empty: there is nothing to convert"
+		return "", http.StatusUnprocessableEntity,
+			"ENROLL_TAILNET_DST is empty: there is nothing to convert"
 	}
 	t := TailnetTarget{Name: "all", Dst: tacl.Dst}
 	if err := ValidateTarget(t); err != nil {
 		return "", http.StatusUnprocessableEntity, "ENROLL_TAILNET_DST: " + err.Error()
 	}
-	if !slices.ContainsFunc(AllTargets(cur.Cfg.Targets, *d), func(c TailnetTarget) bool { return c.Name == "all" }) {
+	if !slices.ContainsFunc(
+		AllTargets(cur.Cfg.Targets, *d),
+		func(c TailnetTarget) bool { return c.Name == "all" },
+	) {
 		d.Targets = append(d.Targets, t)
 	}
 	n := 0
@@ -333,7 +408,12 @@ func convertDoc(cur Current, d *TailnetDoc, tacl *tailnetACL, devs []Device, now
 		if dv.Revoked || dv.ExpiresAt <= now {
 			continue
 		}
-		g := TailnetGrant{Bridge: bridge, Kind: SubjectDevice, Subject: strconv.FormatInt(dv.ID, 10), Target: "all"}
+		g := TailnetGrant{
+			Bridge:  bridge,
+			Kind:    SubjectDevice,
+			Subject: strconv.FormatInt(dv.ID, 10),
+			Target:  "all",
+		}
 		if !slices.Contains(d.Grants, g) {
 			d.Grants = append(d.Grants, g)
 		}

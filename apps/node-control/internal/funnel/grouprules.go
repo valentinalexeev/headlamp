@@ -7,14 +7,16 @@ import (
 	"strings"
 )
 
-// maxGroupRules limits the generated group rules one call may write (#139: 8 grant groups per bridge, 8 bridges).
+// maxGroupRules limits the generated group rules one call may write (#139: 8 grant groups per
+// bridge, 8 bridges).
 const maxGroupRules = 64
 
-// ErrNoTagOwner is returned when a group tag needs a tagOwners entry but the base tag has none to copy.
+// ErrNoTagOwner is returned when a group tag needs a tagOwners entry but the base tag has none to
+// copy.
 var ErrNoTagOwner = errors.New("the base tag has no tagOwners entry to copy for the group tags")
 
-// GroupRules reads the generated group rules of the policy: for each rule whose src is exactly one tag that
-// starts with prefix, the tag and its dst (sorted). Other rules are ignored.
+// GroupRules reads the generated group rules of the policy: for each rule whose src is exactly one
+// tag that starts with prefix, the tag and its dst (sorted). Other rules are ignored.
 func GroupRules(policy, prefix string) (map[string][]string, error) {
 	_, acls, err := policyParts(policy)
 	if err != nil {
@@ -32,10 +34,11 @@ func GroupRules(policy, prefix string) (map[string][]string, error) {
 	return out, nil
 }
 
-// ComposeGroupRules sets the generated group rules (#139): one rule "accept src [tag] dst want[tag]" and one
-// tagOwners entry per tag in want, with the owners of baseTag. Rules and tagOwners entries whose tag starts
-// with prefix and is not in want are removed. Everything else, and the key order, is left alone. When the
-// policy already matches, the original text comes back. Each tag in want must start with prefix.
+// ComposeGroupRules sets the generated group rules (#139): one rule "accept src [tag] dst
+// want[tag]" and one tagOwners entry per tag in want, with the owners of baseTag. Rules and
+// tagOwners entries whose tag starts with prefix and is not in want are removed. Everything else,
+// and the key order, is left alone. When the policy already matches, the original text comes back.
+// Each tag in want must start with prefix.
 func ComposeGroupRules(policy, prefix, baseTag string, want map[string][]string) (string, error) {
 	if prefix == "" || len(want) > maxGroupRules {
 		return "", ErrPolicyShape
@@ -70,7 +73,10 @@ func ComposeGroupRules(policy, prefix, baseTag string, want map[string][]string)
 	}
 	wantRules := make([]any, 0, len(tags))
 	for _, t := range tags {
-		wantRules = append(wantRules, newObj("action", "accept", "src", []any{t}, "dst", sortedAny(want[t])))
+		wantRules = append(
+			wantRules,
+			newObj("action", "accept", "src", []any{t}, "dst", sortedAny(want[t])),
+		)
 	}
 	if sameRules(have, wantRules) && sameOwners(owners, prefix, tags, base) {
 		return policy, nil

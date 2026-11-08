@@ -1,6 +1,7 @@
 package enroll
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,8 +9,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// The grant state (#139) is one small JSON document: console targets, grants and mode overrides. Like the audit
-// log, it is not part of the enrolment export: a restored store starts without grants (deny by default).
+// The grant state (#139) is one small JSON document: console targets, grants and mode overrides.
+// Like the audit log, it is not part of the enrolment export: a restored store starts without
+// grants (deny by default).
 
 const tailnetSchema = `
 CREATE TABLE IF NOT EXISTS tailnet_doc (
@@ -49,7 +51,8 @@ func decodeTailnetDoc(b []byte) (TailnetDoc, error) {
 // TailnetDoc reads the grant state; an empty store gives an empty document.
 func (s *Store) TailnetDoc() (TailnetDoc, error) {
 	var raw string
-	err := s.db.QueryRow("SELECT doc FROM tailnet_doc WHERE id = 1").Scan(&raw)
+	const q = "SELECT doc FROM tailnet_doc WHERE id = 1"
+	err := s.db.QueryRowContext(context.Background(), q).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TailnetDoc{}, nil
 	}
@@ -65,7 +68,11 @@ func (s *Store) PutTailnetDoc(d TailnetDoc) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec("INSERT INTO tailnet_doc (id, doc) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET doc=excluded.doc", string(b))
+	_, err = s.db.ExecContext(context.Background(),
+		"INSERT INTO tailnet_doc (id, doc) VALUES (1, ?) "+
+			"ON CONFLICT(id) DO UPDATE SET doc=excluded.doc",
+		string(b),
+	)
 	return err
 }
 

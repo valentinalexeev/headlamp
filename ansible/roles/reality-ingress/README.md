@@ -64,11 +64,17 @@ release archive with `get_url` and checks its sha256. xray: the `Xray-linux-64.z
 `caddy_<ver>_linux_<arch>.tar.gz` archive. The archive must agree with the host architecture. A geodata item with a `url` comes from that URL. A geodata item without a
 `url` comes from `xray_image`.
 
-The role stages everything in a fresh temp dir for each run on the control host. It removes the dir afterwards.
-It never reuses anything unpacked earlier. It verifies the checksum of every file before it copies the file.
+The role keeps each file in a cache on the control host (#198): `reality_ingress_cache_dir`, default
+`~/.cache/headlamp/reality-ingress`. The path of a file is `<cache>/<sha256>/<name>`. The role gets a file only when
+it is not in the cache.
 
-The role asserts the architecture from gathered facts. In `--check` mode, the role reports downloads.
-It skips pulls from the images, unpacking, copying binaries and validation.
+On each run, the role calculates the sha256 of each cached file again. If the sha256 is not
+correct, the role gets the file again. The role verifies the checksum of every file before it copies the file. You
+can delete the cache. The next run fills it again.
+
+The role asserts the architecture from gathered facts. In `--check` mode, the role fills the cache on the control
+host. It shows only the changes on the host. A run with nothing to do shows `changed=0`, in `--check` mode and in a
+real run. In `--check` mode, the role does not do the validation.
 
 Control-host requirements:
 

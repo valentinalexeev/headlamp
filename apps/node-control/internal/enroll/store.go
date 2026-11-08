@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS ingress_approvals (
     node_id INTEGER NOT NULL DEFAULT 0,
     machine_key TEXT NOT NULL DEFAULT ''
 );
-` + auditSchema + ackSchema
+` + auditSchema + ackSchema + tailnetSchema
 
 // Device is an enrolled device. It carries no secret material.
 type Device struct {
@@ -91,7 +91,8 @@ type Credential struct {
 	UUID     string `json:"uuid"`
 	Mode     string `json:"mode"`
 	NotAfter int64  `json:"not_after"`
-	// Tailnet is the grant pushed to the agent (#132): "" or "all". Set per bridge by CredentialsFor.
+	// Tailnet is the grant pushed to the agent: "" (none), "all" (#132) or a grant group id "g-<8
+	// hex>" (#139). Set per bridge by CredentialsFor.
 	Tailnet string `json:"tailnet,omitempty"`
 }
 

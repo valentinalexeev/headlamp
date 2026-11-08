@@ -73,6 +73,7 @@ var Routes = map[string]Rule{
 	"GET /enroll/qrcode.js":                   open,
 	"GET /enroll/approve":                     need(FeatureEnroll, LevelOperate),
 	"GET /enroll/static/approve.js":           open,
+	"GET /enroll/static/tailnet.js":           open,
 	"GET /enroll/devices":                     need(FeatureEnroll, LevelView),
 	"POST /enroll/devices":                    need(FeatureEnroll, LevelOperate),
 	"DELETE /enroll/devices/{id}":             need(FeatureEnroll, LevelOperate),
@@ -88,6 +89,13 @@ var Routes = map[string]Rule{
 	"POST /enroll/people/{sub}/lock":          need(FeatureEnroll, LevelAdmin),
 	"POST /enroll/people/{sub}/unlock":        need(FeatureEnroll, LevelAdmin),
 	"POST /enroll/tailnet-acl":                need(FeatureEnroll, LevelAdmin),
+	// tailnet grants (#139): view to read, admin to change
+	"GET /enroll/tailnet-grants":                   need(FeatureEnroll, LevelView),
+	"POST /enroll/tailnet-grants/mode":             need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/tailnet-grants/targets":          need(FeatureEnroll, LevelAdmin),
+	"DELETE /enroll/tailnet-grants/targets/{name}": need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/tailnet-grants/subject":          need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/tailnet-grants/convert":          need(FeatureEnroll, LevelAdmin),
 
 	// tasks
 	"GET /tasks":                       need(FeatureTasks, LevelView),

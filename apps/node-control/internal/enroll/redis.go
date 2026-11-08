@@ -28,6 +28,7 @@ import (
 //	                     enrolled_at, enrol_count, last_active (activity times; absent in older records, read as 0)
 //	<prefix>:t:<hash>    hash per one-time link, with a TTL: device_id, expires, max_uses, uses
 //	<prefix>:approvals   hash; field = ingress name, value = sealed JSON
+//	<prefix>:tailnet     hash; field doc = sealed JSON of the tailnet grant state (#139)
 //	<prefix>:acks        hash; field = module/item id, value = JSON (a login, an id and a hash, like the audit log not sealed)
 //
 // Devices are never expired by Redis. A link's key expires through its TTL, and every spend also checks the stored

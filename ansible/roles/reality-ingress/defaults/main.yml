@@ -64,6 +64,10 @@ enroll_self_service: false
 # Loopback SOCKS5 port of the `tailscale-userspace-socks` role: the xray
 # outbound `via-exit` dials it. Must be loopback.
 socks_listen: "127.0.0.1:1055"
+# Tailnet grant groups (#139): the same list as in the `tailscale-userspace-socks` role. Each id gets the outbound
+# via-tailnet-<id> to 127.0.0.1:<socks_grant_port_base + index>. Only "id" is read here.
+socks_grant_groups: []
+socks_grant_port_base: 1056
 
 xray_user: xray
 # xray stats API (loopback only); the ingress agent reads traffic from it.

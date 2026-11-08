@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -20,13 +21,19 @@ type Cred struct {
 	UUID     string `json:"uuid"`
 	Mode     string `json:"mode"`
 	NotAfter int64  `json:"not_after"`
-	// Tailnet is the tailnet grant of the credential (#132): "" (none, the default) or "all". With "all", the
-	// client may reach tailnet addresses through the bridge's tailscaled; the headscale ACL decides which.
+	// Tailnet is the tailnet grant of the credential: "" (none, the default), "all" (#132) or a
+	// grant group id "g-<8 hex>" (#139). With "all", the client may reach tailnet addresses through
+	// the bridge's tailscaled. With a group id, it goes through the SOCKS instance of that group
+	// (outbound via-tailnet-<id>), which has its own tailnet tag. The headscale ACL decides which
+	// hosts answer.
 	Tailnet string `json:"tailnet,omitempty"`
 }
 
-// TailnetGrants are the accepted values of Cred.Tailnet.
-var TailnetGrants = []string{"", "all"}
+// groupIDRe is a grant group id (#139).
+var groupIDRe = regexp.MustCompile(`^g-[0-9a-f]{8}$`)
+
+// ValidTailnet says whether v is an accepted value of Cred.Tailnet.
+func ValidTailnet(v string) bool { return v == "" || v == "all" || groupIDRe.MatchString(v) }
 
 // Modes are the routing modes a credential can have.
 var Modes = []string{"auto", "direct", "exit"}

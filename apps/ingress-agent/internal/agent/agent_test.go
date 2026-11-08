@@ -382,7 +382,7 @@ func TestValidation(t *testing.T) {
 func TestChangedPushTestsThenRestarts(t *testing.T) {
 	r := newRig(t)
 	rec := r.put(bodyOf(cred(u1, "auto", now0+1000), cred(u2, "direct", now0+1000)), "")
-	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"count":2}` {
+	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"count":2,"tailnet_groups":[]}` {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	if !reflect.DeepEqual(r.proc.kinds(), []string{"test", "restart"}) || len(clients(r.config(), 1)) != 2 || len(r.state()) != 2 {
@@ -736,4 +736,94 @@ func TestTailnetFieldOverTheAPI(t *testing.T) {
 	if s := r.state(); len(s) != 1 || s[0].Tailnet != "" {
 		t.Errorf("old state %+v", s)
 	}
+}
+
+// --- tailnet grant groups (#139) ---
+
+const gA, gB = "g-0a1b2c3d", "g-deadbeef"
+
+func withGroupOuts(t *testing.T, groups ...string) []byte {
+	t.Helper()
+	var b map[string]any
+	_ = json.Unmarshal(withTailnetOut(t), &b)
+	for i, g := range groups {
+		b["outbounds"] = append(b["outbounds"].([]any), map[string]any{"tag": GroupOutbound(g), "protocol": "socks",
+			"settings": map[string]any{"servers": []any{map[string]any{"address": "127.0.0.1", "port": 1056 + i}}}})
+	}
+	out, _ := json.Marshal(b)
+	return out
+}
+
+func TestGroupRulesOnePerGroupBeforeBlock(t *testing.T) {
+	cs := []Cred{{UUID: u1, Mode: "auto", NotAfter: 9, Tailnet: gA}, {UUID: u2, Mode: "auto", NotAfter: 9, Tailnet: gB},
+		{UUID: u3, Mode: "auto", NotAfter: 9}}
+	cfg := render(t, withGroupOuts(t, gA, gB), cs, nil, nil)
+	rules := cfg["routing"].(map[string]any)["rules"].([]any)
+	jsonEq(t, rules[0], fmt.Sprintf(`{"type":"field","inboundTag":["reality-in"],"user":[%q],"ip":["100.64.0.0/10","fd7a:115c:a1e0::/48"],"outboundTag":%q}`, EmailFor(u1), GroupOutbound(gA)))
+	jsonEq(t, rules[1], fmt.Sprintf(`{"type":"field","inboundTag":["reality-in"],"user":[%q],"ip":["100.64.0.0/10","fd7a:115c:a1e0::/48"],"outboundTag":%q}`, EmailFor(u2), GroupOutbound(gB)))
+	if rules[2].(map[string]any)["outboundTag"] != "blocked" {
+		t.Errorf("the block rule must follow the group rules: %v", rules[2])
+	}
+}
+
+func TestGroupWithoutOutboundIsDenied(t *testing.T) {
+	cs := []Cred{{UUID: u1, Mode: "auto", NotAfter: 9, Tailnet: gB}}
+	cfg := render(t, withGroupOuts(t, gA), cs, nil, nil) // only gA is provisioned
+	for _, r := range cfg["routing"].(map[string]any)["rules"].([]any) {
+		if tag, _ := r.(map[string]any)["outboundTag"].(string); strings.HasPrefix(tag, TailnetOut) {
+			t.Fatalf("an unprovisioned group has a tailnet rule: %v", r)
+		}
+	}
+}
+
+func TestGroupOutboundsListsOnlyGroupIDs(t *testing.T) {
+	got := GroupOutbounds(withGroupOuts(t, gB, gA))
+	if strings.Join(got, ",") != gA+","+gB {
+		t.Errorf("%v", got)
+	}
+	if len(GroupOutbounds([]byte("x"))) != 0 {
+		t.Error("bad base")
+	}
+}
+
+func TestGroupIDOverTheAPIAndReport(t *testing.T) {
+	r := newRig(t)
+	_ = os.WriteFile(r.a.BasePath, withGroupOuts(t, gA), 0o640)
+	body := map[string]any{"credentials": []any{map[string]any{"uuid": u1, "mode": "auto", "not_after": now0 + 1000, "tailnet": gA}}}
+	rec := r.put(body, "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"tailnet_groups":["`+gA+`"]`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	for _, bad := range []string{"g-XYZ", "g-0a1b2c3", "nas", "all "} {
+		b := map[string]any{"credentials": []any{map[string]any{"uuid": u1, "mode": "auto", "not_after": now0 + 1000, "tailnet": bad}}}
+		if c := r.put(b, "").Code; c != 422 {
+			t.Errorf("tailnet=%q: %d", bad, c)
+		}
+	}
+}
+
+func TestNewGroupOutboundRendersAgain(t *testing.T) {
+	r := newRig(t)
+	_ = os.WriteFile(r.a.BasePath, withGroupOuts(t), 0o640)
+	body := map[string]any{"credentials": []any{map[string]any{"uuid": u1, "mode": "auto", "not_after": now0 + 1000, "tailnet": gA}}}
+	r.put(body, "")
+	n := len(r.proc.kinds())
+	r.put(body, "") // nothing changed
+	if len(r.proc.kinds()) != n {
+		t.Fatal("an unchanged push rendered again")
+	}
+	_ = os.WriteFile(r.a.BasePath, withGroupOuts(t, gA), 0o640) // the playbook added the group's SOCKS
+	r.put(body, "")
+	if len(r.proc.kinds()) == n || !strings.Contains(string(mustRead(t, r.a.ConfigPath)), GroupOutbound(gA)+`"`) {
+		t.Fatal("the new group outbound was not used")
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

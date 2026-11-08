@@ -21,3 +21,13 @@ socks_verify_url: "https://ifconfig.me"
 # Binaries installed by the base `tailscale` role (.deb).
 socks_tailscaled_bin: /usr/sbin/tailscaled
 socks_tailscale_bin: /usr/bin/tailscale
+
+# Tailnet grant groups (#139): one more userspace tailscaled per group, each its own tailnet node with the tag of
+# its pre-auth key (tag:ingress-g-<8 hex>, shown on the bridge page of node-control). Each listens on a loopback
+# SOCKS5 port, 1056 for the first entry, 1057 for the second, and so on: keep the order. They use no exit node,
+# because they carry only tailnet traffic. At most 8 entries.
+#   socks_grant_groups:
+#     - id: g-0a1b2c3d          # the group id from the console
+#       authkey: "{{ vault_socks_group_key_1 }}"   # needed until the node is logged in
+socks_grant_groups: []
+socks_grant_port_base: 1056

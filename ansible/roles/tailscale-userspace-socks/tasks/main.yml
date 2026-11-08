@@ -153,6 +153,9 @@
   ansible.builtin.include_tasks: assert-exit-node.yml
   when: not ansible_check_mode
 
+- name: Tailnet grant groups (#139)
+  ansible.builtin.include_tasks: groups.yml
+
 - name: Verify through the SOCKS port (opt-in, tag socks-verify)
   ansible.builtin.include_tasks:
     file: verify.yml

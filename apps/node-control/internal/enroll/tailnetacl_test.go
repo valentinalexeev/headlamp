@@ -39,6 +39,10 @@ func taclFx(t *testing.T, grant bool, dst []string, pol *fakePolicy) *adminFx {
 	if grant {
 		cfg.Ingresses[0].TailnetAccess = TailnetAll
 	}
+	return taclFxCfg(t, cfg, dst, pol)
+}
+
+func taclFxCfg(t *testing.T, cfg IngressConfig, dst []string, pol *fakePolicy) *adminFx {
 	f := newAdminFxCfg(t, cfg)
 	f.admin.tacl = &tailnetACL{Tag: "tag:ingress", Dst: dst, pol: func() PolicyService {
 		if pol == nil {

@@ -1,0 +1,81 @@
+---
+# One tailnet grant group (#139): unit, start, first join with the group key. No exit node.
+- name: "Install the unit of grant group {{ socks_group.id }}"
+  ansible.builtin.template:
+    src: tailscaled-socks-group.service.j2
+    dest: "/etc/systemd/system/tailscaled-socks-{{ socks_group.id }}.service"
+    mode: "0644"
+  become: true
+  register: socks_group_unit
+
+- name: "Start grant group {{ socks_group.id }}"
+  ansible.builtin.systemd:
+    name: "tailscaled-socks-{{ socks_group.id }}"
+    enabled: true
+    state: "{{ 'restarted' if socks_group_unit is changed else 'started' }}"
+    daemon_reload: true
+  become: true
+  when: not ansible_check_mode
+
+- name: "Read the state of grant group {{ socks_group.id }}"
+  ansible.builtin.command: >-
+    {{ socks_tailscale_bin }} --socket=/run/tailscaled-socks-{{ socks_group.id }}/tailscaled.sock status --json
+  become: true
+  register: socks_group_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  retries: "{{ 0 if ansible_check_mode else 10 }}"
+  delay: 2
+  until: socks_group_status.rc == 0 or socks_group_status.stdout | length > 0
+
+- name: "Join grant group {{ socks_group.id }} (key in a 0600 temp file, removed afterwards)"
+  when: >-
+    not ansible_check_mode and
+    (socks_group_status.stdout | default('') | regex_findall('"BackendState":\\s*"([A-Za-z]+)"') | first | default('Unknown'))
+    != 'Running'
+  block:
+    - name: Require the group auth key for the first join
+      ansible.builtin.assert:
+        that: socks_group.authkey | default('') | length > 0
+        fail_msg: "tailscale-userspace-socks: grant group {{ socks_group.id }} is not logged in and has no authkey."
+        quiet: true
+      no_log: true
+
+    - name: Create a temp file for the group auth key
+      ansible.builtin.tempfile:
+        state: file
+        prefix: tsauth.
+      become: true
+      register: socks_group_keyfile
+      no_log: true
+
+    - name: Write the group auth key
+      ansible.builtin.copy:
+        content: "{{ socks_group.authkey }}"
+        dest: "{{ socks_group_keyfile.path }}"
+        mode: "0600"
+      become: true
+      no_log: true
+
+    - name: Run tailscale up for the group
+      ansible.builtin.command:
+        argv:
+          - "{{ socks_tailscale_bin }}"
+          - "--socket=/run/tailscaled-socks-{{ socks_group.id }}/tailscaled.sock"
+          - up
+          - --timeout=60s
+          - "--login-server={{ socks_login_server }}"
+          - "--hostname={{ socks_hostname }}-{{ socks_group.id }}"
+          - --accept-dns=false
+          - --accept-routes=false
+          - "--auth-key=file:{{ socks_group_keyfile.path }}"
+      become: true
+  always:
+    - name: Remove the group auth key temp file
+      ansible.builtin.file:
+        path: "{{ socks_group_keyfile.path }}"
+        state: absent
+      become: true
+      no_log: true
+      when: socks_group_keyfile.path is defined

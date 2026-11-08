@@ -150,6 +150,8 @@ before the agent has ever run.
 
 The base config has the outbound `via-tailnet`, a second name for the SOCKS port of `socks_listen` (#132). The agent uses it only for credentials with a tailnet grant, and only for tailnet addresses. node-control gives the grant per bridge (`"tailnet_access": "all"`). The headscale ACL for the tag of `socks_authkey` decides which hosts answer. The kernel backstop does not change, because xray dials only the loopback SOCKS port.
 
+For tailnet grants (#139), set `socks_grant_groups` to the same list as in the `tailscale-userspace-socks` role. The base config then has one outbound `via-tailnet-<group id>` for each entry. The first entry uses `127.0.0.1:<socks_grant_port_base>` (default `1056`), the next entry uses the next port. Only `id` of each entry is read here.
+
 ## Kernel backstop (nftables)
 
 The xray rule of the agent blocks `geoip:private` and `100.64.0.0/10` for phone users. It acts on

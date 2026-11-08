@@ -17,7 +17,7 @@
 #   E2E_TAILSCALE_IMAGE  default tailscale/tailscale:v1.104.4
 #   E2E_SINGBOX_IMAGE    default ghcr.io/sagernet/sing-box:v1.14.4
 #   E2E_MIHOMO_IMAGE     default metacubex/mihomo:v1.19.33
-#   E2E_XRAY_VERSION     default 26.10.31
+#   E2E_XRAY_IMAGE       default: the pinned ghcr.io/xtls/xray-core image in Dockerfile.bridge
 #   E2E_KEEP=1           keep the containers on exit, for debugging
 set -u
 root=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -26,7 +26,7 @@ hs_image=${E2E_HEADSCALE_IMAGE:-ghcr.io/juanfont/headscale:v0.29.7}
 ts_image=${E2E_TAILSCALE_IMAGE:-tailscale/tailscale:v1.104.4}
 sb_image=${E2E_SINGBOX_IMAGE:-ghcr.io/sagernet/sing-box:v1.14.4}
 mh_image=${E2E_MIHOMO_IMAGE:-metacubex/mihomo:v1.19.33}
-xray_version=${E2E_XRAY_VERSION:-26.10.31}
+xray_image=${E2E_XRAY_IMAGE:-}
 host=bridge.e2e.example
 front=front.e2e.example
 
@@ -70,8 +70,10 @@ dk build -q -t hy2-e2e-node-control "$root/apps/node-control" >/dev/null || die 
 mkdir -p "$T/bctx/agent"
 cp -R "$root/apps/ingress-agent/go.mod" "$root/apps/ingress-agent/cmd" "$root/apps/ingress-agent/internal" "$T/bctx/agent/"
 cp "$here/Dockerfile.bridge" "$here/bridge.sh" "$T/bctx/"
-dk build -q --build-arg XRAY_VERSION="$xray_version" --build-arg TAILSCALE_IMAGE="$ts_image" -f "$T/bctx/Dockerfile.bridge" \
+dk build -q ${xray_image:+--build-arg XRAY_IMAGE="$xray_image"} --build-arg TAILSCALE_IMAGE="$ts_image" -f "$T/bctx/Dockerfile.bridge" \
   -t hy2-e2e-bridge "$T/bctx" >/dev/null || die "bridge image"
+# The xray version inside the bridge image, for the report below.
+xray_version=$(docker run --rm --entrypoint xray hy2-e2e-bridge version 2>/dev/null | awk 'NR==1{print $2}')
 for i in "$hs_image" "$ts_image" "$sb_image" "$mh_image" python:3.13-alpine caddy:2-alpine curlimages/curl:8.17.0; do
   dk image inspect "$i" >/dev/null 2>&1 || tmo 300 docker pull -q "$i" >/dev/null || die "pull $i"
 done

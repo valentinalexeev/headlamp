@@ -13,6 +13,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Changed
 
+- CI: the gitleaks secret scan runs the official `ghcr.io/gitleaks/gitleaks` image, pinned by digest, and the Hysteria 2 e2e bridge takes xray from the official `ghcr.io/xtls/xray-core` image. Before, both downloaded release files from the GitHub release CDN, which gave HTTP 504 for hours and failed CI.
 - `control-host/aws` uses Ubuntu 26.04 Minimal by default (was Ubuntu 26.04 Server) (#171). New input `image_flavor`, default `minimal`. Set `server` to keep the old image. New input `ami_id` sets any other AMI. The instance ignores AMI changes, so a running host is not replaced.
 - CI runs on `ubuntu-26.04` runners.
 - The exit-node VM modules use Ubuntu 26.04 "resolute" by default where the cloud publishes an image (#164). Running VMs are not replaced. Each module keeps an input to pin the old image:

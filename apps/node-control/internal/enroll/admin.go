@@ -124,6 +124,12 @@ func (a *Admin) Register(mux *core.Mux) {
 		mux.HandleFunc("GET /enroll/tailnet-acl", a.getTailnetACL)
 		mux.HandleFunc("POST /enroll/tailnet-acl", a.jsonOnly(a.applyTailnetACL))
 	}
+	mux.HandleFunc("GET /enroll/tailnet-grants", a.getGrants)
+	mux.HandleFunc("POST /enroll/tailnet-grants/mode", a.jsonOnly(a.putMode))
+	mux.HandleFunc("POST /enroll/tailnet-grants/targets", a.jsonOnly(a.putTarget))
+	mux.HandleFunc("DELETE /enroll/tailnet-grants/targets/{name}", a.jsonOnly(a.deleteTarget))
+	mux.HandleFunc("POST /enroll/tailnet-grants/subject", a.jsonOnly(a.setGrants))
+	mux.HandleFunc("POST /enroll/tailnet-grants/convert", a.jsonOnly(a.convertToGrants))
 }
 
 // actor names the caller for the audit log. A failed WhoIs gives "unknown"; the action still goes ahead.

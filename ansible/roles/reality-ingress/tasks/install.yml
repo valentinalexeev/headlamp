@@ -38,11 +38,13 @@
 
 - name: Stage, verify and install the binaries
   vars:
+    # Image platform of the node (preflight allows only these two).
+    reality_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] }}"
     # Files that come from an image, with the sha256 they must have.
     # Stage path and pinned sha256 of each file that comes from an image (geodata without url: geodata/<name>).
     reality_image_files: >-
-      {{ ([{'path': 'xray/xray', 'sha256': xray_image_sha256}] if xray_url | length == 0 else [])
-         + ([{'path': 'caddy/caddy', 'sha256': caddy_image_sha256}] if caddy_url | length == 0 else [])
+      {{ ([{'path': 'xray/xray', 'sha256': xray_image_sha256[reality_arch]}] if xray_url | length == 0 else [])
+         + ([{'path': 'caddy/caddy', 'sha256': caddy_image_sha256[reality_arch]}] if caddy_url | length == 0 else [])
          + (xray_geodata_files | selectattr('url', 'undefined') | list) }}
   block:
     - name: Create a fresh stage directory on the control host
@@ -71,7 +73,7 @@
     - name: Pull the needed files from the xray image to the control host
       ansible.builtin.command:
         argv: >-
-          {{ [ansible_playbook_python, role_path ~ '/files/oci-extract.py', xray_image, reality_stage.path ~ '/image']
+          {{ [ansible_playbook_python, role_path ~ '/files/oci-extract.py', '--arch', reality_arch, xray_image, reality_stage.path ~ '/image']
              + ([xray_image_path] if xray_url | length == 0 else [])
              + (xray_geodata_files | selectattr('url', 'undefined')
                 | map(attribute='name') | map('regex_replace', '^', xray_image_geodata_dir ~ '/') | list) }}
@@ -87,6 +89,8 @@
         argv:
           - "{{ ansible_playbook_python }}"
           - "{{ role_path }}/files/oci-extract.py"
+          - --arch
+          - "{{ reality_arch }}"
           - "{{ caddy_image }}"
           - "{{ reality_stage.path }}/image-caddy"
           - "{{ caddy_image_path }}"

@@ -15,7 +15,7 @@ Not verified against a real host yet. Before the first deploy, read [Not verifie
 
 ## Supported systems
 
-The role uses `apt` and systemd. The OS matrix (`make test-ansible-os`, #170) tests it on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13. The PR of #170 gives the result of each test.
+The role uses `apt` and systemd. The OS matrix (`make test-ansible-os`, #170) tests it on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13. All six roles pass check mode and a real apply on these three systems, on amd64 and arm64 (#178).
 
 ## Use
 

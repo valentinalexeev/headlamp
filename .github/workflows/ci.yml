@@ -105,12 +105,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # The golangci-lint analysis cache and the Go module cache, kept between runs (runs on main fill it for PRs).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/lint-cache
+          key: golangci-${{ runner.os }}-${{ hashFiles('.golangci.yml', 'apps/*/go.sum', 'apps/*/go.mod') }}
+          restore-keys: golangci-${{ runner.os }}-
       - name: golangci-lint (new code, strict)
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
-        run: make lint-go LINT_BASE_REV="origin/$BASE_REF"
+          LINT_CACHE_DIR: ${{ runner.temp }}/lint-cache
+        run: make lint-go LINT_BASE_REV="origin/$BASE_REF" LINT_CACHE_DIR="$LINT_CACHE_DIR"
       - name: golangci-lint (full report, warnings)
-        run: make lint-go-report
+        env:
+          LINT_CACHE_DIR: ${{ runner.temp }}/lint-cache
+        run: make lint-go-report LINT_CACHE_DIR="$LINT_CACHE_DIR"
 
   vulncheck:
     runs-on: ubuntu-26.04
@@ -119,6 +128,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27.3"
+          # The Go module and build caches (setup-go keeps them): all apps, so one key covers the scan.
+          cache-dependency-path: apps/*/go.sum
       - run: make vulncheck
 
   config-lint:
@@ -176,6 +187,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.scope.outputs.ansible == 'true'
+      # pipx (ansible-core) and the Galaxy collections, shared by the ansible and ansible-os jobs.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.scope.outputs.ansible == 'true'
+        with:
+          path: |
+            ~/.local/pipx
+            ~/.ansible/collections
+          key: ansible-${{ runner.os }}-${{ hashFiles('ansible/requirements.yml') }}
+          restore-keys: ansible-${{ runner.os }}-
       - name: Syntax check the playbooks
         if: needs.scope.outputs.ansible == 'true'
         working-directory: ansible
@@ -206,6 +226,15 @@ jobs:
         if: needs.scope.outputs.ansible == 'true'
         with:
           go-version-file: apps/ingress-agent/go.mod
+      # pipx (ansible-core) and the Galaxy collections, shared by the ansible and ansible-os jobs.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.scope.outputs.ansible == 'true'
+        with:
+          path: |
+            ~/.local/pipx
+            ~/.ansible/collections
+          key: ansible-${{ runner.os }}-${{ hashFiles('ansible/requirements.yml') }}
+          restore-keys: ansible-${{ runner.os }}-
       - name: OS matrix
         if: needs.scope.outputs.ansible == 'true'
         env:

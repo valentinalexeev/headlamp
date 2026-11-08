@@ -21,6 +21,12 @@ client --VLESS+Reality :443--> xray --direct--------------------> destination
 > The xray routing rule and the nftables backstop below are defence in depth. They do not replace the ACL.
 > A phone user must not be able to reach any tailnet service, even if both were wrong.
 
+## Supported systems
+
+The role uses `apt` and systemd. The OS matrix (`make test-ansible-os`, #170) tests it on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13. The PR of #170 gives the result of each test.
+
+For a bridge VM, use Ubuntu 26.04 Minimal. It is the preferred image. Use Debian 13 only when the OS matrix shows a pass for all bridge roles on it.
+
 ## What it installs
 
 | Piece | Where |

@@ -61,6 +61,9 @@ var approveHTML []byte
 //go:embed static/approve.js
 var approveJS []byte
 
+//go:embed static/tailnet.js
+var tailnetJS []byte
+
 // Clients are the accepted DeviceIn.client values.
 var Clients = []string{"sing-box", "karing", "clash"}
 
@@ -110,6 +113,7 @@ func (a *Admin) Register(mux *core.Mux) {
 	mux.HandleFunc("GET /enroll/qrcode.js", asset("text/javascript; charset=utf-8", qrcodeJS))
 	mux.HandleFunc("GET /enroll/approve", asset("text/html; charset=utf-8", approveHTML))
 	mux.HandleFunc("GET /enroll/static/approve.js", asset("text/javascript; charset=utf-8", approveJS))
+	mux.HandleFunc("GET /enroll/static/tailnet.js", asset("text/javascript; charset=utf-8", tailnetJS))
 	mux.HandleFunc("GET /enroll/devices", a.listDevices)
 	mux.HandleFunc("POST /enroll/devices", a.jsonOnly(a.createDevice))
 	mux.HandleFunc("DELETE /enroll/devices/{id}", a.jsonOnly(a.deleteDevice))

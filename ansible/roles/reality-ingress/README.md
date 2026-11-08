@@ -36,23 +36,51 @@ For a bridge VM, use Ubuntu 26.04 Minimal. It is the preferred image. Use Debian
 | xray config | `/etc/xray/` (`root:xray`, `2750`): `config.base.json` (`0640`, holds the Reality private key) |
 | nftables backstop | `/etc/ingress-guard.nft`, unit `ingress-guard.service` (table `inet ingress_guard`); package `nftables` if `nft` is missing |
 
-The role downloads binaries on the **control host**, because hosts in restricted networks often cannot reach GitHub.
-`get_url` verifies each download with `checksum: sha256:...`. The role unpacks the binaries there (xray: `Xray-linux-64.zip`; Caddy:
-`caddy_<ver>_linux_amd64.tar.gz`; linux/amd64 only) and copies them over.
+The role gets the binaries on the **control host**, because hosts in restricted networks often cannot reach a
+registry or GitHub. The bridge VM does not need docker. Linux/amd64 only.
+
+By default, the files come from the official images, pinned by digest (#182):
+
+| File | Image | Path in the image |
+|---|---|---|
+| `xray` | `ghcr.io/xtls/xray-core` (`xray_image`) | `/usr/local/bin/xray` |
+| `geoip.dat`, `geosite.dat` | the same image | `/usr/local/share/xray/` |
+| `caddy` | `docker.io/library/caddy` (`caddy_image`) | `/usr/bin/caddy` |
+
+The script `files/oci-extract.py` pulls only the necessary layers from the registry. It uses the Python of
+`ansible-playbook` and its standard library only. It does not need docker, `skopeo` or `crane`. The script checks the
+digest of each manifest and each layer. Then the role checks the sha256 of each file against the pin
+(`xray_image_sha256`, `caddy_image_sha256`, the `sha256` of each geodata item).
+
+We use this method because the GitHub release CDN can fail for hours (HTTP 504). The registries of the images are a
+different service. The digest and the sha256 pin the exact content.
+
+To use a mirror, set `xray_url` with `xray_sha256`, or `caddy_url` with `caddy_sha256`. The role then downloads that
+release archive with `get_url` and checks its sha256. xray: the `Xray-linux-64.zip` archive. Caddy: the
+`caddy_<ver>_linux_amd64.tar.gz` archive. A geodata item with a `url` comes from that URL. A geodata item without a
+`url` comes from `xray_image`.
 
 The role stages everything in a fresh temp dir for each run on the control host. It removes the dir afterwards.
-It never reuses anything unpacked earlier. It verifies the checksum of every download first.
+It never reuses anything unpacked earlier. It verifies the checksum of every file before it copies the file.
 
 Only
 x86_64 hosts are supported (asserted from gathered facts). In `--check` mode, the role reports downloads.
-It skips unpacking, copying binaries and validation.
+It skips pulls from the images, unpacking, copying binaries and validation.
 
 Control-host requirements:
 
-- Network access to GitHub.
-- `unzip` for the xray archive (present on macOS and most Linux).
-- Any `tar` that can read `.tar.gz`. BSD tar on macOS and GNU tar both work. The role unpacks the Caddy archive
-  with a plain `tar -xzf`, not with `unarchive` of Ansible, which rejects BSD tar.
+- Network access to `ghcr.io` and `registry-1.docker.io` (the default), or to the URLs that you set.
+- A CA store for the Python of `ansible-playbook`. The script uses `certifi` when it is installed.
+- `unzip` for the xray archive, only with `xray_url` (present on macOS and most Linux).
+- Any `tar` that can read `.tar.gz`, only with `caddy_url`. BSD tar on macOS and GNU tar both work. The role unpacks
+  the Caddy archive with a plain `tar -xzf`, not with `unarchive` of Ansible, which rejects BSD tar.
+
+To update a pin:
+
+1. Get the digest of the new image: `docker buildx imagetools inspect ghcr.io/xtls/xray-core:<version>`.
+2. Get the files: `python3 files/oci-extract.py <image>@<digest> <dir> /usr/local/bin/xray`.
+3. Get the sha256 of each file: `shasum -a 256 <dir>/*`.
+4. Set the digest and the sha256 values together.
 
 ## Variables
 
@@ -61,9 +89,6 @@ Required (no default; preflight fails early):
 - `ingress_host`
 - `reality_private_key`
 - `reality_short_id` (hex, even length, at most 16; vault)
-- `xray_version` and `xray_sha256`
-- `caddy_version` and `caddy_sha256`
-- `xray_geodata_files`: a list of `{name, url, sha256}` with at least `geoip.dat` and `geosite.dat`. Both are required.
 - `enroll_upstream` (`host:port`, no scheme)
 - `enroll_self_service` (default `false`): also proxy the self-enrolment pages (see "Caddy front")
 - `hy2_obfs_password` when `hy2_enabled` is true (the default): 16 to 128 characters of `[A-Za-z0-9_-]`, from a vault.
@@ -77,7 +102,12 @@ Optional:
 - `socks_listen` (`127.0.0.1:1055`, must be loopback)
 - `xray_user` (`xray`)
 - `xray_api_listen` (`127.0.0.1:10085`, loopback)
-- `xray_url` and `caddy_url` (release URLs derived from the versions)
+- `xray_image`, `xray_image_sha256`, `caddy_image`, `caddy_image_sha256`: the image pins (see above).
+  `xray_image_path`, `xray_image_geodata_dir` and `caddy_image_path` give the paths in the images.
+- `xray_url` with `xray_sha256`, and `caddy_url` with `caddy_sha256` (empty): the archive override for a mirror.
+  `xray_version` and `caddy_version` are not used by the role. You can use them to make the URL.
+- `xray_geodata_files`: a list of `{name, sha256}` and an optional `url`. It must have `geoip.dat` and `geosite.dat`.
+  The default takes both from `xray_image`.
 - `ingress_guard_resolvers` (`["127.0.0.53"]`): IPv4 resolvers that xray can query on port 53.
   The list must include every IPv4 resolver in `/etc/resolv.conf` that lies in a range that the guard blocks.
   Examples are a tailnet resolver at `100.100.100.100` or a local stub. Preflight checks this.

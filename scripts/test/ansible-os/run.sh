@@ -92,8 +92,7 @@ for _ in $(seq 60); do
   s="$(docker exec "$host" systemctl is-system-running 2>/dev/null)"; case "$s" in running|degraded) break ;; esac; sleep 1
 done
 
-# Pins for reality-ingress. Real releases, verified by sha256 like a site would.
-geo=https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/202611072203
+# reality-ingress uses its default pins: the official xray and caddy images by digest, with the sha256 of each file.
 cat > "$T/vars.yml" <<YAML
 tailscale_version: "$(tr -d '[:space:]' < "$root/TAILSCALE_VERSION")"
 headscale_login_server: "http://$hs:8080"
@@ -112,13 +111,6 @@ enroll_upstream: "127.0.0.1:8081"
 hy2_enabled: false
 # Docker gives the container its embedded resolver.
 ingress_guard_resolvers: ["127.0.0.11", "127.0.0.53"]
-xray_version: 26.10.31
-xray_sha256: e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214
-caddy_version: 2.11.9
-caddy_sha256: 5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb
-xray_geodata_files:
-  - {name: geoip.dat, url: "$geo/geoip.dat", sha256: 90b78ab861c1cdc3f871f305f9ceedfb8d6d6329e3a40295e6773e057297384c}
-  - {name: geosite.dat, url: "$geo/geosite.dat", sha256: 975ed7bfec972ed42cc9aaf36edbd25e247cfc0d75e05663162d03e613bd8095}
 ingress_agent_src: "$root/apps/ingress-agent"
 ingress_agent_token: "$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 task_runner_src: "$root/apps/task-runner"

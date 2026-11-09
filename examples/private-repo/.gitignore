@@ -10,3 +10,6 @@ ansible/inventory/hosts.yml
 .env
 __pycache__/
 .DS_Store
+
+# fleet-run.sh: the nodes that were down at the last fleet run (#199)
+ansible/.fleet-pending

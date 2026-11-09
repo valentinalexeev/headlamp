@@ -24,6 +24,9 @@ No action required. The old site files keep working.
 
 ### Defaults that changed
 
+- `make ansible-site` and `make bump-tailscale-version` (from `mk/site.mk`) skip the nodes that do not answer within
+  `PROBE_TIMEOUT` seconds (default 15), and list them as pending (#199). `make ansible-site` exits 2 when a node is
+  pending. Add `.fleet-pending` to your `.gitignore`.
 - `make deploy-headscale` now takes a volume snapshot before the deploy, and stops when the snapshot fails (#197). The
   deploying Fly token needs to create snapshots. For a deploy with no snapshot, set `NO_SNAPSHOT=1`.
 

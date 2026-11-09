@@ -633,7 +633,7 @@ func (w *world) seedAcknowledged(must mustFn) error {
 
 type mustFn func(what string, want int, method, path string, body any) ([]byte, error)
 
-func (w *world) seedDevices(_ context.Context, must mustFn) error {
+func (w *world) seedDevices(ctx context.Context, must mustFn) error {
 	day := 24 * time.Hour
 	far := time.Now().Add(180 * day).Unix()
 	devices := []struct {
@@ -658,7 +658,7 @@ func (w *world) seedDevices(_ context.Context, must mustFn) error {
 			return err
 		}
 	}
-	return w.seedPerson(must, far)
+	return w.seedPerson(ctx, must, far)
 }
 
 // demoSubject is an invented OIDC subject of the length real issuers give, so the console shows
@@ -667,7 +667,7 @@ const demoSubject = "3f9c1e7a5b2d4f6081a3c5e7f9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c
 
 // seedPerson adds a self-enrolled person (#102) with one device, as a sign-in through the
 // identity provider would.
-func (w *world) seedPerson(must mustFn, expires int64) error {
+func (w *world) seedPerson(ctx context.Context, must mustFn, expires int64) error {
 	if w.idp == nil {
 		return nil
 	}
@@ -678,7 +678,7 @@ func (w *world) seedPerson(must mustFn, expires int64) error {
 	}
 	defer db.Close()
 	const insert = `INSERT OR IGNORE INTO oidc_users(subject, email, last_login) VALUES(?, ?, ?)`
-	if _, err := db.Exec(insert,
+	if _, err := db.ExecContext(ctx, insert,
 		demoSubject, "dana@example.net", time.Now().Add(-2*time.Hour).Unix()); err != nil {
 		return fmt.Errorf("adding a person: %w", err)
 	}

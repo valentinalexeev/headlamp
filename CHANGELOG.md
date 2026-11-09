@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Fixed
+
+- node-control console: the Devices table, the tailnet grants and People show the email of a self-enrolled owner, not `oidc:<subject>` (#257). `GET /enroll/devices` gives `owner_email` for such owners. The identifier is in the cell title, and a long owner no longer widens the table. The invitation form no longer asks for a device name: the device is named after the part of the email before the `@`. The API still takes `device_name`.
+
 ### Security
 
 - ingress-agent: xray no longer looks up client destinations with the resolver of the bridge network. `IPOnDemand` routing resolves every domain that a client goes to (also the sniffed TLS/HTTP name). Before, xray had no `dns` section, so it used the system resolver of the bridge host, and the bridge network saw every name that `exit` and `auto` clients used. A poisoned answer could also send a name to the wrong outbound. The agent now writes a `dns` section (tag `dns-internal`) and sends its queries through `via-exit`. The servers are `INGRESS_EXIT_DNS` (role variable `ingress_exit_dns`; default `https://1.1.1.1/dns-query`, `https://1.0.0.1/dns-query`). Only names on the direct geosite lists use the system resolver. A `dns` section in the base config is replaced. Clients of mode `direct` now get their addresses from these servers too, so their lookups fail while the exit node is down.

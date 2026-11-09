@@ -36,13 +36,15 @@
 		}
 	}
 
-	# Exactly /e/<token> and /sub/<token>: no trailing slash, no extra
-	# segments, no encoded slashes, no dot-only tokens ("." / "..").
-	@enroll path_regexp `^/(e|sub)/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}$`
+	# Exactly /e/<token>, /sub/<token> and /sub/<token>/<format> (#241): no
+	# trailing slash, no other segments, no encoded slashes, no dot-only tokens
+	# ("." / "..").
+	@enroll path_regexp `^/(e/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}|sub/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}(/(sing-box|clash|stash|uri))?)$`
 
 {% if enroll_self_service | bool %}
-	# Self-enrolment (#102): the exact pages of /me and the OIDC login, nothing below them.
-	@self path_regexp `^/(me|me/devices|me/devices/[0-9]{1,18}/revoke|me/logout|oidc/login|oidc/callback)$`
+	# Self-enrolment (#102): the exact pages of /me and the OIDC login, nothing below them. #241 adds
+	# the app picker (/me/devices/<id>), the app icons and the invitation links (/i/<token>).
+	@self path_regexp `^/(me|me/devices|me/devices/[0-9]{1,18}|me/devices/[0-9]{1,18}/revoke|me/logout|me/icons/[a-z0-9-]{1,32}|i/[0-9a-f]{64}|oidc/login|oidc/callback)$`
 	handle @self {
 		reverse_proxy http://{{ enroll_upstream }} {
 			header_up -X-Forwarded-For

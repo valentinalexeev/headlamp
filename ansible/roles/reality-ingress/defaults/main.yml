@@ -81,8 +81,9 @@ xray_geodata_files:
 # (REQUIRED), e.g. "node-control.example.net:8081" or "<tailnet-ip>:8081".
 # No scheme, no path.
 enroll_upstream: ""
-# Self-enrolment with OIDC (#102): also proxy /me, /me/devices[/<id>/revoke], /me/logout and /oidc/{login,callback}
-# to enroll_upstream. Off by default: the front then serves only /e/ and /sub/.
+# Self-enrolment with OIDC (#102): also proxy /me, /me/devices[/<id>[/revoke]], /me/logout, /me/icons/<app>,
+# /i/<token> (invitations, #241) and /oidc/{login,callback} to enroll_upstream. Off by default: the front then
+# serves only /e/ and /sub/.
 enroll_self_service: false
 
 # Loopback SOCKS5 port of the `tailscale-userspace-socks` role: the xray

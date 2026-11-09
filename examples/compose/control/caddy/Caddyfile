@@ -24,8 +24,9 @@
 # gets no ACME request (#216); "acme" for a real name.
 {$ENROLL_DOMAIN:enroll.invalid} {
 	import tls/{$ENROLL_TLS:unused}.caddy
-	# /me and /oidc/*: self-enrolment with OIDC (#102). Remove them if you do not set OIDC_ISSUER.
-	@public path /e/* /sub/* /me /me/* /oidc/login /oidc/callback
+	# /me, /i/* and /oidc/*: self-enrolment with OIDC (#102) and its invitations (#241). Remove them if you do not
+	# set OIDC_ISSUER.
+	@public path /e/* /sub/* /me /me/* /i/* /oidc/login /oidc/callback
 	handle @public {
 		reverse_proxy node-control:8081
 	}

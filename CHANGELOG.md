@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control `aws` provider: with no `region` in the node block and no `AWS_REGION`, the host's own region from IMDSv2 is the default (#220). It is looked up once, with a 2 s limit, so a host off EC2 is not slowed down. The error for a node with no region now names all three ways. `AWS_REGION` is in `examples/compose/control/node-control.env.example`.
+
 ## 0.13.0 - 2026-11-08
 
 ### Added

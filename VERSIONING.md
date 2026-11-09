@@ -123,9 +123,18 @@ A hotfix is a normal fix on a `hotfix/` branch, followed at once by a PATCH rele
 Before you tag, run `make release-preflight` on the release commit. It does these checks:
 
 - It runs each Ansible role in check mode in a systemd container.
-- It builds each image in `.github/components.json`.
+- It builds each image in `.github/components.json`. In CI it pulls the `src-<hash>` image of the `images`
+  workflow instead. It builds only an image that is not in the registry.
 - It builds each app that has an overlay in `examples/private-repo/fly/<app>/`, with the overlay on top. Then it starts
   each `[processes]` command of the `fly.toml` of that release, and of the previous release.
+
+CI runs the preflight on the release PR. The tag reuses that result if all of these are true:
+
+- The tag is the merge commit of the PR.
+- Its tree is the same as the tree of the PR head.
+- The preflight of the PR head passed.
+
+Otherwise, the tag runs the full preflight again.
 
 If a process command of the previous release fails, a site overlay breaks on upgrade. Write the change in the
 changelog, then set `ALLOW_PROCESS_CHANGE=1`. `REF=vX.Y.Z` checks an older tree with the checks of today.

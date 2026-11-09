@@ -9,7 +9,8 @@
 #
 # Usage: scripts/release-preflight.sh [REF]      (default HEAD; a tag such as v0.12.0 checks that release tree)
 # Env:   STEPS="roles images overlay" (default all), OS=debian13 (OS matrix image), SKIP_IMAGES="img ..." to skip,
-#        KEEP_IMAGES=1 keeps the built images, ALLOW_PROCESS_CHANGE=1, PREFLIGHT_APPLY="tailscale" (roles applied for real).
+#        KEEP_IMAGES=1 keeps the built images, ALLOW_PROCESS_CHANGE=1, PREFLIGHT_APPLY="tailscale" (roles applied for real),
+#        PREFLIGHT_PULL=ghcr.io/<owner>/<repo> pulls the src-<hash> images instead of building them (fallback: build).
 # Needs docker (linux/amd64 emulation on arm64), git, jq, python3 (tomllib), ansible-playbook with community.docker.
 # Prints "PREFLIGHT <step> <item> ok|FAIL" lines and exits 1 on any failure.
 set -uo pipefail
@@ -81,10 +82,21 @@ args_of() { # components.json entry -> build args, values from files read from t
 manifest="$tree/.github/components.json"
 
 if has images; then
+  # PREFLIGHT_PULL=<registry prefix> (CI): use the image that the images workflow built from the same source
+  # (src-<hash> tag, see scripts/ci-components.sh) instead of a new build. That is the image a release ships. An
+  # image that is not in the registry yet is built here as before.
+  hashes=""
+  [ -z "${PREFLIGHT_PULL:-}" ] || hashes="$(cd "$repo" && scripts/ci-components.sh list "$sha" | jq -r '.[] | "\(.image) \(.hash)"')"
   while IFS= read -r e; do
     img="$(jq -r .image <<<"$e")"
     case " ${SKIP_IMAGES:-} " in *" $img "*) res image "$img" skip; continue ;; esac
-    if build "hlpf-$img:$sha" "$tree/$(jq -r .context <<<"$e")" "$(jq -r .dockerfile <<<"$e")" "$(args_of "$e")"; then
+    h="$(awk -v i="$img" '$1 == i { print $2 }' <<<"$hashes")"
+    if [ -n "$h" ] && docker pull -q --platform linux/amd64 "$PREFLIGHT_PULL/$img:src-$h" >"$work/build.log" 2>&1 &&
+      docker tag "$PREFLIGHT_PULL/$img:src-$h" "hlpf-$img:$sha"; then
+      built+=("hlpf-$img:$sha" "$PREFLIGHT_PULL/$img:src-$h")
+      echo "  $img: pulled src-$h"
+      res image "$img" ok
+    elif build "hlpf-$img:$sha" "$tree/$(jq -r .context <<<"$e")" "$(jq -r .dockerfile <<<"$e")" "$(args_of "$e")"; then
       res image "$img" ok
     else res image "$img" FAIL; tail -n 15 "$work/build.log"; fi
   done < <(jq -c '.[]' "$manifest")

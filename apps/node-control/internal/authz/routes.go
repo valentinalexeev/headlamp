@@ -88,7 +88,12 @@ var Routes = map[string]Rule{
 	"GET /enroll/people":                      need(FeatureEnroll, LevelView),
 	"POST /enroll/people/{sub}/lock":          need(FeatureEnroll, LevelAdmin),
 	"POST /enroll/people/{sub}/unlock":        need(FeatureEnroll, LevelAdmin),
-	"POST /enroll/tailnet-acl":                need(FeatureEnroll, LevelAdmin),
+	"GET /enroll/static/invites.js":           open,
+	"GET /enroll/invites":                     need(FeatureEnroll, LevelView),
+	// An invitation lets a new person in: a relay device and a tailnet key.
+	"POST /enroll/invites":             need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/invites/{id}/revoke": need(FeatureEnroll, LevelOperate),
+	"POST /enroll/tailnet-acl":         need(FeatureEnroll, LevelAdmin),
 	// tailnet grants (#139): view to read, admin to change
 	"GET /enroll/tailnet-grants":                   need(FeatureEnroll, LevelView),
 	"POST /enroll/tailnet-grants/mode":             need(FeatureEnroll, LevelAdmin),

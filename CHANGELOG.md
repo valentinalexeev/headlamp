@@ -7,6 +7,12 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Added
 
 - node-control `aws` provider: with no `region` in the node block and no `AWS_REGION`, the host's own region from IMDSv2 is the default (#220). It is looked up once, with a 2 s limit, so a host off EC2 is not slowed down. The error for a node with no region now names all three ways. `AWS_REGION` is in `examples/compose/control/node-control.env.example`.
+- `exit-node-vm/aws`: `authkey_from_secret` (bool). Set `true` when the auth key secret is made in the same stack (#222). Its ARN is then unknown at plan time, and the plan failed with "Invalid count argument". The default follows `authkey_secret_arn`, so existing callers do not change.
+- `exit-node-vm/aws`: `state_parameter_name` keeps the tailscaled state in SSM Parameter Store (#213). A node-control stop and start (a new instance, ADR 0001) is then the same headscale node, with the same id, name and IPs, and no stale offline node is left. The node role can read and write only that parameter. `state_kms_key_arn` sets a customer managed key. A node with a stored state does not use the auth key again. `make test-ssm-state-e2e` and `make test-ssm-state-vm-e2e` test it with headscale and LocalStack.
+
+### Fixed
+
+- `control-host/aws` tags the root volume in the launch request and the primary network interface just after the launch (#225). `exit-node-vm/aws` (with `tags`) also tags the network interface in the launch request. A deployer that may create resources only with the site tags can now launch. The plan of an existing host shows the new root volume and network interface tags, in place.
 
 ## 0.13.0 - 2026-11-08
 

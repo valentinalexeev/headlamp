@@ -220,3 +220,24 @@ run "rejects_a_hop_limit_out_of_range" {
   }
   expect_failures = [var.metadata_hop_limit]
 }
+
+# #225: the root volume is tagged in the launch request, and the primary network interface right after it.
+run "root_volume_and_eni_carry_the_tags" {
+  command = plan
+  variables {
+    tags = { Project = "vpn", Component = "control" }
+  }
+
+  assert {
+    condition     = aws_instance.this.root_block_device[0].tags["Project"] == "vpn" && aws_instance.this.root_block_device[0].tags["Name"] == "headlamp-control-root"
+    error_message = "the root volume must carry the site tags and a Name"
+  }
+  assert {
+    condition     = aws_ec2_tag.eni["Project"].value == "vpn" && aws_ec2_tag.eni["Component"].value == "control" && contains(keys(aws_ec2_tag.eni), "Name")
+    error_message = "the primary network interface must get the site tags and a Name"
+  }
+  assert {
+    condition     = length(aws_instance.this.volume_tags == null ? {} : aws_instance.this.volume_tags) == 0
+    error_message = "volume_tags must stay unset: it would also tag the separate data volume"
+  }
+}

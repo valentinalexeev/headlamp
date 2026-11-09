@@ -2,7 +2,7 @@
 # Used when authkey_secret_arn or tailscale_version is set. The auth key is not in this file: the node reads it at
 # boot from Secrets Manager with its instance role.
 write_files:
-%{ if authkey_secret_arn != null ~}
+%{ if use_secret ~}
   - path: /usr/local/sbin/headlamp-fetch-secret
     permissions: "0700"
     encoding: b64
@@ -12,6 +12,27 @@ write_files:
     content: |
       net.ipv4.ip_forward = 1
       net.ipv6.conf.all.forwarding = 1
+%{ if state_arn != null ~}
+  # Exit 0 when tailscaled loaded a node key from its state (SSM), so a new instance does not register again. The
+  # backend can still be NoState here, so HaveNodeKey is the check, not BackendState.
+  - path: /usr/local/sbin/headlamp-logged-in
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      for _ in $(seq 30); do
+        s="$(tailscale status --json 2>/dev/null)" && break
+        sleep 2
+      done
+      printf '%s' "$s" | grep -q '"HaveNodeKey": *true'
+  # A systemd drop-in, written before the package install, so the first tailscaled start already keeps its state in
+  # SSM (#213). It replaces ExecStart, so the --state of the unit is gone. /etc/default/tailscaled stays as the
+  # package ships it: it is a dpkg conffile, and a changed copy makes the install stop at a prompt.
+  - path: /etc/systemd/system/tailscaled.service.d/10-headlamp-state.conf
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/sbin/tailscaled --state=${state_arn} --socket=/run/tailscale/tailscaled.sock --port=$${PORT} $FLAGS
+%{ endif ~}
 runcmd:
   - sysctl --system
 %{ if tailscale_version != null ~}
@@ -24,16 +45,27 @@ runcmd:
     apt-get update -q
     DEBIAN_FRONTEND=noninteractive apt-get install -y -q "tailscale=${tailscale_version}"
     apt-mark hold tailscale
+    systemctl daemon-reload
+    systemctl enable --now tailscaled
 %{ else ~}
   - curl -fsSL https://tailscale.com/install.sh | sh
 %{ endif ~}
-%{ if authkey_secret_arn != null ~}
+%{ if use_secret ~}
   - |
     set -eu
+%{ if state_arn != null ~}
+    if /usr/local/sbin/headlamp-logged-in; then exit 0; fi # the stored state has the prefs; tailscaled logs in by itself
+%{ endif ~}
     install -d -m 0700 /run/headlamp
     /usr/local/sbin/headlamp-fetch-secret '${authkey_secret_arn}' /run/headlamp/authkey
     tailscale up --login-server='${headscale_login_server}' --auth-key=file:/run/headlamp/authkey --hostname='${hostname}' --advertise-exit-node
     rm -f /run/headlamp/authkey
+%{ else ~}
+%{ if state_arn != null ~}
+  - |
+    set -eu
+    if /usr/local/sbin/headlamp-logged-in; then exit 0; fi # the stored state has the prefs; tailscaled logs in by itself
+    tailscale up --login-server='${headscale_login_server}' --authkey='${tailscale_authkey}' --hostname='${hostname}' --advertise-exit-node
 %{ else ~}
   - >-
     tailscale up
@@ -41,4 +73,5 @@ runcmd:
     --authkey=${tailscale_authkey}
     --hostname=${hostname}
     --advertise-exit-node
+%{ endif ~}
 %{ endif ~}

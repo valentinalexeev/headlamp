@@ -62,6 +62,9 @@ type IngressConfig struct {
 	Ingresses   []Ingress `json:"ingresses"`
 	// Targets are the named tailnet targets of enroll.json (#139), for bridges in grants mode.
 	Targets []TailnetTarget `json:"tailnet_targets,omitempty"`
+	// Clients are the apps the self-service picker page offers, in order, with their store links.
+	// Empty: every app of the catalog, without store links.
+	Clients []ClientChoice `json:"clients,omitempty"`
 
 	key []byte // ENROLL_SECRET_KEY, set by WithKey; never serialised
 }
@@ -100,15 +103,22 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 	if err := json.Unmarshal(data, &raw); err != nil || raw == nil {
 		return IngressConfig{}, errors.New("ENROLL_CONFIG: must be a JSON object")
 	}
+	var clients []ClientChoice
+	if v, ok := raw["clients"]; ok {
+		var err error
+		if clients, err = parseClients(v); err != nil {
+			return IngressConfig{}, err
+		}
+	}
 	list, hasList := raw["ingresses"]
 	if !hasList {
 		old, err := ParseIngressCfg(data)
 		if err != nil {
 			return IngressConfig{}, err
 		}
-		return IngressConfig{ProfileName: old.ProfileName, LinkHost: old.Host, Ingresses: []Ingress{{
-			Name: defaultIngress, Host: old.Host, PublicKey: old.PublicKey, ShortID: old.ShortID,
-			SNI: old.SNI, Port: old.Port, UUIDs: uuidsBase}}}, nil
+		return IngressConfig{ProfileName: old.ProfileName, LinkHost: old.Host, Clients: clients,
+			Ingresses: []Ingress{{Name: defaultIngress, Host: old.Host, PublicKey: old.PublicKey,
+				ShortID: old.ShortID, SNI: old.SNI, Port: old.Port, UUIDs: uuidsBase}}}, nil
 	}
 	for _, k := range singleHostKeys {
 		if _, ok := raw[k]; ok {
@@ -118,7 +128,7 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 	if err := rejectUnknownKeys(raw, "", newShapeTopKeys); err != nil {
 		return IngressConfig{}, err
 	}
-	cfg := IngressConfig{ProfileName: "tunnel"}
+	cfg := IngressConfig{ProfileName: "tunnel", Clients: clients}
 	if v, ok := raw["profile_name"]; ok {
 		s, ok := rawString(v)
 		if !ok {
@@ -271,10 +281,13 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 }
 
 var (
-	newShapeTopKeys = []string{"profile_name", "link_host", "ingresses", "tailnet_targets"}
+	newShapeTopKeys = append(newShapeKeysBase, "clients")
 	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids", "node", "intermittent", "hy2_port", "tailnet_access"}
 	keyNameRe       = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,40}$`)
 )
+
+// newShapeKeysBase are the top-level keys of the list shape before the client catalog.
+var newShapeKeysBase = []string{"profile_name", "link_host", "ingresses", "tailnet_targets"}
 
 // rejectUnknownKeys fails on a key outside allowed, so a misspelt option is never silently
 // ignored. The key name is echoed only when it looks like a name (never an arbitrary string).

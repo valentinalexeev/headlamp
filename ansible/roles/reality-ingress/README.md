@@ -160,7 +160,7 @@ Use a token for each bridge host. `ingress_name` is a short label such as
 `ingress-1` (used only for discovery).
 
 With several bridges, the Caddy front of every bridge must serve the `link_host` of node-control. This needs a certificate for it.
-It also needs the `/e/<token>` and `/sub/<secret>` proxy to `enroll_upstream`, which is `:8081` of node-control. The shared name
+It also needs the `/e/<token>`, `/sub/<secret>` and `/sub/<secret>/<format>` proxy to `enroll_upstream`, which is `:8081` of node-control. The shared name
 can then point at any of the bridges. Give each bridge host its own agent token (`AGENT_TOKEN_<NAME>` in node-control, one
 distinct value for each host).
 
@@ -253,13 +253,16 @@ API are loopback only.
 
 `:80` answers `404` to everything except ACME HTTP-01.
 
-`<ingress_host>:8443` (bound to loopback) is the Reality `dest`. It reverse-proxies only paths that match `^/(e|sub)/<token>$`
-to `http://<enroll_upstream>`. The token is 1-80 characters of
-`A-Za-z0-9_.-` and does not start with a dot. No trailing slash, no extra segments and no encoded
-slashes are allowed. The proxy strips `X-Forwarded-*`, sets `Host` to `ingress_host`
-and uses short timeouts. Anything else gets an empty `404`.
+`<ingress_host>:8443` (bound to loopback) is the Reality `dest`. It reverse-proxies only these paths to
+`http://<enroll_upstream>`: `/e/<token>`, `/sub/<token>` and `/sub/<token>/<format>`. The format is `sing-box`, `clash`,
+`stash` or `uri` (#241). The token is 1-80 characters of
+`A-Za-z0-9_.-` and does not start with a dot. No trailing slash, no other segments and no encoded
+slashes are allowed.
 
-With `enroll_self_service: true`, the front also proxies the pages of self-enrolment with OIDC (#102). These are `/me`, `/me/devices`, `/me/devices/<id>/revoke`, `/me/logout`, `/oidc/login` and `/oidc/callback`, and nothing below them. The default is `false`.
+The proxy strips `X-Forwarded-*`, sets `Host` to `ingress_host` and uses short timeouts. Anything else gets an empty
+`404`.
+
+With `enroll_self_service: true`, the front also proxies the pages of self-enrolment with OIDC (#102). These are `/me`, `/me/devices`, `/me/devices/<id>`, `/me/devices/<id>/revoke`, `/me/logout`, `/me/icons/<app>`, `/i/<token>`, `/oidc/login` and `/oidc/callback`, and nothing below them. The default is `false`.
 
 There is no access log. Runtime and ACME errors of Caddy go to the journal (level ERROR). The logged request is removed,
 so enrolment tokens in paths never appear. `journalctl -u caddy-ingress`

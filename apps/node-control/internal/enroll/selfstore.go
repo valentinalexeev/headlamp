@@ -1,6 +1,7 @@
 package enroll
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -76,7 +77,7 @@ func OpenSelfStore(path string, key []byte, clock func() time.Time) (*SelfStore,
 		return nil, fmt.Errorf("open OIDC db: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(selfSchema); err != nil {
+	if _, err := db.ExecContext(context.Background(), selfSchema+inviteSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("open OIDC db: %w", err)
 	}

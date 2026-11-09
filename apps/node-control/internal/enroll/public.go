@@ -136,9 +136,9 @@ func (p *Public) enrol(w http.ResponseWriter, r *http.Request, token string) {
 		serverError(w, err)
 		return
 	}
-	if d.Client == "karing" || d.Client == "clash" {
-		label := map[string]string{"karing": "Karing", "clash": "Clash Mi"}[d.Client]
-		body := strings.NewReplacer("{client}", pyEscape.Replace(label), "{href}", pyEscape.Replace(location)).Replace(landingTemplate)
+	if c, _ := ClientByID(d.Client); c.Landing {
+		body := strings.NewReplacer("{client}", pyEscape.Replace(c.Label),
+			"{href}", pyEscape.Replace(location)).Replace(landingTemplate)
 		h := w.Header()
 		h.Set("Content-Type", "text/html; charset=utf-8")
 		h.Set("Cache-Control", "no-store")
@@ -150,7 +150,17 @@ func (p *Public) enrol(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusFound)
 }
 
+// subscription serves /sub/<secret> (the format of the device's app) and /sub/<secret>/<format>
+// (any format of the catalog, for the app the person picked on the self-service page).
 func (p *Public) subscription(w http.ResponseWriter, r *http.Request, secret string) {
+	format := ""
+	if i := strings.IndexByte(secret, '/'); i >= 0 {
+		secret, format = secret[:i], secret[i+1:]
+		if !validFormat(format) {
+			notFound(w)
+			return
+		}
+	}
 	if secret == "" || strings.Contains(secret, "/") || isPreview(r.Header.Get("User-Agent")) {
 		notFound(w)
 		return
@@ -164,19 +174,14 @@ func (p *Public) subscription(w http.ResponseWriter, r *http.Request, secret str
 		notFound(w)
 		return
 	}
-	var body []byte
-	var ctype string
 	cfg := p.cfg
 	if p.profileCfg != nil {
 		cfg = p.profileCfg(r.Context())
 	}
-	if d.Client == "clash" {
-		body, err = RenderClashProfile(cfg, *d)
-		ctype = "text/yaml; charset=utf-8"
-	} else {
-		body, err = RenderProfile(cfg, *d)
-		ctype = "application/json"
+	if format == "" {
+		format = formatOf(d.Client)
 	}
+	body, ctype, err := RenderFormat(cfg, *d, format)
 	if err != nil {
 		serverError(w, err)
 		return

@@ -9,6 +9,27 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## Unreleased (0.15.0)
+
+### Action required
+
+- **Bridges that serve the link host** (#241): run the `reality-ingress` role on each bridge, for example with
+  `make ansible-site`. The new front also proxies `/sub/<secret>/<format>`, the links of the app picker. With
+  `enroll_self_service: true`, it also proxies `/me/devices/<id>`, `/me/icons/<app>` and `/i/<token>`. Until then, an
+  old front answers 404 to these links. The links of earlier enrolments do not change.
+
+  Check: for the subscription URL of an active test device,
+  `curl -s -o /dev/null -w '%{http_code}' https://<link_host>/sub/<secret>/uri` gives `200`.
+- **Your own edge in front of node-control** (not the role, not `examples/compose/control`): also proxy `/i/*` to
+  `:8081` when you use self-enrolment with OIDC.
+
+### Optional
+
+- Add `clients` to `enroll.json` to choose the apps of the app picker and their store links. Put the app icons in a
+  directory of the site repo and set `ENROLL_CLIENT_ICON_DIR`. See the node-control README, "Client apps and profile
+  formats" and "App picker".
+- Set `OIDC_INVITE_ONLY=true` to allow new devices only with an invitation.
+
 ## 0.14.0
 
 ### Action required

@@ -89,7 +89,7 @@ A permission is a feature and a level. A higher level includes the lower ones:
 |---|---|---|---|
 | `overview` | the overview, tailnet status | | |
 | `nodes` | node list and status | start, stop | |
-| `enroll` | devices, bridges | create, revoke, extend, links, rotate | approve bridges |
+| `enroll` | devices, bridges, people, invitations | create, revoke, extend, links, rotate, withdraw invitations | approve bridges, lock people, make invitations |
 | `tasks` | tasks, runs, sessions, config | run now, cancel, start or stop a session | edit config and secrets |
 | `policy` | the policy, preview | | apply, confirm, revert |
 | `funnel` | state, config, audit | | namespaces, keys, routes, blocks |
@@ -419,6 +419,7 @@ The file gives one or more bridge nodes. Each entry is a bridge host with its ow
   - `ingresses`: 1 to 8 entries, required.
   - `link_host`: required with more than one bridge. With one bridge, the default is the `host` of that bridge.
   - `profile_name`: the label of the imported profile. The default is `tunnel`.
+  - `clients`: the apps that the self-service app picker shows, in this order (#241). See "Client apps and profile formats". Without it, the picker shows all apps of the catalog, without store links. The old single-host file also accepts it.
   - Unknown keys are an error.
 - Required keys of each entry:
   - `name`: `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`, unique.
@@ -770,6 +771,47 @@ Differences from the Python app that this replaced:
 - The app closes the database only after both listeners drain on shutdown.
 - A misconfigured enrolment stops startup with a message that names the problem, never a secret. Examples are a variable that is not set, or an `ENROLL_CONFIG` that is not readable or not valid.
 
+### Client apps and profile formats
+
+node-control makes profiles and import links for the apps of a fixed catalog (#241):
+
+| `id` | App | Profile format | Platforms |
+|---|---|---|---|
+| `sing-box` | sing-box | `sing-box` | `ios`, `macos`, `android` |
+| `karing` | Karing | `sing-box` | `ios`, `macos`, `android`, `windows`, `linux` |
+| `clash` | Clash Mi | `clash` | `ios`, `macos`, `android`, `windows` |
+| `shadowrocket` | Shadowrocket | `uri` | `ios`, `macos` |
+| `stash` | Stash | `stash` | `ios`, `macos` |
+
+- The `id` is also the `client` value of a device that an operator makes.
+- The one-time link of a `karing`, `clash`, `shadowrocket` or `stash` device opens a page with a button, because these apps open only from a tap. The one-time link of a `sing-box` device redirects at once.
+- `https://<link_host>/sub/<secret>` serves the format of the device's `client`. This did not change.
+- `https://<link_host>/sub/<secret>/<format>` serves the profile in one format, for every device. Each import link of the app picker uses this form. Thus one device can go into each app, also into more than one app.
+
+The formats are:
+
+| Format | Content |
+|---|---|
+| `sing-box` | The sing-box JSON profile ("Phone profile"). |
+| `clash` | The Clash (mihomo) profile, as JSON, which is also valid YAML. |
+| `stash` | The Clash profile with the field names of Stash: `sni` for the VLESS server name and `auth` for the Hysteria 2 password. |
+| `uri` | A base64 list of share links, one line for each link: a `vless://` link for each mode and bridge, and a `hysteria2://` link for each mode on a bridge with `hy2_port`. A link list has no groups, so the app shows each link and the person selects one. The name of each link is its tag, for example `auto-ingress-1-hy2`, never the device name. |
+
+The `clients` key of `enroll.json` selects the apps of the app picker and gives a store link for each platform:
+
+```json
+"clients": [
+  {"id": "karing", "install": {"ios": "https://apps.example.com/karing", "android": "https://store.example.com/karing"}},
+  {"id": "shadowrocket", "install": {"ios": "https://apps.example.com/shadowrocket"}},
+  {"id": "clash"}
+]
+```
+
+- `id` is required. It must be an `id` of the catalog, and each `id` can occur one time only.
+- `install` is optional. Its keys are platforms (`ios`, `android`, `macos`, `windows`, `linux`). Its values are `https` URLs of the store page of the app, 500 characters or fewer.
+- An empty list is an error. To show all apps, remove the key.
+- Which apps your people can get depends on the app stores that they can use. Keep the list and the store links in your private repo.
+
 ## Console shell
 
 One shell wraps every admin page. The shell has these parts:
@@ -922,15 +964,69 @@ Set `OIDC_ISSUER` to turn it on. It needs:
 | `OIDC_KEY_MINUTES` | The lifetime of the tailnet key, 5 to 1440 minutes. The default is 60. |
 | `OIDC_RECHECK_MINUTES` | How often each person is checked again at the identity provider, 5 to 1440 minutes. The default is 60. |
 | `OIDC_SESSION_MINUTES` | The browser session, 5 to 1440 minutes. The default is 480. |
+| `OIDC_INVITE_ONLY` | `true` or `false`. The default is `false`. With `true`, a person can add a device only with an invitation: `/me` has no "Add a device" form, and node-control refuses the form with 403. With `false`, the form stays, as before. Invitations work with both values. |
+| `OIDC_INVITE_REQUIRE_VERIFIED` | `true` or `false`. The default is `true`: an invitation makes a device only when the ID token has `email_verified` set to `true`. Set `false` only when your identity provider does not send the claim and people cannot change the email of their account. See "Invitations". |
+| `ENROLL_CLIENT_ICON_DIR` | Optional. A directory with the app icons of the app picker: `<id>.svg`, `<id>.png` or `<id>.webp` for each `id` of the catalog, 64 KiB or less for each file. node-control reads the files at start and ignores other files. Without an icon, the button shows the first letter of the app. This repository has no app icons, because they are the marks of their makers. Keep the icons in your private repo and lay them over the app. |
 
 ### How a person enrols
 
 1. The person opens `https://<link_host>/me` and selects **Sign in**.
 2. The identity provider signs the person in and sends the browser back to `/oidc/callback`.
-3. The person names the device, selects the relay app and selects **Add device**.
-4. The page shows the import link, the subscription URL and the tailnet key one time only. A reload does not show them again.
+3. The person names the device and selects **Add device**.
+4. The app picker opens (see "App picker"). It shows the tailnet key one time only. A reload does not show the key again.
+5. The person selects the button of the installed app. The app opens and adds the profile.
 
-The page lists the person's devices. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*` and `/oidc/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`.
+The page lists the person's devices. For each active device, **Add to an app** opens the app picker again. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*`, `/oidc/*` and `/i/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`.
+
+### App picker
+
+`/me/devices/{id}` shows one button for each app of `clients` in `enroll.json` (all apps of the catalog without the key). It shows the page only for an active device of the signed-in person.
+
+- The page finds the platform from the User-Agent of the browser and shows only the apps for that platform. **Show all apps** shows all of them. An iPad that asks for desktop pages shows as a Mac. Each app of the catalog for iOS also runs on a Mac.
+- A web page cannot find which apps are installed. Thus each button has the store link of `install` for that platform, when `enroll.json` gives one.
+- Each button is the import link of the app, with the subscription URL of the app's format (`/sub/<secret>/<format>`).
+- **Add the profile by hand** shows the subscription URL of each format.
+
+> **CAUTION:** The app picker shows the subscription URLs each time the person opens it. Anyone with such a URL can use the device. The page is only for the signed-in owner of the device, and it is never cached.
+
+### Invitations
+
+An invitation lets one person add one device. It is bound to one email address (#241).
+
+To invite a person, do these steps:
+
+1. On the Devices page, go to the **Invitations** section.
+2. Type the email address of the person.
+3. Optional: type a device name. The default is `Invited device`.
+4. Optional: type the number of days that the invitation is valid, 1 to 90. The default is 7.
+5. Select **Invite**. The section shows the link `https://<link_host>/i/<token>` one time only.
+6. Send the link to the person.
+
+Then this occurs:
+
+- The person opens the link. node-control keeps the token in a cookie for 10 minutes and starts the sign-in.
+- After the sign-in, node-control compares the email of the account with the email of the invitation. The comparison ignores upper and lower case.
+- If they are the same, node-control spends the invitation and makes the device for the person. Then it shows the app picker with the tailnet key.
+
+> **WARNING:** The invitation trusts the email that the identity provider gives. Keep `OIDC_INVITE_REQUIRE_VERIFIED` at `true` if people can set the email of their account at your identity provider. Otherwise a person can type the email of the invitation and get the device.
+
+node-control makes no device in these cases:
+
+- The invitation was used, withdrawn or has expired.
+- The account has another email address.
+- The ID token does not have `email_verified` set to `true`. With `OIDC_INVITE_REQUIRE_VERIFIED=false`, a token without the claim is also accepted, but `false` is always refused.
+- The person is at the device limit (`OIDC_MAX_DEVICES`) or locked.
+- The person is not in `OIDC_ALLOWED_GROUPS`.
+
+In all cases but the first, the invitation stays usable. **Withdraw** stops an invitation that made no device, also during a sign-in that uses it. To stop a device that an invitation made, revoke the device. A withdrawal of such an invitation gets 409.
+
+node-control keeps the invitations in `OIDC_DB`. It stores only the hash of the token. A link preview of a messenger gets an empty 404 and does not start the sign-in.
+
+API:
+
+- `GET /enroll/invites`: all invitations, newest first. Each has `id`, `email`, `device_name`, `created_by`, `created_at`, `expires_at`, `used_at`, `used_by`, `device_id`, `revoked` and `state` (`pending`, `used`, `expired` or `revoked`). It never shows a token.
+- `POST /enroll/invites` with `{"email": "...", "device_name": "...", "days": 7}`. Only `email` is required. The answer has the `url` of the invitation. No other call shows it. It needs `admin` on `enroll`, because an invitation gives a relay device and a tailnet key.
+- `POST /enroll/invites/{id}/revoke`: withdraws an invitation that made no device. It needs `operate` on `enroll`. For an invitation that made a device, the answer is 409.
 
 ### Locks
 
@@ -953,10 +1049,11 @@ API: `GET /enroll/people`, `POST /enroll/people/{subject}/lock` (body `{"reason"
 
 ### Threat model
 
-- The public pages are on the enrolment listener, behind the front of the link host. They set a strict Content-Security-Policy and run no script.
+- The public pages are on the enrolment listener, behind the front of the link host. They set a strict Content-Security-Policy and run no script. Images come only from the same origin (the app icons).
+- An app icon is served with `X-Content-Type-Options: nosniff` and a `sandbox` Content-Security-Policy, so a script in an SVG file does not run.
 - The session cookie is `__Host-`, `Secure`, `HttpOnly` and `SameSite=Lax`. The app stores only the hash of the session id. Every form needs the CSRF token of the session.
 - The app checks the signature of the ID token with the keys of the issuer. It also checks `iss`, `aud`, `azp` (with more than one audience), `exp`, `iat` and `nonce`. It does not accept the `none` algorithm. It reads the keys again at most once a minute for an unknown key id.
-- The login state is single-use and expires after 10 minutes. The PKCE verifier stays on the server.
+- The login state is single-use and expires after 10 minutes. The PKCE verifier stays on the server. The state is also in a `__Host-` cookie of the browser that started the sign-in. A callback in another browser gets 400, so a callback URL of another account cannot sign a browser in to that account.
 - The app seals the refresh tokens with a key derived from `ENROLL_SECRET_KEY`. The `OIDC_DB` file alone gives no access.
 - The tailnet key is single-use, not reusable and not ephemeral. It has no tags, so the node gets only the ACL of its own user.
 - A person sees and revokes only their own devices.

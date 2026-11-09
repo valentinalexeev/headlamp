@@ -4,6 +4,14 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- `mk/site.mk` and `scripts/deploy-fly.sh` (#194). A site repo includes `vendor/headlamp/mk/site.mk` and sets only its values (`FLY_APPS`, `NODE_CONTROL_URL`, paths). Targets: `deploy-<app>`, `plan-deploy-<app>`, `deploy-all`, `tf-plan`/`tf-apply`/`tf-save`, `ansible-site`/`ansible-check`, `bump-tailscale-version` (now also deploys the Fly exit node), `policy-*`, `tasks-*`, `rotate-api-key-check`, `submodule-check`, `verify`. `deploy-fly.sh` runs from any directory of the site repo, refuses a dirty submodule or a checkout that differs from the pin, and passes `VERSION` and `TSVERSION` from the pins to the apps that declare them. `make test-site-mk` tests it.
+
+### Deprecated
+
+- `examples/private-repo/fly/deploy.sh` is now a wrapper of `scripts/deploy-fly.sh` (#194). Use `make deploy-<app>`.
+
 ## 0.13.0 - 2026-11-08
 
 ### Added

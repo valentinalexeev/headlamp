@@ -9,7 +9,19 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
-## 0.13.0
+## Unreleased (0.14.0)
+
+### Action required
+
+No action required. The old site files keep working.
+
+- **Recommended: stop copying the site scripts** (#194). Replace the targets of your site `Makefile` with
+  `include vendor/headlamp/mk/site.mk` and your values, as in `examples/private-repo/Makefile`. Replace your copy of
+  `fly/deploy.sh` with the wrapper in `examples/private-repo/fly/deploy.sh`, or delete it and use `make deploy-<app>`.
+  Then a release that moves a path or adds a build arg needs no change in your site repo.
+
+  Check: `make help` lists the headlamp targets, and `make verify` passes.
+
 
 ### Action required
 

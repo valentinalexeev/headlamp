@@ -28,8 +28,10 @@ type Applier struct {
 	Runner                          *Runner
 	Clock                           func() int64
 	DirectGeoIP, DirectGeoSite      []string
-	Log                             *slog.Logger
-	mu                              sync.Mutex
+	// ExitDNS are the resolvers reached through via-exit; empty: DefaultExitDNS.
+	ExitDNS []string
+	Log     *slog.Logger
+	mu      sync.Mutex
 	// rendered is the list of grant group outbounds of the base at the last render (#139). When a
 	// playbook run adds one, the next push renders again even if the credentials did not change.
 	// nil: not rendered yet.
@@ -69,7 +71,7 @@ func (a *Applier) render(creds []Cred) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Render(base, creds, a.DirectGeoIP, a.DirectGeoSite)
+	return Render(base, creds, a.DirectGeoIP, a.DirectGeoSite, a.ExitDNS)
 }
 
 // install writes the config next to the live one, has xray validate it, then replaces the live file. The

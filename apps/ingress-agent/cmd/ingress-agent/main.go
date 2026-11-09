@@ -49,7 +49,8 @@ func run(log *slog.Logger) error {
 	a := &agent.Applier{StatePath: filepath.Join(state, "credentials.json"),
 		BasePath: env("XRAY_BASE_CONFIG", "/etc/xray/config.base.json"), ConfigPath: env("XRAY_CONFIG", "/etc/xray/config.json"),
 		Runner: runner, DirectGeoIP: agent.ParseList(os.Getenv("INGRESS_DIRECT_GEOIP")),
-		DirectGeoSite: agent.ParseList(os.Getenv("INGRESS_DIRECT_GEOSITE")), Log: log}
+		DirectGeoSite: agent.ParseList(os.Getenv("INGRESS_DIRECT_GEOSITE")),
+		ExitDNS:       agent.ParseList(os.Getenv("INGRESS_EXIT_DNS")), Log: log}
 	listen := env("AGENT_LISTEN", "127.0.0.1:9000")
 	if _, _, err := net.SplitHostPort(listen); err != nil {
 		return fmt.Errorf("AGENT_LISTEN must be host:port")

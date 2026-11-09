@@ -20,29 +20,63 @@ concurrency:
   group: images-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  # Release preflight (#192): every Ansible role in check mode in a systemd container, every image built, and every app
-  # with an example overlay built and started with its fly.toml process commands (also those of the previous release).
-  # Runs on tags and on release/ PRs; a tag cannot pass the gate while it fails.
+  # Release preflight (#192): every Ansible role in check mode in a systemd container, every image (the src-<hash>
+  # image from the registry when it exists, else built), and every app with an example overlay built and started with
+  # its fly.toml process commands (also those of the previous release).
+  # Runs on tags and on release/ PRs; a tag cannot pass the gate while it fails. A tag on the merge commit of a
+  # release PR reuses the PR's result when the PR head passed the preflight and has the same tree as the tag.
   preflight:
     if: github.ref_type == 'tag' || startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-26.04
     timeout-minutes: 90
     permissions:
       contents: read
+      checks: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Reuse the preflight of the release PR
+        id: reuse
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The tag must be a merge commit whose second parent (the PR head) has exactly the same tree, and the
+          # preflight check of that commit must have passed. Anything else runs the full preflight.
+          head=$(git rev-parse -q --verify 'HEAD^2' || true)
+          if [ -n "$head" ] && [ "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse "$head^{tree}")" ]; then
+            ok=$(gh api "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?check_name=preflight" \
+              --jq '[.check_runs[] | select(.app.slug == "github-actions" and .conclusion == "success")] | length')
+            if [ "${ok:-0}" -gt 0 ]; then
+              echo "the release PR head $head passed the preflight with the same tree: reusing it"
+              echo "reused=true" >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "no passed preflight for the same tree: running the full preflight"
       - name: Install ansible
+        if: steps.reuse.outputs.reused != 'true'
         run: |
           pipx install --include-deps ansible-core
           ansible-galaxy collection install -r ansible/requirements.yml
           ansible-galaxy collection install community.docker
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.reuse.outputs.reused != 'true'
         with:
           go-version-file: apps/ingress-agent/go.mod
+          cache-dependency-path: apps/*/go.sum
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        if: steps.reuse.outputs.reused != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - name: Run the release preflight
-        run: scripts/release-preflight.sh HEAD
+        if: steps.reuse.outputs.reused != 'true'
+        run: |
+          PREFLIGHT_PULL="ghcr.io/${GITHUB_REPOSITORY,,}" scripts/release-preflight.sh HEAD
 
   gate:
     needs: preflight

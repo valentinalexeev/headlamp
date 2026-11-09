@@ -70,7 +70,6 @@
       ev.preventDefault();
       if (st.busy) { return; }
       var body = { email: els.email.value.trim() };
-      if (els.name.value.trim()) { body.device_name = els.name.value.trim(); }
       var days = parseInt(els.days.value, 10);
       if (days > 0) { body.days = days; }
       st.busy = true;
@@ -78,7 +77,6 @@
         st.busy = false;
         setError('');
         els.email.value = '';
-        els.name.value = '';
         showLink(hl.plain(hl.obj(j).url, 500));
         return load();
       }, function (e) {
@@ -96,7 +94,7 @@
     var ctrl = mount({
       root: root, rows: document.getElementById('inviterows'), error: document.getElementById('inviteerror'),
       made: document.getElementById('invitemade'), form: document.getElementById('inviteform'),
-      email: document.getElementById('inviteemail'), name: document.getElementById('invitename'),
+      email: document.getElementById('inviteemail'),
       days: document.getElementById('invitedays')
     });
     hl.poll(ctrl.load, POLL_MS);

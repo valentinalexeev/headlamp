@@ -229,7 +229,7 @@ func TestInviteAPI(t *testing.T) {
 		Invites []Invite `json:"invites"`
 	}
 	if json.Unmarshal(rec.Body.Bytes(), &res) != nil || len(res.Invites) != 1 || res.Invites[0].State != InvitePending ||
-		res.Invites[0].DeviceName != defaultInviteName || res.Invites[0].ExpiresAt != adminNow+30*86400 {
+		res.Invites[0].DeviceName != "a" || res.Invites[0].ExpiresAt != adminNow+30*86400 {
 		t.Fatalf("%s", rec.Body)
 	}
 	if strings.Contains(rec.Body.String(), "token") {

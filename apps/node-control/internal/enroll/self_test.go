@@ -2,6 +2,7 @@ package enroll
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/cookiejar"
@@ -420,6 +421,31 @@ func TestPeopleAdminAPI(t *testing.T) {
 	}
 	if rec := do("POST", "/enroll/people/sub-1/unlock", `{}`); rec.Code != 200 {
 		t.Errorf("unlock %d", rec.Code)
+	}
+}
+
+func TestDeviceListShowsOwnerEmail(t *testing.T) {
+	f := newSelfFx(t, SelfConfig{})
+	c := f.browser()
+	f.enrol(c, f.signIn(c), "Phone")
+	rec := httptest.NewRecorder()
+	f.admin.listDevices(rec, httptest.NewRequest("GET", "/enroll/devices", nil))
+	var res struct {
+		Devices []deviceRow `json:"devices"`
+	}
+	if json.Unmarshal(rec.Body.Bytes(), &res) != nil || len(res.Devices) != 1 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if d := res.Devices[0]; d.Owner != "oidc:sub-1" || d.OwnerEmail == "" || !strings.Contains(d.OwnerEmail, "@") {
+		t.Errorf("%+v", d)
+	}
+}
+
+func TestInviteName(t *testing.T) {
+	for in, want := range map[string]string{"alice@example.test": "alice", "Bob.Smith@x.test": "Bob.Smith", "@x": defaultInviteName} {
+		if got := inviteName(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
 	}
 }
 

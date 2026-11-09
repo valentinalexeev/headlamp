@@ -34,7 +34,7 @@
         var tr = hl.el('tr');
         var who = hl.el('td');
         who.appendChild(hl.el('div', null, hl.plain(p.email, 120) || hl.plain(p.owner, 120)));
-        who.appendChild(hl.el('div', 't3 small', hl.plain(p.owner, 120)));
+        who.setAttribute('title', hl.plain(p.owner, 120)); // the identifier stays at hand without filling the row
         tr.appendChild(who);
         var s = stateOf(p, now);
         var stc = hl.el('td');

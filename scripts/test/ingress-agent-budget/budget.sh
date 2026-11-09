@@ -11,7 +11,7 @@ docker run --rm -v "$root/apps/ingress-agent:/src:ro" -w /src -e CGO_ENABLED=0 -
   go build -trimpath -ldflags="-s -w" -o /tmp/ingress-agent ./cmd/ingress-agent
   apk add -q --no-cache curl python3 >/dev/null
   printf "#!/bin/sh\nexit 0\n" > /tmp/xray; chmod +x /tmp/xray
-  mkdir -p /tmp/x && echo "{\"inbounds\":[{\"tag\":\"reality-in\",\"settings\":{\"clients\":[]}}],\"routing\":{\"rules\":[]}}" > /tmp/x/base.json
+  mkdir -p /tmp/x && echo "{\"inbounds\":[{\"tag\":\"reality-in\",\"settings\":{\"clients\":[]}}],\"outbounds\":[{\"tag\":\"via-exit\",\"protocol\":\"socks\"}],\"routing\":{\"rules\":[]}}" > /tmp/x/base.json
   tok=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d " \n"); auth="Authorization: Bearer $tok"
   export AGENT_TOKEN="$tok" AGENT_STATE_DIR=/tmp/s XRAY_BIN=/tmp/xray XRAY_BASE_CONFIG=/tmp/x/base.json \
     XRAY_CONFIG=/tmp/x/config.json XRAY_RESTART_CMD=true AGENT_LISTEN=127.0.0.1:9000 \

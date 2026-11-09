@@ -328,13 +328,16 @@ func asset(contentType string, body []byte) http.HandlerFunc {
 }
 
 type deviceRow struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Owner     string `json:"owner"`
-	Client    string `json:"client"`
-	ExpiresAt int64  `json:"expires_at"`
-	Revoked   bool   `json:"revoked"`
-	Traffic   any    `json:"traffic"`
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Owner string `json:"owner"`
+	// OwnerEmail is the email of a self-enrolled owner ("oidc:<subject>"), for display; empty for
+	// other owners.
+	OwnerEmail string `json:"owner_email,omitempty"`
+	Client     string `json:"client"`
+	ExpiresAt  int64  `json:"expires_at"`
+	Revoked    bool   `json:"revoked"`
+	Traffic    any    `json:"traffic"`
 	// When a one-time link of the device was last spent and how often, and when its traffic last grew (unix seconds;
 	// 0 = never). No client addresses.
 	EnrolledAt int64 `json:"enrolled_at"`
@@ -392,13 +395,15 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	emails := a.ownerEmails()
 	rows := make([]deviceRow, 0, len(devs))
 	for _, d := range devs {
 		var traffic any
 		if tr, ok := stats[d.ID]; ok {
 			traffic = map[string]any{"up": tr.Up, "down": tr.Down}
 		}
-		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, d.Client, d.ExpiresAt, d.Revoked, traffic, d.EnrolledAt, d.Enrolments, d.LastActive})
+		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, emails[d.Owner], d.Client, d.ExpiresAt,
+			d.Revoked, traffic, d.EnrolledAt, d.Enrolments, d.LastActive})
 	}
 	snaps := snapshotsOf(cur.SyncTargets)
 	pending := cur.Pending

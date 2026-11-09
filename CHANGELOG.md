@@ -7,6 +7,11 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Fixed
 
 - node-control self-enrolment: `/me` no longer makes a second headscale user for a person who already has one (#253). Before, a person who had logged in through the OIDC login of headscale got a second user `oidc-<hash>` with the same email, and headscale did not start again when the policy named the person by email. Now the first device reuses, in this order: the user with the provider ID `<OIDC_ISSUER>/<subject>`, the user `oidc-<hash>`, or the one user with the person's email when the ID token says `email_verified: true`. More than one user with that email: node-control refuses the device and says why. The OIDC database gets an `email_verified` column at start.
+- node-control console: the Devices table, the tailnet grants and People show the email of a self-enrolled owner, not `oidc:<subject>` (#257). `GET /enroll/devices` gives `owner_email` for such owners. The identifier is in the cell title, and a long owner no longer widens the table. The invitation form no longer asks for a device name: the device is named after the part of the email before the `@`. The API still takes `device_name`.
+
+### Security
+
+- ingress-agent: xray no longer looks up client destinations with the resolver of the bridge network. `IPOnDemand` routing resolves every domain that a client goes to (also the sniffed TLS/HTTP name). Before, xray had no `dns` section, so it used the system resolver of the bridge host, and the bridge network saw every name that `exit` and `auto` clients used. A poisoned answer could also send a name to the wrong outbound. The agent now writes a `dns` section (tag `dns-internal`) and sends its queries through `via-exit`. The servers are `INGRESS_EXIT_DNS` (role variable `ingress_exit_dns`; default `https://1.1.1.1/dns-query`, `https://1.0.0.1/dns-query`). Only names on the direct geosite lists use the system resolver. A `dns` section in the base config is replaced. Clients of mode `direct` now get their addresses from these servers too, so their lookups fail while the exit node is down.
 
 ## 0.15.1 - 2026-11-09
 

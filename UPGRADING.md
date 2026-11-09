@@ -9,6 +9,14 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## Unreleased
+
+### Action required
+
+- **Bridges** (`ingress-agent` role): run the role on each bridge. The new agent sends the DNS lookups of xray
+  through the exit node. Check: `jq '.dns, .routing.rules[0]' /etc/xray/config.json` shows tag `dns-internal` and a
+  rule that sends it to `via-exit`. To use other resolvers, set `ingress_exit_dns` (IP addresses only).
+
 ## 0.15.1
 
 ### Optional

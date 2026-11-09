@@ -46,7 +46,17 @@ The agent starts from the base file (`XRAY_BASE_CONFIG`). The base file must con
 - one client per credential on `reality-in` (`flow: xtls-rprx-vision`, email `u<12 hex of sha256(uuid)>@i`);
 - `routing.domainStrategy` is set to `IPOnDemand`. This overrides the base value. Xray must resolve domain destinations
   before the block rule. If it does not, a hostname that points to a private address bypasses the rule.
+- the `dns` section. This replaces the base value. Xray uses it for each lookup of `IPOnDemand`. The servers are
+  `INGRESS_EXIT_DNS` (default `https://1.1.1.1/dns-query`, `https://1.0.0.1/dns-query`). The tag of the section is
+  `dns-internal`, and a routing rule sends these queries to `via-exit`. Thus the resolver of the bridge network does
+  not see the names that clients go to. Only names on `INGRESS_DIRECT_GEOSITE` use the system resolver (server
+  `localhost` with `skipFallback`), because their traffic leaves from this host.
+
+  **CAUTION:** Clients of mode `direct` also get their addresses from the exit DNS servers. When the exit node is
+  not available, their lookups fail.
 - Routing rules, put before the base rules, in this order:
+  - Send the queries of the `dns-internal` tag to `via-exit`. The base config must have this outbound, or the push
+    gives `503`.
   0. This rule exists only when a credential has the tailnet grant (#132). It sends the tailnet ranges of these
      clients to the outbound `via-tailnet`. The ranges are `100.64.0.0/10` and `fd7a:115c:a1e0::/48`. The base config must then have this outbound, or the push gives
      `503`. Other private ranges are not in this rule, so they stay blocked.
@@ -83,6 +93,7 @@ the agent removes expired entries and applies the config again.
 | `XRAY_API` | `127.0.0.1:10085` (xray stats API, must be enabled in the base config) |
 | `INGRESS_DIRECT_GEOIP` | empty. Comma-separated geodata list names; in `auto` mode, destinations on them leave from this host |
 | `INGRESS_DIRECT_GEOSITE` | empty. Same, for geosite lists |
+| `INGRESS_EXIT_DNS` | empty: `https://1.1.1.1/dns-query,https://1.0.0.1/dns-query`. Comma-separated resolvers for the lookups of xray, through `via-exit`. Each is `https://<ipv4>/<path>` or `tcp://<ipv4>[:port]`. A name is not accepted, because its lookup leaves through the local network |
 | `INGRESS_NAME` | unset. Short label of this bridge, `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`. Needed for `/v1/info` |
 | `INGRESS_HOST` | unset. Public DNS name of the bridge (lowercase, no scheme, port or path). Needed for `/v1/info` |
 | `INGRESS_PORT` | `443`. Public port, 1-65535 |

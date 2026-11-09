@@ -139,11 +139,15 @@ func (s *SelfStore) InviteByToken(ctx context.Context, token string) (Invite, er
 	return in, err
 }
 
-// RevokeInvite withdraws an unused invitation. A used one stays as it is: its device is revoked
-// on the Devices page.
+// ErrInviteUsed: the invitation already made a device, so withdrawing it changes nothing.
+var ErrInviteUsed = errors.New("the invitation already made a device")
+
+// RevokeInvite withdraws an invitation that has made no device. It also stops a redemption that
+// is still running: if that redemption fails and gives the invitation back, the invitation stays
+// withdrawn. An invitation that made a device gives ErrInviteUsed: revoke the device instead.
 func (s *SelfStore) RevokeInvite(ctx context.Context, id int64) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE oidc_invites SET revoked=1 WHERE id=? AND used_at=0", id)
+		"UPDATE oidc_invites SET revoked=1 WHERE id=? AND device_id=0", id)
 	if err != nil {
 		return err
 	}
@@ -153,7 +157,10 @@ func (s *SelfStore) RevokeInvite(ctx context.Context, id int64) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return ErrInviteUsed
 	}
 	return nil
 }

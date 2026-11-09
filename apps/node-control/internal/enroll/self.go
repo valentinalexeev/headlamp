@@ -41,6 +41,10 @@ type SelfConfig struct {
 	// InviteOnly: a person can enrol only with an invitation (OIDC_INVITE_ONLY). Default false: the
 	// "Add a device" form of /me stays, as before.
 	InviteOnly bool
+	// InviteAnyEmail accepts an invitation also when the ID token has no email_verified claim
+	// (OIDC_INVITE_REQUIRE_VERIFIED=false). The default needs the claim, and true: some issuers
+	// let a person set the email of their account and do not send the claim.
+	InviteAnyEmail bool
 }
 
 func (c *SelfConfig) defaults() {
@@ -198,7 +202,7 @@ const defaultSelfClient = "sing-box"
 func (s *Self) Redeem(
 	ctx context.Context, id oidc.Identity, token string, link IngressConfig,
 ) (Enrolment, Invite, error) {
-	if id.EmailUnverified {
+	if id.EmailUnverified || (!id.EmailVerified && !s.cfg.InviteAnyEmail) {
 		return Enrolment{}, Invite{}, ErrEmailUnverified
 	}
 	inv, err := s.users.ClaimInvite(ctx, token, id.Email, ownerOf(id.Subject))

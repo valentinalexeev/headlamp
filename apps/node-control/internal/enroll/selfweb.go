@@ -45,6 +45,7 @@ type SelfWeb struct {
 const (
 	sessionCookie = "__Host-hl_session"
 	inviteCookie  = "__Host-hl_invite"
+	flowCookie    = "__Host-hl_flow" // the state of the sign-in this browser started
 	flowTTL       = 10 * time.Minute
 )
 
@@ -172,6 +173,10 @@ func (s *SelfWeb) login(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// The callback must come back to the browser that started the sign-in: a callback URL of
+	// someone else's sign-in must not log this browser in to that account.
+	http.SetCookie(w, &http.Cookie{Name: flowCookie, Value: f.State, Path: "/", Secure: true,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(flowTTL / time.Second)})
 	secHeaders(w)
 	http.Redirect(w, r, s.rp.AuthURL(f), http.StatusFound)
 }
@@ -189,6 +194,18 @@ func userError(err error) string {
 
 func (s *SelfWeb) callback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	// The invitation and the flow cookies are for this one callback, whatever its result.
+	invite := ""
+	if c, err := r.Cookie(inviteCookie); err == nil {
+		invite = c.Value
+		clearCookie(w, inviteCookie)
+	}
+	fc, ferr := r.Cookie(flowCookie)
+	clearCookie(w, flowCookie)
+	if ferr != nil || !constantEq(fc.Value, q.Get("state")) {
+		s.render(w, http.StatusBadRequest, meView{Error: userError(oidc.ErrState)})
+		return
+	}
 	nonce, verifier, ok, err := s.self.users.TakeFlow(q.Get("state"))
 	if err != nil {
 		s.fail(w, err)
@@ -220,9 +237,8 @@ func (s *SelfWeb) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: sid, Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: int(s.self.cfg.SessionTTL / time.Second)})
-	if c, err := r.Cookie(inviteCookie); err == nil && c.Value != "" {
-		clearCookie(w, inviteCookie)
-		s.redeem(w, r, id, c.Value, csrf)
+	if invite != "" {
+		s.redeem(w, r, id, invite, csrf)
 		return
 	}
 	secHeaders(w)

@@ -70,6 +70,13 @@ func selfConfig(env core.Env) (oidc.Config, SelfConfig, string, error) {
 	default:
 		return oidc.Config{}, SelfConfig{}, "", errors.New(errInviteOnlyValue)
 	}
+	switch v := strings.ToLower(strings.TrimSpace(env.Getenv("OIDC_INVITE_REQUIRE_VERIFIED"))); v {
+	case "", "true", "1", "yes":
+	case "false", "0", "no":
+		sc.InviteAnyEmail = true
+	default:
+		return oidc.Config{}, SelfConfig{}, "", errors.New(errInviteVerifiedValue)
+	}
 	sc.defaults()
 	return rp, sc, env.Getenv("OIDC_DB"), nil
 }
@@ -119,6 +126,11 @@ func (m *Module) registerSelf(r *core.Routes, key []byte) error {
 // errInviteOnlyValue says what each value of OIDC_INVITE_ONLY does.
 const errInviteOnlyValue = "OIDC_INVITE_ONLY must be true or false (true: only an invitation " +
 	"can add a device; false, the default: the \"Add a device\" form of /me stays)"
+
+// errInviteVerifiedValue says what each value of OIDC_INVITE_REQUIRE_VERIFIED does.
+const errInviteVerifiedValue = "OIDC_INVITE_REQUIRE_VERIFIED must be true or false (true, the " +
+	"default: an invitation needs email_verified true in the ID token; false: a token without " +
+	"the claim is also accepted)"
 
 // Invitation limits.
 const (
@@ -201,6 +213,8 @@ func (a *Admin) revokeInvite(w http.ResponseWriter, r *http.Request) {
 	switch err := a.self.users.RevokeInvite(r.Context(), id); {
 	case errors.Is(err, ErrNotFound):
 		detail(w, http.StatusNotFound, "unknown invitation")
+	case errors.Is(err, ErrInviteUsed):
+		detail(w, http.StatusConflict, "the invitation made a device; revoke the device instead")
 	case err != nil:
 		a.internal(w, err)
 	default:

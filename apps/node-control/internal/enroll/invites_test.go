@@ -17,6 +17,13 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 )
 
+// inviteFx is a fixture whose issuer says the email is verified, as invitations need by default.
+func inviteFx(t *testing.T, cfg SelfConfig) *selfFx {
+	f := newSelfFx(t, cfg)
+	f.is.Tamper = func(c jwt.MapClaims) { c["email_verified"] = true }
+	return f
+}
+
 // adminDo calls the invitation API of the fixture's admin.
 func (f *selfFx) adminDo(method, path, body string) *httptest.ResponseRecorder {
 	f.t.Helper()
@@ -67,7 +74,7 @@ func (f *selfFx) invites() []Invite {
 }
 
 func TestInviteRedeemEndToEnd(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{InviteOnly: true})
+	f := inviteFx(t, SelfConfig{InviteOnly: true})
 	id, path := f.newInvite(`{"email":"Anna@Example.test","device_name":"Anna's phone"}`)
 	c := f.browser()
 	code, page := f.follow(c, path)
@@ -109,7 +116,7 @@ func TestInviteRedeemEndToEnd(t *testing.T) {
 }
 
 func TestInviteRefusalOtherEmail(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{})
+	f := inviteFx(t, SelfConfig{})
 	_, path := f.newInvite(`{"email":"bob@example.test"}`)
 	code, page := f.follow(f.browser(), path)
 	if code != 409 || !strings.Contains(page, "for another account") {
@@ -124,7 +131,7 @@ func TestInviteRefusalOtherEmail(t *testing.T) {
 }
 
 func TestInviteRefusalUnverifiedEmail(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{})
+	f := inviteFx(t, SelfConfig{})
 	f.is.Tamper = func(c jwt.MapClaims) { c["email_verified"] = false }
 	_, path := f.newInvite(`{"email":"anna@example.test"}`)
 	if code, page := f.follow(f.browser(), path); code != 409 || !strings.Contains(page, "does not confirm") {
@@ -136,7 +143,7 @@ func TestInviteRefusalUnverifiedEmail(t *testing.T) {
 }
 
 func TestInviteRefusalVerifiedAsAString(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{})
+	f := inviteFx(t, SelfConfig{})
 	f.is.Tamper = func(c jwt.MapClaims) { c["email_verified"] = "true" }
 	_, path := f.newInvite(`{"email":"anna@example.test"}`)
 	if code, page := f.follow(f.browser(), path); code != 200 || !strings.Contains(page, "is ready") {
@@ -145,7 +152,7 @@ func TestInviteRefusalVerifiedAsAString(t *testing.T) {
 }
 
 func TestInviteRefusalRevoked(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{})
+	f := inviteFx(t, SelfConfig{})
 	id, path := f.newInvite(`{"email":"anna@example.test"}`)
 	if rec := f.adminDo("POST", "/enroll/invites/"+strconv.FormatInt(id, 10)+"/revoke", `{}`); rec.Code != 200 {
 		t.Fatalf("revoke %d %s", rec.Code, rec.Body)
@@ -159,7 +166,7 @@ func TestInviteRefusalRevoked(t *testing.T) {
 }
 
 func TestInviteRefusalExpired(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{})
+	f := inviteFx(t, SelfConfig{})
 	inv, tok, err := f.self.users.NewInvite(context.Background(), "anna@example.test", "x", "admin", -time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +180,7 @@ func TestInviteRefusalExpired(t *testing.T) {
 }
 
 func TestInviteRefusalDeviceLimitKeepsTheInvitation(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{MaxDevices: 1})
+	f := inviteFx(t, SelfConfig{MaxDevices: 1})
 	c := f.browser()
 	f.enrol(c, f.signIn(c), "first")
 	_, path := f.newInvite(`{"email":"anna@example.test"}`)
@@ -186,7 +193,7 @@ func TestInviteRefusalDeviceLimitKeepsTheInvitation(t *testing.T) {
 }
 
 func TestInviteRefusalPreviewAndUnknown(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{})
+	f := inviteFx(t, SelfConfig{})
 	_, path := f.newInvite(`{"email":"anna@example.test"}`)
 	req, _ := http.NewRequest("GET", f.srv.URL+path, nil)
 	req.Header.Set("User-Agent", "TelegramBot (like TwitterBot)")
@@ -203,7 +210,7 @@ func TestInviteRefusalPreviewAndUnknown(t *testing.T) {
 }
 
 func TestInviteAPI(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{})
+	f := inviteFx(t, SelfConfig{})
 	for body, want := range map[string]int{
 		`{}`:                                          422,
 		`{"email":"no-at"}`:                           422,
@@ -238,7 +245,7 @@ func TestInviteAPI(t *testing.T) {
 }
 
 func TestPickerPage(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{})
+	f := inviteFx(t, SelfConfig{})
 	c := f.browser()
 	csrf := f.signIn(c)
 	f.enrol(c, csrf, "Phone")
@@ -295,7 +302,7 @@ func TestPickerPage(t *testing.T) {
 }
 
 func TestPickerUsesSiteChoicesAndIcons(t *testing.T) {
-	f := newSelfFx(t, SelfConfig{})
+	f := inviteFx(t, SelfConfig{})
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "stash.svg"), []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), 0o600)
 	_ = os.WriteFile(filepath.Join(dir, "unrelated.png"), []byte("x"), 0o600)
@@ -345,6 +352,17 @@ func TestPickerUsesSiteChoicesAndIcons(t *testing.T) {
 
 func TestInviteOnlyConfig(t *testing.T) {
 	base := map[string]string{"OIDC_ISSUER": "https://idp.example", "OIDC_CLIENT_ID": "c", "OIDC_DB": "/x", "OIDC_REDIRECT_URL": "https://links.example/oidc/callback"}
+	for v, want := range map[string]bool{"": true, "true": true, "false": false, "0": false} {
+		base["OIDC_INVITE_REQUIRE_VERIFIED"] = v
+		if _, sc, _, err := selfConfig(core.MapEnv(base)); err != nil || sc.InviteAnyEmail == want {
+			t.Errorf("require verified %q: %v %v", v, sc.InviteAnyEmail, err)
+		}
+	}
+	base["OIDC_INVITE_REQUIRE_VERIFIED"] = "x"
+	if _, _, _, err := selfConfig(core.MapEnv(base)); err == nil {
+		t.Error("bad OIDC_INVITE_REQUIRE_VERIFIED accepted")
+	}
+	delete(base, "OIDC_INVITE_REQUIRE_VERIFIED")
 	for v, want := range map[string]bool{"": false, "false": false, "true": true, "1": true} {
 		base["OIDC_INVITE_ONLY"] = v
 		if _, sc, _, err := selfConfig(core.MapEnv(base)); err != nil || sc.InviteOnly != want {
@@ -354,5 +372,78 @@ func TestInviteOnlyConfig(t *testing.T) {
 	base["OIDC_INVITE_ONLY"] = "maybe"
 	if _, _, _, err := selfConfig(core.MapEnv(base)); err == nil || !strings.Contains(err.Error(), "OIDC_INVITE_ONLY") {
 		t.Errorf("bad value: %v", err)
+	}
+}
+
+func TestInviteNeedsTheVerifiedClaimByDefault(t *testing.T) {
+	f := newSelfFx(t, SelfConfig{}) // the issuer sends no email_verified
+	_, path := f.newInvite(`{"email":"anna@example.test"}`)
+	if code, page := f.follow(f.browser(), path); code != 409 || !strings.Contains(page, "does not confirm") {
+		t.Fatalf("%d %s", code, page)
+	}
+	g := newSelfFx(t, SelfConfig{InviteAnyEmail: true})
+	_, path = g.newInvite(`{"email":"anna@example.test"}`)
+	if code, page := g.follow(g.browser(), path); code != 200 || !strings.Contains(page, "is ready") {
+		t.Fatalf("with OIDC_INVITE_REQUIRE_VERIFIED=false: %d %s", code, page)
+	}
+}
+
+func TestWithdrawStopsARunningRedemption(t *testing.T) {
+	f := inviteFx(t, SelfConfig{})
+	ctx := context.Background()
+	inv, tok, err := f.self.users.NewInvite(ctx, "anna@example.test", "x", "admin", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.self.users.ClaimInvite(ctx, tok, "anna@example.test", "oidc:sub-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.self.users.RevokeInvite(ctx, inv.ID); err != nil {
+		t.Fatalf("withdraw during a redemption: %v", err)
+	}
+	_ = f.self.users.ReleaseInvite(ctx, inv.ID) // the device could not be made
+	if got := f.invites()[0]; got.State != InviteRevoked {
+		t.Fatalf("the invitation came back: %+v", got)
+	}
+	// an invitation that made a device cannot be withdrawn
+	_, path := f.newInvite(`{"email":"anna@example.test"}`)
+	f.follow(f.browser(), path)
+	used := f.invites()[0]
+	rec := f.adminDo("POST", "/enroll/invites/"+strconv.FormatInt(used.ID, 10)+"/revoke", `{}`)
+	if used.State != InviteUsed || rec.Code != 409 {
+		t.Fatalf("%+v %d %s", used, rec.Code, rec.Body)
+	}
+}
+
+func TestCallbackNeedsTheBrowserThatStartedTheSignIn(t *testing.T) {
+	f := newSelfFx(t, SelfConfig{})
+	attacker := f.browser()
+	attacker.CheckRedirect = func(r *http.Request, _ []*http.Request) error {
+		if strings.HasPrefix(r.URL.Path, "/oidc/callback") {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	}
+	resp, err := attacker.Get(f.srv.URL + "/oidc/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb := resp.Header.Get("Location")
+	resp.Body.Close()
+	victim := f.browser()
+	r2, err := victim.Get(cb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := readAll(r2); r2.StatusCode != 400 || strings.Contains(p, "Signed in as") {
+		t.Fatalf("another browser used the callback: %d %s", r2.StatusCode, p)
+	}
+	// the flow was not spent: the browser that started it still signs in
+	r3, err := attacker.Get(cb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := readAll(r3); !strings.Contains(p, "Signed in as") {
+		t.Fatalf("own callback: %d %s", r3.StatusCode, p)
 	}
 }

@@ -62,11 +62,11 @@
   ansible.builtin.set_fact:
     socks_backend_state: >-
       {{ socks_status.stdout | default('')
-         | regex_findall('"BackendState":\\s*"([A-Za-z]+)"') | first | default('Unknown') }}
+         | regex_findall('"BackendState":[ ]*"([A-Za-z]+)"') | first | default('Unknown') }}
     # Stopped = logged in but down: `up` needs no key then.
     socks_needs_key: >-
       {{ (socks_status.stdout | default('')
-         | regex_findall('"BackendState":\\s*"([A-Za-z]+)"') | first | default('Unknown'))
+         | regex_findall('"BackendState":[ ]*"([A-Za-z]+)"') | first | default('Unknown'))
          in ['Unknown', 'NeedsLogin', 'NoState'] }}
 
 - name: Fail clearly if the second tailscaled cannot be queried

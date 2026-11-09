@@ -1,5 +1,5 @@
 # Example site overlay for the headscale Fly app. Copy it to fly/headscale/fly.toml in your private repo and set the
-# placeholders. fly/deploy.sh lays it over vendor/headlamp/apps/headscale for the build.
+# placeholders. `make deploy-headscale` lays it over vendor/headlamp/apps/headscale for the build.
 # scripts/release-preflight.sh builds the image with this overlay and starts each process once (#192).
 app = "<your-headscale-app>"
 primary_region = "<region>"

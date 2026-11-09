@@ -13,8 +13,14 @@ says "No action required".
 
 ### Action required
 
-No action required.
+No action required. The old site files and modules keep working.
 
+- **Recommended: stop copying the site scripts** (#194). Replace the targets of your site `Makefile` with
+  `include vendor/headlamp/mk/site.mk` and your values, as in `examples/private-repo/Makefile`. Replace your copy of
+  `fly/deploy.sh` with the wrapper in `examples/private-repo/fly/deploy.sh`, or delete it and use `make deploy-<app>`.
+  Then a release that moves a path or adds a build arg needs no change in your site repo.
+
+  Check: `make help` lists the headlamp targets, and `make verify` passes.
 - **Recommended for AWS exit nodes** (#213): set `state_parameter_name` (for example `/headlamp/<node>/tailscaled`)
   and `tailscale_version` on each `exit-node-vm/aws` module. Then a node-control stop and start keeps the same node.
   The deploying identity needs the IAM actions of `authkey_secret_arn` (role, profile, `iam:PassRole`). The first
@@ -32,6 +38,14 @@ No action required.
 - `control-host/aws` and `exit-node-vm/aws` (with `tags`) now tag the root volume and the network interface (#225).
   `terraform plan` shows these tag changes in place. A deployer policy with `aws:RequestTag` conditions: see the
   control-host README, "Deploying identity with tag conditions".
+
+### Defaults that changed
+
+- `make ansible-site` and `make bump-tailscale-version` (from `mk/site.mk`) skip the nodes that do not answer within
+  `PROBE_TIMEOUT` seconds (default 15), and list them as pending (#199). `make ansible-site` exits 2 when a node is
+  pending. Add `.fleet-pending` to your `.gitignore`.
+- `make deploy-headscale` now takes a volume snapshot before the deploy, and stops when the snapshot fails (#197). The
+  deploying Fly token needs to create snapshots. For a deploy with no snapshot, set `NO_SNAPSHOT=1`.
 
 
 ### Action required

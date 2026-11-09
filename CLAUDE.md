@@ -426,17 +426,20 @@ database there), and TLS in front of it
 
 The Fly Dockerfiles `COPY` some site files from the app directory (`headscale.yaml`, `acl.json`,
 `direct-hosts.txt`, `app/nodes.json`, `fly.toml`). The build context needs your files, and the
-submodule must stay pristine. `examples/private-repo/fly/deploy.sh` does exactly that:
+submodule must stay pristine. `scripts/deploy-fly.sh` (`make deploy-<app>` from `mk/site.mk`, #194) does exactly
+that. You run it from anywhere in the site repo:
 
-- It refuses to run if `vendor/headlamp` is dirty.
+- It refuses to run if `vendor/headlamp` has changes, or if its checkout is not the commit the site repo pins.
 - It copies `fly/<app>/` over `vendor/headlamp/apps/<app>/`.
-- It runs `flyctl deploy` there.
+- It runs `flyctl deploy` there, with `VERSION` (from `vendor/headlamp/VERSION`) and `TSVERSION` (from the site's
+  `TAILSCALE_VERSION`) for the apps that declare them. A `--build-arg` that you give wins.
 - It restores the submodule on exit (even on failure).
 
 ```bash
-fly/deploy.sh headscale
-fly/deploy.sh exit-node --build-arg TSVERSION=<x.y.z>
-fly/deploy.sh headscale --build-arg HEADSCALE_VERSION=<tag>   # default is pinned in the Dockerfile
+make deploy-headscale
+make plan-deploy-exit-node                                   # show the flyctl command, deploy nothing
+make deploy-headscale ARGS="--build-arg HEADSCALE_VERSION=<tag>"   # default is pinned in the Dockerfile
+make bump-tailscale-version VERSION=<x.y.z>                  # the pin, the VM nodes, then the Fly exit node
 ```
 
 The headscale image is the stock upstream image, pinned in `HEADSCALE_VERSION` (the Dockerfile default and the e2e
@@ -444,7 +447,12 @@ harnesses must name the same tag: `make check-headscale-pin`). The image is dist
 `flyctl ssh console -a <app>` without `-C` cannot open one. Run the binary directly, for example
 `flyctl ssh console -a <app> -C "headscale nodes list"`. To bump the version, edit `HEADSCALE_VERSION` and the
 Dockerfile default, run `make check-headscale-pin`, every headscale e2e suite and `make test-route-approval
-FROM=ghcr.io/juanfont/headscale:<old tag>` (an in-place upgrade), and take a database snapshot before the deploy.
+FROM=ghcr.io/juanfont/headscale:<old tag>` (an in-place upgrade).
+
+`make deploy-headscale` takes a volume snapshot first (`scripts/fly-snapshot.sh`, #197). It waits until Fly reports
+the snapshot as created and prints its ID. If the snapshot fails, the deploy does not run. Write the ID down: it is the
+restore point (`flyctl volumes create <name> --snapshot-id <id> -a <app>`). `NO_SNAPSHOT=1` skips the snapshot when you
+already have a fresh one. `SNAPSHOT_APPS` lists the apps that get one (default `headscale`).
 
 Deploying is a real change, so confirm with the operator first. Afterwards, `git -C vendor/headlamp status` must
 be clean.

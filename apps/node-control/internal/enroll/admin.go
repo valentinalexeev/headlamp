@@ -331,7 +331,8 @@ type deviceRow struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Owner string `json:"owner"`
-	// OwnerEmail is the email of a self-enrolled owner ("oidc:<subject>"), for display; empty for other owners.
+	// OwnerEmail is the email of a self-enrolled owner ("oidc:<subject>"), for display; empty for
+	// other owners.
 	OwnerEmail string `json:"owner_email,omitempty"`
 	Client     string `json:"client"`
 	ExpiresAt  int64  `json:"expires_at"`
@@ -401,7 +402,8 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 		if tr, ok := stats[d.ID]; ok {
 			traffic = map[string]any{"up": tr.Up, "down": tr.Down}
 		}
-		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, emails[d.Owner], d.Client, d.ExpiresAt, d.Revoked, traffic, d.EnrolledAt, d.Enrolments, d.LastActive})
+		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, emails[d.Owner], d.Client, d.ExpiresAt,
+			d.Revoked, traffic, d.EnrolledAt, d.Enrolments, d.LastActive})
 	}
 	snaps := snapshotsOf(cur.SyncTargets)
 	pending := cur.Pending

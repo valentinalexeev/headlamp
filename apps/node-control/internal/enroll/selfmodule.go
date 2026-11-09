@@ -160,8 +160,9 @@ func (a *Admin) listInvites(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"invites": invs})
 }
 
-// inviteName is the name of the device an invitation makes when the administrator gives none: the part of the
-// email address before the "@", so that the devices of different people are told apart.
+// inviteName is the name of the device an invitation makes when the administrator gives none:
+// the part of the email address before the "@", so that the devices of different people are
+// told apart.
 func inviteName(email string) string {
 	local := strings.TrimSpace(email[:max(strings.LastIndexByte(email, '@'), 0)])
 	if local == "" {
@@ -248,8 +249,8 @@ func mustHost(u string) string {
 	return p.Hostname()
 }
 
-// ownerEmails maps the owner of each self-enrolled person ("oidc:<subject>") to the email of the person. It is
-// for display only: nil when self-enrolment is off or the store cannot be read.
+// ownerEmails maps the owner of each self-enrolled person ("oidc:<subject>") to the email of the
+// person. It is for display only: nil when self-enrolment is off or the store cannot be read.
 func (a *Admin) ownerEmails() map[string]string {
 	if a.self == nil {
 		return nil

@@ -127,8 +127,9 @@ lint:
 	  scripts/tasks.sh scripts/test/tasks/run.sh scripts/release-preflight.sh scripts/deploy-fly.sh scripts/fly-snapshot.sh scripts/fleet-run.sh scripts/test/fleet-run/run_tests.sh scripts/test/fly-snapshot/run_tests.sh scripts/test/site-mk/run_tests.sh examples/private-repo/fly/deploy.sh scripts/test/ansible-os/run.sh scripts/test/ssm-state/e2e-docker.sh scripts/test/ssm-state/vm-e2e.sh \
 	  scripts/headscale-tag-node.sh scripts/test/headscale-tag-node/run.sh \
 	  .githooks/pre-commit .githooks/commit-msg \
-	  apps/tailguard/*.sh apps/headscale/*.sh scripts/test/feature-defaults/run.sh
+	  apps/tailguard/*.sh apps/headscale/*.sh scripts/test/feature-defaults/run.sh scripts/check-enroll-paths.sh
 	./scripts/check-feature-defaults.sh
+	./scripts/check-enroll-paths.sh
 	-./scripts/check-statestore-port.sh
 
 # Helm chart charts/tailnet-connector (#103): helm lint, helm template | kubeconform (docker images if not installed).

@@ -13,6 +13,13 @@ says "No action required".
 
 ### Action required
 
+- **Control host with `ENROLL_DOMAIN`** (`examples/compose/control`, #260): copy the new `caddy/Caddyfile` and
+  `caddy/enroll-paths.caddy`, and the new `compose.yaml` (it mounts the second file). Then run
+  `docker compose up -d edge`. If you changed your Caddyfile, replace its `@public` list with `import
+  enroll-paths.caddy` and the 2 `handle` blocks of the example. Check: `curl -s -o /dev/null -w '%{http_code}'
+  https://<ENROLL_DOMAIN>/me` gives `200`.
+- **Bridges** (`reality-ingress` role): run the role. It now writes `enroll-paths.caddy` next to the Caddyfile. The
+  front serves the same paths as before.
 - **Bridges** (`ingress-agent` role): run the role on each bridge. The new agent sends the DNS lookups of xray
   through the exit node. Check: `jq '.dns, .routing.rules[0]' /etc/xray/config.json` shows tag `dns-internal` and a
   rule that sends it to `via-exit`. To use other resolvers, set `ingress_exit_dns` (IP addresses only).

@@ -97,6 +97,27 @@ See "Optional overrides" in
 - `security_group_id`: the node's security group, so a root stack can add rules (for example a proxy port) with `openstack_networking_secgroup_rule_v2`
 - `image_id`: the image of the boot volume
 
+## Tags and metadata
+
+Use `tags` and `metadata` to find and bill the node's resources by site (#227):
+
+- `tags` (list): the instance, port, network, subnet, router, security group and floating IP. The instance also
+  gets `preemptible` when `preemptible = true`.
+- `metadata` (map): the instance and the boot volume. Cinder volumes have no tags.
+
+```hcl
+  tags     = ["site-a"]
+  metadata = { project = "site-a" }
+```
+
+```sh
+openstack port list --tags site-a
+openstack volume list --property project=site-a
+```
+
+With the defaults (`[]` and `{}`) the module sets no tags and no metadata, so an existing stack plans no change.
+A stack that adds tags updates the resources in place. It does not replace them.
+
 ## Bridge node
 
 A bridge (`reality-ingress`, `ingress-agent`, `tailscale-userspace-socks`) uses this module too (#235). It needs public

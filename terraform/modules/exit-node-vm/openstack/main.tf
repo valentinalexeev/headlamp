@@ -10,6 +10,11 @@ locals {
 
   # An image ID pins the image (#235). A name picks the newest public image with that name at each plan.
   image_id = var.image_id != null ? var.image_id : data.openstack_images_image_v2.this[0].id
+
+  # null (not []) when empty, so that a stack without tags plans no change (#227).
+  tags          = length(var.tags) > 0 ? var.tags : null
+  instance_tags = var.preemptible || length(var.tags) > 0 ? distinct(concat(var.tags, var.preemptible ? ["preemptible"] : [])) : null
+  metadata      = length(var.metadata) > 0 ? var.metadata : null
 }
 
 data "openstack_images_image_v2" "this" {
@@ -32,17 +37,20 @@ resource "openstack_compute_keypair_v2" "this" {
 resource "openstack_networking_network_v2" "this" {
   name           = "${var.name}-net"
   admin_state_up = true
+  tags           = local.tags
 }
 
 resource "openstack_networking_subnet_v2" "this" {
   name       = "${var.name}-subnet"
   network_id = openstack_networking_network_v2.this.id
   cidr       = var.subnet_cidr
+  tags       = local.tags
 }
 
 resource "openstack_networking_router_v2" "this" {
   name                = "${var.name}-router"
   external_network_id = data.openstack_networking_network_v2.external.id
+  tags                = local.tags
 }
 
 resource "openstack_networking_router_interface_v2" "this" {
@@ -55,6 +63,7 @@ resource "openstack_networking_router_interface_v2" "this" {
 resource "openstack_networking_secgroup_v2" "this" {
   name        = "${var.name}-sg"
   description = "${var.advertise_exit_node ? "exit node" : "bridge"}: tailscale UDP in, everything out"
+  tags        = local.tags
 }
 
 resource "openstack_networking_secgroup_rule_v2" "extra_tcp_in" {
@@ -104,6 +113,7 @@ resource "openstack_networking_port_v2" "this" {
   name               = "${var.name}-port"
   network_id         = openstack_networking_network_v2.this.id
   security_group_ids = [openstack_networking_secgroup_v2.this.id]
+  tags               = local.tags
 
   fixed_ip {
     subnet_id = openstack_networking_subnet_v2.this.id
@@ -117,6 +127,7 @@ resource "openstack_blockstorage_volume_v3" "boot" {
   volume_type          = var.volume_type
   availability_zone    = var.availability_zone
   enable_online_resize = true
+  metadata             = local.metadata
 
   lifecycle {
     ignore_changes = [image_id]
@@ -129,7 +140,8 @@ resource "openstack_compute_instance_v2" "this" {
   key_pair          = openstack_compute_keypair_v2.this.name
   availability_zone = var.availability_zone
   user_data         = local.user_data
-  tags              = var.preemptible ? ["preemptible"] : null
+  tags              = local.instance_tags
+  metadata          = local.metadata
 
   network {
     port = openstack_networking_port_v2.this.id
@@ -160,6 +172,7 @@ resource "openstack_compute_instance_v2" "this" {
 
 resource "openstack_networking_floatingip_v2" "this" {
   pool = data.openstack_networking_network_v2.external.name
+  tags = local.tags
 }
 
 resource "openstack_networking_floatingip_associate_v2" "this" {

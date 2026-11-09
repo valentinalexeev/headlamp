@@ -22,6 +22,8 @@ module "node" {
   advertise_exit_node     = var.advertise_exit_node
   extra_tcp_ingress_ports = var.extra_tcp_ingress_ports
   extra_udp_ingress_ports = var.extra_udp_ingress_ports
+  tags                    = var.tags
+  metadata                = var.metadata
 }
 
 # The resources used to live directly in this module. These blocks move existing state into module.node, so

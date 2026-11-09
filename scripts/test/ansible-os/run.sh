@@ -128,6 +128,10 @@ task_runner_guard_resolvers: ["127.0.0.11", "100.100.100.100", "fd7a:115c:a1e0::
 task_runner_min_free_mb: 64
 task_runner_min_free_disk_mb: 64
 YAML
+# BRIDGE=1 (#235): the host is a bridge, as in the exit-node-vm/openstack README "Bridge node". It joins with no exit
+# routes, and the run checks that headscale shows none for it. The matrix has no second exit node, and the socks role
+# points at this host, so with BRIDGE=1 leave tailscale-userspace-socks out of APPLY (its check mode still runs).
+[ "${BRIDGE:-}" = 1 ] && echo "tailscale_advertise_exit_node: false" >> "$T/vars.yml"
 # A tiny stand-in run image: the matrix checks the install, not Chromium.
 docker pull -q --platform "$platform" busybox:1.37 >/dev/null && docker save -o "$T/run-image.tar" busybox:1.37 || die "run image"
 
@@ -188,4 +192,14 @@ for r in "${roles[@]}"; do
   case "$c$a" in okok|okskip) ;; *) fails=$((fails + 1)) ;; esac
 
 done
+# BRIDGE=1: the host joined with no exit routes (headscale lists no 0.0.0.0/0 or ::/0 for it).
+if [ "${BRIDGE:-}" = 1 ] && printf ' %s ' "${roles[*]}" | grep -q ' tailscale '; then
+  routes="$(hx nodes list -o json | python3 -c 'import json,sys
+n=[x for x in json.load(sys.stdin) if x.get("given_name","").startswith("exit-")]
+print(" ".join(sorted(set(r for x in n for k in ("available_routes","approved_routes","subnet_routes") for r in (x.get(k) or [])))))')"
+  case " $routes " in
+    *" 0.0.0.0/0 "* | *" ::/0 "*) echo "RESULT $os bridge-no-exit-routes FAIL ($routes)"; fails=$((fails + 1)) ;;
+    *) echo "RESULT $os bridge-no-exit-routes ok (routes: ${routes:-none})" ;;
+  esac
+fi
 [ $fails = 0 ] && echo "all roles passed on $os" || { echo "$fails role(s) failed on $os"; exit 1; }

@@ -56,8 +56,9 @@ echo "ok   - every old resource has a moved block ($(echo "$old" | wc -l | tr -d
 stack ../selectel >"$tmp/stack/main.tf"
 printf '%s\nrun "plan_wrapper" {\n  command = plan\n}\n' "$mock" >"$tmp/stack/tests/a.tftest.hcl"
 (cd "$tmp/stack" && terraform init -input=false -no-color >/dev/null && terraform test -no-color >/dev/null)
-diff <(sed -n 's/^output "\(.*\)".*/\1/p' "$tmp/old/outputs.tf" | sort) <(sed -n 's/^output "\(.*\)".*/\1/p' "$tmp/selectel/outputs.tf" | sort) >/dev/null ||
-	{ echo "FAIL - outputs changed"; exit 1; }
-diff <(sed -n 's/^variable "\(.*\)".*/\1/p' "$tmp/old/variables.tf" | sort) <(sed -n 's/^variable "\(.*\)".*/\1/p' "$tmp/selectel/variables.tf" | grep -v '^external_network_name$' | sort) >/dev/null ||
-	{ echo "FAIL - inputs changed"; exit 1; }
+# Every old output and input must still exist. New optional inputs and outputs are allowed (#235).
+missing=$(comm -23 <(sed -n 's/^output "\(.*\)".*/\1/p' "$tmp/old/outputs.tf" | sort) <(sed -n 's/^output "\(.*\)".*/\1/p' "$tmp/selectel/outputs.tf" | sort))
+[ -z "$missing" ] || { echo "FAIL - outputs removed: $missing"; exit 1; }
+missing=$(comm -23 <(sed -n 's/^variable "\(.*\)".*/\1/p' "$tmp/old/variables.tf" | sort) <(sed -n 's/^variable "\(.*\)".*/\1/p' "$tmp/selectel/variables.tf" | sort))
+[ -z "$missing" ] || { echo "FAIL - inputs removed: $missing"; exit 1; }
 echo "ok   - the wrapper plans with the old inputs and keeps every input and output"

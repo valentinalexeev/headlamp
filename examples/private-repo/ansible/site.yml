@@ -11,3 +11,16 @@
   roles:
     - role: route-provisioner
       tags: [route-provisioner]
+
+# Bridges (#235). Read the HARD GATE in the reality-ingress README first: the bridge tag must reach only its exit node.
+- name: Configure Reality + Hysteria 2 bridges
+  hosts: bridges
+  roles:
+    - role: tailscale
+      tags: [tailscale]
+    - role: tailscale-userspace-socks
+      tags: [tailscale-userspace-socks]
+    - role: reality-ingress
+      tags: [reality-ingress]
+    - role: ingress-agent
+      tags: [ingress-agent]

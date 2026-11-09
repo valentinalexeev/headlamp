@@ -33,7 +33,7 @@ variable "disk_size_gb" {
 variable "image_name" {
   type        = string
   default     = "Ubuntu 26.04 LTS 64-bit"
-  description = "Public image name, matched exactly (most recent). Set \"Ubuntu 22.04 LTS 64-bit\" to keep the old image for a new server."
+  description = "Public image name, matched exactly (most recent). Set \"Ubuntu 22.04 LTS 64-bit\" to keep the old image for a new server, or \"Debian 13 (Trixie) 64-bit\" (Selectel) for Debian 13. image_id overrides it."
 }
 
 variable "subnet_cidr" {
@@ -103,4 +103,38 @@ variable "external_network_name" {
     Selectel uses. Another OpenStack-compatible cloud usually names it differently (often "public" or "ext-net");
     `openstack network list --external` shows it.
   EOT
+}
+
+variable "image_id" {
+  type        = string
+  default     = null
+  description = "Image ID to boot from. It pins the image (#235): a rebuild uses the same image. Null (default): the newest public image named image_name."
+}
+
+variable "advertise_exit_node" {
+  type        = bool
+  default     = true
+  description = "With bootstrap_tailscale, run `tailscale up --advertise-exit-node`. Set false for a bridge (reality-ingress, #235): a bridge must not advertise exit routes."
+}
+
+variable "extra_tcp_ingress_ports" {
+  type        = list(number)
+  default     = []
+  description = "Extra TCP ports open inbound from anywhere, for a node that also serves a public front. A bridge needs [80, 443]: ACME HTTP-01 and Reality. Empty (default): only the tailscale UDP port."
+
+  validation {
+    condition     = alltrue([for p in var.extra_tcp_ingress_ports : p >= 1 && p <= 65535 && p == floor(p) && p != 22])
+    error_message = "extra_tcp_ingress_ports: whole numbers 1-65535, and never 22 (SSH is admin_ssh_cidr only)."
+  }
+}
+
+variable "extra_udp_ingress_ports" {
+  type        = list(number)
+  default     = []
+  description = "Extra UDP ports open inbound from anywhere. A bridge with Hysteria 2 needs [443] (hy2_listen_port). Empty (default): none."
+
+  validation {
+    condition     = alltrue([for p in var.extra_udp_ingress_ports : p >= 1 && p <= 65535 && p == floor(p)])
+    error_message = "extra_udp_ingress_ports: whole numbers 1-65535."
+  }
 }

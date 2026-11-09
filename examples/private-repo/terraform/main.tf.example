@@ -19,6 +19,15 @@ module "node1" {
 #   ssh_public_key = var.ssh_public_key  admin_ssh_cidr = "<your-ip>/32"
 # }
 
+# module "bridge1" {   # a Reality + Hysteria 2 bridge on Selectel (OpenStack), Debian 13 (#235). See the openstack
+#   # module README, "Bridge node". The roles in ansible/site.yml ("bridges" play) turn it into a bridge.
+#   source = "../vendor/headlamp/terraform/modules/exit-node-vm/openstack"
+#   name = "bridge1"  availability_zone = "<zone>"  flavor_id = "<flavor-id>"  volume_type = "<volume-type>"
+#   image_name = "Debian 13 (Trixie) 64-bit"      # or image_id = "<id>" to pin one image
+#   ssh_public_key = var.ssh_public_key  admin_ssh_cidr = "<your-ip>/32"
+#   extra_tcp_ingress_ports = [80, 443]  extra_udp_ingress_ports = [443]  advertise_exit_node = false
+# }
+
 # module "node3" {   # Cloud.ru Evolution: see the module's README (provider install, tailscale bootstrap)
 #   source = "../vendor/headlamp/terraform/modules/exit-node-vm/cloudru"
 #   name = "node3"  project_id = var.cloudru_project_id  zone_name = "<zone>"  vpc_id = var.cloudru_vpc_id

@@ -33,6 +33,9 @@ No action required. The old site files and modules keep working.
 
   Check: `terraform plan` of the stack has no "Invalid count argument".
 
+- **Bridge on OpenStack or Selectel** (#235): no action for existing exit nodes. For a new bridge, see the
+  `exit-node-vm/openstack` README, "Bridge node". The `selectel` wrapper passes the new inputs through.
+
 ### Defaults that changed
 
 - `control-host/aws` and `exit-node-vm/aws` (with `tags`) now tag the root volume and the network interface (#225).

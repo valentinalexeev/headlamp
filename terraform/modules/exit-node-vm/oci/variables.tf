@@ -54,6 +54,17 @@ variable "extra_tcp_ingress_ports" {
   }
 }
 
+variable "extra_udp_ingress_ports" {
+  type        = list(number)
+  default     = []
+  description = "Extra UDP ports to open inbound from anywhere in the security list, for a bridge with Hysteria 2 (443, #235). Empty keeps the default: only the Tailscale UDP port."
+
+  validation {
+    condition     = alltrue([for p in var.extra_udp_ingress_ports : p >= 1 && p <= 65535 && p == floor(p)])
+    error_message = "extra_udp_ingress_ports: whole numbers 1-65535."
+  }
+}
+
 variable "ubuntu_version" {
   type        = string
   default     = "26.04 Minimal"

@@ -19,15 +19,21 @@ a running node. To make a new node with the new image, run
 ### Supported images
 
 The table gives the default image and the override for each provider of `exit-node-vm`. All images must run
-cloud-init. The Ansible roles are tested on Ubuntu only.
+cloud-init. The Ansible roles are tested on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13 (#178).
 
 | Provider | Default image | Override |
 |---|---|---|
 | `aws` | Ubuntu 26.04 Minimal (Canonical AMI) | `image_flavor = "server"` for Ubuntu Server. `ami_id` for a different AMI, for example Debian 13 |
 | `oci` | Ubuntu 26.04 Minimal. If OCI has no such image, Ubuntu 24.04 Minimal | `ubuntu_version`, `ubuntu_version_fallback` |
 | `yandex` | Ubuntu 26.04 LTS (family `ubuntu-2604-lts`) | `image_family` or `image_id`, for example family `debian-13` |
-| `openstack`, `selectel` | `Ubuntu 26.04 LTS 64-bit` | `image_name` |
+| `openstack`, `selectel` | `Ubuntu 26.04 LTS 64-bit` | `image_name`, or `image_id` to pin one image. Selectel: `Debian 13 (Trixie) 64-bit` (#235) |
 | `cloudru` | `ubuntu-22.04` | `image_name` |
 
 Ubuntu Minimal has fewer packages and services than Ubuntu Server, and it has no snapd. Yandex Cloud, Selectel and
 Cloud.ru do not publish a Minimal image, so these modules use the server image.
+
+## Public ports
+
+The security list opens only the tailscale UDP port by default. For a node that also serves a public front, set
+`extra_tcp_ingress_ports`. A bridge with Reality and Hysteria 2 needs `extra_tcp_ingress_ports = [80, 443]` and
+`extra_udp_ingress_ports = [443]` (#235). Port 22 is not allowed: admin access is over the tailnet.

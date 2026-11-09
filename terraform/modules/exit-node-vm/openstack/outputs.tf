@@ -10,3 +10,8 @@ output "security_group_id" {
   description = "ID of the node's security group, for attaching extra rules from the root stack."
   value       = openstack_networking_secgroup_v2.this.id
 }
+
+output "image_id" {
+  description = "The image of the boot volume (image_id, or the newest image named image_name at the last plan)."
+  value       = local.image_id
+}

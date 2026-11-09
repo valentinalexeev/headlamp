@@ -32,7 +32,7 @@
 - name: "Join grant group {{ socks_group.id }} (key in a 0600 temp file, removed afterwards)"
   when: >-
     not ansible_check_mode and
-    (socks_group_status.stdout | default('') | regex_findall('"BackendState":\\s*"([A-Za-z]+)"') | first | default('Unknown'))
+    (socks_group_status.stdout | default('') | regex_findall('"BackendState":[ ]*"([A-Za-z]+)"') | first | default('Unknown'))
     != 'Running'
   block:
     - name: Require the group auth key for the first join

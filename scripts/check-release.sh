@@ -48,7 +48,20 @@ if [ -n "$previous" ]; then
 	fi
 
 	need="patch"
-	log=$(git log --no-merges --format='%s%n%b%n%x00' "$previous..$commit")
+	# .release-retype (at the tagged commit): "<full commit hash> <type>" lines. They correct the type of a commit
+	# on main whose subject has the wrong one, because main history does not change. Each line is reviewed in a PR.
+	retype=$(git show "$commit:.release-retype" 2>/dev/null | grep -E '^[0-9a-f]{40} [a-z]+$' || true)
+	log=$(git log --no-merges --format='%H %s%n%b%n%x00' "$previous..$commit" | while IFS= read -r line; do
+		h=${line%% *}
+		if [[ $h =~ ^[0-9a-f]{40}$ ]]; then
+			subj=${line#* }
+			t=$(awk -v h="$h" '$1 == h { print $2 }' <<<"$retype")
+			[ -z "$t" ] || subj=$(sed -E "s/^[a-z]+(\([^)]*\))?(!?): /$t\1\2: /" <<<"$subj")
+			printf '%s\n' "$subj"
+		else
+			printf '%s\n' "$line"
+		fi
+	done)
 	if grep -qE '^[a-z]+(\([^)]*\))?!: |^BREAKING[ -]CHANGE: ' <<<"$log"; then
 		need="major"
 		[ "$pmajor" != 0 ] || need=minor # before 1.0.0, a breaking change moves the minor

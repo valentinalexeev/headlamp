@@ -9,6 +9,15 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## 0.15.1
+
+### Optional
+
+- **Control host serves `link_host`** (`examples/compose/control` with `ENROLL_DOMAIN`): take the new `compose.yaml`
+  and run `docker compose up -d`. It sets `ENROLL_PUBLIC_LISTEN=:8081` for node-control, so the edge reaches the
+  enrolment pages. Check: `curl -s -o /dev/null -w '%{http_code}' https://<ENROLL_DOMAIN>/me` gives `200`.
+- Other sites: no action required.
+
 ## 0.15.0
 
 ### Action required

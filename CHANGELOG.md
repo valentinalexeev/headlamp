@@ -4,6 +4,12 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.15.1 - 2026-11-09
+
+### Fixed
+
+- node-control: `ENROLL_PUBLIC_LISTEN` (optional, `host:port`) serves the public enrolment pages (`/e/`, `/sub/`, `/me`, `/oidc/*`, `/i/*`) also on a plain TCP address, not only on the tailnet port 8081 (#250). Before, the TLS edge of `examples/compose/control` could not reach node-control (`connection refused`), so a control host could not serve `link_host` itself. The admin app stays tailnet-only. `examples/compose/control` sets `ENROLL_PUBLIC_LISTEN=:8081` on the compose network; the port is not published.
+
 ## 0.15.0 - 2026-11-09
 
 ### Added

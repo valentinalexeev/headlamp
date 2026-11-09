@@ -1,0 +1,21 @@
+# A Reality + Hysteria 2 bridge (#235). Rename to bridge1.yml. Keep the secrets in a sops file
+# (group_vars/all/vault.sops.yaml), never here in plain text.
+tailscale_hostname: bridge1
+tailscale_authkey: "{{ tailscale_authkey_bridge1 }}"   # a key with the bridge tag (tag:ingress)
+tailscale_advertise_exit_node: false                   # a bridge must not advertise exit routes
+
+# tailscale-userspace-socks: the second tailscaled that sends the bridge traffic to one exit node.
+socks_hostname: bridge1-socks
+socks_exit_node: node1                                 # the exit node for the bridge traffic
+socks_authkey: "{{ socks_authkey_bridge1 }}"
+
+# reality-ingress: the public name has a DNS A record to the bridge's floating IP (ports 80/tcp, 443/tcp, 443/udp).
+ingress_host: bridge1.example.com
+reality_private_key: "{{ reality_private_key_bridge1 }}"  # xray x25519
+reality_short_id: "{{ reality_short_id_bridge1 }}"        # 2-16 hex characters
+enroll_upstream: "<node-control tailnet name>:8081"
+hy2_obfs_password: "{{ hy2_obfs_password_bridge1 }}"      # Hysteria 2 is on by default; or hy2_enabled: false
+
+# ingress-agent: the token that node-control uses to reach the agent.
+ingress_agent_token: "{{ ingress_agent_token_bridge1 }}"
+ingress_agent_src: "{{ playbook_dir }}/../vendor/headlamp/apps/ingress-agent"   # built on the control host

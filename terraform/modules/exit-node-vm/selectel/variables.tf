@@ -104,3 +104,24 @@ variable "external_network_name" {
     `openstack network list --external` shows it.
   EOT
 }
+
+# Passed through to ../openstack unchanged (#235). See that module for the meaning.
+variable "image_id" {
+  type    = string
+  default = null
+}
+
+variable "advertise_exit_node" {
+  type    = bool
+  default = true
+}
+
+variable "extra_tcp_ingress_ports" {
+  type    = list(number)
+  default = []
+}
+
+variable "extra_udp_ingress_ports" {
+  type    = list(number)
+  default = []
+}

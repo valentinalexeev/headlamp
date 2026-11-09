@@ -10,8 +10,8 @@ runcmd:
     tailscale up
     --login-server=${headscale_login_server}
     --authkey=${tailscale_authkey}
-    --hostname=${hostname}
-    --advertise-exit-node
+    --hostname=${hostname}%{ if advertise_exit_node }
+    --advertise-exit-node%{ endif }
 %{ else ~}
 # Tailscale is installed and joined later by the Ansible `tailscale` role (bootstrap_tailscale = false).
 runcmd:

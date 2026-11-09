@@ -95,6 +95,53 @@ See "Optional overrides" in
 - `instance_id`: the server's ID
 - `external_ip`: the floating IP
 - `security_group_id`: the node's security group, so a root stack can add rules (for example a proxy port) with `openstack_networking_secgroup_rule_v2`
+- `image_id`: the image of the boot volume
+
+## Bridge node
+
+A bridge (`reality-ingress`, `ingress-agent`, `tailscale-userspace-socks`) uses this module too (#235). It needs public
+ports that an exit node does not need, and it must not advertise exit routes:
+
+| Input | Exit node | Bridge |
+|---|---|---|
+| `extra_tcp_ingress_ports` | `[]` | `[80, 443]`: ACME HTTP-01, and Reality |
+| `extra_udp_ingress_ports` | `[]` | `[443]`: Hysteria 2 (`hy2_listen_port`). Leave it out with `hy2_enabled: false` |
+| `advertise_exit_node` | `true` | `false` |
+| `bootstrap_tailscale` | `false` (recommended) | `false`: the Ansible `tailscale` role joins it, with the bridge tag |
+
+Port 22 is not allowed in `extra_tcp_ingress_ports`. SSH is only from `admin_ssh_cidr`.
+
+```hcl
+module "bridge_spb" {
+  source                  = "../vendor/headlamp/terraform/modules/exit-node-vm/openstack"
+  name                    = "bridge-spb"
+  availability_zone       = "<zone>"
+  flavor_id               = "<fixed-configuration flavor id>"
+  volume_type             = "<volume-type>"
+  image_name              = "Debian 13 (Trixie) 64-bit"   # the Selectel name; or image_id to pin one image
+  ssh_public_key          = var.ssh_public_key
+  admin_ssh_cidr          = "203.0.113.7/32"              # for the first Ansible run
+  extra_tcp_ingress_ports = [80, 443]
+  extra_udp_ingress_ports = [443]
+  advertise_exit_node     = false
+}
+```
+
+Then run the roles against the bridge: `tailscale` (with `tailscale_advertise_exit_node: false` and the bridge tag),
+`tailscale-userspace-socks`, `reality-ingress` and `ingress-agent`. Read the HARD GATE in the `reality-ingress` README
+first: the bridge tag must reach only its exit node. `examples/private-repo` has a bridge host in the inventory, its
+`host_vars` and the play.
+
+### Debian 13
+
+Selectel has the public image `Debian 13 (Trixie) 64-bit` (checked 2026-11-09). Check that your pool has it. Two things differ from Ubuntu:
+
+- The login user is `debian`, not `ubuntu`. Set `ansible_user: debian` in the inventory.
+- The image is smaller. It has no cron and no `procps` at first. The roles install what they need (#178).
+
+`image_name` takes the newest image with that name at each plan. Terraform ignores an image change on a running server,
+but a replaced server gets the newest image. To build each server from the same image, set `image_id` (from
+`openstack image show "Debian 13 (Trixie) 64-bit" -f value -c id`).
 
 ## Tailscale bootstrap
 
@@ -133,14 +180,14 @@ To make new servers with the old image, set `image_name = "Ubuntu 22.04 LTS 64-b
 ### Supported images
 
 The table gives the default image and the override for each provider of `exit-node-vm`. All images must run
-cloud-init. The Ansible roles are tested on Ubuntu only.
+cloud-init. The Ansible roles are tested on Ubuntu 26.04 Server, Ubuntu 26.04 Minimal and Debian 13 (#178).
 
 | Provider | Default image | Override |
 |---|---|---|
 | `aws` | Ubuntu 26.04 Minimal (Canonical AMI) | `image_flavor = "server"` for Ubuntu Server. `ami_id` for a different AMI, for example Debian 13 |
 | `oci` | Ubuntu 26.04 Minimal. If OCI has no such image, Ubuntu 24.04 Minimal | `ubuntu_version`, `ubuntu_version_fallback` |
 | `yandex` | Ubuntu 26.04 LTS (family `ubuntu-2604-lts`) | `image_family` or `image_id`, for example family `debian-13` |
-| `openstack`, `selectel` | `Ubuntu 26.04 LTS 64-bit` | `image_name` |
+| `openstack`, `selectel` | `Ubuntu 26.04 LTS 64-bit` | `image_name`, or `image_id` to pin one image. Selectel: `Debian 13 (Trixie) 64-bit` (#235) |
 | `cloudru` | `ubuntu-22.04` | `image_name` |
 
 Ubuntu Minimal has fewer packages and services than Ubuntu Server, and it has no snapd. Yandex Cloud, Selectel and

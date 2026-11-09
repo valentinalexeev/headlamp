@@ -64,6 +64,21 @@ resource "oci_core_security_list" "this" {
     }
   }
 
+  # Extra UDP ports, for a bridge with Hysteria 2 on 443/udp (#235).
+  dynamic "ingress_security_rules" {
+    for_each = toset(var.extra_udp_ingress_ports)
+    content {
+      protocol    = "17" # UDP
+      source      = "0.0.0.0/0"
+      description = "Extra UDP ${ingress_security_rules.value}"
+
+      udp_options {
+        min = ingress_security_rules.value
+        max = ingress_security_rules.value
+      }
+    }
+  }
+
   egress_security_rules {
     protocol    = "all"
     destination = "0.0.0.0/0"

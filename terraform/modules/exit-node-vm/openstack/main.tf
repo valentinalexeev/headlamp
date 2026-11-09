@@ -5,10 +5,15 @@ locals {
     headscale_login_server = var.headscale_login_server
     tailscale_authkey      = var.tailscale_authkey
     hostname               = local.hostname
+    advertise_exit_node    = var.advertise_exit_node
   })
+
+  # An image ID pins the image (#235). A name picks the newest public image with that name at each plan.
+  image_id = var.image_id != null ? var.image_id : data.openstack_images_image_v2.this[0].id
 }
 
 data "openstack_images_image_v2" "this" {
+  count       = var.image_id == null ? 1 : 0
   name        = var.image_name
   most_recent = true
   visibility  = "public"
@@ -45,10 +50,33 @@ resource "openstack_networking_router_interface_v2" "this" {
   subnet_id = openstack_networking_subnet_v2.this.id
 }
 
-# Inbound: only tailscale's WireGuard UDP port (and optionally SSH). Outbound: neutron's default allow-all egress.
+# Inbound: tailscale's WireGuard UDP port, optional SSH, and the extra public ports of a bridge (#235). Outbound:
+# neutron's default allow-all egress.
 resource "openstack_networking_secgroup_v2" "this" {
   name        = "${var.name}-sg"
-  description = "exit node: tailscale UDP in, everything out"
+  description = "${var.advertise_exit_node ? "exit node" : "bridge"}: tailscale UDP in, everything out"
+}
+
+resource "openstack_networking_secgroup_rule_v2" "extra_tcp_in" {
+  for_each          = toset([for p in var.extra_tcp_ingress_ports : tostring(p)])
+  security_group_id = openstack_networking_secgroup_v2.this.id
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = tonumber(each.value)
+  port_range_max    = tonumber(each.value)
+  remote_ip_prefix  = "0.0.0.0/0"
+}
+
+resource "openstack_networking_secgroup_rule_v2" "extra_udp_in" {
+  for_each          = toset([for p in var.extra_udp_ingress_ports : tostring(p)])
+  security_group_id = openstack_networking_secgroup_v2.this.id
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "udp"
+  port_range_min    = tonumber(each.value)
+  port_range_max    = tonumber(each.value)
+  remote_ip_prefix  = "0.0.0.0/0"
 }
 
 resource "openstack_networking_secgroup_rule_v2" "tailscale_in" {
@@ -85,7 +113,7 @@ resource "openstack_networking_port_v2" "this" {
 resource "openstack_blockstorage_volume_v3" "boot" {
   name                 = "${var.name}-boot"
   size                 = var.disk_size_gb
-  image_id             = data.openstack_images_image_v2.this.id
+  image_id             = local.image_id
   volume_type          = var.volume_type
   availability_zone    = var.availability_zone
   enable_online_resize = true

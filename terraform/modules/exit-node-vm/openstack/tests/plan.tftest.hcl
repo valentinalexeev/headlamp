@@ -145,3 +145,60 @@ run "tags_and_metadata_reach_the_node_resources" {
     error_message = "the boot volume and the instance must carry the metadata"
   }
 }
+
+run "secret_mode_keeps_the_auth_key_out_of_user_data" {
+  command = plan
+  override_resource {
+    target          = openstack_identity_application_credential_v3.authkey
+    override_during = plan
+    values          = { id = "appcred-1", secret = "appcred-secret" }
+  }
+  variables {
+    bootstrap_tailscale    = true
+    headscale_login_server = "https://hs.example.com"
+    authkey_from_secret    = true
+    authkey_secret_ref     = "https://kms.example.com/v1/secrets/0b6a1c9e-1f2a-4c3b-9d8e-7f6a5b4c3d2e"
+    keystone_auth_url      = "https://keystone.example.com/v3"
+  }
+
+  assert {
+    condition     = length(openstack_identity_application_credential_v3.authkey) == 1
+    error_message = "secret mode must create the application credential"
+  }
+  assert {
+    condition = [for r in openstack_identity_application_credential_v3.authkey[0].access_rules : [r.service, r.method, r.path]] == [
+      ["key-manager", "GET", "/v1/secrets/0b6a1c9e-1f2a-4c3b-9d8e-7f6a5b4c3d2e/payload"],
+    ]
+    error_message = "the credential must have exactly one rule: GET on this secret's payload"
+  }
+  assert {
+    condition     = !strcontains(local.user_data, "--authkey=") && strcontains(local.user_data, "--auth-key=file:/run/headlamp/authkey")
+    error_message = "secret mode must not put an auth key in user data"
+  }
+  assert {
+    condition     = length(yamldecode(local.user_data).write_files) == 2 && strcontains(local.user_data, "--advertise-exit-node")
+    error_message = "the secret mode user data must be valid YAML with the script and the credential file"
+  }
+}
+
+run "secret_mode_rejects_an_inline_key_too" {
+  command = plan
+  variables {
+    bootstrap_tailscale    = true
+    headscale_login_server = "https://hs.example.com"
+    tailscale_authkey      = "tskey-0000"
+    authkey_from_secret    = true
+    authkey_secret_ref     = "https://kms.example.com/v1/secrets/0b6a1c9e-1f2a-4c3b-9d8e-7f6a5b4c3d2e"
+    keystone_auth_url      = "https://keystone.example.com/v3"
+  }
+  expect_failures = [openstack_compute_instance_v2.this]
+}
+
+run "default_mode_has_no_credential" {
+  command = plan
+
+  assert {
+    condition     = length(openstack_identity_application_credential_v3.authkey) == 0
+    error_message = "without authkey_from_secret there must be no application credential"
+  }
+}

@@ -1,0 +1,51 @@
+---
+# #259: one request through the SOCKS port after the exit node is selected. A policy without autogroup:internet for
+# tag:ingress lets the bridge select the exit node, but drops every request: clients connect and get no reply. Fail
+# here, with the cause, not at the client.
+# python3 is on every host that Ansible manages; curl is not (Ubuntu Minimal, Debian cloud images). A plain SOCKS5
+# CONNECT with the host name (as --socks5-hostname), then TLS, then one HEAD request.
+- name: Fetch the egress check URL through the SOCKS port
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import socket, ssl, struct, sys, urllib.parse
+        listen, url = sys.argv[1], urllib.parse.urlsplit(sys.argv[2])
+        host, port = listen.rsplit(":", 1)
+        s = socket.create_connection((host.strip("[]"), int(port)), timeout=15)
+        s.sendall(b"\x05\x01\x00")
+        if s.recv(2) != b"\x05\x00":
+            sys.exit("the SOCKS server refused the greeting")
+        name = url.hostname.encode()
+        s.sendall(b"\x05\x01\x00\x03" + bytes([len(name)]) + name + struct.pack(">H", url.port or 443))
+        r = s.recv(10)
+        if len(r) < 2 or r[1] != 0:
+            sys.exit("SOCKS CONNECT to %s failed (reply %s)" % (url.hostname, r[1] if len(r) > 1 else "none"))
+        t = ssl.create_default_context().wrap_socket(s, server_hostname=url.hostname)
+        t.sendall(("HEAD %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n"
+                   % (url.path or "/", url.hostname)).encode())
+        line = t.recv(64).split(b"\r\n")[0].decode()
+        print(line)
+        sys.exit(0 if line.startswith("HTTP/") else "no HTTP answer")
+      - "{{ socks_listen }}"
+      - "{{ socks_egress_check_url }}"
+  register: socks_egress
+  changed_when: false
+  failed_when: false
+  retries: 4
+  delay: 5
+  until: socks_egress.rc == 0
+
+- name: Assert that traffic leaves through the exit node
+  ansible.builtin.assert:
+    that: socks_egress.rc == 0
+    fail_msg: >-
+      tailscale-userspace-socks: a request through {{ socks_listen }} to {{ socks_egress_check_url }} failed
+      ({{ (socks_egress.stderr | default('') | trim).splitlines() | last | default('no output') }}). The exit node
+      '{{ socks_exit_node }}' is selected, but traffic does not get through. Most often the headscale policy
+      lacks {"action": "accept", "src": ["tag:ingress"], "dst": ["autogroup:internet:*"]}: without it the exit
+      node drops the traffic, and the SOCKS node logs "403 Forbidden" for its DNS lookups. See "Policy needed by a
+      bridge" in the README of this role. Also check that the exit node is online. To skip this check, set
+      socks_egress_check: false.
+    quiet: true

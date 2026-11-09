@@ -12,6 +12,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -60,11 +61,19 @@ type awsProvider struct {
 	mu      sync.Mutex
 	clients map[string]awsClients // by region
 	load    func(ctx context.Context, region string) (awsClients, error)
+
+	// hostRegion is the region of the host node-control runs on, from IMDSv2 (#220): the
+	// default when neither the node block nor AWS_REGION sets one. It is looked up once;
+	// "" means not on EC2 (or IMDS is off).
+	regionOnce sync.Once
+	region     string
+	hostRegion func(ctx context.Context) string
 }
 
 // NewAWS returns the AWS EC2 provider. The target's block is {"region", "instance_name", "instance_id", "asg"}, all
 // optional: the instance is found by its Name tag (default Target.Name, terminated instances ignored, the id cached for
-// 15 s) unless instance_id pins one; region falls back to AWS_REGION. An instance launched by an Auto Scaling group
+// 15 s) unless instance_id pins one; region falls back to AWS_REGION, then to the host's region
+// from IMDSv2 (#220). An instance launched by an Auto Scaling group
 // (or a block naming "asg") is started and stopped by scaling the group between 1 and 0, because the group would
 // replace a stopped instance (docs/adr/0001). Credentials come from the default AWS chain: an instance or task role,
 // AWS_PROFILE, or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY. AWS_ENDPOINT_URL_EC2 and AWS_ENDPOINT_URL_AUTO_SCALING
@@ -75,7 +84,42 @@ func NewAWS(env core.Env, hc *http.Client) Provider {
 	}
 	p := &awsProvider{env: env, hc: hc, now: time.Now, clients: map[string]awsClients{}}
 	p.load = p.defaultLoad
+	p.hostRegion = imdsRegion
 	return p
+}
+
+// imdsTimeout bounds the IMDS lookup, so a host that is not on EC2 is not slowed down.
+const imdsTimeout = 2 * time.Second
+
+// imdsRegion asks the instance metadata service (IMDSv2) for the region of this host. The SDK's
+// settings apply: AWS_EC2_METADATA_DISABLED=true turns it off, and
+// AWS_EC2_METADATA_SERVICE_ENDPOINT moves it.
+func imdsRegion(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, imdsTimeout)
+	defer cancel()
+	// IMDS needs no region, but the config loader wants one.
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion("us-east-1"))
+	if err != nil {
+		return ""
+	}
+	out, err := imds.NewFromConfig(cfg).GetRegion(ctx, &imds.GetRegionInput{})
+	if err != nil {
+		return ""
+	}
+	return out.Region
+}
+
+// defaultRegion is AWS_REGION, else the host's own region from IMDS (looked up once).
+func (p *awsProvider) defaultRegion() string {
+	if r := p.env.Getenv("AWS_REGION"); r != "" {
+		return r
+	}
+	p.regionOnce.Do(func() {
+		if p.hostRegion != nil {
+			p.region = p.hostRegion(context.Background())
+		}
+	})
+	return p.region
 }
 
 func (p *awsProvider) defaultLoad(ctx context.Context, region string) (awsClients, error) {
@@ -127,7 +171,7 @@ func (p *awsProvider) block(n Target) (region, name, id, group string) {
 	id, _ = n.Block["instance_id"].(string)
 	group, _ = n.Block["asg"].(string)
 	if region == "" {
-		region = p.env.Getenv("AWS_REGION")
+		region = p.defaultRegion()
 	}
 	if name == "" {
 		name = n.Name
@@ -239,7 +283,9 @@ func (p *awsProvider) groupExists(ctx context.Context, c awsClients, group strin
 func (p *awsProvider) resolve(ctx context.Context, n Target) (awsTarget, error) {
 	region, name, id, group := p.block(n)
 	if region == "" {
-		return awsTarget{}, notConfigured(`set "aws": {"region": ...} (or the AWS_REGION env var)`)
+		const noRegion = `no AWS region: set "aws": {"region": ...} in the node, or AWS_REGION ` +
+			`(on EC2 the host's region from IMDS is the default)`
+		return awsTarget{}, notConfigured(noRegion)
 	}
 	if group != "" {
 		return awsTarget{region: region, group: group}, nil

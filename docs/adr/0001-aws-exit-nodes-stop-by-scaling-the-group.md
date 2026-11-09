@@ -34,9 +34,12 @@ no `asg` key, it uses the group name that the module makes, `<name>-asg`.
 
 ## Consequences
 
-- A stopped group-managed node has **no instance**: the next start creates a new one. Its tailnet identity survives only
-  if the node re-joins with a reusable key (the module's default) under the same hostname. Headscale then shows the same
-  node name; a stopped node stays listed while headscale keeps it.
+- A stopped group-managed node has **no instance**: the next start creates a new one, with a new machine key. A reusable
+  key and the same hostname are **not** enough (#213). Headscale registers a new node, for example `cobalt-1`, with a
+  new id and IP. The old node stays as an offline record.
+- From 0.14.0, `state_parameter_name` keeps the identity (#213). tailscaled then keeps its state in SSM Parameter
+  Store. The new instance loads the same machine key, so it is the same node, with the same id, name and IPs.
+  Without it, delete the stale node and rename the new one after each start.
 - The IAM policy needs `autoscaling:DescribeAutoScalingGroups` and `autoscaling:UpdateAutoScalingGroup`, the second
   limited by a tag on the group (documented in the node-control README).
 - Stop is not instant: the group terminates the instance asynchronously. The provider reports `STOPPING` until it is gone.

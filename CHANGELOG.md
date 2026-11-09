@@ -9,10 +9,16 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 - `mk/site.mk` and `scripts/deploy-fly.sh` (#194). A site repo includes `vendor/headlamp/mk/site.mk` and sets only its values (`FLY_APPS`, `NODE_CONTROL_URL`, paths). Targets: `deploy-<app>`, `plan-deploy-<app>`, `deploy-all`, `tf-plan`/`tf-apply`/`tf-save`, `ansible-site`/`ansible-check`, `bump-tailscale-version` (now also deploys the Fly exit node), `policy-*`, `tasks-*`, `rotate-api-key-check`, `submodule-check`, `verify`. `deploy-fly.sh` runs from any directory of the site repo, refuses a dirty submodule or a checkout that differs from the pin, and passes `VERSION` and `TSVERSION` from the pins to the apps that declare them. `make test-site-mk` tests it.
 - `make deploy-headscale` (`scripts/deploy-fly.sh`) takes a Fly volume snapshot first, waits until it is created and prints its ID (#197). When the snapshot fails, it does not deploy. `NO_SNAPSHOT=1` skips it, and `SNAPSHOT_APPS` lists the apps that get one (default `headscale`). `scripts/fly-snapshot.sh <app> [volume]` does the same alone. `make test-fly-snapshot` tests it.
 - `scripts/fleet-run.sh` (#199), used by `make ansible-site` and `make bump-tailscale-version`: it probes the nodes first (`PROBE_TIMEOUT`, default 15 s) and runs the playbook only on the nodes that answer. A stopped on-demand node or a node with no cloud capacity no longer blocks the run. It ends with `done: ...` and `pending: <node> (reason)`, and writes the pending nodes to `.fleet-pending`. `EXCLUDE=n1,n2` skips nodes, and `ONLY_PENDING=1` retries the pending ones. Exit 2 means some nodes are pending. `make test-fleet-run` tests it.
+- `exit-node-vm/aws`: `authkey_from_secret` (bool). Set `true` when the auth key secret is made in the same stack (#222). Its ARN is then unknown at plan time, and the plan failed with "Invalid count argument". The default follows `authkey_secret_arn`, so existing callers do not change.
+- `exit-node-vm/aws`: `state_parameter_name` keeps the tailscaled state in SSM Parameter Store (#213). A node-control stop and start (a new instance, ADR 0001) is then the same headscale node, with the same id, name and IPs, and no stale offline node is left. The node role can read and write only that parameter. `state_kms_key_arn` sets a customer managed key. A node with a stored state does not use the auth key again. `make test-ssm-state-e2e` and `make test-ssm-state-vm-e2e` test it with headscale and LocalStack.
 
 ### Deprecated
 
 - `examples/private-repo/fly/deploy.sh` is now a wrapper of `scripts/deploy-fly.sh` (#194). Use `make deploy-<app>`.
+
+### Fixed
+
+- `control-host/aws` tags the root volume in the launch request and the primary network interface just after the launch (#225). `exit-node-vm/aws` (with `tags`) also tags the network interface in the launch request. A deployer that may create resources only with the site tags can now launch. The plan of an existing host shows the new root volume and network interface tags, in place.
 
 ## 0.13.0 - 2026-11-08
 

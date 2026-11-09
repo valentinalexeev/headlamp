@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -159,6 +160,19 @@ func (a *Admin) listInvites(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"invites": invs})
 }
 
+// inviteName is the name of the device an invitation makes when the administrator gives none: the part of the
+// email address before the "@", so that the devices of different people are told apart.
+func inviteName(email string) string {
+	local := strings.TrimSpace(email[:max(strings.LastIndexByte(email, '@'), 0)])
+	if local == "" {
+		return defaultInviteName
+	}
+	if len(local) > maxDeviceName {
+		local = local[:maxDeviceName]
+	}
+	return local
+}
+
 // createInvite answers POST /enroll/invites {"email", "device_name"?, "days"?}: an invitation for
 // one email address, with its link. The link is in this answer only.
 func (a *Admin) createInvite(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +182,7 @@ func (a *Admin) createInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	var v validator
 	email := strings.TrimSpace(v.str(obj, "email", minEmailLen, maxEmailLen))
-	name := defaultInviteName
+	name := ""
 	if _, present := obj["device_name"]; present {
 		name = strings.TrimSpace(v.str(obj, "device_name", 1, maxDeviceName))
 	}
@@ -185,9 +199,12 @@ func (a *Admin) createInvite(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusUnprocessableEntity, "email must be an email address")
 		return
 	}
-	if name == "" {
+	if _, present := obj["device_name"]; present && name == "" {
 		detail(w, http.StatusUnprocessableEntity, "device_name must not be blank")
 		return
+	}
+	if name == "" {
+		name = inviteName(email)
 	}
 	ttl := time.Duration(days) * day
 	inv, token, err := a.self.users.NewInvite(r.Context(), email, name, a.actor(r), ttl)
@@ -229,6 +246,26 @@ func mustHost(u string) string {
 		return ""
 	}
 	return p.Hostname()
+}
+
+// ownerEmails maps the owner of each self-enrolled person ("oidc:<subject>") to the email of the person. It is
+// for display only: nil when self-enrolment is off or the store cannot be read.
+func (a *Admin) ownerEmails() map[string]string {
+	if a.self == nil {
+		return nil
+	}
+	users, err := a.self.users.Users()
+	if err != nil {
+		slog.Warn("owner emails not read", "error_type", errType(err))
+		return nil
+	}
+	out := make(map[string]string, len(users))
+	for _, u := range users {
+		if u.Email != "" {
+			out[ownerOf(u.Subject)] = u.Email
+		}
+	}
+	return out
 }
 
 // listPeople answers GET /enroll/people: the self-enrolled people, never a token.

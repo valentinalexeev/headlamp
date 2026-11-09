@@ -167,6 +167,8 @@ button.search:hover{border-color:var(--line2);color:var(--t2)}
 .hl td{white-space:normal;padding-top:6px;padding-bottom:6px}
 .hl td.name,.hl td.act,.hl td.mono{white-space:nowrap}
 .hl td .st{white-space:normal}
+/* a long identifier (an owner) keeps one line and is cut; the whole value is in the title */
+.hl td.clip{white-space:nowrap;max-width:28ch;overflow:hidden;text-overflow:ellipsis}
 .hl td.detail{white-space:normal;height:auto;padding:12px 14px}
 /* a side column with nothing in it gives its room back, and tables in one are tighter */
 .colside:empty{display:none}

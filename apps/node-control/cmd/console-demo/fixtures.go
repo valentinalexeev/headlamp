@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -657,7 +658,29 @@ func (w *world) seedDevices(_ context.Context, must mustFn) error {
 			return err
 		}
 	}
-	return nil
+	return w.seedPerson(must, far)
+}
+
+// demoSubject is an invented OIDC subject of the length real issuers give, so the console shows how it handles one.
+const demoSubject = "3f9c1e7a5b2d4f6081a3c5e7f9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7"
+
+// seedPerson adds a self-enrolled person (#102) with one device, as a sign-in through the identity provider would.
+func (w *world) seedPerson(must mustFn, expires int64) error {
+	if w.idp == nil {
+		return nil
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(w.dir, "oidc.db")+"?_pragma=busy_timeout(30000)")
+	if err != nil {
+		return fmt.Errorf("opening the OIDC store: %w", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT OR IGNORE INTO oidc_users(subject, email, last_login) VALUES(?, ?, ?)`,
+		demoSubject, "dana@example.net", time.Now().Add(-2*time.Hour).Unix()); err != nil {
+		return fmt.Errorf("adding a person: %w", err)
+	}
+	_, err = must("creating device phone-7", 200, "POST", "/enroll/devices",
+		map[string]any{"name": "phone-7", "owner": enroll.OwnerPrefix + demoSubject, "client": "sing-box", "expires_at": expires})
+	return err
 }
 
 // seedBridges approves the discovered bridge unless the scenario wants it waiting.

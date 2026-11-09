@@ -138,3 +138,48 @@ variable "extra_udp_ingress_ports" {
     error_message = "extra_udp_ingress_ports: whole numbers 1-65535."
   }
 }
+
+variable "tags" {
+  type        = list(string)
+  default     = []
+  description = "Tags on the instance, port, network, subnet, router, security group and floating IP (Nova and Neutron tags). Use them to find the node's resources, e.g. openstack port list --tags <tag>. The instance also gets \"preemptible\" when preemptible = true."
+}
+
+variable "metadata" {
+  type        = map(string)
+  default     = {}
+  description = "Metadata (key = value) on the instance and the boot volume. Cinder volumes have no tags, so use this to find the volume, e.g. openstack volume list --property <key>=<value>."
+}
+
+variable "authkey_from_secret" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    true: the node reads the auth key at boot from the Barbican secret authkey_secret_ref (#224), not from user data.
+    Terraform creates an application credential that can only GET that secret's payload, and puts it in user data.
+    A plan-time bool, so that a secret made in the same apply does not break the plan (#222).
+  EOT
+}
+
+variable "authkey_secret_ref" {
+  type        = string
+  default     = null
+  description = "Barbican secret href, for example https://<key-manager>/v1/secrets/<uuid>. Its payload is the auth key. Required when authkey_from_secret = true."
+
+  validation {
+    condition     = var.authkey_secret_ref == null || can(regex("^https://[^/]+/.*secrets/[0-9a-fA-F-]{36}$", var.authkey_secret_ref))
+    error_message = "authkey_secret_ref must be a Barbican secret href: https://<host>/.../secrets/<uuid>."
+  }
+}
+
+variable "keystone_auth_url" {
+  type        = string
+  default     = null
+  description = "Keystone v3 URL that the node uses to get a token, for example https://<keystone>/v3. Required when authkey_from_secret = true."
+}
+
+variable "authkey_credential_expires_at" {
+  type        = string
+  default     = null
+  description = "RFC 3339 time when the node's application credential stops working, for example 2027-01-01T00:00:00Z. Null: it does not expire. The node needs it only on the first boot."
+}

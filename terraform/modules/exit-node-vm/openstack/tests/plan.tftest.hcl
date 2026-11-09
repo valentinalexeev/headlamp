@@ -107,3 +107,98 @@ run "bridge_bootstrap_does_not_advertise_exit" {
     error_message = "a bridge bootstrap must not advertise exit routes"
   }
 }
+
+run "no_tags_or_metadata_by_default" {
+  command = plan
+
+  assert {
+    condition     = openstack_networking_port_v2.this.tags == null && openstack_compute_instance_v2.this.tags == null && local.metadata == null
+    error_message = "without tags and metadata the module must set none, so that existing stacks plan no change"
+  }
+}
+
+run "tags_and_metadata_reach_the_node_resources" {
+  command = plan
+  variables {
+    tags        = ["site-a", "headlamp"]
+    metadata    = { project = "site-a" }
+    preemptible = true
+  }
+
+  assert {
+    condition = alltrue([for t in [
+      openstack_networking_port_v2.this.tags,
+      openstack_networking_secgroup_v2.this.tags,
+      openstack_networking_network_v2.this.tags,
+      openstack_networking_subnet_v2.this.tags,
+      openstack_networking_router_v2.this.tags,
+      openstack_networking_floatingip_v2.this.tags,
+    ] : toset(t) == toset(["site-a", "headlamp"])])
+    error_message = "every neutron resource must carry the tags"
+  }
+  assert {
+    condition     = toset(openstack_compute_instance_v2.this.tags) == toset(["site-a", "headlamp", "preemptible"])
+    error_message = "the instance must carry the tags and keep the preemptible tag"
+  }
+  assert {
+    condition     = openstack_blockstorage_volume_v3.boot.metadata == tomap({ project = "site-a" }) && openstack_compute_instance_v2.this.metadata == tomap({ project = "site-a" })
+    error_message = "the boot volume and the instance must carry the metadata"
+  }
+}
+
+run "secret_mode_keeps_the_auth_key_out_of_user_data" {
+  command = plan
+  override_resource {
+    target          = openstack_identity_application_credential_v3.authkey
+    override_during = plan
+    values          = { id = "appcred-1", secret = "appcred-secret" }
+  }
+  variables {
+    bootstrap_tailscale    = true
+    headscale_login_server = "https://hs.example.com"
+    authkey_from_secret    = true
+    authkey_secret_ref     = "https://kms.example.com/v1/secrets/0b6a1c9e-1f2a-4c3b-9d8e-7f6a5b4c3d2e"
+    keystone_auth_url      = "https://keystone.example.com/v3"
+  }
+
+  assert {
+    condition     = length(openstack_identity_application_credential_v3.authkey) == 1
+    error_message = "secret mode must create the application credential"
+  }
+  assert {
+    condition = [for r in openstack_identity_application_credential_v3.authkey[0].access_rules : [r.service, r.method, r.path]] == [
+      ["key-manager", "GET", "/v1/secrets/0b6a1c9e-1f2a-4c3b-9d8e-7f6a5b4c3d2e/payload"],
+    ]
+    error_message = "the credential must have exactly one rule: GET on this secret's payload"
+  }
+  assert {
+    condition     = !strcontains(local.user_data, "--authkey=") && strcontains(local.user_data, "--auth-key=file:/run/headlamp/authkey")
+    error_message = "secret mode must not put an auth key in user data"
+  }
+  assert {
+    condition     = length(yamldecode(local.user_data).write_files) == 2 && strcontains(local.user_data, "--advertise-exit-node")
+    error_message = "the secret mode user data must be valid YAML with the script and the credential file"
+  }
+}
+
+run "secret_mode_rejects_an_inline_key_too" {
+  command = plan
+  variables {
+    bootstrap_tailscale    = true
+    headscale_login_server = "https://hs.example.com"
+    tailscale_authkey      = "tskey-0000"
+    authkey_from_secret    = true
+    authkey_secret_ref     = "https://kms.example.com/v1/secrets/0b6a1c9e-1f2a-4c3b-9d8e-7f6a5b4c3d2e"
+    keystone_auth_url      = "https://keystone.example.com/v3"
+  }
+  expect_failures = [openstack_compute_instance_v2.this]
+}
+
+run "default_mode_has_no_credential" {
+  command = plan
+
+  assert {
+    condition     = length(openstack_identity_application_credential_v3.authkey) == 0
+    error_message = "without authkey_from_secret there must be no application credential"
+  }
+}

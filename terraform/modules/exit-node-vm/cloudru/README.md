@@ -49,6 +49,11 @@ The role downloads the `.deb` on the control host and copies it over. That first
 When the node is on the tailnet, you can drop `admin_ssh_cidr`. Set
 `bootstrap_tailscale = true` (plus `headscale_login_server`, `tailscale_authkey`) only if the VM can reach those hosts.
 
+**CAUTION:** `tailscale_authkey` is in the Terraform state and in the VM's user data, and any process on the VM can
+read user data. Cloud.ru has no Barbican, so use a **single-use, short-lived** key, for example
+`headscale preauthkeys create --user <user> --expiration 1h` (not `--reusable`). The disk stays when the VM stops and
+starts. Thus the node keeps its identity and does not need the key again (#224).
+
 ## Preemptible VMs
 
 As of v2.1.5, the Cloud.ru Evolution provider has no preemptible or spot option, so this node is a regular VM.

@@ -125,3 +125,33 @@ variable "extra_udp_ingress_ports" {
   type    = list(number)
   default = []
 }
+
+variable "tags" {
+  type    = list(string)
+  default = []
+}
+
+variable "metadata" {
+  type    = map(string)
+  default = {}
+}
+
+variable "authkey_from_secret" {
+  type    = bool
+  default = false
+}
+
+variable "authkey_secret_ref" {
+  type    = string
+  default = null
+}
+
+variable "keystone_auth_url" {
+  type    = string
+  default = null
+}
+
+variable "authkey_credential_expires_at" {
+  type    = string
+  default = null
+}

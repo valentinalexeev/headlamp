@@ -97,6 +97,27 @@ See "Optional overrides" in
 - `security_group_id`: the node's security group, so a root stack can add rules (for example a proxy port) with `openstack_networking_secgroup_rule_v2`
 - `image_id`: the image of the boot volume
 
+## Tags and metadata
+
+Use `tags` and `metadata` to find and bill the node's resources by site (#227):
+
+- `tags` (list): the instance, port, network, subnet, router, security group and floating IP. The instance also
+  gets `preemptible` when `preemptible = true`.
+- `metadata` (map): the instance and the boot volume. Cinder volumes have no tags.
+
+```hcl
+  tags     = ["site-a"]
+  metadata = { project = "site-a" }
+```
+
+```sh
+openstack port list --tags site-a
+openstack volume list --property project=site-a
+```
+
+With the defaults (`[]` and `{}`) the module sets no tags and no metadata, so an existing stack plans no change.
+A stack that adds tags updates the resources in place. It does not replace them.
+
 ## Bridge node
 
 A bridge (`reality-ingress`, `ingress-agent`, `tailscale-userspace-socks`) uses this module too (#235). It needs public
@@ -149,6 +170,39 @@ but a replaced server gets the newest image. To build each server from the same 
 so cloud-init does not try. Run the Ansible `tailscale` role instead against `module.node.external_ip`.
 The role downloads the `.deb` on the control host and copies it over. That first run needs SSH from `admin_ssh_cidr`.
 You can drop `admin_ssh_cidr` when the node is on the tailnet.
+
+### The auth key with `bootstrap_tailscale = true` (#224)
+
+**CAUTION:** with `tailscale_authkey`, the key is in the Terraform state and in user data. Any process on the node
+can read user data from the metadata service (`http://169.254.169.254/openstack/latest/user_data`) without a token.
+
+There are 2 safer options:
+
+1. **Barbican** (if your cloud has the key-manager service). Put the key in a Barbican secret and set:
+
+   ```hcl
+     bootstrap_tailscale    = true
+     headscale_login_server = "https://hs.example.com"
+     authkey_from_secret    = true    # a plan-time bool: the secret can be made in the same apply
+     authkey_secret_ref     = openstack_keymanager_secret_v1.authkey.secret_ref
+     keystone_auth_url      = "https://<keystone>/v3"
+     authkey_credential_expires_at = "2027-01-01T00:00:00Z"   # optional
+   ```
+
+   The module creates an application credential with one access rule: `GET` on that secret's payload. The node reads
+   the key at first boot and deletes the credential file.
+
+   The credential is still in user data and in the state.
+   It is a credential: it can read the auth key while it is valid. After the node joins, revoke it
+   (`openstack application credential delete <name>-authkey`) or let it expire. Output `application_credential_id`
+   shows its ID. The user that runs Terraform must be allowed to create application credentials with access rules.
+
+2. **No Barbican** (Cloud.ru, some Selectel projects): use a **single-use, short-lived** key, for example
+   `headscale preauthkeys create --user <user> --expiration 1h` (not `--reusable`). The disk stays when the server
+   stops and starts. Thus the node keeps its identity and does not need the key again.
+
+`user_data` is in `ignore_changes`. A new key or a new secret does not change a running server. To use it, rebuild
+the server (see "Replacing the server").
 
 ## Preemptible servers
 

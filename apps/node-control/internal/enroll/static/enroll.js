@@ -258,12 +258,15 @@
 
     // ----- the table
 
+    // ownerLabel: the email of a self-enrolled owner instead of its "oidc:<subject>" identifier.
+    function ownerLabel(d) { return hl.plain(d.owner_email, 100) || hl.plain(d.owner, 100); }
+
     function rowModel(d) {
       var t = now();
       var s = stateOf(d, t);
       var total = d.traffic && typeof d.traffic === 'object' ? (Number(d.traffic.up) || 0) + (Number(d.traffic.down) || 0) : null;
       return {
-        id: d.id, name: hl.plain(d.name, 100), owner: hl.plain(d.owner, 100), client: hl.plain(d.client, 20),
+        id: d.id, name: hl.plain(d.name, 100), owner: ownerLabel(d), ownerId: hl.plain(d.owner, 100), client: hl.plain(d.client, 20),
         level: s.level, word: s.word, kind: s.kind,
         seen: d.last_active > 0 ? hl.relTime(new Date(d.last_active * 1000).toISOString(), t) : 'Never',
         traffic: total === null ? '-' : (hl.fmtBytes(total) || '-'),
@@ -336,7 +339,7 @@
       hl.api('POST', '/enroll/devices/' + encodeURIComponent(d.id) + '/links', { ttl: LINK_TTL, max_uses: 1 }).then(function (j) {
         delete st.busy[d.id];
         render();
-        openDrawer({ mode: 'link', device: { id: d.id, name: hl.plain(d.name, 100), owner: hl.plain(d.owner, 100), expires_at: d.expires_at }, link: String(hl.obj(j).url || '') });
+        openDrawer({ mode: 'link', device: { id: d.id, name: hl.plain(d.name, 100), owner: ownerLabel(d), expires_at: d.expires_at }, link: String(hl.obj(j).url || '') });
       }, function (err) {
         delete st.busy[d.id];
         setError('New link failed for ' + hl.plain(d.name, 100) + ': ' + hl.plain(err && err.message, 200));
@@ -455,7 +458,9 @@
         var d = find(r.id);
         var tr = hl.el('tr', st.open && st.open.id === r.id ? 'sel' : '');
         tr.appendChild(hl.el('td', 'name', r.name));
-        tr.appendChild(hl.el('td', 't2', r.owner));
+        var oc = hl.el('td', 't2 clip', r.owner);
+        oc.setAttribute('title', r.ownerId);
+        tr.appendChild(oc);
         tr.appendChild(hl.el('td', 'mono t2', r.client));
         var state = hl.el('td');
         state.appendChild(hl.status(r.level, r.word));

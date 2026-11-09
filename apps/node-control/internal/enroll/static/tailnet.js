@@ -184,7 +184,7 @@
         cell.appendChild(hl.el('p', 't2 small', 'This device'));
         checks(cell, hl.arr(st.view.targets), held.direct, function (ts) { save(b.name, 'device', String(d.id), ts); });
         if (d.owner) {
-          cell.appendChild(hl.el('p', 't2 small', 'All devices of ' + hl.plain(d.owner, 100)));
+          cell.appendChild(hl.el('p', 't2 small', 'All devices of ' + (hl.plain(d.owner_email, 100) || hl.plain(d.owner, 100))));
           checks(cell, hl.arr(st.view.targets), held.owner, function (ts) { save(b.name, 'owner', d.owner, ts); });
         }
       });
@@ -203,7 +203,7 @@
         var btn = hl.button(st.open === d.id ? 'Close' : 'Edit', 'edit', 'sm quiet', function () {
           st.open = st.open === d.id ? null : d.id; render();
         });
-        row(els.rows, [hl.plain(d.name, 100), hl.plain(d.owner, 100), parts.join('; '), btn]);
+        row(els.rows, [hl.plain(d.name, 100), hl.plain(d.owner_email, 100) || hl.plain(d.owner, 100), parts.join('; '), btn]);
         if (st.open === d.id) {
           var tr = els.rows.appendChild(hl.el('tr'));
           var cell = tr.appendChild(hl.el('td', 'detail'));

@@ -64,13 +64,7 @@ var approveJS []byte
 //go:embed static/tailnet.js
 var tailnetJS []byte
 
-// Clients are the accepted DeviceIn.client values.
-var Clients = []string{"sing-box", "karing", "clash"}
-
-const (
-	clientsRepr  = "('sing-box', 'karing', 'clash')" // Python tuple repr, kept for the 422 detail
-	maxBodyBytes = 1 << 20
-)
+const maxBodyBytes = 1 << 20
 
 // syncWait bounds how long a change waits for the ingresses before answering.
 var syncWait = 3 * time.Second

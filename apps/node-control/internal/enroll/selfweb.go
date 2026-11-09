@@ -285,7 +285,7 @@ func (s *SelfWeb) redeem(
 		switch {
 		case errors.Is(err, ErrInviteInvalid), errors.Is(err, ErrInviteOtherEmail),
 			errors.Is(err, ErrEmailUnverified), errors.Is(err, ErrDeviceLimit),
-			errors.Is(err, ErrLocked):
+			errors.Is(err, ErrLocked), errors.Is(err, ErrHSUserAmbiguous):
 		default:
 			s.fail(w, err)
 			return
@@ -362,7 +362,7 @@ func (s *SelfWeb) enrol(w http.ResponseWriter, r *http.Request, sub, csrf string
 	}
 	e, err := s.self.Enrol(r.Context(), sub, name, client, s.link())
 	switch {
-	case errors.Is(err, ErrDeviceLimit), errors.Is(err, ErrLocked):
+	case errors.Is(err, ErrDeviceLimit), errors.Is(err, ErrLocked), errors.Is(err, ErrHSUserAmbiguous):
 		v.Error = err.Error()
 		s.render(w, http.StatusConflict, v)
 		return

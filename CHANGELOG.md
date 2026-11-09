@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Fixed
+
+- node-control self-enrolment: `/me` no longer makes a second headscale user for a person who already has one (#253). Before, a person who had logged in through the OIDC login of headscale got a second user `oidc-<hash>` with the same email, and headscale did not start again when the policy named the person by email. Now the first device reuses, in this order: the user with the provider ID `<OIDC_ISSUER>/<subject>`, the user `oidc-<hash>`, or the one user with the person's email when the ID token says `email_verified: true`. More than one user with that email: node-control refuses the device and says why. The OIDC database gets an `email_verified` column at start.
+
 ## 0.15.1 - 2026-11-09
 
 ### Fixed

@@ -317,7 +317,7 @@ func TestPickerUsesSiteChoicesAndIcons(t *testing.T) {
 	t.Cleanup(srv.Close)
 	(&SelfWeb{self: f.self, rp: nil, link: func() IngressConfig { return cfg }, icons: icons}).Register(mux)
 	sid, _, _ := f.self.users.NewSession("sub-1", time.Hour)
-	_ = f.self.users.RecordLogin("sub-1", "anna@example.test", "")
+	_ = f.self.users.RecordLogin("sub-1", "anna@example.test", true, "")
 	d, _, _ := f.store.CreateDevice("Phone", "oidc:sub-1", "sing-box", adminFuture)
 	req, _ := http.NewRequest("GET", srv.URL+"/me/devices/"+strconv.FormatInt(d.ID, 10), nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone)")

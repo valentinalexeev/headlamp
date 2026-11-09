@@ -26,16 +26,18 @@ type SelfStore struct {
 
 // SelfUser is one person, keyed by the issuer's subject.
 type SelfUser struct {
-	Subject     string
-	Email       string
-	HSUserID    uint64 // the headscale user created for this person; 0 until the first device
-	Locked      bool
-	LockedBy    string
-	LockReason  string
-	LastLogin   int64
-	LastCheck   int64
-	CheckFailed int64 // when the last re-check could not reach the issuer, 0 when it did
-	refresh     []byte
+	Subject string
+	Email   string
+	// EmailVerified is true when the ID token of the last login said email_verified true (#253).
+	EmailVerified bool
+	HSUserID      uint64 // the headscale user created for this person; 0 until the first device
+	Locked        bool
+	LockedBy      string
+	LockReason    string
+	LastLogin     int64
+	LastCheck     int64
+	CheckFailed   int64 // when the last re-check could not reach the issuer, 0 when it did
+	refresh       []byte
 }
 
 const selfSchema = `
@@ -49,7 +51,8 @@ CREATE TABLE IF NOT EXISTS oidc_users (
 	last_login   INTEGER NOT NULL DEFAULT 0,
 	last_check   INTEGER NOT NULL DEFAULT 0,
 	check_failed INTEGER NOT NULL DEFAULT 0,
-	refresh      BLOB
+	refresh      BLOB,
+	email_verified INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS oidc_sessions (
 	id_hash    TEXT PRIMARY KEY,
@@ -78,6 +81,11 @@ func OpenSelfStore(path string, key []byte, clock func() time.Time) (*SelfStore,
 	}
 	db.SetMaxOpenConns(1)
 	if _, err := db.ExecContext(context.Background(), selfSchema+inviteSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("open OIDC db: %w", err)
+	}
+	// A database of 0.15.x and before has no email_verified column (#253).
+	if err := addSelfColumn(db, "oidc_users", "email_verified", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("open OIDC db: %w", err)
 	}
@@ -119,21 +127,50 @@ func (s *SelfStore) open(sub string, ct []byte) (string, error) {
 
 // RecordLogin creates or updates the person after a verified login. A new refresh token replaces the old one; an
 // empty one keeps it.
-func (s *SelfStore) RecordLogin(sub, email, refresh string) error {
-	_, err := s.db.Exec(`INSERT INTO oidc_users(subject, email, last_login, last_check, refresh) VALUES(?,?,?,?,?)
-		ON CONFLICT(subject) DO UPDATE SET email=excluded.email, last_login=excluded.last_login,
-		last_check=excluded.last_check, check_failed=0, refresh=COALESCE(excluded.refresh, oidc_users.refresh)`,
-		sub, email, s.now(), s.now(), s.seal(sub, refresh))
+func (s *SelfStore) RecordLogin(sub, email string, emailVerified bool, refresh string) error {
+	_, err := s.db.Exec(`INSERT INTO oidc_users(subject, email, email_verified, last_login, last_check, refresh)
+		VALUES(?,?,?,?,?,?)
+		ON CONFLICT(subject) DO UPDATE SET email=excluded.email, email_verified=excluded.email_verified,
+		last_login=excluded.last_login, last_check=excluded.last_check, check_failed=0,
+		refresh=COALESCE(excluded.refresh, oidc_users.refresh)`,
+		sub, email, b2i(emailVerified), s.now(), s.now(), s.seal(sub, refresh))
 	return err
 }
 
-const userCols = "subject, email, hs_user_id, locked, locked_by, lock_reason, last_login, last_check, check_failed, refresh"
+// addSelfColumn adds a column to a table that an earlier version created.
+func addSelfColumn(db *sql.DB, table, col, decl string) error {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	has := false
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		has = has || name == col
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || has {
+		return err
+	}
+	_, err = db.Exec("ALTER TABLE " + table + " ADD COLUMN " + col + " " + decl)
+	return err
+}
+
+const userCols = "subject, email, hs_user_id, locked, locked_by, lock_reason, last_login, last_check, check_failed, refresh, email_verified"
 
 func scanUser(sc interface{ Scan(...any) error }) (SelfUser, error) {
 	var u SelfUser
-	var locked int
-	err := sc.Scan(&u.Subject, &u.Email, &u.HSUserID, &locked, &u.LockedBy, &u.LockReason, &u.LastLogin, &u.LastCheck, &u.CheckFailed, &u.refresh)
+	var locked, verified int
+	err := sc.Scan(&u.Subject, &u.Email, &u.HSUserID, &locked, &u.LockedBy, &u.LockReason, &u.LastLogin, &u.LastCheck, &u.CheckFailed, &u.refresh, &verified)
 	u.Locked = locked != 0
+	u.EmailVerified = verified != 0
 	return u, err
 }
 

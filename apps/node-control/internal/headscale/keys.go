@@ -12,6 +12,10 @@ import (
 type User struct {
 	ID   uint64
 	Name string
+	// Email and ProviderID come from GET /api/v1/user. ProviderID is "<issuer>/<subject>" for a user that
+	// headscale's own OIDC login made, and empty for a user made through the API (#253).
+	Email      string
+	ProviderID string
 }
 
 // PreAuthKey is a headscale pre-auth key. Key is set only by CreatePreAuthKey.
@@ -25,8 +29,10 @@ type PreAuthKey struct {
 }
 
 type apiUser struct {
-	ID   json.RawMessage `json:"id"`
-	Name string          `json:"name"`
+	ID         json.RawMessage `json:"id"`
+	Name       string          `json:"name"`
+	Email      string          `json:"email"`
+	ProviderID string          `json:"providerId"`
 }
 
 type apiKey struct {
@@ -72,7 +78,7 @@ func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
 		if err != nil {
 			return nil, err
 		}
-		users = append(users, User{ID: id, Name: u.Name})
+		users = append(users, User{ID: id, Name: u.Name, Email: u.Email, ProviderID: u.ProviderID})
 	}
 	return users, nil
 }

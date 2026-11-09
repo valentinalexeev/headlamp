@@ -111,7 +111,7 @@ func (m *Module) registerSelf(r *core.Routes, key []byte) error {
 		return err
 	}
 	admin := m.admin
-	m.self = &Self{cfg: sc, users: users, store: m.store, hs: m.selfHS, idp: rp, push: func(ctx context.Context) {
+	m.self = &Self{cfg: sc, users: users, store: m.store, hs: m.selfHS, idp: rp, issuer: rp.Issuer(), push: func(ctx context.Context) {
 		SyncAll(ctx, m.store, m.reg.Current(ctx, false).Cfg, m.reg.Current(ctx, false).SyncTargets)
 	}}
 	admin.self = m.self

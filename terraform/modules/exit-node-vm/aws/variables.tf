@@ -144,3 +144,25 @@ variable "subnet_ids" {
   default     = null
   description = "Subnets of the group. Null (default) uses all subnets of the VPC. The subnets must give a public IPv4 address or have a NAT route."
 }
+
+variable "state_parameter_name" {
+  type        = string
+  default     = null
+  description = "SSM Parameter Store name for the tailscaled state, for example \"/headlamp/<node>/tailscaled\". When set, tailscaled keeps its state there and not on the disk. A new instance after a node-control stop and start is then the same headscale node (same id, name and IPs). Null (default): the state is on the instance disk and each start makes a new node."
+
+  validation {
+    condition     = var.state_parameter_name == null || (can(regex("^/[A-Za-z0-9_./-]+$", var.state_parameter_name)) && length(coalesce(var.state_parameter_name, "")) <= 1011)
+    error_message = "state_parameter_name must start with / and use only letters, digits, _ . - and /."
+  }
+}
+
+variable "state_kms_key_arn" {
+  type        = string
+  default     = null
+  description = "ARN of a customer managed KMS key for the state parameter. Null uses the AWS managed key aws/ssm. With a key, the node role gets kms:Encrypt and kms:Decrypt on it through SSM only."
+
+  validation {
+    condition     = var.state_kms_key_arn == null || can(regex("^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+$", var.state_kms_key_arn))
+    error_message = "state_kms_key_arn must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>)."
+  }
+}

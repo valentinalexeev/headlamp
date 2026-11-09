@@ -3,6 +3,38 @@
 This module makes one exit node on AWS EC2. An auto scaling group with a size of one runs the node. The node joins your
 tailnet with the auth key that you give.
 
+## Node identity across stop and start
+
+node-control stops a node by scaling its group to 0, so each start makes a **new instance** (ADR 0001). With the
+default, tailscaled keeps its state on the instance disk. So the new instance has a new machine key. Headscale then
+registers a new node: a new id, a new IP and a name such as `cobalt-1`. The old node stays as an offline record.
+
+To keep the same node, set `state_parameter_name`:
+
+```hcl
+module "cobalt" {
+  source               = "../vendor/headlamp/terraform/modules/exit-node-vm/aws"
+  name                 = "cobalt"
+  state_parameter_name = "/headlamp/cobalt/tailscaled"
+  tailscale_version    = "1.104.5"
+  # the other inputs as usual
+}
+```
+
+Then tailscaled keeps its state in SSM Parameter Store (a `SecureString`), not on the disk. A new instance loads the
+same machine key and is the same node, with the same id, name and IPs. It does not use the auth key again.
+
+- The node role gets `ssm:GetParameter` and `ssm:PutParameter` on that one parameter. With `state_kms_key_arn`, it
+  also gets `kms:Encrypt` and `kms:Decrypt` on that key, through SSM only. With no key, SSM uses `aws/ssm`.
+- tailscaled makes the parameter at the first start. `terraform destroy` does not delete it. Delete it by hand when
+  you remove the node: `aws ssm delete-parameter --name /headlamp/cobalt/tailscaled`.
+- Use one parameter for one node. Two running instances with the same parameter are one node with two connections.
+  The group has a maximum size of 1, so this can occur only for a short time during a Spot replacement.
+- The state holds the node's private keys. Anyone who can read the parameter can act as the node.
+
+With an existing node, the first start with the new setting registers once more, because the state is not in SSM
+yet. Delete the old node in headscale after that start.
+
 ## Auth key
 
 With node-control's stop and start (ADR 0001), each start makes a new instance, and it joins again. So the auth key must
@@ -36,6 +68,8 @@ version. Set exactly one of the two.
 | `authkey_kms_key_arn` | none | The KMS key of the secret, if it is a customer managed key |
 | `ssh_public_key` | none | An optional key pair. Admin access is over the tailnet. |
 | `tailscale_version` | none | Install this version from the signed apt repository and hold it. None: the unpinned `install.sh`. |
+| `state_parameter_name` | none | Keep the tailscaled state in this SSM parameter, so a stop and start keeps the same node |
+| `state_kms_key_arn` | none | The KMS key of the state parameter, if it is a customer managed key |
 | `enable_ssm` | `false` | Attach `AmazonSSMManagedInstanceCore` to the node role |
 | `iam_path`, `iam_permissions_boundary` | `/`, none | The IAM path and the permissions boundary of the node role |
 | `tags` | none | Tags for every resource. The group puts them on each instance and its volumes. |
@@ -44,7 +78,7 @@ version. Set exactly one of the two.
 | `instance_type`, `ami_arch`, `spot` | `t3.micro`, `amd64`, `true` | The instance |
 | `ubuntu_series`, `image_flavor`, `ami_id` | see "Boot image" | The image |
 
-The node gets a role only with `authkey_secret_arn` or `enable_ssm`. IMDSv2 is required, with hop limit 1.
+The node gets a role only with `authkey_secret_arn`, `state_parameter_name` or `enable_ssm`. IMDSv2 is required, with hop limit 1.
 
 ### Existing nodes
 

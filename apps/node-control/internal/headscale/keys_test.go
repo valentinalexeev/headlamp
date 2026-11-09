@@ -9,9 +9,10 @@ import (
 )
 
 func TestListUsers(t *testing.T) {
-	c, got := recorder(t, 200, `{"users":[{"id":"3","name":"alice","email":"a@example.test"},{"id":"4","name":"bob"}]}`)
+	c, got := recorder(t, 200, `{"users":[{"id":"3","name":"alice","email":"a@example.test","providerId":"https://idp.example.test/sub-a","provider":"oidc"},{"id":"4","name":"bob"}]}`)
 	us, err := c.ListUsers(context.Background())
-	if err != nil || len(us) != 2 || us[0] != (User{3, "alice"}) || us[1].ID != 4 {
+	want := User{ID: 3, Name: "alice", Email: "a@example.test", ProviderID: "https://idp.example.test/sub-a"}
+	if err != nil || len(us) != 2 || us[0] != want || us[1] != (User{ID: 4, Name: "bob"}) {
 		t.Fatalf("%+v %v", us, err)
 	}
 	if got.method != "GET" || got.path != "/api/v1/user" || got.auth != "Bearer k1" {

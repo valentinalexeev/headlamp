@@ -979,6 +979,19 @@ Set `OIDC_ISSUER` to turn it on. It needs:
 
 The page lists the person's devices. For each active device, **Add to an app** opens the app picker again. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*`, `/oidc/*` and `/i/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`.
 
+### The headscale user of a person
+
+One person is one headscale user (#253). On the first device, node-control looks for a headscale user of the person, in this order:
+
+1. The user that the OIDC login of headscale made for the same issuer and subject. Its provider ID is `<OIDC_ISSUER>/<subject>`. This needs the same issuer in `OIDC_ISSUER` and in `oidc.issuer` of headscale.
+2. The user `oidc-<hash>` that an earlier attempt of node-control made.
+3. The one user with the person's email. node-control uses it only when the ID token has `email_verified: true`.
+4. If there is none, node-control makes the user `oidc-<hash>`, with the person's email.
+
+If more than one headscale user has the email, node-control does not make the device. Remove or rename the extra users, then let the person try again.
+
+A person who enrolled before 0.15.2 keeps the user that node-control recorded. To merge such a person, move the nodes and delete the extra user in headscale.
+
 ### App picker
 
 `/me/devices/{id}` shows one button for each app of `clients` in `enroll.json` (all apps of the catalog without the key). It shows the page only for an active device of the signed-in person.

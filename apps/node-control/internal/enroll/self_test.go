@@ -117,7 +117,7 @@ func newSelfFx(t *testing.T, cfg SelfConfig) *selfFx {
 	}
 	t.Cleanup(func() { users.Close() })
 	cfg.defaults()
-	f.self = &Self{cfg: cfg, users: users, store: f.store, hs: f.hs, idp: rp, push: func(ctx context.Context) {
+	f.self = &Self{cfg: cfg, users: users, store: f.store, hs: f.hs, idp: rp, issuer: is.URL, push: func(ctx context.Context) {
 		f.pushes++
 		SyncAll(ctx, f.store, adminCfg, f.admin.reg.Current(ctx, false).SyncTargets)
 	}}

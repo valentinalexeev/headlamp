@@ -100,6 +100,9 @@ func getJSON(ctx context.Context, hc *http.Client, u string, v any) error {
 
 // key returns the verification key for kid. An unknown kid refreshes the JWKS at most once a minute, so a key
 // rotation at the issuer is picked up without letting forged kids hammer it.
+// Issuer is the issuer URL of the discovery document, the same as the iss claim of the ID tokens.
+func (p *Provider) Issuer() string { return p.meta.Issuer }
+
 func (p *Provider) key(ctx context.Context, kid string) (any, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

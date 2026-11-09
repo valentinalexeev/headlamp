@@ -38,7 +38,7 @@ Fly.io, `fly.toml`).
 | `TAILSCALE_AUTH_KEY` | Secret. The pre-auth key for the tailnet identity of this app. The tags come from the key, not from the client. |
 | `TAILNET_HOSTNAME` | The name on the tailnet. The default is `node-control`. |
 | `TSNET_VERBOSE` | `1` forwards the logs of the embedded tailscale node (a large quantity of log lines). By default, the app logs only messages for users, such as the login URL. At start, the app waits up to 60 s for the node to join the tailnet. If the node cannot join (bad auth key, control server not reachable), the app exits with a non-zero code. |
-| `REDIS_URL` | Secret (never in a plain config file such as `fly.toml`). The plain `redis://` URL of the shared Redis on a private network. When it is set, the tailscale state is in Redis, not in a file (see "Tailscale state"). When it is not set, the state is in a file under `/var/lib/tailscale`, as before. |
+| `REDIS_URL` | Secret (never in a plain config file such as `fly.toml`). The plain `redis://` URL of the shared Redis on a private network. **Percent-encode the password** if it has `/`, `?`, `#` or `@` (#217). A base64 password often has `/`, and then the URL does not parse: `python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$PW"`. Or make the password with `openssl rand -hex 32`, which has none of these. When it is set, the tailscale state is in Redis, not in a file (see "Tailscale state"). When it is not set, the state is in a file under `/var/lib/tailscale`, as before. |
 | `REDIS_KEY` | Optional hash key for the state. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:tsnet` (for example `node-control:tsnet`; Fly.io sets `FLY_APP_NAME`). It must have the form `<app>:<name>` and must not contain `* ? [ \`. |
 | `NODE_CONTROL_STATE_KEY` | Secret. 32 random bytes, base64 (`openssl rand -base64 32`). It encrypts the Redis state (AES-256-GCM). It is required with `REDIS_URL` unless `STATE_ALLOW_PLAINTEXT=1`. Without `REDIS_URL`, the app ignores it and logs a warning. |
 | `STATE_ALLOW_PLAINTEXT` | `1` keeps the Redis state unencrypted. This is an explicit opt-out. We do not recommend it, because the state holds node private keys. |
@@ -899,7 +899,12 @@ With self-enrolment, people of your organisation add their own devices after the
 - a relay device, the same as a device that an operator enrols, with the owner `oidc:<subject>`;
 - a one-time headscale pre-auth key for a regular tailnet client, for a headscale user of that person only.
 
-Set `OIDC_ISSUER` to turn it on. It needs the enrolment store (`ENROLL_DB` or `ENROLL_REDIS=1`) and the headscale API.
+Set `OIDC_ISSUER` to turn it on. It needs:
+
+- the enrolment store (`ENROLL_DB` or `ENROLL_REDIS=1`) and the headscale API;
+- **at least one bridge in `ENROLL_CONFIG`** (#219). Without one, node-control stops at start with
+  `ENROLL_CONFIG: at least one bridge is required`. So a site with only a control host and exit nodes cannot use `/me`
+  until it runs a bridge (an ingress relay). The relay device of each enrolment needs it.
 
 ### Environment
 

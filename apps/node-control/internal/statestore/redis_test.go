@@ -120,6 +120,23 @@ func TestRedisErrorsDoNotContainURL(t *testing.T) {
 		}
 	})
 
+	// #217: a base64 password with "/" does not parse. The error names the fix, and leaks no part of the password.
+	t.Run("base64 password with a slash", func(t *testing.T) {
+		const b64 = "Zm9v/YmFy+cXV4=="
+		_, err := NewRedis("redis://:"+b64+"@redis:6379/0", testKey)
+		if err == nil {
+			t.Fatal("accepted")
+		}
+		if !strings.Contains(err.Error(), "percent-encode") || !strings.Contains(err.Error(), "base64") {
+			t.Fatalf("the error does not name the fix: %v", err)
+		}
+		for _, part := range []string{b64, "Zm9v", "YmFy", "cXV4"} {
+			if strings.Contains(err.Error(), part) {
+				t.Fatalf("the error leaks %q: %v", part, err)
+			}
+		}
+	})
+
 	t.Run("operation error", func(t *testing.T) {
 		r := &Redis{secrets: secretsFor(url, pw)}
 		err := r.wrap("read", errors.New("dial failed for "+url+" with "+pw))

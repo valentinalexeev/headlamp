@@ -87,6 +87,11 @@ func NewRedis(rawURL, key string) (*Redis, error) {
 	return &Redis{rdb: rdb, key: key, secrets: secrets}, nil
 }
 
+// errBadRedisURL names the usual cause of a REDIS_URL that does not parse, with no part of the URL.
+const errBadRedisURL = "invalid REDIS_URL: it does not parse. If the password has / ? # @ " +
+	"(base64 has /), percent-encode it: python3 -c 'import urllib.parse,sys;" +
+	"print(urllib.parse.quote(sys.argv[1],safe=\"\"))' \"$PW\""
+
 // OpenClient connects to rawURL with the shared-Redis options (small pool, RESP2, no CLIENT SETINFO, no
 // maintenance handshake) and pings once. The second result lists the strings (the URL, the password and its
 // escaped forms) that must be removed from any error text before it is logged; use scrub.Scrub. No error text
@@ -94,8 +99,9 @@ func NewRedis(rawURL, key string) (*Redis, error) {
 func OpenClient(rawURL string) (*redis.Client, []string, error) {
 	opt, err := redis.ParseURL(rawURL)
 	if err != nil {
-		// ParseURL errors may echo the URL, so none of it is passed on.
-		return nil, nil, errors.New("invalid REDIS_URL")
+		// ParseURL errors may echo the URL, so none of it is passed on. The usual cause is a
+		// password with "/", "?", "#" or "@" (base64 has "/"): it ends the userinfo early (#217).
+		return nil, nil, errors.New(errBadRedisURL)
 	}
 	opt.DialTimeout = opTimeout
 	opt.ReadTimeout = opTimeout

@@ -57,11 +57,22 @@ The `.gitignore` here keeps `.env` and the `*.env` files out of git.
    ```
 
 7. Put the pre-auth key and the API key into `node-control.env`, and set `ADMIN_USERS` to your login.
-8. Start node-control:
+8. Start node-control **within 1 hour** of step 6:
 
    ```sh
    docker compose up -d node-control
    ```
+
+   WARNING: the pre-auth key of step 6 expires after 1 hour (#218). If node-control did not join in that time, it
+   cannot join with the key in `node-control.env`, and its log shows an auth error. Check, and make a new key if it
+   did not join:
+
+   ```sh
+   docker compose exec headscale headscale nodes list | grep node-control   # no line: it did not join
+   docker compose exec headscale headscale preauthkeys create -u <id> --tags tag:node-control -e 1h
+   ```
+
+   After the first join, node-control keeps its identity in its volume (or Redis). It does not use the key again.
 
 The node-control console is on the tailnet only, at `http://node-control/`. It has no public name.
 
@@ -143,6 +154,10 @@ The edge sends `X-Forwarded-For`. `compose.yaml` thus sets `FUNNEL_CLIENT_IP_HEA
 Set `ENROLL_DOMAIN` in `.env` to serve the public enrolment links (`/e/<token>` and `/sub/<secret>`) from this host.
 The edge sends only these two paths to node-control. Any other path gets 404. Set `ENROLL_DB`, `ENROLL_CONFIG` and
 `ENROLL_SECRET_KEY` in `node-control.env` (see the node-control README, "Enrolment").
+
+While `ENROLL_DOMAIN` is not set, the site has the reserved name `enroll.invalid` and a local certificate. So Caddy asks
+no ACME CA for it (#216). The same is true for `funnel.invalid` while `FUNNEL_DOMAIN` is not set.
+
 
 ## AWS
 

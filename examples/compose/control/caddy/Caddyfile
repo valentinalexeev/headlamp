@@ -20,7 +20,10 @@
 
 # Optional, the public enrolment links of node-control (/e/<token>, /sub/<secret>). Remove the block if you do not
 # use enrolment, or if a bridge serves the link host (see the node-control README, "Enrolment").
+# ENROLL_TLS (set by compose): empty while ENROLL_DOMAIN is not set, so the snippet is "unused" and the .invalid name
+# gets no ACME request (#216); "acme" for a real name.
 {$ENROLL_DOMAIN:enroll.invalid} {
+	import tls/{$ENROLL_TLS:unused}.caddy
 	# /me and /oidc/*: self-enrolment with OIDC (#102). Remove them if you do not set OIDC_ISSUER.
 	@public path /e/* /sub/* /me /me/* /oidc/login /oidc/callback
 	handle @public {
@@ -33,7 +36,9 @@
 # default FUNNEL_DNS=ondemand, each host gets its own certificate on demand (see the global block). To use one
 # wildcard certificate per namespace instead, set FUNNEL_DNS to a DNS-01 provider file in dns/ (route53, cloudflare,
 # googleclouddns, rfc2136).
+# While FUNNEL_DOMAIN is not set, compose leaves FUNNEL_DNS empty, so the snippet is "unused": no ACME and no
+# on-demand TLS for funnel.invalid (#216).
 *.*.{$FUNNEL_DOMAIN:funnel.invalid} {
-	import dns/{$FUNNEL_DNS:ondemand}.caddy
+	import dns/{$FUNNEL_DNS:unused}.caddy
 	reverse_proxy funnel-ingress:8080
 }

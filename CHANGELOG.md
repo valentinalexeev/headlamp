@@ -4,11 +4,16 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.15.0 - 2026-11-09
+
 ### Added
 
 - node-control self-enrolment: bound invitations (#241). An administrator invites one email address on the Devices page (Invitations section, `POST /enroll/invites`, needs `admin` on `enroll`). The link `https://<link_host>/i/<token>` signs the person in and makes one device only when the verified email of the account is the invitation's (by default the ID token must have `email_verified: true`; `OIDC_INVITE_REQUIRE_VERIFIED=false` also accepts a token without the claim). A failed attempt leaves the invitation usable. Withdraw one that made no device with `POST /enroll/invites/{id}/revoke`, also while a sign-in uses it. Invitations are stored in `OIDC_DB`, as token hashes. `OIDC_INVITE_ONLY=true` turns off the "Add a device" form of `/me`. The default is `false`, so a running site does not change.
 - node-control self-enrolment: an app picker (#241). The person now picks the relay app after the device is made, on `/me/devices/{id}`: one import link per app, for the platform of the browser, with the site's store links. **Add to an app** in the device list opens it again. `enroll.json` takes an optional `clients` list (the apps, their order and their store links per platform); without it every app is shown. `ENROLL_CLIENT_ICON_DIR` gives optional app icons (this repository ships none).
 - node-control enrolment: Shadowrocket and Stash in the client catalog (#241), also for devices that an operator makes. `/sub/<secret>/<format>` serves any profile format (`sing-box`, `clash`, `stash`, `uri`) for every device; `/sub/<secret>` is unchanged. `stash` is the Clash profile with Stash's field names, `uri` a base64 list of `vless://` and `hysteria2://` share links.
+
+- `exit-node-vm/openstack` (and `selectel`): `tags` and `metadata` inputs (#227). `tags` go on the instance, port, network, subnet, router, security group and floating IP; `metadata` on the instance and the boot volume. The defaults set nothing, so an existing stack plans no change.
+- `exit-node-vm/openstack` (and `selectel`): `authkey_from_secret` reads the auth key at first boot from a Barbican secret, not from user data (#224). Terraform makes an application credential that can only `GET` that secret's payload (`authkey_secret_ref`, `keystone_auth_url`, optional `authkey_credential_expires_at`; output `application_credential_id`). The bool is decided at plan time, so a secret made in the same apply plans. Revoke the credential after the first boot.
 
 ### Changed
 

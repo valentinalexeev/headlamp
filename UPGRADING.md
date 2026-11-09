@@ -9,7 +9,7 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
-## Unreleased (0.15.0)
+## 0.15.0
 
 ### Action required
 
@@ -29,6 +29,8 @@ says "No action required".
   directory of the site repo and set `ENROLL_CLIENT_ICON_DIR`. See the node-control README, "Client apps and profile
   formats" and "App picker".
 - Set `OIDC_INVITE_ONLY=true` to allow new devices only with an invitation.
+- OpenStack nodes with `bootstrap_tailscale = true`: set `authkey_from_secret = true` to keep the auth key out of user
+  data (#224). Or use a single-use key that expires after 1 h. See the `exit-node-vm/openstack` README.
 
 ## 0.14.0
 

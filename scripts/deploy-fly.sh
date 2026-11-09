@@ -18,6 +18,9 @@
 #   HEADLAMP_DIR   the submodule path, relative to the site root (default vendor/headlamp)
 #   OVERLAY_DIR    the overlay root, relative to the site root (default fly); the files of <app> are in OVERLAY_DIR/<app>/
 #   FLYCTL         the flyctl command (default flyctl; tests set a fake)
+#   SNAPSHOT_APPS  the apps that get a volume snapshot before each deploy (default "headscale", #197). The deploy
+#                  stops when the snapshot fails. NO_SNAPSHOT=1 skips it, when you already have a fresh restore point.
+#                  The Fly app name is the `app` of the overlay's fly.toml.
 set -eu
 
 dry=0
@@ -69,10 +72,25 @@ flyctl="${FLYCTL:-flyctl}"
 if [ "$dry" = 1 ]; then
   # shellcheck disable=SC2086 # extra is a list of words built above
   echo "would run in $dst (with $src/ laid over it): $flyctl deploy$extra $*"
+  case " ${SNAPSHOT_APPS-headscale} " in *" $app "*) [ "${NO_SNAPSHOT:-}" = 1 ] \
+    && echo "no snapshot first (NO_SNAPSHOT=1)" || echo "first a volume snapshot of the app (fly-snapshot.sh)" ;; esac
   exit 0
 fi
 
 trap 'git -C "$hl" checkout -q -- . && git -C "$hl" clean -fdq' EXIT INT TERM
 cp -R "$src"/. "$dst"/
+
+# A restore point just before the deploy (#197): a stateful app is deployed only after its snapshot is ready.
+case " ${SNAPSHOT_APPS-headscale} " in
+  *" $app "*)
+    if [ "${NO_SNAPSHOT:-}" = 1 ]; then
+      echo "deploy-fly: NO_SNAPSHOT=1: no snapshot of $app before the deploy" >&2
+    else
+      flyapp="$(sed -n 's/^app *= *"\(.*\)"/\1/p' "$dst/fly.toml" 2>/dev/null | head -n 1)"
+      [ -n "$flyapp" ] || die "no app = \"...\" in $src/fly.toml; it is needed for the snapshot (or set NO_SNAPSHOT=1)"
+      snap="$(FLYCTL="$flyctl" "$hl/scripts/fly-snapshot.sh" "$flyapp")" || die "no snapshot of $flyapp; not deployed (NO_SNAPSHOT=1 skips it)"
+      echo "deploy-fly: restore point for $flyapp: snapshot $snap" >&2
+    fi ;;
+esac
 # shellcheck disable=SC2086
 ( cd "$dst" && $flyctl deploy $extra "$@" )

@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-serve-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-control-host-aws test-runtime-config lint \
+.PHONY: test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-headscale-policy test-headscale-policy-e2e test-serve-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-control-host-aws test-runtime-config lint \
   test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -124,7 +124,7 @@ release-preflight:
 lint:
 	shellcheck -S warning -x scripts/*.sh scripts/test/tf-run/run_tests.sh scripts/test/check-denylist/run_tests.sh \
 	  scripts/test/exit-node-state/run_tests.sh scripts/test/runtime-config/run_tests.sh scripts/test/headscale-policy/run.sh scripts/test/headscale-policy/e2e-docker.sh apps/exit-node/*.sh \
-	  scripts/tasks.sh scripts/test/tasks/run.sh scripts/release-preflight.sh scripts/deploy-fly.sh scripts/test/site-mk/run_tests.sh examples/private-repo/fly/deploy.sh scripts/test/ansible-os/run.sh \
+	  scripts/tasks.sh scripts/test/tasks/run.sh scripts/release-preflight.sh scripts/deploy-fly.sh scripts/fly-snapshot.sh scripts/test/fly-snapshot/run_tests.sh scripts/test/site-mk/run_tests.sh examples/private-repo/fly/deploy.sh scripts/test/ansible-os/run.sh \
 	  scripts/headscale-tag-node.sh scripts/test/headscale-tag-node/run.sh \
 	  .githooks/pre-commit .githooks/commit-msg \
 	  apps/tailguard/*.sh apps/headscale/*.sh scripts/test/feature-defaults/run.sh
@@ -146,6 +146,10 @@ test-access-e2e:
 # #194: mk/site.mk and scripts/deploy-fly.sh in a throwaway site repo (fake flyctl, no network).
 test-site-mk:
 	bash scripts/test/site-mk/run_tests.sh
+
+# #197: a volume snapshot before each headscale deploy (fake flyctl).
+test-fly-snapshot:
+	bash scripts/test/fly-snapshot/run_tests.sh
 
 # --- Go / config linting (#160) --------------------------------------------------------------
 # Each tool runs natively when installed, else through its pinned docker image.

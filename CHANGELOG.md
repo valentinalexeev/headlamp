@@ -7,6 +7,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Added
 
 - `mk/site.mk` and `scripts/deploy-fly.sh` (#194). A site repo includes `vendor/headlamp/mk/site.mk` and sets only its values (`FLY_APPS`, `NODE_CONTROL_URL`, paths). Targets: `deploy-<app>`, `plan-deploy-<app>`, `deploy-all`, `tf-plan`/`tf-apply`/`tf-save`, `ansible-site`/`ansible-check`, `bump-tailscale-version` (now also deploys the Fly exit node), `policy-*`, `tasks-*`, `rotate-api-key-check`, `submodule-check`, `verify`. `deploy-fly.sh` runs from any directory of the site repo, refuses a dirty submodule or a checkout that differs from the pin, and passes `VERSION` and `TSVERSION` from the pins to the apps that declare them. `make test-site-mk` tests it.
+- `make deploy-headscale` (`scripts/deploy-fly.sh`) takes a Fly volume snapshot first, waits until it is created and prints its ID (#197). When the snapshot fails, it does not deploy. `NO_SNAPSHOT=1` skips it, and `SNAPSHOT_APPS` lists the apps that get one (default `headscale`). `scripts/fly-snapshot.sh <app> [volume]` does the same alone. `make test-fly-snapshot` tests it.
 
 ### Deprecated
 

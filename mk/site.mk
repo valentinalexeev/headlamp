@@ -37,6 +37,7 @@ need = $(if $($(1)),,$(error $(1) is not set; set it in your Makefile before `in
 help:
 	@echo "headlamp site targets ($(H)/mk/site.mk):"
 	@echo "  deploy-<app>             overlay deploy of one Fly app (plan-deploy-<app>: show the command only)"
+	@echo "                           headscale gets a volume snapshot first; NO_SNAPSHOT=1 skips it"
 	@echo "  deploy-all               deploy every app in FLY_APPS ($(FLY_APPS))"
 	@echo "  tf-plan tf-apply tf-save terraform through tf-run.sh (encrypted state)"
 	@echo "  ansible-site             run $(SITE_PLAYBOOK) with the fleet tailscale pin ($(tsv))"
@@ -64,7 +65,8 @@ submodule:
 	@if git -C $(H) rev-parse HEAD >/dev/null 2>&1; then $(MAKE) --no-print-directory submodule-check; \
 	  else git submodule update --init $(H); fi
 
-# Overlay deploy. Any flyctl args go in ARGS, for example ARGS="--strategy immediate".
+# Overlay deploy. Any flyctl args go in ARGS, for example ARGS="--strategy immediate". The apps in SNAPSHOT_APPS
+# (default headscale) get a volume snapshot first, and the deploy stops when it fails (#197). NO_SNAPSHOT=1 skips it.
 deploy-%: submodule-check
 	$(H)/scripts/deploy-fly.sh $* $(ARGS)
 

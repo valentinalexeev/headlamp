@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- `examples/compose/control/backup/`: sample continuous backup, restore and recovery drill for the control host (#262). Litestream replicates the headscale database and the node-control SQLite files (`policy.db`, `enroll.db`) to S3-compatible storage about every 10 seconds; `backup.sh` copies each night what Litestream does not cover (headscale noise and DERP keys, the node-control enrolment export with `ENROLL_REDIS=1`, a Redis snapshot); `restore.sh` puts it all back on a new host and never writes over a live database; `drill.sh` restores into a temporary directory on the live host and compares counts and key hashes. Compose overlay, systemd timer sample and an STE manual included.
+
 ### Fixed
 
 - node-control self-enrolment: `/me` no longer makes a second headscale user for a person who already has one (#253). Before, a person who had logged in through the OIDC login of headscale got a second user `oidc-<hash>` with the same email, and headscale did not start again when the policy named the person by email. Now the first device reuses, in this order: the user with the provider ID `<OIDC_ISSUER>/<subject>`, the user `oidc-<hash>`, or the one user with the person's email when the ID token says `email_verified: true`. More than one user with that email: node-control refuses the device and says why. The OIDC database gets an `email_verified` column at start.

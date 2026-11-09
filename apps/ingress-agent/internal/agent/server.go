@@ -28,9 +28,10 @@ type Applier struct {
 	Runner                          *Runner
 	Clock                           func() int64
 	DirectGeoIP, DirectGeoSite      []string
-	ExitDNS                         []string // resolvers reached through via-exit; empty: DefaultExitDNS
-	Log                             *slog.Logger
-	mu                              sync.Mutex
+	// ExitDNS are the resolvers reached through via-exit; empty: DefaultExitDNS.
+	ExitDNS []string
+	Log     *slog.Logger
+	mu      sync.Mutex
 	// rendered is the list of grant group outbounds of the base at the last render (#139). When a
 	// playbook run adds one, the next push renders again even if the credentials did not change.
 	// nil: not rendered yet.

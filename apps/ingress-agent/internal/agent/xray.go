@@ -24,8 +24,8 @@ const (
 	// too: the uuid is the Hysteria auth and the label is the same, so routing rules and stats cover both.
 	HY2Tag = "hy2-in"
 	flow   = "xtls-rprx-vision"
-	// DNSTag is the routing inbound tag of xray's own DNS queries. Render routes it to via-exit, so the names
-	// clients visit are not looked up through the resolver of this host's network.
+	// DNSTag is the routing inbound tag of xray's own DNS queries. Render routes it to
+	// via-exit, so the resolver of this host's network does not see the names clients visit.
 	DNSTag = "dns-internal"
 	// ExitOut is the outbound to the exit node (the tailscaled SOCKS).
 	ExitOut = "via-exit"
@@ -36,30 +36,31 @@ var (
 	// tailnetIPs are the headscale address ranges a granted client may reach through via-tailnet.
 	tailnetIPs = []any{"100.64.0.0/10", "fd7a:115c:a1e0::/48"}
 	listEntry  = regexp.MustCompile(`^[A-Za-z0-9!@._-]{1,64}$`)
-	// DefaultExitDNS are the resolvers xray queries through the exit node when INGRESS_EXIT_DNS is empty.
+	// DefaultExitDNS are the resolvers xray queries through the exit node when
+	// INGRESS_EXIT_DNS is empty.
 	DefaultExitDNS = []string{"https://1.1.1.1/dns-query", "https://1.0.0.1/dns-query"}
-	// exitDNSEntry admits DNS-over-HTTPS or DNS-over-TCP to an IPv4 literal: both run over TCP, so they pass
-	// the SOCKS outbound, and a literal needs no lookup of its own (that lookup would leave locally).
-	exitDNSEntry = regexp.MustCompile(`^(https://[0-9]{1,3}(\.[0-9]{1,3}){3}(:[0-9]{1,5})?/[A-Za-z0-9._/-]*|tcp://[0-9]{1,3}(\.[0-9]{1,3}){3}(:[0-9]{1,5})?)$`)
+	// exitDNSEntry admits DNS-over-HTTPS or DNS-over-TCP to an IPv4 literal: both run over
+	// TCP, so they pass the SOCKS outbound, and a literal needs no lookup of its own (that
+	// lookup would leave locally).
+	exitDNSEntry = regexp.MustCompile(
+		`^(https://` + ipv4Port + `/[A-Za-z0-9._/-]*|tcp://` + ipv4Port + `)$`)
 )
+
+// ipv4Port is a dotted IPv4 literal with an optional port, for exitDNSEntry.
+const ipv4Port = `[0-9]{1,3}(\.[0-9]{1,3}){3}(:[0-9]{1,5})?`
 
 type obj = map[string]any
 
-// Render builds the live xray config from the base and the credentials. directGeoIP and directGeoSite are geodata
-// list names whose destinations leave from this host in auto mode. exitDNS are the resolvers xray uses for its
-// own lookups, reached through via-exit (empty: DefaultExitDNS). The base is not changed.
-func Render(base []byte, creds []Cred, directGeoIP, directGeoSite, exitDNS []string) ([]byte, error) {
+// Render builds the live xray config from the base and the credentials. directGeoIP and
+// directGeoSite are geodata list names whose destinations leave from this host in auto mode.
+// exitDNS are the
+// resolvers xray uses for its own lookups, reached through via-exit (empty: DefaultExitDNS).
+// The base is not changed.
+func Render(base []byte, creds []Cred,
+	directGeoIP, directGeoSite, exitDNS []string) ([]byte, error) {
 	for _, e := range append(append([]string{}, directGeoIP...), directGeoSite...) {
 		if !listEntry.MatchString(e) {
 			return nil, fmt.Errorf("invalid direct list entry: %q", e)
-		}
-	}
-	if len(exitDNS) == 0 {
-		exitDNS = DefaultExitDNS
-	}
-	for _, e := range exitDNS {
-		if !exitDNSEntry.MatchString(e) {
-			return nil, fmt.Errorf("invalid exit DNS server (want https://<ipv4>/<path> or tcp://<ipv4>[:port]): %q", e)
 		}
 	}
 	var cfg obj
@@ -93,6 +94,34 @@ func Render(base []byte, creds []Cred, directGeoIP, directGeoSite, exitDNS []str
 		tags = append(tags, HY2Tag)
 	}
 
+	// Domain destinations must resolve before the block rule.
+	routing["domainStrategy"] = "IPOnDemand"
+	dnsRule, err := setDNS(cfg, directGeoSite, exitDNS)
+	if err != nil {
+		return nil, err
+	}
+	rules := []any{dnsRule}
+	// Granted tailnet traffic goes first, before the block rule, and only to the tailnet
+	// ranges: private ranges stay blocked for everyone, and so does the tailnet for every
+	// other credential.
+	tailnetRules, err := tailnetRules(cfg, creds, tags)
+	if err != nil {
+		return nil, err
+	}
+	rules = append(rules, tailnetRules...)
+	rules = append(rules, obj{"type": "field", "inboundTag": tags, "ip": blockedIPs,
+		"outboundTag": "blocked"})
+	rules = append(rules, modeRules(creds, directGeoIP, directGeoSite)...)
+	if old, ok := routing["rules"].([]any); ok {
+		rules = append(rules, old...)
+	}
+	routing["rules"] = rules
+	return json.Marshal(cfg)
+}
+
+// modeRules sends each credential by its mode: direct, exit, or auto (direct for destinations
+// on the direct lists, the exit node for the rest).
+func modeRules(creds []Cred, directGeoIP, directGeoSite []string) []any {
 	users := func(mode string) []any {
 		var out []any
 		for _, c := range creds {
@@ -102,22 +131,7 @@ func Render(base []byte, creds []Cred, directGeoIP, directGeoSite, exitDNS []str
 		}
 		return out
 	}
-	routing["domainStrategy"] = "IPOnDemand" // domain destinations must resolve before the block rule
-	if !hasOutbound(cfg, ExitOut) {
-		return nil, fmt.Errorf("base config has no outbound tagged %s", ExitOut)
-	}
-	cfg["dns"] = dnsSection(directGeoSite, exitDNS)
-	// xray's own DNS queries go to the exit node first. Without this rule IPOnDemand looks up every name a
-	// client visits with the system resolver of this host, in the network the clients want to avoid.
-	rules := []any{obj{"type": "field", "inboundTag": []any{DNSTag}, "outboundTag": ExitOut}}
-	// Granted tailnet traffic goes first, before the block rule, and only to the tailnet ranges: private ranges
-	// stay blocked for everyone, and so does the tailnet for every other credential.
-	tailnetRules, err := tailnetRules(cfg, creds, tags)
-	if err != nil {
-		return nil, err
-	}
-	rules = append(rules, tailnetRules...)
-	rules = append(rules, obj{"type": "field", "inboundTag": tags, "ip": blockedIPs, "outboundTag": "blocked"})
+	var rules []any
 	if u := users("direct"); u != nil {
 		rules = append(rules, obj{"type": "field", "user": u, "outboundTag": "direct"})
 	}
@@ -126,33 +140,47 @@ func Render(base []byte, creds []Cred, directGeoIP, directGeoSite, exitDNS []str
 	}
 	if u := users("auto"); u != nil {
 		if len(directGeoIP) > 0 {
-			rules = append(rules, obj{"type": "field", "user": u, "ip": prefixed("geoip:", directGeoIP), "outboundTag": "direct"})
+			rules = append(rules, obj{"type": "field", "user": u,
+				"ip": prefixed("geoip:", directGeoIP), "outboundTag": "direct"})
 		}
 		if len(directGeoSite) > 0 {
-			rules = append(rules, obj{"type": "field", "user": u, "domain": prefixed("geosite:", directGeoSite), "outboundTag": "direct"})
+			rules = append(rules, obj{"type": "field", "user": u,
+				"domain": prefixed("geosite:", directGeoSite), "outboundTag": "direct"})
 		}
 		rules = append(rules, obj{"type": "field", "user": u, "outboundTag": ExitOut})
 	}
-	if old, ok := routing["rules"].([]any); ok {
-		rules = append(rules, old...)
-	}
-	routing["rules"] = rules
-	return json.Marshal(cfg)
+	return rules
 }
 
-// dnsSection is xray's resolver config. Names on the direct site lists resolve with the system resolver (their
-// traffic leaves from this host, so the local answer is the right one); skipFallback keeps every other name off
-// it. All other lookups use exitDNS, which the DNSTag rule sends through via-exit. This replaces any dns section
-// of the base.
-func dnsSection(directGeoSite, exitDNS []string) obj {
+// setDNS writes xray's resolver config into cfg (replacing any dns section of the base) and
+// returns the routing rule that must come first: it sends xray's own queries to via-exit.
+// Without it, IPOnDemand looks up every name a client visits with the system resolver of
+// this host, in the network the clients want to avoid.
+//
+// Names on the direct site lists resolve with the system resolver (their traffic leaves from
+// this host, so the local answer is the right one); skipFallback keeps every other name off
+// it. All other lookups use exitDNS (empty: DefaultExitDNS).
+func setDNS(cfg obj, directGeoSite, exitDNS []string) (obj, error) {
+	if len(exitDNS) == 0 {
+		exitDNS = DefaultExitDNS
+	}
+	if !hasOutbound(cfg, ExitOut) {
+		return nil, fmt.Errorf("base config has no outbound tagged %s", ExitOut)
+	}
 	var servers []any
 	if len(directGeoSite) > 0 {
-		servers = append(servers, obj{"address": "localhost", "domains": prefixed("geosite:", directGeoSite), "skipFallback": true})
+		servers = append(servers, obj{"address": "localhost",
+			"domains": prefixed("geosite:", directGeoSite), "skipFallback": true})
 	}
-	for _, s := range exitDNS {
-		servers = append(servers, s)
+	for _, e := range exitDNS {
+		if !exitDNSEntry.MatchString(e) {
+			return nil, fmt.Errorf("invalid exit DNS server "+
+				"(want https://<ipv4>/<path> or tcp://<ipv4>[:port]): %q", e)
+		}
+		servers = append(servers, e)
 	}
-	return obj{"tag": DNSTag, "queryStrategy": "UseIPv4", "servers": servers}
+	cfg["dns"] = obj{"tag": DNSTag, "queryStrategy": "UseIPv4", "servers": servers}
+	return obj{"type": "field", "inboundTag": []any{DNSTag}, "outboundTag": ExitOut}, nil
 }
 
 // tailnetRules gives one rule for the "all" grants (outbound via-tailnet) and one rule per grant

@@ -8,12 +8,12 @@ Everything here is a placeholder. Replace the `<...>` values,
 `example.com`, and the sample node names with your own. The core repo does not use anything in this directory.
 
 ```
-Makefile                      glue: sops key, tf-run.sh targets, ansible, version bump
+Makefile                      only your values (apps, node-control URL, sops key), then include vendor/headlamp/mk/site.mk
 .sops.yaml.example            age recipients (rename to .sops.yaml)
 .gitignore                    keeps plaintext state/secrets out of your repo
 terraform/                    root stack using vendor/headlamp/terraform/modules (+ example vars)
 ansible/                      ansible.cfg, site.yml, inventory + vars examples
-fly/deploy.sh                 overlay deploy for the Fly apps
+fly/deploy.sh                 deprecated wrapper for old scripts: use make deploy-<app>
 fly/headscale/fly.toml        example headscale overlay (checked by make release-preflight)
 fly/node-control/tasks/       placeholder task config and a commented task script (tasks module)
 ```

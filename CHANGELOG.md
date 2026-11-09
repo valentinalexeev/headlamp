@@ -6,8 +6,13 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
+- `mk/site.mk` and `scripts/deploy-fly.sh` (#194). A site repo includes `vendor/headlamp/mk/site.mk` and sets only its values (`FLY_APPS`, `NODE_CONTROL_URL`, paths). Targets: `deploy-<app>`, `plan-deploy-<app>`, `deploy-all`, `tf-plan`/`tf-apply`/`tf-save`, `ansible-site`/`ansible-check`, `bump-tailscale-version` (now also deploys the Fly exit node), `policy-*`, `tasks-*`, `rotate-api-key-check`, `submodule-check`, `verify`. `deploy-fly.sh` runs from any directory of the site repo, refuses a dirty submodule or a checkout that differs from the pin, and passes `VERSION` and `TSVERSION` from the pins to the apps that declare them. `make test-site-mk` tests it.
 - `exit-node-vm/aws`: `authkey_from_secret` (bool). Set `true` when the auth key secret is made in the same stack (#222). Its ARN is then unknown at plan time, and the plan failed with "Invalid count argument". The default follows `authkey_secret_arn`, so existing callers do not change.
 - `exit-node-vm/aws`: `state_parameter_name` keeps the tailscaled state in SSM Parameter Store (#213). A node-control stop and start (a new instance, ADR 0001) is then the same headscale node, with the same id, name and IPs, and no stale offline node is left. The node role can read and write only that parameter. `state_kms_key_arn` sets a customer managed key. A node with a stored state does not use the auth key again. `make test-ssm-state-e2e` and `make test-ssm-state-vm-e2e` test it with headscale and LocalStack.
+
+### Deprecated
+
+- `examples/private-repo/fly/deploy.sh` is now a wrapper of `scripts/deploy-fly.sh` (#194). Use `make deploy-<app>`.
 
 ### Fixed
 

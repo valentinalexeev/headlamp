@@ -134,7 +134,7 @@ Pin the digest as well as the version.
 
 Two things do not use the published images yet:
 
-- `fly/deploy.sh` in [`examples/private-repo/`](../examples/private-repo/) still builds from source, with your files laid over the app directory. That keeps working.
+- `make deploy-<app>` (`scripts/deploy-fly.sh`, used by [`examples/private-repo/`](../examples/private-repo/)) still builds from source, with your files laid over the app directory. That keeps working.
 - The `task-runner` Ansible role builds the browser image on each node, or loads a `podman save` archive for nodes that cannot reach a registry. Set `task_runner_base_image` for the first, or `task_runner_image_archive` for the second.
 
 All images are `linux/amd64` for now.

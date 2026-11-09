@@ -75,7 +75,8 @@ type Self struct {
 	store Backend
 	hs    SelfHeadscale
 	idp   Refresher
-	// issuer is OIDC_ISSUER, as in the iss claim. It finds the headscale user of headscale's own OIDC login.
+	// issuer is OIDC_ISSUER, as in the iss claim. It finds the headscale user that
+	// headscale's own OIDC login made.
 	issuer string
 	// push sends the credential set to every bridge at once (Admin.syncNow without a request).
 	push func(ctx context.Context)
@@ -232,12 +233,15 @@ func hsUserName(sub string) string {
 	return "oidc-" + hashID(sub)[:16]
 }
 
-// ErrHSUserAmbiguous: more than one headscale user has the person's verified email, and none has the
-// person's OIDC identity. node-control does not guess, and makes no new user either (#253).
-var ErrHSUserAmbiguous = errors.New("your account matches more than one tailnet user; ask an administrator")
+// ErrHSUserAmbiguous: more than one headscale user has the person's verified email, and
+// none has the person's OIDC identity. node-control does not guess, and makes no new
+// user either (#253).
+var ErrHSUserAmbiguous = errors.New(
+	"your account matches more than one tailnet user; ask an administrator")
 
-// hsProviderID is the provider identifier that headscale's own OIDC login gives a user: "<issuer>/<subject>",
-// with no slash at the end of the issuer or at the start of the subject (headscale OIDCClaims.Identifier).
+// hsProviderID is the provider identifier that headscale's own OIDC login gives a user:
+// "<issuer>/<subject>", with no slash at the end of the issuer or at the start of the
+// subject (headscale OIDCClaims.Identifier).
 func hsProviderID(issuer, sub string) string {
 	if issuer == "" || sub == "" {
 		return ""
@@ -245,11 +249,13 @@ func hsProviderID(issuer, sub string) string {
 	return strings.TrimSuffix(issuer, "/") + "/" + strings.TrimPrefix(sub, "/")
 }
 
-// hsUser returns the person's headscale user, on the first device. It reuses a user that already belongs to the
-// person, so that one person is one headscale user (#253). In this order:
+// hsUser returns the person's headscale user, on the first device. It reuses a user that
+// already belongs to the person, so that one person is one headscale user (#253). In this
+// order:
 //  1. the user that headscale's own OIDC login made for the same issuer and subject;
-//  2. the user that an earlier attempt of node-control made (oidc-<hash>), but did not record;
-//  3. when the issuer said that the email is verified: the one user with that email (more than one: refuse);
+//  2. the user that an earlier attempt of node-control made (oidc-<hash>), not recorded;
+//  3. when the issuer said that the email is verified: the one user with that email
+//     (more than one: refuse);
 //  4. else a new user oidc-<hash>.
 func (s *Self) hsUser(ctx context.Context, u SelfUser) (uint64, error) {
 	if u.HSUserID != 0 {

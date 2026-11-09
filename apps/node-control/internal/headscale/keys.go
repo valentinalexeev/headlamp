@@ -12,8 +12,9 @@ import (
 type User struct {
 	ID   uint64
 	Name string
-	// Email and ProviderID come from GET /api/v1/user. ProviderID is "<issuer>/<subject>" for a user that
-	// headscale's own OIDC login made, and empty for a user made through the API (#253).
+	// Email and ProviderID come from GET /api/v1/user. ProviderID is "<issuer>/<subject>"
+	// for a user that headscale's own OIDC login made, and empty for a user made through the
+	// API (#253).
 	Email      string
 	ProviderID string
 }

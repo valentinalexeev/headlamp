@@ -362,7 +362,8 @@ func (s *SelfWeb) enrol(w http.ResponseWriter, r *http.Request, sub, csrf string
 	}
 	e, err := s.self.Enrol(r.Context(), sub, name, client, s.link())
 	switch {
-	case errors.Is(err, ErrDeviceLimit), errors.Is(err, ErrLocked), errors.Is(err, ErrHSUserAmbiguous):
+	case errors.Is(err, ErrDeviceLimit), errors.Is(err, ErrLocked),
+		errors.Is(err, ErrHSUserAmbiguous):
 		v.Error = err.Error()
 		s.render(w, http.StatusConflict, v)
 		return

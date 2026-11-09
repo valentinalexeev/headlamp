@@ -28,6 +28,7 @@ type Applier struct {
 	Runner                          *Runner
 	Clock                           func() int64
 	DirectGeoIP, DirectGeoSite      []string
+	ExitDNS                         []string // resolvers reached through via-exit; empty: DefaultExitDNS
 	Log                             *slog.Logger
 	mu                              sync.Mutex
 	// rendered is the list of grant group outbounds of the base at the last render (#139). When a
@@ -69,7 +70,7 @@ func (a *Applier) render(creds []Cred) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Render(base, creds, a.DirectGeoIP, a.DirectGeoSite)
+	return Render(base, creds, a.DirectGeoIP, a.DirectGeoSite, a.ExitDNS)
 }
 
 // install writes the config next to the live one, has xray validate it, then replaces the live file. The

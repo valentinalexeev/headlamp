@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -223,7 +224,7 @@ func TestEmailIsDeterministicAndOpaque(t *testing.T) {
 
 func render(t *testing.T, b []byte, cs []Cred, ip, site []string) map[string]any {
 	t.Helper()
-	out, err := Render(b, cs, ip, site)
+	out, err := Render(b, cs, ip, site, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,13 +249,14 @@ func TestRuleOrder(t *testing.T) {
 	cfg := render(t, base, []Cred{cred(u1, "direct", 9), cred(u2, "exit", 9), cred(u3, "auto", 9)}, []string{"xx", "yy"}, []string{"zz"})
 	rules := cfg["routing"].(map[string]any)["rules"].([]any)
 	e := EmailFor
-	jsonEq(t, rules[0], `{"type":"field","inboundTag":["reality-in"],"ip":["geoip:private","100.64.0.0/10"],"outboundTag":"blocked"}`)
-	jsonEq(t, rules[1], fmt.Sprintf(`{"type":"field","user":[%q],"outboundTag":"direct"}`, e(u1)))
-	jsonEq(t, rules[2], fmt.Sprintf(`{"type":"field","user":[%q],"outboundTag":"via-exit"}`, e(u2)))
-	jsonEq(t, rules[3], fmt.Sprintf(`{"type":"field","user":[%q],"ip":["geoip:xx","geoip:yy"],"outboundTag":"direct"}`, e(u3)))
-	jsonEq(t, rules[4], fmt.Sprintf(`{"type":"field","user":[%q],"domain":["geosite:zz"],"outboundTag":"direct"}`, e(u3)))
-	jsonEq(t, rules[5], fmt.Sprintf(`{"type":"field","user":[%q],"outboundTag":"via-exit"}`, e(u3)))
-	jsonEq(t, rules[6:], `[{"type":"field","inboundTag":["api"],"outboundTag":"api"}]`)
+	jsonEq(t, rules[0], dnsRule)
+	jsonEq(t, rules[1], `{"type":"field","inboundTag":["reality-in"],"ip":["geoip:private","100.64.0.0/10"],"outboundTag":"blocked"}`)
+	jsonEq(t, rules[2], fmt.Sprintf(`{"type":"field","user":[%q],"outboundTag":"direct"}`, e(u1)))
+	jsonEq(t, rules[3], fmt.Sprintf(`{"type":"field","user":[%q],"outboundTag":"via-exit"}`, e(u2)))
+	jsonEq(t, rules[4], fmt.Sprintf(`{"type":"field","user":[%q],"ip":["geoip:xx","geoip:yy"],"outboundTag":"direct"}`, e(u3)))
+	jsonEq(t, rules[5], fmt.Sprintf(`{"type":"field","user":[%q],"domain":["geosite:zz"],"outboundTag":"direct"}`, e(u3)))
+	jsonEq(t, rules[6], fmt.Sprintf(`{"type":"field","user":[%q],"outboundTag":"via-exit"}`, e(u3)))
+	jsonEq(t, rules[7:], `[{"type":"field","inboundTag":["api"],"outboundTag":"api"}]`)
 	cl := clients(cfg, 1)
 	jsonEq(t, cl[0], fmt.Sprintf(`{"id":%q,"email":%q,"flow":"xtls-rprx-vision"}`, u1, e(u1)))
 	if len(cl) != 3 {
@@ -267,19 +269,19 @@ func TestRuleOrder(t *testing.T) {
 
 func TestBlockRuleFirstWithZeroCreds(t *testing.T) {
 	rules := render(t, base, nil, nil, nil)["routing"].(map[string]any)["rules"].([]any)
-	if len(rules) != 2 || rules[0].(map[string]any)["outboundTag"] != "blocked" {
+	if len(rules) != 3 || rules[1].(map[string]any)["outboundTag"] != "blocked" {
 		t.Errorf("rules %v", rules)
 	}
 }
 
 func TestRenderRefusals(t *testing.T) {
-	if _, err := Render(base, nil, []string{"bad entry"}, nil); err == nil {
+	if _, err := Render(base, nil, []string{"bad entry"}, nil, nil); err == nil {
 		t.Error("an invalid direct list entry is accepted")
 	}
-	if _, err := Render([]byte(`{"inbounds":[],"routing":{}}`), nil, nil, nil); err == nil {
+	if _, err := Render([]byte(`{"inbounds":[],"routing":{}}`), nil, nil, nil, nil); err == nil {
 		t.Error("a base without reality-in is accepted")
 	}
-	if _, err := Render([]byte(`{"inbounds":[{"tag":"reality-in"}]}`), nil, nil, nil); err == nil {
+	if _, err := Render([]byte(`{"inbounds":[{"tag":"reality-in"}]}`), nil, nil, nil, nil); err == nil {
 		t.Error("a base without routing is accepted")
 	}
 }
@@ -291,10 +293,10 @@ func TestHy2(t *testing.T) {
 	hb, _ := json.Marshal(b)
 	cfg := render(t, hb, []Cred{cred(u1, "direct", 9), cred(u2, "exit", 9)}, nil, nil)
 	jsonEq(t, clients(cfg, 2), fmt.Sprintf(`[{"auth":%q,"email":%q},{"auth":%q,"email":%q}]`, u1, EmailFor(u1), u2, EmailFor(u2)))
-	jsonEq(t, cfg["routing"].(map[string]any)["rules"].([]any)[0].(map[string]any)["inboundTag"], `["reality-in","hy2-in"]`)
+	jsonEq(t, cfg["routing"].(map[string]any)["rules"].([]any)[1].(map[string]any)["inboundTag"], `["reality-in","hy2-in"]`)
 	b["inbounds"].([]any)[2].(map[string]any)["protocol"] = "vless"
 	hb, _ = json.Marshal(b)
-	if _, err := Render(hb, nil, nil, nil); err == nil {
+	if _, err := Render(hb, nil, nil, nil, nil); err == nil {
 		t.Error("hy2-in with another protocol is accepted")
 	}
 }
@@ -680,14 +682,14 @@ func TestTailnetGrantRuleComesFirstAndOnlyForGranted(t *testing.T) {
 	g := Cred{UUID: u1, Mode: "direct", NotAfter: 9, Tailnet: "all"}
 	cfg := render(t, withTailnetOut(t), []Cred{g, cred(u2, "exit", 9)}, nil, nil)
 	rules := cfg["routing"].(map[string]any)["rules"].([]any)
-	jsonEq(t, rules[0], fmt.Sprintf(`{"type":"field","inboundTag":["reality-in"],"user":[%q],"ip":["100.64.0.0/10","fd7a:115c:a1e0::/48"],"outboundTag":"via-tailnet"}`, EmailFor(u1)))
-	jsonEq(t, rules[1], `{"type":"field","inboundTag":["reality-in"],"ip":["geoip:private","100.64.0.0/10"],"outboundTag":"blocked"}`)
+	jsonEq(t, rules[1], fmt.Sprintf(`{"type":"field","inboundTag":["reality-in"],"user":[%q],"ip":["100.64.0.0/10","fd7a:115c:a1e0::/48"],"outboundTag":"via-tailnet"}`, EmailFor(u1)))
+	jsonEq(t, rules[2], `{"type":"field","inboundTag":["reality-in"],"ip":["geoip:private","100.64.0.0/10"],"outboundTag":"blocked"}`)
 	// u2 has no grant: it is not in the tailnet rule, so the block rule catches its tailnet traffic
-	if strings.Contains(fmt.Sprint(rules[0]), EmailFor(u2)) {
+	if strings.Contains(fmt.Sprint(rules[1]), EmailFor(u2)) {
 		t.Error("an ungranted credential is in the tailnet rule")
 	}
 	// private ranges other than the tailnet are not in the tailnet rule
-	if strings.Contains(fmt.Sprint(rules[0]), "geoip:private") {
+	if strings.Contains(fmt.Sprint(rules[1]), "geoip:private") {
 		t.Error("the tailnet rule must not open private ranges")
 	}
 }
@@ -702,7 +704,7 @@ func TestNoGrantNoTailnetRule(t *testing.T) {
 }
 
 func TestGrantWithoutOutboundIsRefused(t *testing.T) {
-	if _, err := Render(base, []Cred{{UUID: u1, Mode: "auto", NotAfter: 9, Tailnet: "all"}}, nil, nil); err == nil || !strings.Contains(err.Error(), "via-tailnet") {
+	if _, err := Render(base, []Cred{{UUID: u1, Mode: "auto", NotAfter: 9, Tailnet: "all"}}, nil, nil, nil); err == nil || !strings.Contains(err.Error(), "via-tailnet") {
 		t.Errorf("got %v", err)
 	}
 }
@@ -759,10 +761,10 @@ func TestGroupRulesOnePerGroupBeforeBlock(t *testing.T) {
 		{UUID: u3, Mode: "auto", NotAfter: 9}}
 	cfg := render(t, withGroupOuts(t, gA, gB), cs, nil, nil)
 	rules := cfg["routing"].(map[string]any)["rules"].([]any)
-	jsonEq(t, rules[0], fmt.Sprintf(`{"type":"field","inboundTag":["reality-in"],"user":[%q],"ip":["100.64.0.0/10","fd7a:115c:a1e0::/48"],"outboundTag":%q}`, EmailFor(u1), GroupOutbound(gA)))
-	jsonEq(t, rules[1], fmt.Sprintf(`{"type":"field","inboundTag":["reality-in"],"user":[%q],"ip":["100.64.0.0/10","fd7a:115c:a1e0::/48"],"outboundTag":%q}`, EmailFor(u2), GroupOutbound(gB)))
-	if rules[2].(map[string]any)["outboundTag"] != "blocked" {
-		t.Errorf("the block rule must follow the group rules: %v", rules[2])
+	jsonEq(t, rules[1], fmt.Sprintf(`{"type":"field","inboundTag":["reality-in"],"user":[%q],"ip":["100.64.0.0/10","fd7a:115c:a1e0::/48"],"outboundTag":%q}`, EmailFor(u1), GroupOutbound(gA)))
+	jsonEq(t, rules[2], fmt.Sprintf(`{"type":"field","inboundTag":["reality-in"],"user":[%q],"ip":["100.64.0.0/10","fd7a:115c:a1e0::/48"],"outboundTag":%q}`, EmailFor(u2), GroupOutbound(gB)))
+	if rules[3].(map[string]any)["outboundTag"] != "blocked" {
+		t.Errorf("the block rule must follow the group rules: %v", rules[3])
 	}
 }
 
@@ -826,4 +828,49 @@ func mustRead(t *testing.T, p string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+const dnsRule = `{"type":"field","inboundTag":["dns-internal"],"outboundTag":"via-exit"}`
+
+// xray's own lookups (IPOnDemand resolves every domain destination for the IP rules) must go through the exit
+// node, not the system resolver of the bridge host: that would show every visited name to the local network.
+func TestDNSGoesThroughExit(t *testing.T) {
+	cfg := render(t, base, []Cred{cred(u1, "exit", 9)}, nil, nil)
+	rules := cfg["routing"].(map[string]any)["rules"].([]any)
+	jsonEq(t, rules[0], dnsRule)
+	jsonEq(t, cfg["dns"], `{"tag":"dns-internal","queryStrategy":"UseIPv4","servers":["https://1.1.1.1/dns-query","https://1.0.0.1/dns-query"]}`)
+	if strings.Contains(fmt.Sprint(cfg["dns"]), "localhost") {
+		t.Error("without direct site lists no name may use the system resolver")
+	}
+}
+
+func TestDNSDirectSitesResolveLocallyOnly(t *testing.T) {
+	cfg := render(t, base, []Cred{cred(u1, "auto", 9)}, []string{"xx"}, []string{"zz"})
+	jsonEq(t, cfg["dns"], `{"tag":"dns-internal","queryStrategy":"UseIPv4","servers":[`+
+		`{"address":"localhost","domains":["geosite:zz"],"skipFallback":true},`+
+		`"https://1.1.1.1/dns-query","https://1.0.0.1/dns-query"]}`)
+}
+
+func TestDNSReplacesBaseSectionAndTakesOverride(t *testing.T) {
+	b := bytes.Replace(base, []byte(`"routing"`), []byte(`"dns": {"servers": ["localhost"]}, "routing"`), 1)
+	out, err := Render(b, nil, nil, nil, []string{"tcp://192.0.2.53:53", "https://192.0.2.1/dns-query"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(out, &m)
+	jsonEq(t, m["dns"], `{"tag":"dns-internal","queryStrategy":"UseIPv4","servers":["tcp://192.0.2.53:53","https://192.0.2.1/dns-query"]}`)
+}
+
+func TestDNSRefusals(t *testing.T) {
+	for _, bad := range []string{"localhost", "1.1.1.1", "udp://1.1.1.1", "https://dns.example.com/dns-query",
+		"tcp://dns.example.com", "https+local://1.1.1.1/dns-query", "tcp://1.1.1.1 x"} {
+		if _, err := Render(base, nil, nil, nil, []string{bad}); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	noExit := bytes.Replace(base, []byte(`{"tag": "via-exit"}`), []byte(`{"tag": "other"}`), 1)
+	if _, err := Render(noExit, nil, nil, nil, nil); err == nil || !strings.Contains(err.Error(), "via-exit") {
+		t.Errorf("a base without via-exit must be refused: %v", err)
+	}
 }

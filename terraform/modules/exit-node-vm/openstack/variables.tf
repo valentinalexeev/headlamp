@@ -138,3 +138,15 @@ variable "extra_udp_ingress_ports" {
     error_message = "extra_udp_ingress_ports: whole numbers 1-65535."
   }
 }
+
+variable "tags" {
+  type        = list(string)
+  default     = []
+  description = "Tags on the instance, port, network, subnet, router, security group and floating IP (Nova and Neutron tags). Use them to find the node's resources, e.g. openstack port list --tags <tag>. The instance also gets \"preemptible\" when preemptible = true."
+}
+
+variable "metadata" {
+  type        = map(string)
+  default     = {}
+  description = "Metadata (key = value) on the instance and the boot volume. Cinder volumes have no tags, so use this to find the volume, e.g. openstack volume list --property <key>=<value>."
+}

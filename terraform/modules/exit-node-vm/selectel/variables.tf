@@ -125,3 +125,13 @@ variable "extra_udp_ingress_ports" {
   type    = list(number)
   default = []
 }
+
+variable "tags" {
+  type    = list(string)
+  default = []
+}
+
+variable "metadata" {
+  type    = map(string)
+  default = {}
+}

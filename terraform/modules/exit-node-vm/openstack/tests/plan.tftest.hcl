@@ -107,3 +107,41 @@ run "bridge_bootstrap_does_not_advertise_exit" {
     error_message = "a bridge bootstrap must not advertise exit routes"
   }
 }
+
+run "no_tags_or_metadata_by_default" {
+  command = plan
+
+  assert {
+    condition     = openstack_networking_port_v2.this.tags == null && openstack_compute_instance_v2.this.tags == null && local.metadata == null
+    error_message = "without tags and metadata the module must set none, so that existing stacks plan no change"
+  }
+}
+
+run "tags_and_metadata_reach_the_node_resources" {
+  command = plan
+  variables {
+    tags        = ["site-a", "headlamp"]
+    metadata    = { project = "site-a" }
+    preemptible = true
+  }
+
+  assert {
+    condition = alltrue([for t in [
+      openstack_networking_port_v2.this.tags,
+      openstack_networking_secgroup_v2.this.tags,
+      openstack_networking_network_v2.this.tags,
+      openstack_networking_subnet_v2.this.tags,
+      openstack_networking_router_v2.this.tags,
+      openstack_networking_floatingip_v2.this.tags,
+    ] : toset(t) == toset(["site-a", "headlamp"])])
+    error_message = "every neutron resource must carry the tags"
+  }
+  assert {
+    condition     = toset(openstack_compute_instance_v2.this.tags) == toset(["site-a", "headlamp", "preemptible"])
+    error_message = "the instance must carry the tags and keep the preemptible tag"
+  }
+  assert {
+    condition     = openstack_blockstorage_volume_v3.boot.metadata == tomap({ project = "site-a" }) && openstack_compute_instance_v2.this.metadata == tomap({ project = "site-a" })
+    error_message = "the boot volume and the instance must carry the metadata"
+  }
+}

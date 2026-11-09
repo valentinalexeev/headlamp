@@ -193,7 +193,7 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 		if err != nil {
 			return fmt.Errorf("listen %s: %w", name, err)
 		}
-		servers = append(servers, &srv{name, ln, newHTTPServer(h, name == "public")})
+		servers = append(servers, &srv{name, ln, newHTTPServer(h, name == "public" || name == "public-plain")})
 		return nil
 	}
 	if err := add("admin", hostGuard(allowed, NavMiddleware(navItems, navActions, tn, admin)), tn.ListenAdmin); err != nil {
@@ -203,6 +203,17 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 		if err := add("public", cleanPathGuard(public), tn.ListenPublic); err != nil {
 			closeAll()
 			return err
+		}
+		// ENROLL_PUBLIC_LISTEN (optional, host:port): the same public enrolment handler also on a plain TCP address,
+		// for a TLS edge on the same host (compose network) that serves link_host itself, so people can enrol
+		// before they have any tunnel. Only the public pages are there; the admin app stays tailnet-only.
+		if addr := env.Getenv("ENROLL_PUBLIC_LISTEN"); addr != "" {
+			if err := add("public-plain", cleanPathGuard(public), func() (net.Listener, error) {
+				return net.Listen("tcp", addr)
+			}); err != nil {
+				closeAll()
+				return err
+			}
 		}
 	}
 

@@ -68,6 +68,8 @@ services:
     environment:
       # headscale on the compose network: no public round trip, and the control URL nodes see stays the public one
       HEADSCALE_LOGIN_SERVER: https://${HEADSCALE_DOMAIN}
+      # The public enrolment pages also on the compose network, for the edge's ENROLL_DOMAIN block (not published).
+      ENROLL_PUBLIC_LISTEN: ":8081"
     volumes:
       - ${DATA_DIR:-/srv/headlamp/data}/node-control:/var/lib/tailscale
       - ./config/node-control:/srv/app:ro

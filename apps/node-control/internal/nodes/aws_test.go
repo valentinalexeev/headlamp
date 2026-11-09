@@ -363,3 +363,75 @@ func TestAWSErrorsRedactIdentities(t *testing.T) {
 		t.Errorf("error lost its useful part: %s", msg)
 	}
 }
+
+// #220: with no region in the block and no AWS_REGION, the host's region from IMDS is the default, looked up once.
+func TestAWSRegionFromIMDS(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeEC2{instances: []fakeInstance{{"i-0abc", "exit-a", "running", "t3.micro", ""}}}
+	p := newAWSTest(t, f, map[string]string{"AWS_REGION": ""}).(*awsProvider)
+	calls := 0
+	p.hostRegion = func(context.Context) string { calls++; return "xx-test-1" }
+	for range 3 {
+		st, err := p.Status(ctx, Target{Name: "exit-a"})
+		if err != nil || st["status"] != "RUNNING" {
+			t.Fatalf("status with the IMDS region: %v %v", st, err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("IMDS asked %d times, want once", calls)
+	}
+
+	t.Run("AWS_REGION wins over IMDS", func(t *testing.T) {
+		p := newAWSTest(t, f, map[string]string{"AWS_REGION": "xx-test-1"}).(*awsProvider)
+		p.hostRegion = func(context.Context) string { t.Fatal("IMDS must not be asked when AWS_REGION is set"); return "" }
+		if _, err := p.Status(ctx, Target{Name: "exit-a"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("not on EC2: the error names the fix", func(t *testing.T) {
+		p := newAWSTest(t, f, map[string]string{"AWS_REGION": ""}).(*awsProvider)
+		p.hostRegion = func(context.Context) string { return "" }
+		_, err := p.Status(ctx, Target{Name: "exit-a"})
+		if !errors.Is(err, ErrNotConfigured) || !strings.Contains(err.Error(), "AWS_REGION") || !strings.Contains(err.Error(), "IMDS") {
+			t.Fatalf("got %v", err)
+		}
+	})
+}
+
+// imdsRegion against a fake IMDSv2: a token from PUT /latest/api/token, then the identity document with that token.
+// Without the token the fake answers 401, as IMDSv2 with http_tokens = "required" does.
+func TestIMDSRegion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/latest/api/token":
+			w.Header().Set("X-Aws-Ec2-Metadata-Token-Ttl-Seconds", "21600")
+			_, _ = w.Write([]byte("tok"))
+		case r.Header.Get("X-Aws-Ec2-Metadata-Token") != "tok":
+			http.Error(w, "token required", http.StatusUnauthorized)
+		case r.URL.Path == "/latest/dynamic/instance-identity/document":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"region":"eu-central-1","instanceId":"i-0abc","accountId":"123456789012"}`))
+		case r.URL.Path == "/latest/meta-data/placement/region":
+			_, _ = w.Write([]byte("eu-central-1"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "")
+	t.Setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", srv.URL)
+	t.Setenv("AWS_CONFIG_FILE", t.TempDir()+"/none")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", t.TempDir()+"/none")
+	if got := imdsRegion(context.Background()); got != "eu-central-1" {
+		t.Fatalf("imdsRegion = %q", got)
+	}
+	t.Setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", "http://127.0.0.1:1")
+	if got := imdsRegion(context.Background()); got != "" {
+		t.Fatalf("no IMDS: got %q, want empty", got)
+	}
+	t.Setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", srv.URL)
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	if got := imdsRegion(context.Background()); got != "" {
+		t.Fatalf("AWS_EC2_METADATA_DISABLED=true: got %q, want empty", got)
+	}
+}

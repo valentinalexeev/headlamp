@@ -243,3 +243,45 @@ run "rejects_a_relative_parameter_name" {
   }
   expect_failures = [var.state_parameter_name]
 }
+
+# #222: the secret is created in the same stack, so its ARN is unknown at plan. With authkey_from_secret = true the
+# plan works. Without it the module cannot know at plan time whether a role is needed.
+# #222: the secret is made in the same stack, so its ARN is unknown at plan. authkey_from_secret = true decides at plan.
+run "same_stack_secret_plans_with_authkey_from_secret" {
+  command = plan
+  module {
+    source = "./tests/same-stack"
+  }
+
+  assert {
+    condition     = module.node.role_name == "n1-exit-node"
+    error_message = "a same-stack secret must plan, with the node role made"
+  }
+}
+
+run "authkey_from_secret_true_without_arn_is_refused" {
+  command = plan
+  variables {
+    tailscale_authkey   = "tskey-0000"
+    authkey_from_secret = true
+  }
+  expect_failures = [var.authkey_from_secret]
+}
+
+# #225: the launch request tags the instance, its volume and its network interface.
+run "launch_tags_volume_and_network_interface" {
+  command = plan
+  variables {
+    tailscale_authkey = "tskey-0000"
+    tags              = { Project = "vpn" }
+  }
+
+  assert {
+    condition     = toset([for s in aws_launch_template.this.tag_specifications : s.resource_type]) == toset(["instance", "volume", "network-interface"])
+    error_message = "the launch template must tag instance, volume and network-interface"
+  }
+  assert {
+    condition     = alltrue([for s in aws_launch_template.this.tag_specifications : s.tags["Project"] == "vpn"])
+    error_message = "every tag specification must carry the site tags"
+  }
+}

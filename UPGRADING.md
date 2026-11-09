@@ -22,6 +22,16 @@ No action required.
   (`headscale nodes delete -i <old id>`).
 
   Check: after a stop and start, `headscale nodes list` shows the same id and name, and no `<name>-1`.
+- **AWS: a secret made in the same stack** (#222). If your root stack makes the auth key secret in the same apply as
+  `exit-node-vm/aws`, set `authkey_from_secret = true`. Without it, the plan fails with "Invalid count argument".
+
+  Check: `terraform plan` of the stack has no "Invalid count argument".
+
+### Defaults that changed
+
+- `control-host/aws` and `exit-node-vm/aws` (with `tags`) now tag the root volume and the network interface (#225).
+  `terraform plan` shows these tag changes in place. A deployer policy with `aws:RequestTag` conditions: see the
+  control-host README, "Deploying identity with tag conditions".
 
 
 ### Action required

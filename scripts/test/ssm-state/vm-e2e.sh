@@ -71,7 +71,7 @@ cat > "$T/r/main.tf" <<EOF
 output "ud" {
   sensitive = true
   value = templatefile("$mod/templates/cloud-init-v2.yaml.tmpl", {
-    headscale_login_server = "http://$hs", tailscale_authkey = "$key", authkey_secret_arn = null,
+    headscale_login_server = "http://$hs", tailscale_authkey = "$key", authkey_secret_arn = null, use_secret = false,
     tailscale_version = "$tsv", hostname = "cobalt", fetch_secret_b64 = "",
     state_arn = "arn:aws:ssm:eu-central-1:000000000000:parameter/headlamp/cobalt/tailscaled" })
 }

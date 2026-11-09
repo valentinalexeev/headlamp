@@ -52,6 +52,21 @@ docker run --rm amazon/aws-cli sts get-caller-identity   # shows the host role
 
 The change applies in place, with no new instance.
 
+## Deploying identity with tag conditions
+
+Some accounts let the deploying identity create resources only with the site tags (`aws:RequestTag/<key>` on
+`ec2:RunInstances`). Set the same tags in `tags`. The module then tags these resources (#225):
+
+| Resource | When |
+|---|---|
+| Instance, root volume | In the `RunInstances` request (`tags`, `root_block_device.tags`) |
+| Data volume, security group, roles, load balancer | When each is made |
+| Primary network interface | Just after the launch (`aws_ec2_tag`): `aws_instance` cannot tag it in the request |
+
+So the policy can require the tags on `instance/*` and `volume/*` in `RunInstances`. It must allow
+`network-interface/*` in `RunInstances` with no tag condition, and allow `ec2:CreateTags` on `network-interface/*`.
+The instance keeps its condition, so no untagged instance can start.
+
 ## Boot image
 
 The module uses the newest Canonical AMI of Ubuntu 26.04 LTS in the flavor of `image_flavor`. The default flavor is

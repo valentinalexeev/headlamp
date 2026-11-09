@@ -166,3 +166,14 @@ variable "state_kms_key_arn" {
     error_message = "state_kms_key_arn must be a KMS key ARN (arn:aws:kms:<region>:<account>:key/<id>)."
   }
 }
+
+variable "authkey_from_secret" {
+  type        = bool
+  default     = null
+  description = "Read the auth key from authkey_secret_arn. Null (default): true when authkey_secret_arn is set. Set it to true when the secret is made in the same stack: its ARN is then unknown at plan time, and Terraform cannot count the node role from it (#222)."
+
+  validation {
+    condition     = var.authkey_from_secret != true || var.authkey_secret_arn != null
+    error_message = "authkey_from_secret = true needs authkey_secret_arn."
+  }
+}

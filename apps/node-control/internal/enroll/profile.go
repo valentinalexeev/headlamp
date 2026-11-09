@@ -94,8 +94,8 @@ func SubURL(cfg IngressConfig, secret string) string {
 	return "https://" + cfg.Link().Host + "/sub/" + secret
 }
 
-// DeepLinkFor builds the import link of one app of the catalog (clients.go) for a subscription URL and a label.
-// An unknown app is an error.
+// DeepLinkFor builds the import link of one app of the catalog (clients.go) for a subscription URL
+// and a label. An unknown app is an error.
 func DeepLinkFor(client, subURL, name string) (string, error) {
 	c, ok := ClientByID(client)
 	if !ok {
@@ -296,8 +296,8 @@ func RenderClashProfile(cfg IngressConfig, d Device) ([]byte, error) {
 	return renderClash(cfg, d, false)
 }
 
-// RenderStashProfile renders the Clash profile in Stash's dialect: the VLESS server name is "sni" and the
-// Hysteria 2 password is "auth".
+// RenderStashProfile renders the Clash profile in Stash's dialect: the VLESS server name is "sni"
+// and the Hysteria 2 password is "auth".
 func RenderStashProfile(cfg IngressConfig, d Device) ([]byte, error) {
 	return renderClash(cfg, d, true)
 }
@@ -446,10 +446,11 @@ func hy2Outbound(mode string, i Ingress, uuid string) obj {
 	return append(o, kv{"tls", obj{{"enabled", true}, {"server_name", i.Host}, {"alpn", strs([]string{"h3"})}}})
 }
 
-// RenderURIList renders the profile as share links: one vless:// link per mode and bridge, and one hysteria2:// link
-// where the bridge has Hysteria 2, joined by newlines and base64-encoded (the subscription format of URI-based apps).
-// A link list has no groups: the app lists every link, and the person picks one. The fragment of each link is its
-// tag (mode and bridge), never the device name.
+// RenderURIList renders the profile as share links: one vless:// link per mode and bridge, and one
+// hysteria2:// link where the bridge has Hysteria 2, joined by newlines and base64-encoded (the
+// subscription format of URI-based apps). A link list has no groups: the app lists every link, and
+// the person picks one. The fragment of each link is its tag (mode and bridge), never the device
+// name.
 func RenderURIList(cfg IngressConfig, d Device) ([]byte, error) {
 	if err := checkModes(d); err != nil {
 		return nil, err
@@ -461,15 +462,18 @@ func RenderURIList(cfg IngressConfig, d Device) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			q := "encryption=none&flow=xtls-rprx-vision&security=reality&sni=" + quote(i.SNI) + "&fp=chrome&pbk=" +
-				quote(i.PublicKey) + "&sid=" + quote(i.ShortID) + "&type=tcp"
-			lines = append(lines, "vless://"+uuid+"@"+hostPort(i.Host, i.Port)+"?"+q+"#"+quote(outboundTag(cfg, m, i)))
+			q := "encryption=none&flow=xtls-rprx-vision&security=reality&sni=" + quote(i.SNI) +
+				"&fp=chrome&pbk=" + quote(i.PublicKey) + "&sid=" + quote(i.ShortID) + "&type=tcp"
+			tag := quote(outboundTag(cfg, m, i))
+			lines = append(lines, "vless://"+uuid+"@"+hostPort(i.Host, i.Port)+"?"+q+"#"+tag)
 			if i.Hy2Port != 0 {
 				q := "sni=" + quote(i.Host) + "&alpn=h3"
 				if i.Hy2Obfs != "" {
 					q += "&obfs=salamander&obfs-password=" + quote(i.Hy2Obfs)
 				}
-				lines = append(lines, "hysteria2://"+quote(uuid)+"@"+hostPort(i.Host, i.Hy2Port)+"/?"+q+"#"+quote(hy2Tag(m, i)))
+				addr := hostPort(i.Host, i.Hy2Port)
+				tag := quote(hy2Tag(m, i))
+				lines = append(lines, "hysteria2://"+quote(uuid)+"@"+addr+"/?"+q+"#"+tag)
 			}
 		}
 	}
@@ -482,7 +486,9 @@ func RenderURIList(cfg IngressConfig, d Device) ([]byte, error) {
 func hostPort(host string, port int) string { return host + ":" + strconv.Itoa(port) }
 
 // RenderFormat renders a device's profile in one format, with its content type.
-func RenderFormat(cfg IngressConfig, d Device, format string) (body []byte, ctype string, err error) {
+func RenderFormat(cfg IngressConfig, d Device, format string) (
+	body []byte, ctype string, err error,
+) {
 	switch format {
 	case FormatClash:
 		body, err = RenderClashProfile(cfg, d)

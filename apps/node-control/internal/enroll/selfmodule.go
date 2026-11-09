@@ -63,6 +63,13 @@ func selfConfig(env core.Env) (oidc.Config, SelfConfig, string, error) {
 		}
 		x.set(n)
 	}
+	switch v := strings.ToLower(strings.TrimSpace(env.Getenv("OIDC_INVITE_ONLY"))); v {
+	case "", "false", "0", "no":
+	case "true", "1", "yes":
+		sc.InviteOnly = true
+	default:
+		return oidc.Config{}, SelfConfig{}, "", errors.New(errInviteOnlyValue)
+	}
 	sc.defaults()
 	return rp, sc, env.Getenv("OIDC_DB"), nil
 }
@@ -88,6 +95,10 @@ func (m *Module) registerSelf(r *core.Routes, key []byte) error {
 	if err != nil {
 		return err
 	}
+	icons, err := LoadIcons(m.env.Getenv("ENROLL_CLIENT_ICON_DIR"))
+	if err != nil {
+		return err
+	}
 	users, err := OpenSelfStore(path, key, m.now)
 	if err != nil {
 		return err
@@ -97,11 +108,105 @@ func (m *Module) registerSelf(r *core.Routes, key []byte) error {
 		SyncAll(ctx, m.store, m.reg.Current(ctx, false).Cfg, m.reg.Current(ctx, false).SyncTargets)
 	}}
 	admin.self = m.self
-	(&SelfWeb{self: m.self, rp: rp, link: m.reg.LinkConfig}).Register(r.Public)
+	(&SelfWeb{self: m.self, rp: rp, link: m.reg.LinkConfig, icons: icons}).Register(r.Public)
 	r.Admin.HandleFunc("GET /enroll/people", admin.listPeople)
 	r.Admin.HandleFunc("POST /enroll/people/{sub}/lock", admin.jsonOnly(admin.lockPerson))
 	r.Admin.HandleFunc("POST /enroll/people/{sub}/unlock", admin.jsonOnly(admin.unlockPerson))
+	admin.registerInvites(r.Admin)
 	return nil
+}
+
+// errInviteOnlyValue says what each value of OIDC_INVITE_ONLY does.
+const errInviteOnlyValue = "OIDC_INVITE_ONLY must be true or false (true: only an invitation " +
+	"can add a device; false, the default: the \"Add a device\" form of /me stays)"
+
+// Invitation limits.
+const (
+	defaultInviteDays = 7
+	maxInviteDays     = 90
+	defaultInviteName = "Invited device"
+	minEmailLen       = 3
+	maxEmailLen       = 254
+	maxDeviceName     = 100
+	day               = 24 * time.Hour
+)
+
+func (a *Admin) registerInvites(mux *core.Mux) {
+	mux.HandleFunc("GET /enroll/invites", a.listInvites)
+	mux.HandleFunc("POST /enroll/invites", a.jsonOnly(a.createInvite))
+	mux.HandleFunc("POST /enroll/invites/{id}/revoke", a.jsonOnly(a.revokeInvite))
+}
+
+// listInvites answers GET /enroll/invites: every invitation, newest first, never a token.
+func (a *Admin) listInvites(w http.ResponseWriter, r *http.Request) {
+	invs, err := a.self.users.Invites(r.Context())
+	if err != nil {
+		a.internal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"invites": invs})
+}
+
+// createInvite answers POST /enroll/invites {"email", "device_name"?, "days"?}: an invitation for
+// one email address, with its link. The link is in this answer only.
+func (a *Admin) createInvite(w http.ResponseWriter, r *http.Request) {
+	obj, ok := readObject(w, r)
+	if !ok {
+		return
+	}
+	var v validator
+	email := strings.TrimSpace(v.str(obj, "email", minEmailLen, maxEmailLen))
+	name := defaultInviteName
+	if _, present := obj["device_name"]; present {
+		name = strings.TrimSpace(v.str(obj, "device_name", 1, maxDeviceName))
+	}
+	days := int64(defaultInviteDays)
+	if _, present := obj["days"]; present {
+		days = v.integer(obj, "days", 1, maxInviteDays)
+	}
+	if len(v.errs) > 0 {
+		invalid(w, v.errs...)
+		return
+	}
+	at := strings.LastIndexByte(email, '@')
+	if at < 1 || at == len(email)-1 || strings.ContainsAny(email, " \t\r\n<>\"") {
+		detail(w, http.StatusUnprocessableEntity, "email must be an email address")
+		return
+	}
+	if name == "" {
+		detail(w, http.StatusUnprocessableEntity, "device_name must not be blank")
+		return
+	}
+	ttl := time.Duration(days) * day
+	inv, token, err := a.self.users.NewInvite(r.Context(), email, name, a.actor(r), ttl)
+	if err != nil {
+		a.internal(w, err)
+		return
+	}
+	a.audit(r, "invite.create", fmt.Sprintf("invitation %d for %s, until %s",
+		inv.ID, inv.Email, expiryText(inv.ExpiresAt)))
+	link := "https://" + a.reg.LinkConfig().Link().Host + "/i/" + token
+	writeJSON(w, http.StatusOK, map[string]any{"id": inv.ID, "email": inv.Email,
+		"device_name": inv.DeviceName, "expires_at": inv.ExpiresAt, "url": link})
+}
+
+// revokeInvite answers POST /enroll/invites/{id}/revoke: an unused invitation can no longer be
+// spent.
+func (a *Admin) revokeInvite(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		detail(w, http.StatusNotFound, "unknown invitation")
+		return
+	}
+	switch err := a.self.users.RevokeInvite(r.Context(), id); {
+	case errors.Is(err, ErrNotFound):
+		detail(w, http.StatusNotFound, "unknown invitation")
+	case err != nil:
+		a.internal(w, err)
+	default:
+		a.audit(r, "invite.revoke", fmt.Sprintf("invitation %d", id))
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	}
 }
 
 func mustHost(u string) string {

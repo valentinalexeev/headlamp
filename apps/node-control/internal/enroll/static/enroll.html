@@ -43,6 +43,24 @@
         </table>
       </div>
     </section>
+    <section id="invites" hidden>
+      <h2>Invitations</h2>
+      <p class="t2">An invitation lets one person add one device. The person signs in with the identity provider; the device is made only when the verified email of the account is the invitation's. The person then picks the app.</p>
+      <div class="note crit" id="inviteerror" role="alert" hidden></div>
+      <form id="inviteform" class="rowbtns">
+        <label>Email <input id="inviteemail" type="email" maxlength="254" required></label>
+        <label>Device name <input id="invitename" maxlength="100" placeholder="Invited device"></label>
+        <label>Valid for days <input id="invitedays" type="number" min="1" max="90" value="7"></label>
+        <button type="submit">Invite</button>
+      </form>
+      <div class="note" id="invitemade" hidden></div>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Invited</th><th>State</th><th>Valid until</th><th>By</th><th><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="inviterows"></tbody>
+        </table>
+      </div>
+    </section>
     <section id="tailnet" data-page="devices" hidden>
       <h2>Tailnet</h2>
       <p class="t2">The tailnet targets of each device on each bridge in grants mode, from the device and from its owner. An owner grant applies to all devices of the owner, also to devices enrolled later.</p>
@@ -60,6 +78,7 @@
 <script src="/enroll/qrcode.js" defer></script>
 <script src="/enroll/static/enroll.js" defer></script>
 <script src="/enroll/static/people.js" defer></script>
+<script src="/enroll/static/invites.js" defer></script>
 <script src="/enroll/static/tailnet.js" defer></script>
 </body>
 </html>

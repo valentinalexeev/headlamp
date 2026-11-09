@@ -137,7 +137,8 @@ func (p *Public) enrol(w http.ResponseWriter, r *http.Request, token string) {
 		return
 	}
 	if c, _ := ClientByID(d.Client); c.Landing {
-		body := strings.NewReplacer("{client}", pyEscape.Replace(c.Label), "{href}", pyEscape.Replace(location)).Replace(landingTemplate)
+		body := strings.NewReplacer("{client}", pyEscape.Replace(c.Label),
+			"{href}", pyEscape.Replace(location)).Replace(landingTemplate)
 		h := w.Header()
 		h.Set("Content-Type", "text/html; charset=utf-8")
 		h.Set("Cache-Control", "no-store")
@@ -149,8 +150,8 @@ func (p *Public) enrol(w http.ResponseWriter, r *http.Request, token string) {
 	w.WriteHeader(http.StatusFound)
 }
 
-// subscription serves /sub/<secret> (the format of the device's app) and /sub/<secret>/<format> (any format of the
-// catalog, for the app the person picked on the self-service page).
+// subscription serves /sub/<secret> (the format of the device's app) and /sub/<secret>/<format>
+// (any format of the catalog, for the app the person picked on the self-service page).
 func (p *Public) subscription(w http.ResponseWriter, r *http.Request, secret string) {
 	format := ""
 	if i := strings.IndexByte(secret, '/'); i >= 0 {

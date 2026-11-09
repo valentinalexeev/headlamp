@@ -128,9 +128,9 @@ func newSelfFx(t *testing.T, cfg SelfConfig) *selfFx {
 // browser is a client with a cookie jar that follows redirects to the issuer and back.
 func (f *selfFx) browser() *http.Client {
 	jar, _ := cookiejar.New(nil)
-	c := f.srv.Client()
+	c := *f.srv.Client() // a copy: each browser has its own jar
 	c.Jar = jar
-	return c
+	return &c
 }
 
 func (f *selfFx) signIn(c *http.Client) string {

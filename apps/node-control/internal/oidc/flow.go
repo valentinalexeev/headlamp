@@ -63,8 +63,12 @@ func (p *Provider) AuthURL(f Flow) string {
 type Identity struct {
 	Subject string
 	Email   string
-	Name    string
-	Groups  []string
+	// EmailUnverified is true when the ID token says the email address is not verified
+	// (email_verified false). A token without the claim leaves it false: many issuers only hand out
+	// verified addresses and omit the claim.
+	EmailUnverified bool
+	Name            string
+	Groups          []string
 	// GroupsKnown is true when an ID token was verified with a groups claim name: then a missing claim means no
 	// groups. A refresh without an ID token leaves it false, and the groups are unknown.
 	GroupsKnown  bool
@@ -182,6 +186,12 @@ func (p *Provider) Verify(ctx context.Context, raw, nonce, groupsClaim string) (
 	}
 	id := Identity{Subject: sub}
 	id.Email, _ = claims["email"].(string)
+	switch v := claims["email_verified"].(type) {
+	case bool:
+		id.EmailUnverified = !v
+	case string: // some issuers send the claim as a string
+		id.EmailUnverified = strings.EqualFold(v, "false")
+	}
 	id.Name, _ = claims["name"].(string)
 	if exp, err := claims.GetExpirationTime(); err == nil && exp != nil {
 		id.Expiry = exp.Time

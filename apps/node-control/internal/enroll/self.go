@@ -38,6 +38,9 @@ type SelfConfig struct {
 	KeyTTL        time.Duration // tailnet pre-auth key lifetime; default 1 hour
 	Recheck       time.Duration // how often a person is re-checked at the issuer; default 1 hour
 	SessionTTL    time.Duration // browser session; default 8 hours
+	// InviteOnly: a person can enrol only with an invitation (OIDC_INVITE_ONLY). Default false: the
+	// "Add a device" form of /me stays, as before.
+	InviteOnly bool
 }
 
 func (c *SelfConfig) defaults() {
@@ -181,6 +184,41 @@ func (s *Self) Enrol(ctx context.Context, sub, name, client string, link Ingress
 	subURL := SubURL(link, secret)
 	dl, _ := DeepLinkFor(client, subURL, link.ProfileName)
 	return Enrolment{DeviceID: d.ID, Subscription: subURL, Link: dl, TailnetKey: key.Key, KeyExpires: key.Expiration}, nil
+}
+
+// defaultSelfClient is the stored app of a device made on the self-service pages. The person picks
+// the app on the picker page, whose links name the profile format; the stored value only sets the
+// format of the plain /sub/ URL.
+const defaultSelfClient = "sing-box"
+
+// Redeem spends an invitation for a person who has just signed in and makes the device it grants.
+// The email of the sign-in must be the invitation's, and the issuer must not say that it is
+// unverified. When the device cannot be made (device limit, lock, a headscale failure), the
+// invitation stays usable.
+func (s *Self) Redeem(
+	ctx context.Context, id oidc.Identity, token string, link IngressConfig,
+) (Enrolment, Invite, error) {
+	if id.EmailUnverified {
+		return Enrolment{}, Invite{}, ErrEmailUnverified
+	}
+	inv, err := s.users.ClaimInvite(ctx, token, id.Email, ownerOf(id.Subject))
+	if err != nil {
+		return Enrolment{}, Invite{}, err
+	}
+	e, err := s.Enrol(ctx, id.Subject, inv.DeviceName, defaultSelfClient, link)
+	if err != nil {
+		if rerr := s.users.ReleaseInvite(ctx, inv.ID); rerr != nil {
+			slog.Warn("invitation not released", "error_type", errType(rerr))
+		}
+		return Enrolment{}, Invite{}, err
+	}
+	inv.DeviceID = e.DeviceID
+	if err := s.users.InviteDevice(ctx, inv.ID, e.DeviceID); err != nil {
+		slog.Warn("invitation device not recorded", "error_type", errType(err))
+	}
+	_ = s.store.Audit(ownerOf(id.Subject), "invite.redeem",
+		fmt.Sprintf("invitation %d, device %d", inv.ID, e.DeviceID))
+	return e, inv, nil
 }
 
 // hsUserName is the headscale user of a person: a stable, safe name from the subject.

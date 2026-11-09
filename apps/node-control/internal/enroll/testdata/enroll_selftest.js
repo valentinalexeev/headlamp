@@ -900,5 +900,44 @@ const fieldValue = (els, label) => {
     assert.ok(calls.some((c) => c[0] === 'POST' && c[1] === '/enroll/tailnet-acl'));
   }
 
+  if (process.argv[7]) {
+    // invitations (#241): list, make one (its link shows once), withdraw a waiting one
+    require(path.resolve(process.argv[7]));
+    const inv = global.window.hl.invites;
+    const calls = [];
+    const list = [
+      { id: 2, email: '<b>b</b>@example.test', device_name: 'Phone', state: 'pending', expires_at: 1, created_by: 'admin' },
+      { id: 1, email: 'a@example.test', device_name: 'Laptop', state: 'used', expires_at: 1, created_by: 'admin' },
+    ];
+    global.window.hl.api = (m, u, b) => {
+      calls.push([m, u, b]);
+      if (m === 'GET') { return Promise.resolve({ invites: list }); }
+      if (u === '/enroll/invites') { return Promise.resolve({ id: 3, url: 'https://l.example.com/i/abc' }); }
+      return Promise.resolve({ ok: true });
+    };
+    const mk = (t) => new FakeNode(t);
+    const els = { root: mk('section'), rows: mk('tbody'), error: mk('div'), made: mk('div'), form: mk('form'),
+      email: mk('input'), name: mk('input'), days: mk('input') };
+    els.root.hidden = els.made.hidden = els.error.hidden = true;
+    const ctrl = inv.mount(els);
+    await ctrl.load();
+    assert.strictEqual(els.root.hidden, false);
+    assert.strictEqual(els.rows.children.length, 2);
+    assert.ok(textOf(els.rows.children[0]).includes('<b>b</b>@example.test') && textOf(els.rows.children[0]).includes('Waiting'));
+    assert.ok(!buttonNamed(els.rows.children[1], 'Withdraw'), 'a used invitation cannot be withdrawn');
+    els.email.value = ' c@example.test '; els.name.value = ''; els.days.value = '14';
+    fire(els.form, 'submit');
+    await flush();
+    assert.deepStrictEqual(calls.find((c) => c[0] === 'POST'), ['POST', '/enroll/invites', { email: 'c@example.test', days: 14 }]);
+    assert.ok(textOf(els.made).includes('https://l.example.com/i/abc') && !els.made.hidden);
+    buttonNamed(els.rows.children[0], 'Withdraw').click();
+    await flush();
+    assert.ok(calls.some((c) => c[0] === 'POST' && c[1] === '/enroll/invites/2/revoke'));
+    const root2 = mk('section'); root2.hidden = true;
+    global.window.hl.api = () => { const e = new Error('nf'); e.status = 404; return Promise.reject(e); };
+    await inv.mount(Object.assign({}, els, { root: root2 })).load();
+    assert.strictEqual(root2.hidden, true);
+  }
+
   console.log('enroll self-test ok');
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.14.0 - 2026-11-09
+
 ### Added
 
 - `exit-node-vm/openstack` (and the `selectel` wrapper) can make a Reality + Hysteria 2 bridge (#235): `extra_tcp_ingress_ports` and `extra_udp_ingress_ports` (a bridge sets `[80, 443]` and `[443]`), `advertise_exit_node = false`, and `image_id` to pin one image. The README has a bridge recipe and a Debian 13 section (Selectel `Debian 13 (Trixie) 64-bit`, login user `debian`). `exit-node-vm/oci` also has `extra_udp_ingress_ports`. `examples/private-repo` has a bridge module, inventory group, `host_vars` and play. With the defaults, the plan and the user data of existing nodes do not change. `BRIDGE=1 make test-ansible-os IMAGE=debian13` checks a bridge with no exit routes.

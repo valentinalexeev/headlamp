@@ -450,3 +450,47 @@ func TestPublicMuxWhenEnrolmentIsInRedis(t *testing.T) {
 		})
 	}
 }
+
+func TestEnrollPublicListenServesPublicMuxOnly(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	tn := NewLocal("127.0.0.1")
+	env := MapEnv(map[string]string{"ENROLL_DB": filepath.Join(t.TempDir(), "enroll.db"), "ENROLL_PUBLIC_LISTEN": addr})
+	mod := &stubModule{name: "m", register: func(r *Routes) {
+		r.Public.HandleFunc("/pub", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("pub")) })
+	}}
+	stop := runBG(t, []Module{mod}, env, tn)
+	tn.PublicAddr()
+	var code int
+	var body string
+	for i := 0; i < 50; i++ {
+		if c, e := net.Dial("tcp", addr); e == nil {
+			c.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	code, body = get(t, addr, "", "/pub")
+	if code != 200 || body != "pub" {
+		t.Fatalf("plain public: %d %q", code, body)
+	}
+	if code, _ = get(t, addr, "", "/healthz"); code != 404 {
+		t.Fatalf("admin route on the plain public listener: %d", code)
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnrollPublicListenIgnoredWithoutEnrolment(t *testing.T) {
+	tn := NewLocal("127.0.0.1")
+	stop := runBG(t, nil, MapEnv(map[string]string{"ENROLL_PUBLIC_LISTEN": "127.0.0.1:1"}), tn)
+	tn.AdminAddr()
+	if err := stop(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}

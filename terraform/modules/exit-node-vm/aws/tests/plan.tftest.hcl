@@ -13,6 +13,12 @@ mock_provider "aws" {
   mock_data "aws_region" {
     defaults = { region = "eu-central-1" }
   }
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_partition" {
+    defaults = { partition = "aws" }
+  }
   mock_data "aws_iam_policy_document" {
     defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
   }
@@ -176,4 +182,64 @@ run "own_vpc_and_subnets" {
     condition     = aws_security_group.this.vpc_id == "vpc-0123456789abcdef0" && toset(aws_autoscaling_group.this.vpc_zone_identifier) == toset(["subnet-0aaa", "subnet-0bbb"])
     error_message = "the security group and the group must use the given VPC and subnets"
   }
+}
+
+run "ssm_state_keeps_the_node_identity" {
+  command = plan
+  variables {
+    authkey_secret_arn   = "arn:aws:secretsmanager:eu-central-1:123456789012:secret:headlamp/n1-authkey-AbCdEf"
+    state_parameter_name = "/headlamp/n1/tailscaled"
+  }
+
+  assert {
+    condition     = strcontains(base64decode(aws_launch_template.this.user_data), "ExecStart=/usr/sbin/tailscaled --state=arn:aws:ssm:eu-central-1:123456789012:parameter/headlamp/n1/tailscaled --socket")
+    error_message = "the tailscaled drop-in must point --state at the SSM parameter"
+  }
+  assert {
+    condition     = strcontains(base64decode(aws_launch_template.this.user_data), "if /usr/local/sbin/headlamp-logged-in; then")
+    error_message = "a node with state must not register again"
+  }
+  assert {
+    condition     = length(aws_iam_role_policy.state) == 1 && length(aws_iam_role_policy.authkey) == 1
+    error_message = "the role must get the state policy and the secret policy"
+  }
+}
+
+run "ssm_state_with_a_kms_key" {
+  command = plan
+  variables {
+    tailscale_authkey    = "tskey-0000"
+    state_parameter_name = "/headlamp/n1/tailscaled"
+    state_kms_key_arn    = "arn:aws:kms:eu-central-1:123456789012:key/00000000-0000-0000-0000-000000000000"
+  }
+
+  assert {
+    condition     = strcontains(base64decode(aws_launch_template.this.user_data), "parameter/headlamp/n1/tailscaled?kmsKey=arn:aws:kms:eu-central-1:123456789012:key/00000000-0000-0000-0000-000000000000")
+    error_message = "the kms key must be passed as ?kmsKey="
+  }
+  assert {
+    condition     = length(aws_iam_role.this) == 1 && length(aws_iam_role_policy.state) == 1 && length(aws_iam_role_policy.authkey) == 0
+    error_message = "state alone must make the role, with only the state policy"
+  }
+}
+
+run "no_state_no_identity_lookup" {
+  command = plan
+  variables {
+    tailscale_authkey = "tskey-0000"
+  }
+
+  assert {
+    condition     = length(data.aws_caller_identity.current) == 0 && length(aws_iam_role_policy.state) == 0
+    error_message = "without state_parameter_name there must be no account lookup and no state policy"
+  }
+}
+
+run "rejects_a_relative_parameter_name" {
+  command = plan
+  variables {
+    tailscale_authkey    = "tskey-0000"
+    state_parameter_name = "headlamp/n1"
+  }
+  expect_failures = [var.state_parameter_name]
 }

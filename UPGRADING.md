@@ -9,7 +9,20 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
-## 0.13.0
+## Unreleased (0.14.0)
+
+### Action required
+
+No action required.
+
+- **Recommended for AWS exit nodes** (#213): set `state_parameter_name` (for example `/headlamp/<node>/tailscaled`)
+  and `tailscale_version` on each `exit-node-vm/aws` module. Then a node-control stop and start keeps the same node.
+  The deploying identity needs the IAM actions of `authkey_secret_arn` (role, profile, `iam:PassRole`). The first
+  start after the change registers once more: delete the old node in headscale after it
+  (`headscale nodes delete -i <old id>`).
+
+  Check: after a stop and start, `headscale nodes list` shows the same id and name, and no `<name>-1`.
+
 
 ### Action required
 

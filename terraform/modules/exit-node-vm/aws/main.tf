@@ -24,13 +24,18 @@ locals {
 
   # The new template is used only when a new feature asks for it, so the user data of existing callers does not
   # change (a change makes a new launch template version).
-  use_v2_template = var.authkey_secret_arn != null || var.tailscale_version != null
+  use_v2_template = var.authkey_secret_arn != null || var.tailscale_version != null || var.state_parameter_name != null
+
+  # tailscaled's SSM state store (#213): --state=arn:aws:ssm:<region>:<account>:parameter<name>[?kmsKey=<arn>].
+  state_param_arn = var.state_parameter_name == null ? null : "arn:${data.aws_partition.current[0].partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current[0].account_id}:parameter${var.state_parameter_name}"
+  state_arn       = local.state_param_arn == null ? null : (var.state_kms_key_arn == null ? local.state_param_arn : "${local.state_param_arn}?kmsKey=${var.state_kms_key_arn}")
 
   user_data = local.use_v2_template ? templatefile("${path.module}/templates/cloud-init-v2.yaml.tmpl", {
     headscale_login_server = var.headscale_login_server
     tailscale_authkey      = var.tailscale_authkey
     authkey_secret_arn     = var.authkey_secret_arn
     tailscale_version      = var.tailscale_version
+    state_arn              = local.state_arn
     hostname               = local.hostname
     fetch_secret_b64       = filebase64("${path.module}/templates/fetch-secret.py")
     }) : templatefile("${path.module}/templates/cloud-init.yaml.tmpl", {
@@ -40,7 +45,7 @@ locals {
   })
 
   # The node needs a role only to read the secret or for SSM.
-  create_role = var.authkey_secret_arn != null || var.enable_ssm
+  create_role = var.authkey_secret_arn != null || var.enable_ssm || var.state_parameter_name != null
 }
 
 
@@ -145,6 +150,42 @@ data "aws_iam_policy_document" "authkey" {
 }
 
 data "aws_region" "current" {}
+
+data "aws_caller_identity" "current" {
+  count = var.state_parameter_name == null ? 0 : 1
+}
+
+data "aws_partition" "current" {
+  count = var.state_parameter_name == null ? 0 : 1
+}
+
+# tailscaled reads the whole state once at start and writes it back on each change (#213).
+data "aws_iam_policy_document" "state" {
+  count = var.state_parameter_name == null ? 0 : 1
+  statement {
+    actions   = ["ssm:GetParameter", "ssm:PutParameter"]
+    resources = [local.state_param_arn]
+  }
+  dynamic "statement" {
+    for_each = var.state_kms_key_arn == null ? [] : [var.state_kms_key_arn]
+    content {
+      actions   = ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"]
+      resources = [statement.value]
+      condition {
+        test     = "StringEquals"
+        variable = "kms:ViaService"
+        values   = ["ssm.${data.aws_region.current.region}.amazonaws.com"]
+      }
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "state" {
+  count  = var.state_parameter_name == null ? 0 : 1
+  name   = "tailscaled-state"
+  role   = aws_iam_role.this[0].id
+  policy = data.aws_iam_policy_document.state[0].json
+}
 
 resource "aws_iam_role_policy" "authkey" {
   count  = var.authkey_secret_arn == null ? 0 : 1

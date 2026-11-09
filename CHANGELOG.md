@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- `exit-node-vm/aws`: `state_parameter_name` keeps the tailscaled state in SSM Parameter Store (#213). A node-control stop and start (a new instance, ADR 0001) is then the same headscale node, with the same id, name and IPs, and no stale offline node is left. The node role can read and write only that parameter. `state_kms_key_arn` sets a customer managed key. A node with a stored state does not use the auth key again. `make test-ssm-state-e2e` and `make test-ssm-state-vm-e2e` test it with headscale and LocalStack.
+
 ## 0.13.0 - 2026-11-08
 
 ### Added

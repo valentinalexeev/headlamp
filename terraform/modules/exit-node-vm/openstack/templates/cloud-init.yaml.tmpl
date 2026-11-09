@@ -1,17 +1,39 @@
 #cloud-config
 %{ if bootstrap_tailscale ~}
+%{ if use_secret ~}
+# The auth key is not in this file (#224). The node reads it at boot from Barbican with an application credential
+# that can only GET that one secret payload. The credential file is deleted after the join.
+write_files:
+  - path: /usr/local/sbin/headlamp-fetch-secret
+    permissions: "0700"
+    encoding: b64
+    content: ${fetch_secret_b64}
+  - path: /run/headlamp/credential.json
+    permissions: "0600"
+    encoding: b64
+    content: ${credential_b64}
+%{ endif ~}
 runcmd:
   - curl -fsSL https://tailscale.com/install.sh | sh
   - sysctl -w net.ipv4.ip_forward=1
   - sysctl -w net.ipv6.conf.all.forwarding=1
   - 'echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf'
   - 'echo "net.ipv6.conf.all.forwarding = 1" >> /etc/sysctl.conf'
+%{ if use_secret ~}
+  - |
+    set -eu
+    /usr/local/sbin/headlamp-fetch-secret /run/headlamp/credential.json /run/headlamp/authkey
+    rm -f /run/headlamp/credential.json
+    tailscale up --login-server='${headscale_login_server}' --auth-key=file:/run/headlamp/authkey --hostname='${hostname}'%{ if advertise_exit_node } --advertise-exit-node%{ endif }
+    rm -f /run/headlamp/authkey
+%{ else ~}
   - >-
     tailscale up
     --login-server=${headscale_login_server}
     --authkey=${tailscale_authkey}
     --hostname=${hostname}%{ if advertise_exit_node }
     --advertise-exit-node%{ endif }
+%{ endif ~}
 %{ else ~}
 # Tailscale is installed and joined later by the Ansible `tailscale` role (bootstrap_tailscale = false).
 runcmd:

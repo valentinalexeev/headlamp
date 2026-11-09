@@ -1,27 +1,33 @@
 # Compatibility wrapper: the module moved to ../openstack (#101). Existing root stacks keep working: every input and
 # output is passed through unchanged and the defaults are the Selectel ones. New stacks use ../openstack directly.
 module "node" {
-  source                  = "../openstack"
-  name                    = var.name
-  tailscale_hostname      = var.tailscale_hostname
-  availability_zone       = var.availability_zone
-  flavor_id               = var.flavor_id
-  volume_type             = var.volume_type
-  disk_size_gb            = var.disk_size_gb
-  image_name              = var.image_name
-  subnet_cidr             = var.subnet_cidr
-  ssh_public_key          = var.ssh_public_key
-  admin_ssh_cidr          = var.admin_ssh_cidr
-  tailscale_port          = var.tailscale_port
-  preemptible             = var.preemptible
-  bootstrap_tailscale     = var.bootstrap_tailscale
-  headscale_login_server  = var.headscale_login_server
-  tailscale_authkey       = var.tailscale_authkey
-  external_network_name   = var.external_network_name
-  image_id                = var.image_id
-  advertise_exit_node     = var.advertise_exit_node
-  extra_tcp_ingress_ports = var.extra_tcp_ingress_ports
-  extra_udp_ingress_ports = var.extra_udp_ingress_ports
+  source                        = "../openstack"
+  name                          = var.name
+  tailscale_hostname            = var.tailscale_hostname
+  availability_zone             = var.availability_zone
+  flavor_id                     = var.flavor_id
+  volume_type                   = var.volume_type
+  disk_size_gb                  = var.disk_size_gb
+  image_name                    = var.image_name
+  subnet_cidr                   = var.subnet_cidr
+  ssh_public_key                = var.ssh_public_key
+  admin_ssh_cidr                = var.admin_ssh_cidr
+  tailscale_port                = var.tailscale_port
+  preemptible                   = var.preemptible
+  bootstrap_tailscale           = var.bootstrap_tailscale
+  headscale_login_server        = var.headscale_login_server
+  tailscale_authkey             = var.tailscale_authkey
+  external_network_name         = var.external_network_name
+  image_id                      = var.image_id
+  advertise_exit_node           = var.advertise_exit_node
+  extra_tcp_ingress_ports       = var.extra_tcp_ingress_ports
+  extra_udp_ingress_ports       = var.extra_udp_ingress_ports
+  tags                          = var.tags
+  metadata                      = var.metadata
+  authkey_from_secret           = var.authkey_from_secret
+  authkey_secret_ref            = var.authkey_secret_ref
+  keystone_auth_url             = var.keystone_auth_url
+  authkey_credential_expires_at = var.authkey_credential_expires_at
 }
 
 # The resources used to live directly in this module. These blocks move existing state into module.node, so

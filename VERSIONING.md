@@ -30,6 +30,10 @@ Commits say which is which, using [Conventional Commits](https://www.conventiona
 `feat` needs at least a MINOR. `!` before the colon, or a `BREAKING CHANGE:` footer, needs a MAJOR. PR titles are checked
 because they usually become commit subjects.
 
+A commit on `main` with the wrong type cannot change, because `main` history does not change. To correct it for the
+release check, add a line `<full commit hash> <type>` to `.release-retype` in a PR, for example
+`238a9991c1887f56f59f3ea17a11c19468e76ffe fix`. The owner approves the line like any other change.
+
 ## New features before 1.0.0
 
 Before 1.0.0, a minor release must not change a running site that has no config changes. Thus:

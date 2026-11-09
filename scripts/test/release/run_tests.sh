@@ -105,6 +105,18 @@ commit 'docs: upgrading'
 ok try v2.0.1
 git reset -q --hard HEAD~2
 
+# .release-retype corrects the type of a named commit: a feat retyped to fix needs only a patch
+commit 'feat(api): really a fix' 2.0.1
+h=$(git rev-parse HEAD)
+no try v2.0.1
+echo "$h fix" >.release-retype
+commit 'chore: retype'
+ok try v2.0.1
+echo "0000000000000000000000000000000000000000 fix" >.release-retype
+commit 'chore: retype another commit'
+no try v2.0.1
+git reset -q --hard HEAD~3
+
 # the tag must be on main
 git checkout -qb side
 commit 'fix: side' 2.0.1

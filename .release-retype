@@ -1,0 +1,2 @@
+# <full commit hash> <type>: corrects the type of a commit on main for scripts/check-release.sh (see VERSIONING.md).
+238a9991c1887f56f59f3ea17a11c19468e76ffe fix

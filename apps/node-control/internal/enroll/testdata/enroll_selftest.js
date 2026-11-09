@@ -929,7 +929,10 @@ const fieldValue = (els, label) => {
     fire(els.form, 'submit');
     await flush();
     assert.deepStrictEqual(calls.find((c) => c[0] === 'POST'), ['POST', '/enroll/invites', { email: 'c@example.test', days: 14 }]);
-    assert.ok(textOf(els.made).includes('https://l.example.com/i/abc') && !els.made.hidden);
+    // The new link is the whole text of the <code> element: an exact match, not a substring (CodeQL js/incomplete-url-substring-sanitization).
+    const linkNode = els.made.children.find((c) => c.tag === 'code');
+    assert.ok(linkNode && !els.made.hidden, 'the new invitation link is shown');
+    assert.strictEqual(textOf(linkNode), 'https://l.example.com/i/abc');
     buttonNamed(els.rows.children[0], 'Withdraw').click();
     await flush();
     assert.ok(calls.some((c) => c[0] === 'POST' && c[1] === '/enroll/invites/2/revoke'));

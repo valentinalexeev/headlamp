@@ -15,9 +15,10 @@ import (
 const (
 	initialBackoff = time.Second
 	maxBackoff     = 60 * time.Second
-
-	registerTimeout = 15 * time.Second
 )
+
+// registerTimeout bounds one registration request (a variable so tests can shorten it).
+var registerTimeout = 15 * time.Second
 
 // ErrUnreachable ends Run when the registration API gave no answer for cfg.UnreachableExit. The usual cause is
 // that the control server removed this ephemeral node: tsnet does not log in again by itself, so only a new

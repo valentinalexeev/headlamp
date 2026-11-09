@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -504,5 +505,70 @@ func TestRunUnreachableExitZeroNeverExits(t *testing.T) {
 	h.reg.putErr = func(int) error { return context.DeadlineExceeded }
 	if err := h.run(t, 200); err != nil {
 		t.Fatalf("UnreachableExit 0 must disable the exit, got %v", err)
+	}
+}
+
+// TestRunRecoversAfterTheAPIHangs is #238 (#95) with a real HTTP registrar: the ingress accepts the PUT and then
+// does not answer (as after hours behind a load balancer) for some rounds, and then answers again. Each hung request
+// must end at registerTimeout, the sidecar must retry with no restart, and the route must come back.
+func TestRunRecoversAfterTheAPIHangs(t *testing.T) {
+	old := registerTimeout
+	registerTimeout = 100 * time.Millisecond
+	defer func() { registerTimeout = old }()
+
+	var mu sync.Mutex
+	puts, hangFor := 0, 3 // the first 3 PUTs hang
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			mu.Lock()
+			puts++
+			hang := puts <= hangFor
+			mu.Unlock()
+			if hang {
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	h := newHarness()
+	h.svcs = h.svcs[:1]
+	h.cfg.UnreachableExit = 5 * time.Minute
+	reg := NewHTTPRegistrar(srv.URL, &http.Client{Transport: &http.Transport{DisableKeepAlives: true}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	listen := func(string, string) (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") }
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var waits []time.Duration
+	wait := func(c context.Context, d time.Duration) bool {
+		waits = append(waits, d)
+		clock = clock.Add(d)
+		if len(waits) >= 5 {
+			cancel()
+		}
+		return c.Err() == nil
+	}
+	start := time.Now()
+	err := run(ctx, h.cfg, h.svcs, listen, reg, h.ready.set, wait, func() time.Time { return clock }, realDial)
+	if err != nil {
+		t.Fatalf("Run ended with %v; it must retry with no restart", err)
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Fatalf("Run took %v: a hung request was not bounded by registerTimeout", el)
+	}
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 5 * time.Minute, 5 * time.Minute}
+	if !slices.Equal(waits, want) {
+		t.Fatalf("waits = %v, want %v (backoff while hung, then the normal interval)", waits, want)
+	}
+	v := h.ready.get()
+	if len(v) < 5 || v[0] || v[1] || v[2] || !v[3] || !v[4] {
+		t.Fatalf("ready = %v, want false x3, then true: the route must come back", v)
 	}
 }

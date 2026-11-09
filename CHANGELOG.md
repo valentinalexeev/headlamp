@@ -15,6 +15,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 - node-control self-enrolment: the OIDC callback must come back to the browser that started the sign-in (the state is also kept in a `__Host-hl_flow` cookie). A callback URL opened in another browser gets 400 and signs nobody in.
 - node-control `/me`: the "Add a device" form no longer asks for the relay app; the app picker that follows does (#241). The tailnet key shows one time, on that page. The old form field `client` is still accepted.
 - `reality-ingress`: the Caddy front also proxies `/sub/<secret>/<format>`, and with `enroll_self_service: true` also `/me/devices/<id>`, `/me/icons/<app>` and `/i/<token>` (#241). Run the role on each bridge before people use the app picker: an older front answers 404 to these links. `examples/compose/control` proxies `/i/*`.
+- `funnel-sidecar`: a test now shows the recovery of #238. The registration API accepts the PUT and does not answer for some rounds. Each request stops after 15 s, the sidecar tries again with backoff, and the route comes back with no restart. The behavior did not change: 0.10.0 added it (`FUNNEL_UNREACHABLE_EXIT`).
 
 ## 0.14.0 - 2026-11-09
 

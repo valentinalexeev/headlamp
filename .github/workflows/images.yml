@@ -127,6 +127,8 @@ jobs:
       fail-fast: false
       matrix:
         c: ${{ fromJSON(needs.detect.outputs.build) }}
+    # The per-image name is readable when the matrix runs. When nothing needs a build, GitHub skips the job before it
+    # expands the matrix and shows the raw template; images-build below is the fixed check for both cases.
     name: build (${{ matrix.c.image }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -171,6 +173,24 @@ jobs:
           sbom: true
           cache-from: type=gha,scope=${{ matrix.c.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.c.image }}
+
+  # One check with a fixed name for the matrix above. A skipped matrix job has no matrix values, so GitHub shows
+  # its name as the raw "build (${{ matrix.c.image }})"; this job always runs and gives one stable result: it fails
+  # when the detection or any image build failed, and passes when they passed or nothing needed a build.
+  images-build:
+    needs: [detect, build]
+    if: always()
+    runs-on: ubuntu-26.04
+    permissions: {}
+    steps:
+      - name: Result of the image builds
+        env:
+          DETECT: ${{ needs.detect.result }}
+          BUILD: ${{ needs.build.result }}
+        run: |
+          echo "detect=$DETECT build=$BUILD"
+          [ "$DETECT" = success ] || { echo "the detection did not succeed"; exit 1; }
+          case "$BUILD" in success|skipped) echo "image builds: ok" ;; *) echo "an image build failed"; exit 1 ;; esac
 
   publish:
     needs: [detect, build]

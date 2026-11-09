@@ -39,6 +39,11 @@ No action required. The old site files and modules keep working.
   `terraform plan` shows these tag changes in place. A deployer policy with `aws:RequestTag` conditions: see the
   control-host README, "Deploying identity with tag conditions".
 
+### Defaults that changed
+
+- `make deploy-headscale` now takes a volume snapshot before the deploy, and stops when the snapshot fails (#197). The
+  deploying Fly token needs to create snapshots. For a deploy with no snapshot, set `NO_SNAPSHOT=1`.
+
 
 ### Action required
 

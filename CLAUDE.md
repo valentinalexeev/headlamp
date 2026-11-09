@@ -447,7 +447,12 @@ harnesses must name the same tag: `make check-headscale-pin`). The image is dist
 `flyctl ssh console -a <app>` without `-C` cannot open one. Run the binary directly, for example
 `flyctl ssh console -a <app> -C "headscale nodes list"`. To bump the version, edit `HEADSCALE_VERSION` and the
 Dockerfile default, run `make check-headscale-pin`, every headscale e2e suite and `make test-route-approval
-FROM=ghcr.io/juanfont/headscale:<old tag>` (an in-place upgrade), and take a database snapshot before the deploy.
+FROM=ghcr.io/juanfont/headscale:<old tag>` (an in-place upgrade).
+
+`make deploy-headscale` takes a volume snapshot first (`scripts/fly-snapshot.sh`, #197). It waits until Fly reports
+the snapshot as created and prints its ID. If the snapshot fails, the deploy does not run. Write the ID down: it is the
+restore point (`flyctl volumes create <name> --snapshot-id <id> -a <app>`). `NO_SNAPSHOT=1` skips the snapshot when you
+already have a fresh one. `SNAPSHOT_APPS` lists the apps that get one (default `headscale`).
 
 Deploying is a real change, so confirm with the operator first. Afterwards, `git -C vendor/headlamp status` must
 be clean.

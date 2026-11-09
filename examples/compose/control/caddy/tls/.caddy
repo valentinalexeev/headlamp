@@ -1,0 +1,4 @@
+# The empty name: compose sets ENROLL_TLS empty while ENROLL_DOMAIN is not set. Same as unused.caddy.
+# The site is not in use: its name is still the reserved .invalid default (#216). A local certificate, so Caddy asks
+# no ACME CA for it, and the edge log has no endless retries.
+tls internal

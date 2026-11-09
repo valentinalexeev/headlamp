@@ -1,0 +1,4 @@
+# The empty name: compose sets FUNNEL_DNS empty while FUNNEL_DOMAIN is not set. Same as unused.caddy.
+# Funnel is not in use: the name is still the reserved funnel.invalid default (#216). A local certificate, so Caddy asks
+# no ACME CA for it, and the edge log has no endless retries.
+tls internal

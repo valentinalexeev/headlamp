@@ -4,6 +4,15 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Fixed
+
+- `examples/compose/control`: while `ENROLL_DOMAIN` or `FUNNEL_DOMAIN` is not set, the edge gives the reserved `.invalid` site a local certificate (`tls internal`), so Caddy no longer retries ACME for it without end (#216). `compose.yaml` sets `ENROLL_TLS` and an empty `FUNNEL_DNS` for that. A real name gets Let's Encrypt as before.
+- node-control: a `REDIS_URL` that does not parse now gives an error that says why (a password with `/`, `?`, `#` or `@`, as base64 often has) and how to percent-encode it, still with no part of the URL (#217).
+
+### Changed
+
+- Docs: `REDIS_URL` needs a percent-encoded password (#217). Self-enrolment with OIDC (`/me`) needs at least one bridge in `ENROLL_CONFIG` (#219). In `examples/compose/control`, start node-control within 1 hour of its pre-auth key, and how to check and make a new key (#218).
+
 ## 0.13.0 - 2026-11-08
 
 ### Added

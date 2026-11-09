@@ -18,11 +18,13 @@ services:
     environment:
       HEADSCALE_DOMAIN: ${HEADSCALE_DOMAIN:?set HEADSCALE_DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
-      # An unused name stays on a reserved .invalid name: Caddy never gets a certificate for it.
+      # An unused name stays on a reserved .invalid name, and its TLS snippet is "unused" (tls internal): Caddy asks no
+      # ACME CA for it (#216). Setting the name in .env turns on Let's Encrypt for it.
       ENROLL_DOMAIN: ${ENROLL_DOMAIN:-enroll.invalid}
+      ENROLL_TLS: ${ENROLL_DOMAIN:+acme}
       FUNNEL_DOMAIN: ${FUNNEL_DOMAIN:-funnel.invalid}
       CADDY_ACME_CA: ${CADDY_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
-      FUNNEL_DNS: ${FUNNEL_DNS:-ondemand}
+      FUNNEL_DNS: ${FUNNEL_DOMAIN:+${FUNNEL_DNS:-ondemand}}
     # Credentials of the DNS provider, for funnel wildcards only (see caddy/dns/). Optional.
     env_file:
       - path: ./edge.env

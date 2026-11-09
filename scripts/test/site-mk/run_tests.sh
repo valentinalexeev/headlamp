@@ -19,7 +19,7 @@ git -C "$core" init -q && git -C "$core" add -A && git -C "$core" commit -qm cor
 
 site="$T/site"; mkdir -p "$site" && cd "$site" || exit 1; site="$(pwd -P)"
 git init -q
-git -c protocol.file.allow=always submodule -q add "$core" vendor/headlamp
+git -c protocol.file.allow=always submodule -q add "$core" vendor/headlamp || { echo "FATAL: submodule add"; exit 1; }; [ -f vendor/headlamp/VERSION ] || { echo "FATAL: empty submodule"; ls -la vendor/headlamp; exit 1; }
 mkdir -p fly/exit-node fly/node-control fly/headscale ansible bin
 echo "direct.example" > fly/exit-node/direct-hosts.txt
 echo "{}" > fly/node-control/nodes.json

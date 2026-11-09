@@ -40,9 +40,10 @@ help:
 	@echo "                           headscale gets a volume snapshot first; NO_SNAPSHOT=1 skips it"
 	@echo "  deploy-all               deploy every app in FLY_APPS ($(FLY_APPS))"
 	@echo "  tf-plan tf-apply tf-save terraform through tf-run.sh (encrypted state)"
-	@echo "  ansible-site             run $(SITE_PLAYBOOK) with the fleet tailscale pin ($(tsv))"
+	@echo "  ansible-site             run $(SITE_PLAYBOOK) with the fleet tailscale pin ($(tsv)); skips nodes that are down"
 	@echo "  ansible-check            the same in --check --diff mode"
 	@echo "  bump-tailscale-version VERSION=x.y.z   write the pin, update the VM nodes, deploy the Fly exit node"
+	@echo "                           EXCLUDE=n1,n2 skips nodes; ONLY_PENDING=1 retries the pending ones"
 	@echo "  policy-check policy-diff policy-apply  the headscale ACL through node-control"
 	@echo "  tasks-check tasks-diff tasks-push      node-control scheduled tasks"
 	@echo "  rotate-api-key-check     check when the headscale API key expires"
@@ -84,8 +85,13 @@ tf-apply: hooks
 tf-save: hooks
 	$(H)/scripts/tf-run.sh save
 
+# Fleet runs go through fleet-run.sh (#199): a node that does not answer is not waited for, and the run ends with
+# "done:" and "pending: <node> (reason)". EXCLUDE=n1,n2 skips nodes; ONLY_PENDING=1 retries the pending ones.
+# PROBE_TIMEOUT (default 15 s) is the wait for each node. Exit 2 means some nodes are pending.
+fleet = cd $(ANSIBLE_DIR) && INVENTORY=$(INVENTORY) $(CURDIR)/$(H)/scripts/fleet-run.sh
+
 ansible-site:
-	cd $(ANSIBLE_DIR) && ansible-playbook $(SITE_PLAYBOOK) -i $(INVENTORY) --extra-vars "tailscale_version=$(tsv)" $(ARGS)
+	$(fleet) $(SITE_PLAYBOOK) --extra-vars "tailscale_version=$(tsv)" $(ARGS)
 
 ansible-check:
 	cd $(ANSIBLE_DIR) && ansible-playbook $(SITE_PLAYBOOK) -i $(INVENTORY) --extra-vars "tailscale_version=$(tsv)" --check --diff $(ARGS)
@@ -96,8 +102,8 @@ FLY_EXIT_NODE ?= 1
 bump-tailscale-version:
 	@test -n "$(VERSION)" || { echo "usage: make bump-tailscale-version VERSION=x.y.z"; exit 1; }
 	@echo "$(VERSION)" > $(TAILSCALE_VERSION_FILE)
-	cd $(ANSIBLE_DIR) && ansible-playbook $(CURDIR)/$(H)/ansible/playbooks/bump-tailscale-version.yml -i $(INVENTORY) \
-	  --extra-vars "tailscale_version=$(VERSION)" $(ARGS)
+	@$(fleet) $(CURDIR)/$(H)/ansible/playbooks/bump-tailscale-version.yml --extra-vars "tailscale_version=$(VERSION)" $(ARGS); \
+	  rc=$$?; [ $$rc = 0 ] || [ $$rc = 2 ] || exit $$rc; [ $$rc = 0 ] || echo "Some VM nodes are pending (above). The Fly exit node is next."
 	@if [ "$(FLY_EXIT_NODE)" = 1 ] && [ -d $(OVERLAY_DIR)/exit-node ]; then $(H)/scripts/deploy-fly.sh exit-node; \
 	  else echo "no Fly exit node deployed (FLY_EXIT_NODE=$(FLY_EXIT_NODE), overlay $(OVERLAY_DIR)/exit-node)"; fi
 	@echo "tailscale $(VERSION): commit $(TAILSCALE_VERSION_FILE)"

@@ -33,6 +33,11 @@ xray_config: /etc/xray/config.json
 # destinations on them leave from this host instead of the exit node. Empty = everything uses the exit node.
 ingress_direct_geoip: []
 ingress_direct_geosite: []
+# Resolvers xray uses for its own lookups (routing needs the IP of every domain destination). The agent routes these
+# queries through the exit node (outbound via-exit), so the bridge's network never sees the visited names; only names
+# on ingress_direct_geosite resolve with the system resolver. Each entry: https://<ipv4>/<path> or tcp://<ipv4>[:port]
+# (TCP only, through the SOCKS outbound). Empty = https://1.1.1.1/dns-query, https://1.0.0.1/dns-query.
+ingress_exit_dns: []
 
 # Geodata directory (xray run -test needs it for geoip:/geosite: rules).
 xray_asset_dir: /usr/local/share/xray

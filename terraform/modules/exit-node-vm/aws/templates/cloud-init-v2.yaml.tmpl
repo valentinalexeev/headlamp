@@ -2,7 +2,7 @@
 # Used when authkey_secret_arn or tailscale_version is set. The auth key is not in this file: the node reads it at
 # boot from Secrets Manager with its instance role.
 write_files:
-%{ if authkey_secret_arn != null ~}
+%{ if use_secret ~}
   - path: /usr/local/sbin/headlamp-fetch-secret
     permissions: "0700"
     encoding: b64
@@ -50,7 +50,7 @@ runcmd:
 %{ else ~}
   - curl -fsSL https://tailscale.com/install.sh | sh
 %{ endif ~}
-%{ if authkey_secret_arn != null ~}
+%{ if use_secret ~}
   - |
     set -eu
 %{ if state_arn != null ~}

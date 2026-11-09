@@ -65,6 +65,7 @@ version. Set exactly one of the two.
 | `headscale_login_server` | required | The headscale URL |
 | `authkey_secret_arn` | none | The secret with the auth key. Recommended. |
 | `tailscale_authkey` | none | The auth key in the user data. Use only if you cannot use a secret. |
+| `authkey_from_secret` | from `authkey_secret_arn` | Set `true` when the secret is made in the same stack |
 | `authkey_kms_key_arn` | none | The KMS key of the secret, if it is a customer managed key |
 | `ssh_public_key` | none | An optional key pair. Admin access is over the tailnet. |
 | `tailscale_version` | none | Install this version from the signed apt repository and hold it. None: the unpinned `install.sh`. |
@@ -88,6 +89,27 @@ the new version at the next start. To move to a secret, set `authkey_secret_arn`
 
 Provider `default_tags` do not reach the tags of the auto scaling group. Set `tags` so that each instance gets them at
 launch. Accounts that limit creates by request tag need this.
+
+With `tags`, the launch template tags the instance, its volume and its network interface in the `RunInstances` request
+(#225). So a deployer that may create these only with the site tags can launch.
+
+### Secret made in the same stack
+
+If the root stack makes the secret in the same apply, its ARN is unknown at plan time. Then set
+`authkey_from_secret = true` (#222), else the plan fails with "Invalid count argument":
+
+```hcl
+resource "aws_secretsmanager_secret" "authkey" {
+  name = "headlamp/cobalt/authkey"
+}
+
+module "cobalt" {
+  source              = "../vendor/headlamp/terraform/modules/exit-node-vm/aws"
+  authkey_secret_arn  = aws_secretsmanager_secret.authkey.arn
+  authkey_from_secret = true
+  # the other inputs as usual
+}
+```
 
 ## Boot image
 

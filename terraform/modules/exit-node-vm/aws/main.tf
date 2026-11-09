@@ -24,7 +24,11 @@ locals {
 
   # The new template is used only when a new feature asks for it, so the user data of existing callers does not
   # change (a change makes a new launch template version).
-  use_v2_template = var.authkey_secret_arn != null || var.tailscale_version != null || var.state_parameter_name != null
+  # On or off for the secret, known at plan time (#222). An ARN of a secret made in the same stack is unknown at plan,
+  # so a count must not depend on it: such a caller sets authkey_from_secret = true.
+  authkey_from_secret = var.authkey_from_secret != null ? var.authkey_from_secret : var.authkey_secret_arn != null
+
+  use_v2_template = local.authkey_from_secret || var.tailscale_version != null || var.state_parameter_name != null
 
   # tailscaled's SSM state store (#213): --state=arn:aws:ssm:<region>:<account>:parameter<name>[?kmsKey=<arn>].
   state_param_arn = var.state_parameter_name == null ? null : "arn:${data.aws_partition.current[0].partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current[0].account_id}:parameter${var.state_parameter_name}"
@@ -34,6 +38,7 @@ locals {
     headscale_login_server = var.headscale_login_server
     tailscale_authkey      = var.tailscale_authkey
     authkey_secret_arn     = var.authkey_secret_arn
+    use_secret             = local.authkey_from_secret
     tailscale_version      = var.tailscale_version
     state_arn              = local.state_arn
     hostname               = local.hostname
@@ -45,7 +50,7 @@ locals {
   })
 
   # The node needs a role only to read the secret or for SSM.
-  create_role = var.authkey_secret_arn != null || var.enable_ssm || var.state_parameter_name != null
+  create_role = local.authkey_from_secret || var.enable_ssm || var.state_parameter_name != null
 }
 
 
@@ -130,7 +135,7 @@ resource "aws_iam_role" "this" {
 }
 
 data "aws_iam_policy_document" "authkey" {
-  count = var.authkey_secret_arn == null ? 0 : 1
+  count = local.authkey_from_secret ? 1 : 0
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
     resources = [var.authkey_secret_arn]
@@ -188,7 +193,7 @@ resource "aws_iam_role_policy" "state" {
 }
 
 resource "aws_iam_role_policy" "authkey" {
-  count  = var.authkey_secret_arn == null ? 0 : 1
+  count  = local.authkey_from_secret ? 1 : 0
   name   = "read-authkey"
   role   = aws_iam_role.this[0].id
   policy = data.aws_iam_policy_document.authkey[0].json
@@ -250,18 +255,20 @@ resource "aws_launch_template" "this" {
     })
   }
 
+  # The volume and the network interface are tagged in the RunInstances request too (#225), so a deployer that may
+  # create them only with the site tags can launch, and cost reports and cleanup find them.
   dynamic "tag_specifications" {
-    for_each = length(var.tags) > 0 ? [1] : []
+    for_each = length(var.tags) > 0 ? ["volume", "network-interface"] : []
     content {
-      resource_type = "volume"
+      resource_type = tag_specifications.value
       tags          = merge(var.tags, { Name = var.name })
     }
   }
 
   lifecycle {
     precondition {
-      condition     = (var.authkey_secret_arn == null) != (var.tailscale_authkey == null)
-      error_message = "Set exactly one of authkey_secret_arn and tailscale_authkey."
+      condition     = (var.authkey_secret_arn == null) != (var.tailscale_authkey == null) && local.authkey_from_secret == (var.authkey_secret_arn != null)
+      error_message = "Set exactly one of authkey_secret_arn and tailscale_authkey. authkey_from_secret = true needs authkey_secret_arn, and false needs tailscale_authkey."
     }
   }
 

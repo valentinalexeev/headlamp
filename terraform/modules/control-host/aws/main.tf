@@ -180,6 +180,9 @@ resource "aws_instance" "this" {
     volume_size = var.root_volume_gb
     volume_type = "gp3"
     encrypted   = true
+    # Tagged in the RunInstances request, so a deployer that may create volumes only with the site tags can launch
+    # the host (#225). Not volume_tags: that would also set the tags of the separate data volume.
+    tags = merge(local.tags, { Name = "${var.name}-root" })
   }
 
   user_data = templatefile("${path.module}/templates/cloud-init.yaml.tmpl", {
@@ -200,6 +203,16 @@ resource "aws_volume_attachment" "data" {
   device_name = "/dev/sdf"
   volume_id   = aws_ebs_volume.data.id
   instance_id = aws_instance.this.id
+}
+
+# The primary network interface. aws_instance cannot tag it in the RunInstances request, so it is tagged right after
+# the launch (#225), for cost reports and tag-based cleanup. A deployer whose policy needs the site tags on
+# network-interface/* in RunInstances must allow it without the tag condition (README "Deploying identity").
+resource "aws_ec2_tag" "eni" {
+  for_each    = merge(local.tags, { Name = "${var.name}-eni" })
+  resource_id = aws_instance.this.primary_network_interface_id
+  key         = each.key
+  value       = each.value
 }
 
 resource "aws_eip" "this" {

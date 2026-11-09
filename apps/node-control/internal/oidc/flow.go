@@ -67,8 +67,10 @@ type Identity struct {
 	// (email_verified false). A token without the claim leaves it false: many issuers only hand out
 	// verified addresses and omit the claim.
 	EmailUnverified bool
-	Name            string
-	Groups          []string
+	// EmailVerified is true only when the ID token says email_verified true.
+	EmailVerified bool
+	Name          string
+	Groups        []string
 	// GroupsKnown is true when an ID token was verified with a groups claim name: then a missing claim means no
 	// groups. A refresh without an ID token leaves it false, and the groups are unknown.
 	GroupsKnown  bool
@@ -188,8 +190,9 @@ func (p *Provider) Verify(ctx context.Context, raw, nonce, groupsClaim string) (
 	id.Email, _ = claims["email"].(string)
 	switch v := claims["email_verified"].(type) {
 	case bool:
-		id.EmailUnverified = !v
+		id.EmailVerified, id.EmailUnverified = v, !v
 	case string: // some issuers send the claim as a string
+		id.EmailVerified = strings.EqualFold(v, "true")
 		id.EmailUnverified = strings.EqualFold(v, "false")
 	}
 	id.Name, _ = claims["name"].(string)

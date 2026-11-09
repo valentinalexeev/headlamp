@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -483,7 +484,7 @@ func RenderURIList(cfg IngressConfig, d Device) ([]byte, error) {
 	return out, nil
 }
 
-func hostPort(host string, port int) string { return host + ":" + strconv.Itoa(port) }
+func hostPort(host string, port int) string { return net.JoinHostPort(host, strconv.Itoa(port)) }
 
 // RenderFormat renders a device's profile in one format, with its content type.
 func RenderFormat(cfg IngressConfig, d Device, format string) (

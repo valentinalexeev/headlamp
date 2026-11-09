@@ -965,6 +965,7 @@ Set `OIDC_ISSUER` to turn it on. It needs:
 | `OIDC_RECHECK_MINUTES` | How often each person is checked again at the identity provider, 5 to 1440 minutes. The default is 60. |
 | `OIDC_SESSION_MINUTES` | The browser session, 5 to 1440 minutes. The default is 480. |
 | `OIDC_INVITE_ONLY` | `true` or `false`. The default is `false`. With `true`, a person can add a device only with an invitation: `/me` has no "Add a device" form, and node-control refuses the form with 403. With `false`, the form stays, as before. Invitations work with both values. |
+| `OIDC_INVITE_REQUIRE_VERIFIED` | `true` or `false`. The default is `true`: an invitation makes a device only when the ID token has `email_verified` set to `true`. Set `false` only when your identity provider does not send the claim and people cannot change the email of their account. See "Invitations". |
 | `ENROLL_CLIENT_ICON_DIR` | Optional. A directory with the app icons of the app picker: `<id>.svg`, `<id>.png` or `<id>.webp` for each `id` of the catalog, 64 KiB or less for each file. node-control reads the files at start and ignores other files. Without an icon, the button shows the first letter of the app. This repository has no app icons, because they are the marks of their makers. Keep the icons in your private repo and lay them over the app. |
 
 ### How a person enrols
@@ -1007,15 +1008,17 @@ Then this occurs:
 - After the sign-in, node-control compares the email of the account with the email of the invitation. The comparison ignores upper and lower case.
 - If they are the same, node-control spends the invitation and makes the device for the person. Then it shows the app picker with the tailnet key.
 
+> **WARNING:** The invitation trusts the email that the identity provider gives. Keep `OIDC_INVITE_REQUIRE_VERIFIED` at `true` if people can set the email of their account at your identity provider. Otherwise a person can type the email of the invitation and get the device.
+
 node-control makes no device in these cases:
 
 - The invitation was used, withdrawn or has expired.
 - The account has another email address.
-- The ID token has `email_verified` set to `false`. An ID token without the claim is accepted, because many identity providers give only verified addresses and do not send it.
+- The ID token does not have `email_verified` set to `true`. With `OIDC_INVITE_REQUIRE_VERIFIED=false`, a token without the claim is also accepted, but `false` is always refused.
 - The person is at the device limit (`OIDC_MAX_DEVICES`) or locked.
 - The person is not in `OIDC_ALLOWED_GROUPS`.
 
-In all cases but the first, the invitation stays usable. **Withdraw** stops an unused invitation. To stop a device that an invitation made, revoke the device.
+In all cases but the first, the invitation stays usable. **Withdraw** stops an invitation that made no device, also during a sign-in that uses it. To stop a device that an invitation made, revoke the device. A withdrawal of such an invitation gets 409.
 
 node-control keeps the invitations in `OIDC_DB`. It stores only the hash of the token. A link preview of a messenger gets an empty 404 and does not start the sign-in.
 
@@ -1023,7 +1026,7 @@ API:
 
 - `GET /enroll/invites`: all invitations, newest first. Each has `id`, `email`, `device_name`, `created_by`, `created_at`, `expires_at`, `used_at`, `used_by`, `device_id`, `revoked` and `state` (`pending`, `used`, `expired` or `revoked`). It never shows a token.
 - `POST /enroll/invites` with `{"email": "...", "device_name": "...", "days": 7}`. Only `email` is required. The answer has the `url` of the invitation. No other call shows it. It needs `admin` on `enroll`, because an invitation gives a relay device and a tailnet key.
-- `POST /enroll/invites/{id}/revoke`: withdraws an unused invitation. It needs `operate` on `enroll`.
+- `POST /enroll/invites/{id}/revoke`: withdraws an invitation that made no device. It needs `operate` on `enroll`. For an invitation that made a device, the answer is 409.
 
 ### Locks
 
@@ -1050,7 +1053,7 @@ API: `GET /enroll/people`, `POST /enroll/people/{subject}/lock` (body `{"reason"
 - An app icon is served with `X-Content-Type-Options: nosniff` and a `sandbox` Content-Security-Policy, so a script in an SVG file does not run.
 - The session cookie is `__Host-`, `Secure`, `HttpOnly` and `SameSite=Lax`. The app stores only the hash of the session id. Every form needs the CSRF token of the session.
 - The app checks the signature of the ID token with the keys of the issuer. It also checks `iss`, `aud`, `azp` (with more than one audience), `exp`, `iat` and `nonce`. It does not accept the `none` algorithm. It reads the keys again at most once a minute for an unknown key id.
-- The login state is single-use and expires after 10 minutes. The PKCE verifier stays on the server.
+- The login state is single-use and expires after 10 minutes. The PKCE verifier stays on the server. The state is also in a `__Host-` cookie of the browser that started the sign-in. A callback in another browser gets 400, so a callback URL of another account cannot sign a browser in to that account.
 - The app seals the refresh tokens with a key derived from `ENROLL_SECRET_KEY`. The `OIDC_DB` file alone gives no access.
 - The tailnet key is single-use, not reusable and not ephemeral. It has no tags, so the node gets only the ACL of its own user.
 - A person sees and revokes only their own devices.

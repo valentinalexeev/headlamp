@@ -4,6 +4,17 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control self-enrolment: bound invitations (#241). An administrator invites one email address on the Devices page (Invitations section, `POST /enroll/invites`, needs `admin` on `enroll`). The link `https://<link_host>/i/<token>` signs the person in and makes one device only when the verified email of the account is the invitation's (`email_verified: false` is refused). A failed attempt leaves the invitation usable. Withdraw an unused one with `POST /enroll/invites/{id}/revoke`. Invitations are stored in `OIDC_DB`, as token hashes. `OIDC_INVITE_ONLY=true` turns off the "Add a device" form of `/me`. The default is `false`, so a running site does not change.
+- node-control self-enrolment: an app picker (#241). The person now picks the relay app after the device is made, on `/me/devices/{id}`: one import link per app, for the platform of the browser, with the site's store links. **Add to an app** in the device list opens it again. `enroll.json` takes an optional `clients` list (the apps, their order and their store links per platform); without it every app is shown. `ENROLL_CLIENT_ICON_DIR` gives optional app icons (this repository ships none).
+- node-control enrolment: Shadowrocket and Stash in the client catalog (#241), also for devices that an operator makes. `/sub/<secret>/<format>` serves any profile format (`sing-box`, `clash`, `stash`, `uri`) for every device; `/sub/<secret>` is unchanged. `stash` is the Clash profile with Stash's field names, `uri` a base64 list of `vless://` and `hysteria2://` share links.
+
+### Changed
+
+- node-control `/me`: the "Add a device" form no longer asks for the relay app; the app picker that follows does (#241). The tailnet key shows one time, on that page. The old form field `client` is still accepted.
+- `reality-ingress`: the Caddy front also proxies `/sub/<secret>/<format>`, and with `enroll_self_service: true` also `/me/devices/<id>`, `/me/icons/<app>` and `/i/<token>` (#241). Run the role on each bridge before people use the app picker: an older front answers 404 to these links. `examples/compose/control` proxies `/i/*`.
+
 ## 0.14.0 - 2026-11-09
 
 ### Added

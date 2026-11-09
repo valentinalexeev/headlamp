@@ -43,6 +43,15 @@
   become: true
   notify: restart caddy-ingress
 
+# On a first run with Hysteria 2 the certificate is not in hy2_tls_dir yet (Caddy gets it only after it starts
+# below), so the early xray test would always fail. It then runs after the certificate copy instead.
+- name: Look for the Hysteria 2 certificate
+  ansible.builtin.stat:
+    path: "{{ hy2_tls_dir }}/cert.pem"
+  register: reality_hy2_cert
+  become: true
+  when: hy2_enabled | bool
+
 # Validate before anything is (re)started. Skipped in check mode: the binaries
 # and files may not exist yet.
 - name: Validate the xray base config
@@ -54,7 +63,7 @@
   # No no_log: a validation error must stay visible. The key is not on the
   # command line (only the file path) and xray reports problems by field name,
   # not by echoing the config.
-  when: not ansible_check_mode
+  when: not ansible_check_mode and (not (hy2_enabled | bool) or reality_hy2_cert.stat.exists)
 
 - name: Validate the Caddyfile (as the caddy user, so no root-owned files appear in its state)
   ansible.builtin.command: >-
@@ -82,6 +91,14 @@
 - name: Hysteria 2 certificate (before xray starts, so the inbound has its files)
   ansible.builtin.include_tasks: hy2.yml
   when: hy2_enabled | bool
+
+- name: Validate the xray base config (first run, now that the Hysteria 2 certificate is in place)
+  ansible.builtin.command: "{{ xray_bin }} run -test -c {{ xray_config_dir }}/config.base.json"
+  environment:
+    XRAY_LOCATION_ASSET: "{{ xray_asset_dir }}"
+  become: true
+  changed_when: false
+  when: not ansible_check_mode and hy2_enabled | bool and not reality_hy2_cert.stat.exists
 
 - name: Enable and start xray
   ansible.builtin.systemd:

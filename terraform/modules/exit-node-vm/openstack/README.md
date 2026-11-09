@@ -190,7 +190,9 @@ There are 2 safer options:
    ```
 
    The module creates an application credential with one access rule: `GET` on that secret's payload. The node reads
-   the key at first boot and deletes the credential file. The credential is still in user data and in the state.
+   the key at first boot and deletes the credential file.
+
+   The credential is still in user data and in the state.
    It is a credential: it can read the auth key while it is valid. After the node joins, revoke it
    (`openstack application credential delete <name>-authkey`) or let it expire. Output `application_credential_id`
    shows its ID. The user that runs Terraform must be allowed to create application credentials with access rules.

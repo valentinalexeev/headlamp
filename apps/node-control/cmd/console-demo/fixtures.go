@@ -340,7 +340,7 @@ func (f *fakeHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "GET /api/v1/node":
 		reply(200, map[string]any{"nodes": f.nodes})
 	case "GET /version":
-		reply(200, map[string]any{"version": "v0.29.7", "commit": "demo"})
+		reply(http.StatusOK, map[string]any{"version": "v0.29.7", "commit": "demo"})
 	case "GET /api/v1/policy":
 		reply(200, map[string]any{"policy": f.policy, "updatedAt": f.updatedAt.Format(time.RFC3339Nano)})
 	case "PUT /api/v1/policy":
@@ -880,7 +880,8 @@ func (w *world) seedFunnelReport(ctx context.Context, hc *http.Client, admin str
 	}
 	post := func() error {
 		code, _, err := call(ctx, hc, admin, "POST", "/ingress/v1/state", map[string]any{
-			"build_version": "0.16.0", "applied_version": "demo", "sent_at": time.Now().UTC().Format(time.RFC3339), "snapshot_loaded": true,
+			"build_version": "0.16.0", "applied_version": "demo",
+			"sent_at": time.Now().UTC().Format(time.RFC3339), "snapshot_loaded": true,
 			"peer_count": 3, "routes": routes, "errors": []string{}})
 		if err != nil {
 			return err

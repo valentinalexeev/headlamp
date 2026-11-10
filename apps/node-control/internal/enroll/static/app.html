@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="apple-itunes-app" content="app-id={{.AppStoreID}}, app-argument={{.Argument}}">
+<title>Add to {{.Label}}</title>
+<style>
+body{font:16px/1.5 system-ui,sans-serif;margin:0;background:#f6f7f9;color:#14171a}
+main{max-width:40rem;margin:0 auto;padding:1.5rem}
+h1{font-size:1.4rem;margin:.2em 0 1em}
+section{background:#fff;border:1px solid #dde1e6;border-radius:.6rem;padding:1rem 1.2rem;margin:0 0 1rem}
+.muted{color:#5b6570}
+a{color:#0a66ff}
+a.btn{display:inline-flex;align-items:center;gap:.6rem;padding:.7em 1.2em;border-radius:.7em;background:#0a66ff;color:#fff;text-decoration:none;font-weight:600}
+a.btn img,a.btn .badge{width:32px;height:32px;border-radius:8px}
+a.btn .badge{display:inline-flex;align-items:center;justify-content:center;background:#fff;color:#0a66ff}
+ol{padding-left:1.3rem}
+</style></head><body><main>
+<h1>Add {{.Name}} to {{.Label}}</h1>
+<section>
+<p>In Safari, the bar at the top of this page shows if {{.Label}} is on this device:</p>
+<ol>
+<li><strong>Open</strong>: {{.Label}} is installed. Tap Open to add the profile.</li>
+<li><strong>Get</strong> or <strong>View</strong>: {{.Label}} is not installed. Install it, come back to this page, then tap Open.</li>
+</ol>
+<p class="muted">If you do not see the bar, this is not Safari, or the bar was closed. Then use the button.</p>
+<p><a class="btn" href="{{.Href}}">{{if .Icon}}<img src="/me/icons/{{.ID}}" alt="">{{else}}<span class="badge" aria-hidden="true">{{slice .Label 0 1}}</span>{{end}}Open in {{.Label}}</a></p>
+{{if .GetURL}}<p><a href="{{.GetURL}}" rel="noreferrer">Get {{.Label}}</a></p>{{end}}
+</section>
+<p><a href="/me/devices/{{.DeviceID}}">Other apps</a> · <a href="/me">Your devices</a></p>
+</main></body></html>

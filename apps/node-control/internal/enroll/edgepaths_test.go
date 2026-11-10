@@ -46,7 +46,7 @@ func TestEdgePathsMatchThePublicRoutes(t *testing.T) {
 	hex := strings.Repeat("ab", 32)
 	// Every route of the public listener, with a valid example path. The edge must proxy each of them.
 	served := []string{"/e/tok_1", "/sub/abc", "/me", "/oidc/login", "/oidc/callback", "/me/devices", "/me/devices/12",
-		"/me/devices/12/revoke", "/me/logout", "/me/icons/sing-box", "/i/" + hex}
+		"/me/devices/12/revoke", "/me/devices/12/app/sing-box", "/me/logout", "/me/icons/sing-box", "/i/" + hex}
 	for _, format := range []string{FormatSingBox, FormatClash, FormatStash, FormatURIList} {
 		served = append(served, "/sub/abc/"+format)
 	}
@@ -78,7 +78,7 @@ func TestEdgePathsMatchThePublicRoutes(t *testing.T) {
 	}
 	// Paths that are not served must not be proxied.
 	for _, p := range []string{"/", "/me/", "/admin", "/enroll", "/e/..", "/sub/abc/bad", "/sub/a/b/c", "/i/short",
-		"/me/devices/x", "/oidc/other", "/metrics"} {
+		"/me/devices/x", "/me/devices/1/app/", "/me/devices/1/app/a/b", "/oidc/other", "/metrics"} {
 		if edgeProxies(ms, p) {
 			t.Errorf("the edge proxies %s, which node-control does not serve", p)
 		}

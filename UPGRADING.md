@@ -11,6 +11,14 @@ says "No action required".
 
 ## Unreleased (0.16.0)
 
+### Action required
+
+- **Each front that serves `link_host`** (#271): copy the new `enroll-paths.caddy` (`examples/compose/control`:
+  `caddy/enroll-paths.caddy`, then `docker compose up -d edge`), or run the `reality-ingress` role on each bridge. It
+  has the app page `/me/devices/<id>/app/<app>`. Until then, the app picker buttons on an iPhone answer 404. **Open without the check** under each button still works.
+
+  Check: on an iPhone, open the app picker of a device in Safari, select an app, and make sure that the app page
+  opens.
 ### Optional
 
 - **Health checks** (#196): run the `ingress-agent` role on each bridge for the bridge self-test (on by default; set

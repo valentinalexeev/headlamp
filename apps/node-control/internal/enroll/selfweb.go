@@ -24,6 +24,7 @@ import (
 //	GET  /oidc/callback   completes it and sets the session cookie
 //	POST /me/devices      enrols a device (form: name, csrf); shows the tailnet key once
 //	                      and the app picker
+//	GET  /me/devices/{id}/app/{app}  one app with Safari's Smart App Banner (#271)
 //	GET  /me/devices/{id} the app picker of an own, active device: one import link per app
 //	                      the site offers
 //	POST /me/devices/{id}/revoke   revokes an own device (form: csrf)
@@ -58,6 +59,9 @@ var meHTML string
 //go:embed static/pick.html
 var pickHTML string
 
+//go:embed static/app.html
+var appHTML string
+
 var tmplFuncs = template.FuncMap{
 	"date": func(ts int64) string { return time.Unix(ts, 0).UTC().Format("2006-01-02") },
 }
@@ -65,6 +69,7 @@ var tmplFuncs = template.FuncMap{
 var (
 	meTmpl   = template.Must(template.New("me").Funcs(tmplFuncs).Parse(meHTML))
 	pickTmpl = template.Must(template.New("pick").Funcs(tmplFuncs).Parse(pickHTML))
+	appTmpl  = template.Must(template.New("app").Funcs(tmplFuncs).Parse(appHTML))
 )
 
 // Register adds the routes to the public mux, ahead of the enrolment catch-all.
@@ -74,6 +79,7 @@ func (s *SelfWeb) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /oidc/callback", s.callback)
 	mux.HandleFunc("POST /me/devices", s.form(s.enrol))
 	mux.HandleFunc("GET /me/devices/{id}", s.pickPage)
+	mux.HandleFunc("GET /me/devices/{id}/app/{app}", s.appPage)
 	mux.HandleFunc("POST /me/devices/{id}/revoke", s.form(s.revoke))
 	mux.HandleFunc("POST /me/logout", s.form(s.logout))
 	mux.HandleFunc("GET /me/icons/{app}", s.icon)

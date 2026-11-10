@@ -17,9 +17,12 @@ import (
 // one.
 
 type pickApp struct {
-	ID      string
-	Label   string
-	Href    template.URL // a custom-scheme import link, built here from quoted parts
+	ID    string
+	Label string
+	Href  template.URL // a custom-scheme import link, built here from quoted parts
+	// Direct is the import link when Href is the app page: a way in without the banner, also
+	// while the edge of the site does not proxy the app page yet.
+	Direct  template.URL
 	Icon    bool
 	Install []pickInstall
 }
@@ -44,9 +47,12 @@ type pickView struct {
 	Enrolment *Enrolment
 	Apps      []pickApp
 	// Platform is the name of the detected platform, "" when unknown or when every app is shown.
-	Platform   string
-	Hidden     int // apps for other platforms, not shown
-	All        bool
+	Platform string
+	Hidden   int // apps for other platforms, not shown
+	All      bool
+	// Missing is the name of the app that Chrome did not find on this device (the fallback of an
+	// intent:// link). Only a catalog id of the query is read, never free text.
+	Missing    string
 	Formats    []pickFormat
 	ProfileTag string
 }
@@ -91,8 +97,27 @@ func (s *SelfWeb) renderPick(
 		_, icon := s.icons[def.ID]
 		app := pickApp{ID: def.ID, Label: def.Label, Icon: icon,
 			Href: importHref(def, FormatURL(subURL, def.Format), link.ProfileName)}
+		installs := ch.installLinks()
+		switch {
+		case platform == PlatformIOS && ch.StoreID() != "":
+			// On an iPhone, the app page checks with Safari's banner whether the app is there.
+			app.Direct, app.Href = app.Href, appPageHref(d.ID, def.ID)
+		case platform == PlatformAndroid && ch.Package() != "":
+			// On Android, an intent:// link opens the app if it is there, else the fallback: the
+			// store link of the site or Google Play, else this page with a "not installed" note.
+			fallback := installs[PlatformAndroid]
+			if fallback == "" {
+				fallback = "https://" + link.Link().Host + "/me/devices/" +
+					strconv.FormatInt(d.ID, 10) + "?missing=" + def.ID
+			}
+			imp := def.Link(FormatURL(subURL, def.Format), link.ProfileName)
+			app.Direct, app.Href = app.Href, intentHref(intentLink(imp, ch.Package(), fallback))
+		}
+		if r.URL.Query().Get("missing") == def.ID {
+			v.Missing = def.Label
+		}
 		for _, p := range platforms {
-			if url, ok := ch.Install[p]; ok && (platform == "" || p == platform) {
+			if url, ok := installs[p]; ok && (platform == "" || p == platform) {
 				label := "Get " + def.Label
 				if platform == "" {
 					label += " for " + PlatformLabel[p]
@@ -121,13 +146,34 @@ func importHref(def ClientDef, subURL, name string) template.URL {
 	return template.URL(def.Link(subURL, name)) // #nosec G203 -- built from encoded parts only
 }
 
+// appPageHref is the path of the app page of a device: digits and a catalog id only.
+func appPageHref(id int64, app string) template.URL {
+	p := "/me/devices/" + strconv.FormatInt(id, 10) + "/app/" + app
+	return template.URL(p) // #nosec G203 -- digits and a catalog id only
+}
+
+// intentHref keeps an intent:// link in the page template: built from the catalog, the encoded
+// import link and an https fallback URL.
+func intentHref(s string) template.URL {
+	return template.URL(s) // #nosec G203 -- built from encoded parts only
+}
+
 // pickPage answers GET /me/devices/{id}: the picker of an own, active device.
 func (s *SelfWeb) pickPage(w http.ResponseWriter, r *http.Request) {
+	sub, csrf, d, ok := s.ownDevice(w, r)
+	if ok {
+		s.renderPick(w, r, sub, csrf, d, nil, d.Name)
+	}
+}
+
+// ownDevice finds the active device of the signed-in person named in the path. When there is
+// none, it has already answered: a redirect without a session, else the devices page with a 404.
+func (s *SelfWeb) ownDevice(w http.ResponseWriter, r *http.Request) (string, string, Device, bool) {
 	sub, csrf, ok := s.session(r)
 	if !ok {
 		secHeaders(w)
 		http.Redirect(w, r, "/me", http.StatusSeeOther)
-		return
+		return "", "", Device{}, false
 	}
 	var d Device
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -135,20 +181,76 @@ func (s *SelfWeb) pickPage(w http.ResponseWriter, r *http.Request) {
 		d, err = s.self.store.GetDevice(id)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			s.fail(w, err)
-			return
+			return "", "", Device{}, false
 		}
 	}
 	if err != nil || d.Owner != ownerOf(sub) || !s.self.active(d) {
-		v, verr := s.view(sub, csrf)
-		if verr != nil {
-			s.fail(w, verr)
-			return
-		}
-		v.Error = "There is no such active device of yours."
-		s.render(w, http.StatusNotFound, v)
+		s.notFoundPage(w, sub, csrf, "There is no such active device of yours.")
+		return "", "", Device{}, false
+	}
+	return sub, csrf, d, true
+}
+
+func (s *SelfWeb) notFoundPage(w http.ResponseWriter, sub, csrf, msg string) {
+	v, err := s.view(sub, csrf)
+	if err != nil {
+		s.fail(w, err)
 		return
 	}
-	s.renderPick(w, r, sub, csrf, d, nil, d.Name)
+	v.Error = msg
+	s.render(w, http.StatusNotFound, v)
+}
+
+// appView is the app page of one device and one app (#271).
+type appView struct {
+	DeviceID   int64
+	Name       string
+	ID         string
+	Label      string
+	Icon       bool
+	AppStoreID string
+	Argument   string       // the import link, for the banner (the template escapes it as text)
+	Href       template.URL // the same import link, for the button
+	GetURL     string
+}
+
+// appPage answers GET /me/devices/{id}/app/{app}: Safari's Smart App Banner for the app. Safari
+// shows "Open" when the app is installed and "Get" when it is not; "Open" gives the import link to
+// the app. A web page cannot find out by itself which apps are installed.
+func (s *SelfWeb) appPage(w http.ResponseWriter, r *http.Request) {
+	sub, csrf, d, ok := s.ownDevice(w, r)
+	if !ok {
+		return
+	}
+	link := s.link()
+	var ch ClientChoice
+	for _, c := range link.Offered() {
+		if c.ID == r.PathValue("app") {
+			ch = c
+		}
+	}
+	def, known := ClientByID(ch.ID)
+	if !known || ch.StoreID() == "" {
+		s.notFoundPage(w, sub, csrf, "This site does not offer that app for iPhone and iPad.")
+		return
+	}
+	secret, err := s.self.store.SubscriptionSecret(d.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	feed := FormatURL(SubURL(link, secret), def.Format)
+	imp := def.Link(feed, link.ProfileName)
+	_, icon := s.icons[def.ID]
+	v := appView{DeviceID: d.ID, Name: d.Name, ID: def.ID, Label: def.Label, Icon: icon,
+		AppStoreID: ch.StoreID(), Argument: imp, GetURL: ch.installLinks()[PlatformIOS],
+		Href: importHref(def, feed, link.ProfileName)}
+	secHeaders(w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if err := appTmpl.Execute(w, v); err != nil {
+		slog.Warn("app page failed", "error_type", errType(err))
+	}
 }
 
 // Icon is one app icon of the site.

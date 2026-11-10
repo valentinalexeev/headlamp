@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -48,6 +49,14 @@ type ClientDef struct {
 	Label     string   // the app's name, for buttons and the landing page
 	Format    string   // the profile format the app imports
 	Platforms []string // where the app runs
+	// AppStoreID is the numeric id of the app in the Apple App Store, for the Smart App Banner of
+	// the app page (#271) and the default iOS store link. "" when the app has no iOS listing.
+	AppStoreID string
+	// AndroidPackage is the application id of the Android app, for the intent:// links of the
+	// picker on Android (#271): Chrome opens that app when it is installed, else a fallback URL.
+	AndroidPackage string
+	// OnPlay says the Android app is on Google Play, so its Play page is a good fallback.
+	OnPlay bool
 	// Landing: the one-time link answers with a page and a button instead of a redirect, because
 	// the app only opens from a tap.
 	Landing bool
@@ -69,34 +78,40 @@ func installConfigLink(scheme string) func(string, string) string {
 
 // Catalog is every app node-control supports, in the default order.
 var Catalog = []ClientDef{
-	{ID: "sing-box", Label: "sing-box", Format: FormatSingBox,
+	// The iOS listing that the sing-box documentation links ("sing-box MT").
+	{ID: "sing-box", Label: "sing-box", Format: FormatSingBox, AppStoreID: "6785326793",
+		AndroidPackage: "io.nekohasekai.sfa", OnPlay: true,
 		Platforms: []string{PlatformIOS, PlatformMacOS, PlatformAndroid},
 		link: func(subURL, name string) string {
 			return "sing-box://import-remote-profile?url=" + quote(subURL) + "#" + quote(name)
 		}},
-	{ID: "karing", Label: "Karing", Format: FormatSingBox, Landing: true,
+	{ID: "karing", Label: "Karing", Format: FormatSingBox, Landing: true, AppStoreID: "6472431552",
+		AndroidPackage: "com.nebula.karing",
 		Platforms: []string{
 			PlatformIOS, PlatformMacOS, PlatformAndroid, PlatformWindows, PlatformLinux,
 		},
 		link: installConfigLink("karing")},
-	{ID: "clash", Label: "Clash Mi", Format: FormatClash, Landing: true,
-		Platforms: []string{PlatformIOS, PlatformMacOS, PlatformAndroid, PlatformWindows},
-		link:      installConfigLink("clash")},
+	{ID: "clash", Label: "Clash Mi", Format: FormatClash, Landing: true, AppStoreID: "6744321968",
+		AndroidPackage: "com.nebula.clashmi",
+		Platforms:      []string{PlatformIOS, PlatformMacOS, PlatformAndroid, PlatformWindows},
+		link:           installConfigLink("clash")},
 	{ID: "shadowrocket", Label: "Shadowrocket", Format: FormatURIList, Landing: true,
-		Platforms: []string{PlatformIOS, PlatformMacOS},
+		AppStoreID: "932747118",
+		Platforms:  []string{PlatformIOS, PlatformMacOS},
 		// The URL is standard base64, as Shadowrocket's own sub:// QR codes carry it.
 		link: func(subURL, name string) string {
 			b := base64.StdEncoding.EncodeToString([]byte(subURL))
 			return "shadowrocket://add/sub://" + b + "?remark=" + quote(name)
 		}},
-	{ID: "stash", Label: "Stash", Format: FormatStash, Landing: true,
+	{ID: "stash", Label: "Stash", Format: FormatStash, Landing: true, AppStoreID: "1596063349",
 		Platforms: []string{PlatformIOS, PlatformMacOS},
 		link:      installConfigLink("stash")},
 	// Happ (#278), an xray-core app. Its import link is happ://add/ followed by the plain
 	// subscription URL: Happ takes everything after the prefix as the URL, so the URL is not
 	// encoded. The link has no name: Happ names the subscription from the profile-title
 	// header, else from the host.
-	{ID: "happ", Label: "Happ", Format: FormatURIList, Landing: true,
+	{ID: "happ", Label: "Happ", Format: FormatURIList, Landing: true, AppStoreID: "6504287215",
+		AndroidPackage: "com.happproxy", OnPlay: true,
 		Platforms: []string{
 			PlatformIOS, PlatformMacOS, PlatformAndroid, PlatformWindows, PlatformLinux,
 		},
@@ -162,6 +177,74 @@ type ClientChoice struct {
 	ID string `json:"id"`
 	// Install maps a platform to the https URL of the app's store page.
 	Install map[string]string `json:"install,omitempty"`
+	// AppStoreID replaces the App Store id of the catalog (#271), because listings change.
+	AppStoreID string `json:"app_store_id,omitempty"`
+	// AndroidPackage replaces the Android application id of the catalog (#271).
+	AndroidPackage string `json:"android_package,omitempty"`
+}
+
+// androidPackageRe is the form of an Android application id.
+var androidPackageRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
+
+// maxAndroidPackage bounds an application id of enroll.json.
+const maxAndroidPackage = 255
+
+// Package is the Android application id of the app: the site's, else the catalog's.
+func (ch ClientChoice) Package() string {
+	if ch.AndroidPackage != "" {
+		return ch.AndroidPackage
+	}
+	def, _ := ClientByID(ch.ID)
+	return def.AndroidPackage
+}
+
+// PlayURL is the Google Play page of an Android application id.
+func PlayURL(pkg string) string { return "https://play.google.com/store/apps/details?id=" + pkg }
+
+// intentLink makes an import link an Android intent:// link for one package. Chrome opens the
+// package with the import link when it is installed, else it goes to fallback. The data part
+// keeps the import link whole: Android splits the link at its last "#", the one of "#Intent;".
+func intentLink(importLink, pkg, fallback string) string {
+	scheme, rest, ok := strings.Cut(importLink, "://")
+	if !ok {
+		return importLink
+	}
+	return "intent://" + rest + "#Intent;scheme=" + scheme + ";package=" + pkg +
+		";S.browser_fallback_url=" + quote(fallback) + ";end"
+}
+
+// appStoreIDRe is the form of an App Store id.
+var appStoreIDRe = regexp.MustCompile(`^[0-9]{1,12}$`)
+
+// StoreID is the App Store id of the app: the site's, else the catalog's. "" when it has none.
+func (ch ClientChoice) StoreID() string {
+	if ch.AppStoreID != "" {
+		return ch.AppStoreID
+	}
+	def, _ := ClientByID(ch.ID)
+	return def.AppStoreID
+}
+
+// AppStoreURL is the App Store page of an app id. Apple sends the visitor to their own storefront.
+func AppStoreURL(id string) string { return "https://apps.apple.com/app/id" + id }
+
+// installLinks are the store links of an app per platform: the site's, plus the App Store page of
+// the app id for iOS when the site gives no iOS link.
+func (ch ClientChoice) installLinks() map[string]string {
+	out := map[string]string{}
+	for p, u := range ch.Install {
+		out[p] = u
+	}
+	if id := ch.StoreID(); id != "" && out[PlatformIOS] == "" {
+		out[PlatformIOS] = AppStoreURL(id)
+	}
+	def, _ := ClientByID(ch.ID)
+	// The Play page belongs to the catalog's package: a site's own package may not be on Play.
+	onPlay := def.OnPlay && (ch.AndroidPackage == "" || ch.AndroidPackage == def.AndroidPackage)
+	if out[PlatformAndroid] == "" && onPlay && ch.Package() != "" {
+		out[PlatformAndroid] = PlayURL(ch.Package())
+	}
+	return out
 }
 
 // Offered are the apps of the picker page: the site's choices, or every app of the catalog.
@@ -209,7 +292,7 @@ func parseClientChoice(i int, raw map[string]json.RawMessage) (ClientChoice, err
 		return ClientChoice{}, fmt.Errorf("ENROLL_CONFIG: clients[%d] must be an object", i)
 	}
 	for k := range raw {
-		if k != "id" && k != "install" {
+		if k != "id" && k != "install" && k != "app_store_id" && k != "android_package" {
 			if !keyNameRe.MatchString(k) {
 				k = "(a key with an unusual name)"
 			}
@@ -222,6 +305,22 @@ func parseClientChoice(i int, raw map[string]json.RawMessage) (ClientChoice, err
 			i, clientsRepr)
 	}
 	ch := ClientChoice{ID: id}
+	if v, present := raw["app_store_id"]; present {
+		s, _ := rawString(v)
+		if !appStoreIDRe.MatchString(s) {
+			return ClientChoice{}, fmt.Errorf("ENROLL_CONFIG: clients[%d] %s: "+
+				"app_store_id must be a string of 1 to 12 digits", i, id)
+		}
+		ch.AppStoreID = s
+	}
+	if v, present := raw["android_package"]; present {
+		s, _ := rawString(v)
+		if !androidPackageRe.MatchString(s) || len(s) > maxAndroidPackage {
+			return ClientChoice{}, fmt.Errorf("ENROLL_CONFIG: clients[%d] %s: android_package "+
+				"must be an Android application id, for example com.example.app", i, id)
+		}
+		ch.AndroidPackage = s
+	}
 	if inst, present := raw["install"]; present {
 		m, err := parseInstall(inst)
 		if err != nil {

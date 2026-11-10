@@ -11,9 +11,28 @@
     fail_msg: "ingress-agent: only x86_64 and aarch64 bridges are supported (got {{ ansible_facts.architecture }})."
     quiet: true
 
+# The build stamps the repo VERSION and the commit into the binary (#195): `ingress-agent --version`, /v1/info and
+# the console fleet view show it. The commit is the last one that changed the agent source, not HEAD: an
+# unrelated commit must not change the binary and restart the agent. Outside a git checkout it is left out.
+- name: Work out the agent version
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      v=$(cat ../../VERSION 2>/dev/null || echo dev)
+      c=$(git log -1 --format=%h --abbrev=7 -- . 2>/dev/null || true)
+      if [ -n "$c" ] && [ -n "$(git status --porcelain -- . 2>/dev/null)" ]; then c="$c-dirty"; fi
+      echo "$v${c:++$c}"
+    chdir: "{{ ingress_agent_src | realpath }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+  register: ingress_agent_version_cmd
+
 - name: Build the agent on the control host
   ansible.builtin.command:
-    argv: [go, build, -trimpath, "-ldflags=-s -w", -o, "{{ ingress_agent_build_dir }}/ingress-agent-linux-{{ ingress_agent_goarch }}", ./cmd/ingress-agent]
+    argv: [go, build, -trimpath, "-ldflags=-s -w -X main.version={{ ingress_agent_version_cmd.stdout | trim }}", -o,
+           "{{ ingress_agent_build_dir }}/ingress-agent-linux-{{ ingress_agent_goarch }}", ./cmd/ingress-agent]
     chdir: "{{ ingress_agent_src | realpath }}"
   environment:
     CGO_ENABLED: "0"
@@ -25,6 +44,16 @@
   changed_when: false
   run_once: false
 
+- name: Read the installed agent version
+  ansible.builtin.command:
+    # An agent before 0.16.0 ignores --version and stops at once without AGENT_TOKEN; the timeout is a guard.
+    argv: [timeout, "5", "{{ ingress_agent_bin }}", --version]
+  become: true
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  register: ingress_agent_old_version
+
 - name: Install the agent binary
   ansible.builtin.copy:
     src: "{{ ingress_agent_build_dir }}/ingress-agent-linux-{{ ingress_agent_goarch }}"
@@ -34,6 +63,14 @@
     mode: "0755"
   become: true
   notify: restart ingress-agent
+
+# A binary has no readable diff: say which version replaces which. An agent from before 0.16.0 has no --version.
+- name: Report the agent version change
+  ansible.builtin.debug:
+    msg: >-
+      ingress-agent {{ ingress_agent_old_version.stdout | default('') | trim | default('before 0.16.0 or not installed', true) }}
+      -> {{ ingress_agent_version_cmd.stdout | trim }}
+  when: (ingress_agent_old_version.stdout | default('') | trim) != (ingress_agent_version_cmd.stdout | trim)
 
 # The former Python agent lived in <ingress_agent_dir>/app, which this role created. Only that tree is removed.
 - name: Remove the former Python agent

@@ -104,3 +104,9 @@ func (l *Local) Dial(ctx context.Context, network, addr string) (net.Conn, error
 func (l *Local) WhoIs(ctx context.Context, remoteAddr string) (string, []string, error) {
 	return "local", nil, nil
 }
+
+// PeerVersions is an optional Tailnet capability: the tailscale version of a peer, by its tailnet
+// address (#195).
+type PeerVersions interface {
+	PeerVersion(ctx context.Context, ip string) (string, error)
+}

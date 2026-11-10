@@ -13,6 +13,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
   - node-control: `HEALTH_LISTEN` serves only `GET /healthz` on a plain address, `503` while the tailnet node is not `Running`. `fly.toml` sets it to `:9001` and checks it.
   - funnel-ingress: the grace period of its Fly check is 60 s, so a slow tailnet login at start does not fail it.
   - `scripts/smoke-test.sh`: after an upgrade, it checks that every bridge is in sync and passes its self-test, makes a test device, checks its subscription through `link_host`, revokes it, and checks the public paths.
+- Fleet versions, part 1 (#195). node-control serves `GET /fleet.json` (Overview view permission). It shows the node-control version, the headscale version, the tailscale version of every tailnet node compared with the pin (current, older, newer, unknown), and the agent and xray version of every discovered bridge. It is read only. The tailscale versions come from node-control's own tailnet node, so nothing is sent to the nodes.
+- ingress-agent reports its build version and its xray version in `GET /v1/info` (`version`, `xray`), and prints its version with `--version`. These fields are not in the bridge fingerprint, so an agent upgrade needs no new approval. The `ingress-agent` role stamps the version (repo VERSION plus the last commit that changed the agent) and prints "old -> new" when it changes.
 
 ## 0.15.3 - 2026-11-10
 

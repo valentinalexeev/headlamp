@@ -265,8 +265,10 @@ func TestPickerPage(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("%d %s", code, p)
 	}
-	for _, want := range []string{`href="shadowrocket://add/sub://`, `href="stash://install-config?url=`, `href="karing://install-config?url=`,
-		`%2Fstash&amp;name=`, "/sub/", "The list shows the apps for iPhone and iPad"} {
+	// on an iPhone, each app with an App Store id goes to its app page (#271)
+	for _, want := range []string{`href="/me/devices/` + id + `/app/shadowrocket"`, `href="/me/devices/` + id + `/app/stash"`,
+		`href="/me/devices/` + id + `/app/karing"`, `href="https://apps.apple.com/app/id932747118"`, "/sub/",
+		"The list shows the apps for iPhone and iPad"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -279,7 +281,8 @@ func TestPickerPage(t *testing.T) {
 		!strings.Contains(p, "Show all apps") {
 		t.Error("platform filter")
 	}
-	if _, p := get("/me/devices/"+id+"?all=1", "Mozilla/5.0 (Linux; Android 16)"); !strings.Contains(p, "shadowrocket://") || strings.Contains(p, "Show all apps") {
+	if _, p := get("/me/devices/"+id+"?all=1", "Mozilla/5.0 (Linux; Android 16)"); !strings.Contains(p, "shadowrocket://") ||
+		!strings.Contains(p, `%2Fstash&amp;name=`) || strings.Contains(p, "Show all apps") {
 		t.Error("all=1")
 	}
 	// someone else's device, an unknown one, and a revoked one are not shown

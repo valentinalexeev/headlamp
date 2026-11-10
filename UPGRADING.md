@@ -9,6 +9,17 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## Unreleased (0.16.0)
+
+### Action required
+
+- **Each front that serves `link_host`** (#271): copy the new `enroll-paths.caddy` (`examples/compose/control`:
+  `caddy/enroll-paths.caddy`, then `docker compose up -d edge`), or run the `reality-ingress` role on each bridge. It
+  has the app page `/me/devices/<id>/app/<app>`. Until then, the app picker buttons on an iPhone answer 404.
+
+  Check: on an iPhone, open the app picker of a device in Safari, select an app, and make sure that the app page
+  opens.
+
 ## 0.15.2
 
 ### Action required

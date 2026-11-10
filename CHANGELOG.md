@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control self-enrolment: an app page for iPhone and iPad, `/me/devices/{id}/app/{app}` (#271). It has Safari's Smart App Banner, which shows **Open** when the app is installed and **Get** when it is not, and gives the import link to the app. On iOS, the app picker buttons open this page. The client catalog has the App Store id of each app (sing-box: "sing-box MT", the listing that the sing-box documentation links). `enroll.json` `clients[].app_store_id` replaces it. Without an `ios` store link, the picker shows the App Store page of the id. `enroll-paths.caddy` has the new path.
+
 ## 0.15.2 - 2026-11-10
 
 ### Fixed

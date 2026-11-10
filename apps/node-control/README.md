@@ -776,15 +776,16 @@ Differences from the Python app that this replaced:
 
 node-control makes profiles and import links for the apps of a fixed catalog (#241):
 
-| `id` | App | Profile format | Platforms |
-|---|---|---|---|
-| `sing-box` | sing-box | `sing-box` | `ios`, `macos`, `android` |
-| `karing` | Karing | `sing-box` | `ios`, `macos`, `android`, `windows`, `linux` |
-| `clash` | Clash Mi | `clash` | `ios`, `macos`, `android`, `windows` |
-| `shadowrocket` | Shadowrocket | `uri` | `ios`, `macos` |
-| `stash` | Stash | `stash` | `ios`, `macos` |
+| `id` | App | Profile format | Platforms | App Store id |
+|---|---|---|---|---|
+| `sing-box` | sing-box (iOS: "sing-box MT") | `sing-box` | `ios`, `macos`, `android` | `6785326793` |
+| `karing` | Karing | `sing-box` | `ios`, `macos`, `android`, `windows`, `linux` | `6472431552` |
+| `clash` | Clash Mi | `clash` | `ios`, `macos`, `android`, `windows` | `6744321968` |
+| `shadowrocket` | Shadowrocket | `uri` | `ios`, `macos` | `932747118` |
+| `stash` | Stash | `stash` | `ios`, `macos` | `1596063349` |
 
 - The `id` is also the `client` value of a device that an operator makes.
+- The App Store id is for the app page on iPhone (#271) and for the default iOS store link. The sing-box documentation links the iOS app "sing-box MT".
 - The one-time link of a `karing`, `clash`, `shadowrocket` or `stash` device opens a page with a button, because these apps open only from a tap. The one-time link of a `sing-box` device redirects at once.
 - `https://<link_host>/sub/<secret>` serves the format of the device's `client`. This did not change.
 - `https://<link_host>/sub/<secret>/<format>` serves the profile in one format, for every device. Each import link of the app picker uses this form. Thus one device can go into each app, also into more than one app.
@@ -809,7 +810,8 @@ The `clients` key of `enroll.json` selects the apps of the app picker and gives 
 ```
 
 - `id` is required. It must be an `id` of the catalog, and each `id` can occur one time only.
-- `install` is optional. Its keys are platforms (`ios`, `android`, `macos`, `windows`, `linux`). Its values are `https` URLs of the store page of the app, 500 characters or fewer.
+- `install` is optional. Its keys are platforms (`ios`, `android`, `macos`, `windows`, `linux`). Its values are `https` URLs of the store page of the app, 500 characters or fewer. Without an `ios` link, the iOS link is `https://apps.apple.com/app/id<App Store id>`.
+- `app_store_id` is optional: a string of 1 to 12 digits. It replaces the App Store id of the catalog, for example when an app gets a new listing.
 - An empty list is an error. To show all apps, remove the key.
 - Which apps your people can get depends on the app stores that they can use. Keep the list and the store links in your private repo.
 
@@ -998,10 +1000,23 @@ A person who enrolled before 0.15.2 keeps the user that node-control recorded. T
 
 - The page finds the platform from the User-Agent of the browser and shows only the apps for that platform. **Show all apps** shows all of them. An iPad that asks for desktop pages shows as a Mac. Each app of the catalog for iOS also runs on a Mac.
 - A web page cannot find which apps are installed. Thus each button has the store link of `install` for that platform, when `enroll.json` gives one.
-- Each button is the import link of the app, with the subscription URL of the app's format (`/sub/<secret>/<format>`).
+- Each button is the import link of the app, with the subscription URL of the app's format (`/sub/<secret>/<format>`). On an iPhone or iPad, a button of an app with an App Store id opens the app page of that app (next section).
 - **Add the profile by hand** shows the subscription URL of each format.
 
 > **CAUTION:** The app picker shows the subscription URLs each time the person opens it. Anyone with such a URL can use the device. The page is only for the signed-in owner of the device, and it is never cached.
+
+### App page on iPhone and iPad
+
+A web page cannot find which apps are installed. Safari can, for one app on each page, with the Smart App Banner (#271). `/me/devices/{id}/app/{app}` uses it:
+
+- The page has `<meta name="apple-itunes-app" content="app-id=<App Store id>, app-argument=<import link>">`.
+- In Safari, the bar at the top of the page shows **Open** when the app is installed, and **Get** or **View** when it is not. **Open** starts the app and gives it the import link.
+- The page also has an **Open in &lt;app&gt;** button with the same import link, and a **Get &lt;app&gt;** link. Use them in other browsers, and when the bar is closed.
+- The page is only for an active device of the signed-in person. The app must be one that the site offers, with an App Store id. Other requests get 404.
+
+Only Safari on iPhone and iPad shows the bar. The in-app browser of a messenger does not. Thus send the invitation link, and tell people to open it in Safari.
+
+> **CAUTION:** Make sure that each app opens the import link from **Open** before you tell people to use the bar. The device test of #243 includes this check. If an app does not open the link, people can use the button.
 
 ### Invitations
 

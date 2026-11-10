@@ -43,10 +43,6 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	egress, err := agent.LoadEgress(os.Getenv)
-	if err != nil {
-		return err
-	}
 	state := env("AGENT_STATE_DIR", "/var/lib/ingress-agent")
 	runner := &agent.Runner{Bin: env("XRAY_BIN", "/usr/local/bin/xray"), Unit: env("XRAY_UNIT", "xray"),
 		API: env("XRAY_API", "127.0.0.1:10085"), RestartCmd: strings.Fields(os.Getenv("XRAY_RESTART_CMD"))}
@@ -72,11 +68,7 @@ func run(log *slog.Logger) error {
 		log.Error("startup restore failed")
 	}
 	go agent.SweepLoop(ctx, a, time.Minute)
-	if egress != nil {
-		go egress.Loop(ctx)
-	}
-	api := &agent.Server{A: a, Token: token, Info: info, Egress: egress}
-	srv := &http.Server{Handler: api.Handler(),
+	srv := &http.Server{Handler: (&agent.Server{A: a, Token: token, Info: info}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

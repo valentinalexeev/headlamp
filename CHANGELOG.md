@@ -4,16 +4,6 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
-### Added
-
-- `examples/compose/control/backup/`: sample continuous backup, restore and recovery drill for the control host (#262). Litestream replicates the headscale database and the node-control SQLite files (`policy.db`, `enroll.db`) to S3-compatible storage about every 10 seconds; `backup.sh` copies each night what Litestream does not cover (headscale noise and DERP keys, the node-control enrolment export with `ENROLL_REDIS=1`, a Redis snapshot); `restore.sh` puts it all back on a new host and never writes over a live database; `drill.sh` restores into a temporary directory on the live host and compares counts and key hashes. Compose overlay, systemd timer sample and an STE manual included.
-- Health checks and self-tests (#196):
-  - ingress-agent: `GET /v1/egress`, a bridge path self-test. Every minute the agent requests a URL through the SOCKS port of the exit node (`INGRESS_EGRESS_SOCKS`, `INGRESS_EGRESS_URL`; role variables `ingress_egress_socks`, default the `socks_listen` of `reality-ingress`, and `ingress_egress_url`). node-control shows a failed self-test as a critical Attention item, and `GET /enroll/ingresses` has the results in `egress`. It finds the case where every component is healthy and clients get no reply (an offline or replaced exit node, or no `autogroup:internet`, #259).
-  - exit-node: a health endpoint on port 9002 (`HEALTH_PORT`): tailscaled Running, the approved exit route, forwarding, NAT and the internet. `fly.toml` checks it. On a kernel without `xt_connmark` (Fly), `start.sh` logs one `info:` line that explains the "router config failed (enabling connmark rules ...)" line of tailscale.
-  - node-control: `HEALTH_LISTEN` serves only `GET /healthz` on a plain address, `503` while the tailnet node is not `Running`. `fly.toml` sets it to `:9001` and checks it.
-  - funnel-ingress: the grace period of its Fly check is 60 s, so a slow tailnet login at start does not fail it.
-  - `scripts/smoke-test.sh`: after an upgrade, it checks that every bridge is in sync and passes its self-test, makes a test device, checks its subscription through `link_host`, revokes it, and checks the public paths.
-
 ### Fixed
 
 - The example policy `examples/compose/control/config/acl.json` now has the rules that a bridge needs, with tests (#259): `tag:ingress` to its exit node, to `autogroup:internet` and to `tag:node-control:8081`, and `tag:node-control` to `tag:ingress:9000`. Before, a bridge that followed the example could not reach the internet through its exit node: its clients connected and got no reply. The `tailscale-userspace-socks` role now sends one request through the SOCKS port after it selects the exit node, and fails with the cause when the request fails (`socks_egress_check`, default `true`). `make test-bridge-policy-e2e` checks the rules on a real headscale.

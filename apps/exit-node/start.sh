@@ -4,13 +4,6 @@ echo 'Starting up...'
 
 # error: adding [-i tailscale0 -j MARK --set-mark 0x40000] in v4/filter/ts-forward: running [/sbin/iptables -t filter -A ts-forward -i tailscale0 -j MARK --set-mark 0x40000 --wait]: exit status 2: iptables v1.8.6 (legacy): unknown option "--set-mark"
 modprobe xt_mark
-# tailscale 1.104 adds connmark rules for rp_filter (mangle PREROUTING/OUTPUT) on every start. The Fly microVM kernel
-# has no xt_connmark, so tailscaled logs "router config failed (enabling connmark rules ...)" each time. The NAT and
-# filter rules are in place and exit traffic flows: the self-test below proves it (#196). Say so once, as info.
-if ! modprobe xt_connmark 2>/dev/null && ! grep -qw xt_connmark /proc/modules 2>/dev/null; then
-    echo "info: the kernel has no xt_connmark. tailscaled will log 'router config failed (enabling connmark rules ...)'." \
-        "This is expected here: forwarding works without it. See GET :${HEALTH_PORT:-9002}/."
-fi
 
 echo 'net.ipv4.ip_forward = 1' | tee -a /etc/sysctl.conf
 echo 'net.ipv6.conf.all.forwarding = 1' | tee -a /etc/sysctl.conf
@@ -75,12 +68,6 @@ do
 done
 
 echo "Tailscale started. Let's go!"
-
-# Health endpoint (#196): GET :HEALTH_PORT/ answers 200 when tailscaled runs as an approved exit node, forwarding
-# and NAT are in place, and this node reaches the internet. The Fly check uses it. HEALTH_PORT=off turns it off.
-if [ "${HEALTH_PORT:-9002}" != off ]; then
-    ( while true; do nc -l -p "${HEALTH_PORT:-9002}" -e /app/health.sh; done ) &
-fi
 
 # Push the state file to Redis whenever it changes (no-op when REDIS_URL is unset).
 /app/state-sync.sh watch &

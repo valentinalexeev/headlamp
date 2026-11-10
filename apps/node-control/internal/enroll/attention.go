@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -104,35 +103,6 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		critical = true
 		outOfSync++
 	}
-	// The bridge path self-test (#196): a bridge in sync can still drop all client traffic, when
-	// its SOCKS node has no working exit node (offline, replaced) or the policy blocks it (#259).
-	// Only bridges in sync and not stopped are asked; an agent without the probe says nothing.
-	for _, t := range cur.SyncTargets {
-		er, ok := t.Agent.(egressReporter)
-		pending := t.State != nil && t.State.Snapshot().Pending
-		if !ok || pending || bridgeStopped(stopped, t.Name, cur.Views) {
-			continue
-		}
-		e := er.Egress(ctx)
-		if !e.Known || e.OK {
-			continue
-		}
-		it := core.AttentionItem{
-			ID: "bridge-egress-" + t.Name, Source: bridgeSource, Level: core.LevelCritical,
-			AckKey: "bridge-egress-" + t.Name + "|" + strconv.FormatInt(e.Since, 10),
-			Title:  t.Name + " cannot reach the internet through its exit node",
-			Detail: "Clients connect but get no reply. The self-test of the agent fails: " +
-				e.Error + ". Check that the exit node of the SOCKS node is online, and that " +
-				"the policy has autogroup:internet for tag:ingress.",
-			ActionLabel: "Open bridge", ActionPath: "/nodes?sel=" + url.QueryEscape(t.Name),
-		}
-		if e.Since > 0 {
-			it.Since = time.Unix(e.Since, 0)
-		}
-		items = append(items, it)
-		critical = true
-	}
-
 	waiting := false
 	for _, v := range cur.Views {
 		approve := "/enroll/approve?name=" + url.QueryEscape(v.Name)

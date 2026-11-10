@@ -26,29 +26,11 @@ roles instead. They do not use this image.
 | `HEADSCALE_LOGIN_SERVER` | env | `https://<your-headscale-url>` |
 | `EXIT_NODE_HOSTNAME` | env | The tailnet name of the node. The default is `ams`. |
 | `DIRECT_HOSTS_FILE` | env | Path of a mounted host list that replaces the built-in placeholder (see `docs/images.md`). |
-| `HEALTH_PORT` | env | The port of the health endpoint (#196). The default is `9002`. `off` turns it off. |
-| `HEALTH_EGRESS_URL` | env | The URL of the internet check of the health endpoint. The default is `https://www.gstatic.com/generate_204`. |
 
 - `direct-hosts.txt` here is a placeholder. Keep the real one in your private repo. Mount it and set
   `DIRECT_HOSTS_FILE`, or copy it over before you build (see `CLAUDE.md`, "overlay procedure").
 - The node advertises itself as an exit node. Approve it (or use the ACL `autoApprovers.exitNode`) before clients
   can use it.
-
-## Health (#196)
-
-`GET :9002/` answers `200` when all of these are true, else `503` with the failed checks:
-
-- tailscaled is `Running`;
-- the node has the exit route `0.0.0.0/0`, approved in headscale;
-- IPv4 forwarding is on, and the `MASQUERADE` rule on `eth0` is in place;
-- this node reaches `HEALTH_EGRESS_URL` (the uplink of the exit traffic). The result is kept for 60 seconds.
-
-The `[checks]` section of `fly.toml` uses it. `fly checks list` shows the result.
-
-The Fly kernel has no `xt_connmark`. tailscale 1.104 tries to add connmark rules for `rp_filter`, so it logs
-`router config failed (enabling connmark rules ...)` at every start. This is expected on Fly: the NAT and filter
-rules are in place, and exit traffic flows. `start.sh` logs one `info:` line about it, and the health endpoint shows
-that forwarding works.
 
 ## Run on Fly.io
 

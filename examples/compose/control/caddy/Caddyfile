@@ -24,10 +24,14 @@
 # gets no ACME request (#216); "acme" for a real name.
 {$ENROLL_DOMAIN:enroll.invalid} {
 	import tls/{$ENROLL_TLS:unused}.caddy
-	# /me, /i/* and /oidc/*: self-enrolment with OIDC (#102) and its invitations (#241). Remove them if you do not
-	# set OIDC_ISSUER.
-	@public path /e/* /sub/* /me /me/* /i/* /oidc/login /oidc/callback
-	handle @public {
+	# The public paths come from enroll-paths.caddy (#260), the same file that the bridge front of reality-ingress
+	# uses. Do not copy the list here: a release that adds a path changes only that file.
+	# @enroll: /e/<token>, /sub/<secret>[/<format>]. @self: /me, /me/*, /i/<token>, /oidc/* (OIDC, #102, #241).
+	import enroll-paths.caddy
+	handle @enroll {
+		reverse_proxy node-control:8081
+	}
+	handle @self {
 		reverse_proxy node-control:8081
 	}
 	respond 404

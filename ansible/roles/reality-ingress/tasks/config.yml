@@ -33,6 +33,16 @@
   become: true
   no_log: true
 
+- name: Write the shared enrolment path matchers (#260)
+  ansible.builtin.copy:
+    src: enroll-paths.caddy
+    dest: "{{ caddy_config_dir }}/enroll-paths.caddy"
+    owner: root
+    group: "{{ caddy_user }}"
+    mode: "0640"
+  become: true
+  notify: restart caddy-ingress
+
 - name: Write the Caddyfile
   ansible.builtin.template:
     src: Caddyfile.j2

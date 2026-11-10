@@ -1314,7 +1314,8 @@ Give users `http://node-control/serve/ca.crt`. Each device must trust it once (t
 
 ## Tailnet DNS module (optional)
 
-The tailnet DNS module (#286) makes node-control the resolver of the tailnet names. A bridge client with a tailnet
+The tailnet DNS module (#286) makes node-control the resolver of the tailnet names. `docs/dns.md` tells how all
+parts of headlamp use DNS. A bridge client with a tailnet
 grant can then open a tailnet service by its name, not only by its tailnet address. Tailnet devices also get the
 names that you add here.
 

@@ -29,6 +29,8 @@ This role uses a separate socket, state dir and unit (`tailscaled-socks.service`
 | `socks_state_dir` | `/var/lib/tailscaled-socks` | Must be `/var/lib/<dir>`; becomes `StateDirectory` (mode 0700). |
 | `socks_socket` | `/run/tailscaled-socks/tailscaled.sock` | Must be `/run/<dir>/<file>`; dir becomes `RuntimeDirectory` (mode 0700). |
 | `socks_login_server` | `headscale_login_server` | No fallback: the caller or base role must set `headscale_login_server` (asserted). |
+| `socks_egress_check` | `true` | After step 5, one request through the SOCKS port must succeed (#259). `false` skips it. |
+| `socks_egress_check_url` | `https://www.gstatic.com/generate_204` | The URL of that request. |
 | `socks_verify_url` | `https://ifconfig.me` | Used by the verify tasks. |
 | `socks_grant_groups` | `[]` | Tailnet grant groups (#139). Each entry has `id` (`g-<8 hex>`, from the bridge page of node-control) and `authkey` (a pre-auth key with the tag `tag:ingress-g-<8 hex>`, needed until the node is logged in). At most 8 entries. |
 | `socks_grant_port_base` | `1056` | The SOCKS port of the first group. The next group uses the next port. |
@@ -52,13 +54,40 @@ This role uses a separate socket, state dir and unit (`tailscaled-socks.service`
    from this host. In that case, the run fails with a message that names the likely causes: exit node offline,
    route not approved, ACL.
 
-6. For each entry of `socks_grant_groups`, install the unit `tailscaled-socks-<id>.service`. It runs one more
+6. With `socks_egress_check: true` (the default), request `socks_egress_check_url` through the SOCKS port. If the
+   request fails, the run fails. The message names the most likely cause: no `autogroup:internet` rule for
+   `tag:ingress` (see "Policy needed by a bridge").
+7. For each entry of `socks_grant_groups`, install the unit `tailscaled-socks-<id>.service`. It runs one more
    userspace tailscaled with its own state dir, socket and loopback SOCKS port. On the first run, it joins with the
    key of the group as `<socks_hostname>-<id>`. It has no exit node, because it carries only tailnet traffic.
    The role stops and removes the units of groups that are no longer in the list.
 
    Keep the order of the list: the port of a group comes from its position. Use the same list in the
    `reality-ingress` role.
+
+## Policy needed by a bridge
+
+A bridge needs these rules in the headscale policy (#259). The example policy
+`examples/compose/control/config/acl.json` has them, with tests:
+
+```hujson
+// the exit node, and the enrolment listener of node-control (enroll_upstream)
+{"action": "accept", "src": ["tag:ingress"], "dst": ["tag:exit:*", "tag:node-control:8081"]},
+// the internet through the exit node
+{"action": "accept", "src": ["tag:ingress"], "dst": ["autogroup:internet:*"]},
+// node-control to the bridge agent (ingress_agent_port)
+{"action": "accept", "src": ["tag:node-control"], "dst": ["tag:ingress:9000"]},
+```
+
+headscale lets a node use an exit node for the internet only with `autogroup:internet` for that node. Without
+the second rule:
+
+- `tailscale set --exit-node=...` works, and the node shows the exit node as selected;
+- each request through the SOCKS port fails, and this node logs `lookup <host> on [fd7a:115c:a1e0::53]:53: 403
+  Forbidden`;
+- the clients of the bridge connect and send, but get no reply.
+
+Step 6 finds this fault during the run. `make test-bridge-policy-e2e` shows both cases on a real headscale.
 
 Verification (not run by default): `ansible-playbook ... --tags socks-verify` fetches
 `socks_verify_url` through the SOCKS port and directly. It prints both results. The SOCKS result must

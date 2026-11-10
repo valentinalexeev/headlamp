@@ -23,6 +23,10 @@ says "No action required".
 - **Bridges** (`ingress-agent` role): run the role on each bridge. The new agent sends the DNS lookups of xray
   through the exit node. Check: `jq '.dns, .routing.rules[0]' /etc/xray/config.json` shows tag `dns-internal` and a
   rule that sends it to `via-exit`. To use other resolvers, set `ingress_exit_dns` (IP addresses only).
+- **headscale policy, sites with bridges** (#259): make sure that the policy has the bridge rules of the example
+  `examples/compose/control/config/acl.json`, mainly `tag:ingress` to `autogroup:internet:*`. The
+  `tailscale-userspace-socks` role now fails when traffic does not get through the exit node. Add the rules before
+  you run it, or set `socks_egress_check: false` for that run.
 
 ### Optional
 

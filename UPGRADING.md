@@ -9,6 +9,15 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## Unreleased (0.16.0)
+
+### Optional
+
+- **MCP endpoint for AI agents** (node-control): it is off by default, so no action is required. To turn it on, set
+  `MCP_ENABLED=1` and grant `mcp.admin` to each admin (the `owner` role has it). For OIDC tokens, also set
+  `MCP_OIDC_ISSUER` and `MCP_RESOURCE_URL`. See the node-control README, "MCP endpoint (optional)".
+- Other sites: no action required.
+
 ## 0.15.1
 
 ### Optional

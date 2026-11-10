@@ -674,7 +674,8 @@ func (a *Admin) listIngresses(w http.ResponseWriter, r *http.Request) {
 	if pending == nil {
 		pending = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ingresses": cur.Views, "pending_ingresses": pending, "discovery": cur.Discovery})
+	writeJSON(w, http.StatusOK, map[string]any{"ingresses": cur.Views, "pending_ingresses": pending,
+		"discovery": cur.Discovery})
 }
 
 // ingressName answers 404 for a name that cannot be an ingress.

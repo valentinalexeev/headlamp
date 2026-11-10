@@ -126,12 +126,20 @@ s2 = re.sub(r'\n\s*\{"action": "accept", "src": \["tag:ingress"\], "dst": \["aut
 assert s2 != s, "the autogroup:internet rule was not found"
 open(p, "w").write(s2)
 PY
-# SIGHUP reloads the policy file. A restart would give headscale a new address on the network.
-dk kill -s HUP "$hs" >/dev/null || die "reload headscale"
-filter_without_internet() { ! dk exec "$ex" tailscale debug netmap | jq -e '[.PacketFilterRules[].DstPorts[].IP] | index("198.0.0.0/7") or index("192.0.0.0/9") or index("128.0.0.0/3")' >/dev/null; }
-wait_for 30 filter_without_internet || nok "the exit node did not get the new policy"
-if curl_via; then nok "the bridge still reaches the web server without autogroup:internet"
-else ok "without autogroup:internet the SOCKS request fails, as on the live site"; fi
+# SIGHUP reloads the policy file. A restart would give headscale a new address on the network. headscale 0.29.7
+# sometimes logs the SIGHUP and does not reload; a second SIGHUP then works. So send it until the log confirms.
+reloaded() { [ "$(docker logs "$hs" 2>&1 | grep -c 'Policy reload completed')" -gt 0 ]; }
+i=0; while [ $i -lt 5 ] && ! reloaded; do dk kill -s HUP "$hs" >/dev/null || die "reload headscale"; sleep 3; i=$((i + 1)); done
+reloaded || nok "headscale did not reload the policy after $i SIGHUP"
+# The exit node's packet filter for the bridge: with autogroup:internet it lists the public ranges (dozens of
+# prefixes), without it only tailnet addresses.
+internet_prefixes() { dk exec "$ex" tailscale debug netmap | jq '[.PacketFilterRules[].DstPorts[].IP | select(startswith("100.") or startswith("fd7a:") | not)] | length'; }
+no_internet() { [ "$(internet_prefixes)" = 0 ]; }
+wait_for 30 no_internet || nok "the exit node did not get the new policy ($(internet_prefixes) internet prefixes)"
+# An open connection or a cached answer can last a moment after the filter changes: wait until it fails.
+fails_now() { ! curl_via; }
+if wait_for 30 fails_now; then ok "without autogroup:internet the SOCKS request fails, as on the live site"
+else nok "the bridge still reaches the web server without autogroup:internet"; fi
 
 echo "$pass passed, $fails failed"
 [ "$fails" = 0 ]

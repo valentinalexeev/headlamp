@@ -4,10 +4,6 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
-### Added
-
-- `examples/compose/control/backup/`: sample continuous backup, restore and recovery drill for the control host (#262). Litestream replicates the headscale database and the node-control SQLite files (`policy.db`, `enroll.db`) to S3-compatible storage about every 10 seconds; `backup.sh` copies each night what Litestream does not cover (headscale noise and DERP keys, the node-control enrolment export with `ENROLL_REDIS=1`, a Redis snapshot); `restore.sh` puts it all back on a new host and never writes over a live database; `drill.sh` restores into a temporary directory on the live host and compares counts and key hashes. Compose overlay, systemd timer sample and an STE manual included.
-
 ### Fixed
 
 - The example policy `examples/compose/control/config/acl.json` now has the rules that a bridge needs, with tests (#259): `tag:ingress` to its exit node, to `autogroup:internet` and to `tag:node-control:8081`, and `tag:node-control` to `tag:ingress:9000`. Before, a bridge that followed the example could not reach the internet through its exit node: its clients connected and got no reply. The `tailscale-userspace-socks` role now sends one request through the SOCKS port after it selects the exit node, and fails with the cause when the request fails (`socks_egress_check`, default `true`). `make test-bridge-policy-e2e` checks the rules on a real headscale.

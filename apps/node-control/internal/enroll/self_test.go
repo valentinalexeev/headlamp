@@ -96,6 +96,7 @@ type selfFx struct {
 	srv    *httptest.Server
 	admin  *Admin
 	pushes int
+	link   IngressConfig // what SelfWeb sees; link_host is the test server
 }
 
 func newSelfFx(t *testing.T, cfg SelfConfig) *selfFx {
@@ -122,7 +123,11 @@ func newSelfFx(t *testing.T, cfg SelfConfig) *selfFx {
 		SyncAll(ctx, f.store, adminCfg, f.admin.reg.Current(ctx, false).SyncTargets)
 	}}
 	f.admin.self = f.self
-	(&SelfWeb{self: f.self, rp: rp, link: func() IngressConfig { return adminCfg }}).Register(mux)
+	// The test server is link_host, as OIDC_REDIRECT_URL must be (#270).
+	link := adminCfg
+	link.LinkHost = strings.TrimPrefix(srv.URL, "https://")
+	f.link = link
+	(&SelfWeb{self: f.self, rp: rp, link: func() IngressConfig { return f.link }}).Register(mux)
 	return f
 }
 

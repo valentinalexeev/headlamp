@@ -32,7 +32,7 @@ need = $(if $($(1)),,$(error $(1) is not set; set it in your Makefile before `in
 
 .PHONY: help hooks submodule submodule-check deploy-% plan-deploy-% deploy-all tf-plan tf-apply tf-save ansible-site \
   ansible-check bump-tailscale-version policy-check policy-diff policy-apply tasks-check tasks-diff tasks-push \
-  rotate-api-key-check verify
+  rotate-api-key-check fleet-check verify
 
 help:
 	@echo "headlamp site targets ($(H)/mk/site.mk):"
@@ -48,6 +48,7 @@ help:
 	@echo "  tasks-check tasks-diff tasks-push      node-control scheduled tasks"
 	@echo "  rotate-api-key-check     check when the headscale API key expires"
 	@echo "  submodule-check          refuse when the $(H) pin and its checkout differ"
+	@echo "  fleet-check              version and health of every part, from node-control (ARGS=--all lists devices)"
 	@echo "  verify                   the read-only checks above, in one run"
 
 hooks:
@@ -125,9 +126,14 @@ tasks-push:
 rotate-api-key-check:
 	$(H)/scripts/rotate-headscale-api-key.sh --check
 
-# Read-only: the pin, the plan of each Fly deploy, and (with NODE_CONTROL_URL) the live policy and tasks.
+fleet-check:
+	$(call need,NODE_CONTROL_URL)
+	NODE_CONTROL_URL=$(NODE_CONTROL_URL) $(H)/scripts/fleet-check.sh $(ARGS)
+
+# Read-only: the pin, the plan of each Fly deploy, and (with NODE_CONTROL_URL) the live policy and tasks and the
+# fleet check (#195).
 verify: submodule-check
 	@test -n "$(tsv)" && echo "tailscale pin: $(tsv)" || { echo "no $(TAILSCALE_VERSION_FILE)"; exit 1; }
 	@set -e; for a in $(FLY_APPS); do $(H)/scripts/deploy-fly.sh --dry-run $$a; done
-	@if [ -n "$(NODE_CONTROL_URL)" ]; then $(MAKE) --no-print-directory policy-diff tasks-diff; \
-	  else echo "NODE_CONTROL_URL is not set: policy and tasks not checked"; fi
+	@if [ -n "$(NODE_CONTROL_URL)" ]; then $(MAKE) --no-print-directory policy-diff tasks-diff fleet-check; \
+	  else echo "NODE_CONTROL_URL is not set: policy, tasks and fleet not checked"; fi

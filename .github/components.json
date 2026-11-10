@@ -12,7 +12,8 @@
     "image": "funnel-ingress",
     "context": "apps/funnel-ingress",
     "dockerfile": "Dockerfile",
-    "paths": ["apps/funnel-ingress"],
+    "paths": ["apps/funnel-ingress", "VERSION"],
+    "args_from_files": {"VERSION": "VERSION"},
     "go": true,
     "test": "cd apps/funnel-ingress && go vet ./... && go test -count=1 ./..."
   },

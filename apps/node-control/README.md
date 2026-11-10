@@ -374,9 +374,23 @@ The file is optional. Files from the Python version continue to work. Start from
 
 ## API
 
-`GET /` (Overview) · `GET /nodes` (page) · `GET /activity` (page) · `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` · `POST /nodes/{id}/stop` · `GET /tailnet/status` · `GET /healthz`.
+- Pages: `GET /` (Overview) · `GET /nodes` · `GET /activity` · `GET /fleet`.
+- Nodes: `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` · `POST /nodes/{id}/stop`.
+- Other: `GET /fleet.json` · `GET /tailnet/status` · `GET /healthz`.
 
 With `ENROLL_DB` or `ENROLL_REDIS=1`, these are also available: the `/enroll` admin pages and API on `:80`, and the public `/e/<token>` and `/sub/<secret>` on `:8081`.
+
+### Fleet (#195)
+
+`GET /fleet.json` (Overview view permission) is one read-only report of the versions and the state of every part:
+
+- `node_control`, `headscale` (from headscale's `/version`, no API key), `tailscale_pin` (the tailscale.com module of node-control, which the image build checks against `TAILSCALE_VERSION`).
+- `nodes`: every tailnet node with its tailscale version. `status` compares it with the pin: `current`, `older`, `newer` or `unknown`. node-control reads the version from its own tailnet node (`Hostinfo.IPNVersion` through WhoIs). Nothing is sent to the nodes.
+- `bridges`: every bridge with its agent and xray version, as the agent last reported them in `/v1/info` (`info_at`), and its sync state. An agent before 0.16.0 reports no version.
+- `funnel`: the build version of the funnel ingress from its last state report. `stale` is true when that report is older than 90 s.
+- `problems`: what needs action. Examples: a part that does not answer, or an active bridge that is offline or out of sync. Also a funnel ingress that does not report or reports errors. Also a server (tagged node) on a tailscale older than the pin. A person's device on an older tailscale is not a problem: it updates itself. `notes`: worth a look, not a failure.
+
+The Fleet page (`/fleet`, in the configure group) shows the same report. `scripts/fleet-check.sh` prints it as a table and exits 1 when `problems` is not empty (`make fleet-check` in a site repo).
 
 Start and stop are idempotent. A provider failure shows as `error` on that node only.
 

@@ -111,20 +111,23 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		return nodes.TailnetNames(cfg, nm.Targets(ctx))
 	}
 	pol = policy.New(env, hsClient)
+	fun := funnel.New(env, hsClient, func() funnel.PolicyService {
+		// Only an active console has a service; a typed nil must not become a non-nil interface.
+		if p, ok := pol.(interface{ Service() *policy.Service }); ok {
+			if svc := p.Service(); svc != nil {
+				return svc
+			}
+		}
+		return nil
+	})
+	// The modules before Fleet, for its navigation rule; set once the list is built.
+	var beforeFleet []core.Module
 	mods := []core.Module{
 		tailnet.New(src, tracked, tailnet.WithKeyExpiry(hsClient.APIKeyExpiry), tailnet.WithKeyViewers(keyViewers(env))),
 		nm,
 		enr,
 		pol,
-		funnel.New(env, hsClient, func() funnel.PolicyService {
-			// Only an active console has a service; a typed nil must not become a non-nil interface.
-			if p, ok := pol.(interface{ Service() *policy.Service }); ok {
-				if svc := p.Service(); svc != nil {
-					return svc
-				}
-			}
-			return nil
-		}),
+		fun,
 		tasks.New(env, src),
 		// Serve (#117): on with SERVE_DB. It reads nodes uncached, so a new replica answers DNS within one refresh.
 		servemod.New(env, hsClient),
@@ -132,8 +135,11 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		access.New(env),
 		// Fleet (#195): read-only versions of node-control, headscale, every tailscale client and
 		// every bridge agent.
-		fleet.New(fleet.Deps{Nodes: src, Headscale: hsClient, Bridges: bridges(enr)}),
+		fleet.New(fleet.Deps{Others: func() []core.Module { return beforeFleet },
+			Nodes: src, Headscale: hsClient, Bridges: bridges(enr),
+			Funnel: funnelStatus(fun)}),
 	}
+	beforeFleet = mods[:len(mods)-1]
 	// Overview is last: it counts the navigation of everything before it.
 	others := slices.Clone(mods)
 	return append(mods, overview.New(func() []core.Module { return others })), nil
@@ -241,5 +247,17 @@ func bridges(enr core.Module) func(context.Context) []enroll.IngressView {
 			return b.Bridges(ctx)
 		}
 		return nil
+	}
+}
+
+// funnelStatus is the funnel ingress status of the funnel module for the fleet view.
+func funnelStatus(fun core.Module) func() (funnel.IngressStatus, bool) {
+	return func() (funnel.IngressStatus, bool) {
+		if f, ok := fun.(interface {
+			Ingress() (funnel.IngressStatus, bool)
+		}); ok {
+			return f.Ingress()
+		}
+		return funnel.IngressStatus{}, false
 	}
 }

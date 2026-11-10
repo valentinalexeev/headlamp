@@ -293,7 +293,8 @@ csrf=$(docker exec "$ua" sed -n 's/.*name="csrf" value="\([0-9a-f]*\)".*/\1/p' /
 [ -n "$csrf" ] || die "no csrf"
 docker exec "$ua" curl -sS --cacert /ca.pem -b /tmp/jar-anna -c /tmp/jar-anna -o /tmp/enrol.page \
   --data-urlencode "csrf=$csrf" --data-urlencode name=Phone --data-urlencode client=sing-box "https://$links/me/devices" || die "enrol"
-sub=$(docker exec "$ua" sed -n 's#.*<code>https://[^/]*/sub/\([^<]*\)</code>.*#\1#p' /tmp/enrol.page | head -1)
+# The page lists one URL per profile format (#241); the relay check below runs sing-box, so take that one by name.
+sub=$(docker exec "$ua" sed -n 's#.*<code>https://[^/]*/sub/\([^<]*/sing-box\)</code>.*#\1#p' /tmp/enrol.page | head -1)
 tkey=$(docker exec "$ua" sed -n 's#.*<code>\(hskey-[^<]*\)</code>.*#\1#p' /tmp/enrol.page | head -1)
 [ -z "$tkey" ] && tkey=$(docker exec "$ua" sh -c "grep -o '<code>[^<]*</code>' /tmp/enrol.page | sed 's#</*code>##g' | grep -v '^https://' | head -1")
 [ -n "$sub" ] && [ -n "$tkey" ] && ok "anna got a relay subscription and a tailnet key, once" || die "enrol page: $(docker exec "$ua" head -c 600 /tmp/enrol.page)"

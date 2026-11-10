@@ -211,7 +211,9 @@ func (ch ClientChoice) installLinks() map[string]string {
 		out[PlatformIOS] = AppStoreURL(id)
 	}
 	def, _ := ClientByID(ch.ID)
-	if out[PlatformAndroid] == "" && def.OnPlay && ch.Package() != "" {
+	// The Play page belongs to the catalog's package: a site's own package may not be on Play.
+	onPlay := def.OnPlay && (ch.AndroidPackage == "" || ch.AndroidPackage == def.AndroidPackage)
+	if out[PlatformAndroid] == "" && onPlay && ch.Package() != "" {
 		out[PlatformAndroid] = PlayURL(ch.Package())
 	}
 	return out

@@ -189,7 +189,8 @@ func TestAndroidPickerUsesIntentLinks(t *testing.T) {
 		t.Errorf("blanked link, an iOS-only app, or a note without a reason: %s", p)
 	}
 	// the fallback: a note for that app only; text of the query never reaches the page
-	if _, p := get("/me/devices/"+id+"?missing=karing", androidUA); !strings.Contains(p, "Karing is not installed on this device") {
+	if _, p := get("/me/devices/"+id+"?missing=karing", androidUA); !strings.Contains(p, "Karing is not installed on this device") ||
+		!strings.Contains(p, "Ask an administrator where to get it") {
 		t.Errorf("missing note: %s", p)
 	}
 	for _, q := range []string{"stash", "nope", "<b>x</b>"} {
@@ -200,6 +201,20 @@ func TestAndroidPickerUsesIntentLinks(t *testing.T) {
 	// other platforms keep the direct links
 	if _, p := get("/me/devices/"+id, "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"); strings.Contains(p, "intent://") {
 		t.Error("intent link outside Android")
+	}
+}
+
+func TestSitePackageGetsNoPlayLink(t *testing.T) {
+	own := ClientChoice{ID: "sing-box", AndroidPackage: "org.example.fork"}
+	if u := own.installLinks()[PlatformAndroid]; u != "" {
+		t.Errorf("a site package got the catalog's Play page: %s", u)
+	}
+	same := ClientChoice{ID: "sing-box", AndroidPackage: "io.nekohasekai.sfa"}
+	if u := same.installLinks()[PlatformAndroid]; u != PlayURL("io.nekohasekai.sfa") {
+		t.Errorf("the catalog package lost its Play page: %q", u)
+	}
+	if u := (ClientChoice{ID: "karing"}).installLinks()[PlatformAndroid]; u != "" {
+		t.Errorf("an app that is not on Play got a Play page: %s", u)
 	}
 }
 

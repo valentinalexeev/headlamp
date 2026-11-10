@@ -813,7 +813,7 @@ The `clients` key of `enroll.json` selects the apps of the app picker and gives 
 - `id` is required. It must be an `id` of the catalog, and each `id` can occur one time only.
 - `install` is optional. Its keys are platforms (`ios`, `android`, `macos`, `windows`, `linux`). Its values are `https` URLs of the store page of the app, 500 characters or fewer. Without an `ios` link, the iOS link is `https://apps.apple.com/app/id<App Store id>`.
 - `app_store_id` is optional: a string of 1 to 12 digits. It replaces the App Store id of the catalog, for example when an app gets a new listing.
-- `android_package` is optional: an Android application id, for example `com.example.app`. It replaces the Android package of the catalog.
+- `android_package` is optional: an Android application id, for example `com.example.app`. It replaces the Android package of the catalog. A replaced package gets no default Google Play link. Give its store link in `install`.
 - An empty list is an error. To show all apps, remove the key.
 - Which apps your people can get depends on the app stores that they can use. Keep the list and the store links in your private repo.
 

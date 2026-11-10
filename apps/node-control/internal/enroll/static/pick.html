@@ -24,7 +24,7 @@ a{color:#0a66ff}
 <p>Tailnet app: use this key to sign in. This page shows it one time only. It works one time, until {{.KeyExpires.UTC.Format "2006-01-02 15:04"}} UTC.</p>
 <p><code>{{.TailnetKey}}</code></p></section>
 {{end}}
-{{if .Missing}}<section class="ok"><p><strong>{{.Missing}} is not installed on this device.</strong> Install it, then tap its button again. The store link is below its button.</p></section>{{end}}
+{{if .Missing}}<section class="ok"><p><strong>{{.Missing}} is not installed on this device.</strong> Ask an administrator where to get it. Install it, then tap its button again.</p></section>{{end}}
 <section>
 <p>Tap the app you have installed. It opens and adds the profile "{{.ProfileTag}}".{{if .Platform}} The list shows the apps for {{.Platform}}.{{end}}</p>
 {{if .Apps}}<ul class="apps">

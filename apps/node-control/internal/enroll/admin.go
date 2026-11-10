@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -674,7 +675,33 @@ func (a *Admin) listIngresses(w http.ResponseWriter, r *http.Request) {
 	if pending == nil {
 		pending = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ingresses": cur.Views, "pending_ingresses": pending, "discovery": cur.Discovery})
+	writeJSON(w, http.StatusOK, map[string]any{"ingresses": cur.Views, "pending_ingresses": pending,
+		"discovery": cur.Discovery, "egress": egressOf(r.Context(), cur.SyncTargets)})
+}
+
+// egressOf gives the bridge path self-test of each bridge whose agent reports one (#196), by
+// bridge name. The agents are asked in parallel, each with the short stats timeout.
+func egressOf(ctx context.Context, targets []SyncTarget) map[string]Egress {
+	out := map[string]Egress{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, t := range targets {
+		er, ok := t.Agent.(egressReporter)
+		if !ok {
+			continue
+		}
+		wg.Add(1)
+		go func(name string, er egressReporter) {
+			defer wg.Done()
+			if e := er.Egress(ctx); e.Known {
+				mu.Lock()
+				out[name] = e
+				mu.Unlock()
+			}
+		}(t.Name, er)
+	}
+	wg.Wait()
+	return out
 }
 
 // ingressName answers 404 for a name that cannot be an ingress.

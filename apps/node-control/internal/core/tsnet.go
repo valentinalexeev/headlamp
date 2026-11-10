@@ -83,6 +83,23 @@ func upError(err error, authKey string) error {
 	return errors.New(msg)
 }
 
+// Healthy reports an error when the embedded node is not Running (#196): logged out, or no
+// state yet.
+func (t *Tsnet) Healthy(ctx context.Context) error {
+	lc, err := t.srv.LocalClient()
+	if err != nil {
+		return errors.New("no local client")
+	}
+	st, err := lc.StatusWithoutPeers(ctx)
+	if err != nil {
+		return errors.New("no status")
+	}
+	if st.BackendState != ipn.Running.String() {
+		return fmt.Errorf("tailnet state %s", st.BackendState)
+	}
+	return nil
+}
+
 func (t *Tsnet) ListenAdmin() (net.Listener, error)  { return t.srv.Listen("tcp", ":80") }
 func (t *Tsnet) ListenPublic() (net.Listener, error) { return t.srv.Listen("tcp", ":8081") }
 

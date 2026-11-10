@@ -1,2 +1,5 @@
 # <full commit hash> <type>: corrects the type of a commit on main for scripts/check-release.sh (see VERSIONING.md).
 238a9991c1887f56f59f3ea17a11c19468e76ffe fix
+# Reverted before 0.15.2 (the features move to 0.16.0, where they are merged again): no feature ships in 0.15.2.
+2dbb02cd9643ebe85477d7643522d4e7f5d841af revert
+53603af9ba252accc4e6367bf0d40164dbb9abc4 revert

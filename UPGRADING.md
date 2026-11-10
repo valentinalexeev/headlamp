@@ -9,7 +9,7 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
-## Unreleased (0.16.0)
+## 0.16.0
 
 ### Action required
 
@@ -19,6 +19,7 @@ says "No action required".
 
   Check: on an iPhone, open the app picker of a device in Safari, select an app, and make sure that the app page
   opens.
+
 ### Optional
 
 - **Health checks** (#196): run the `ingress-agent` role on each bridge for the bridge self-test (on by default; set

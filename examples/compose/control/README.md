@@ -152,10 +152,14 @@ The edge sends `X-Forwarded-For`. `compose.yaml` thus sets `FUNNEL_CLIENT_IP_HEA
 
 ## Enrolment (optional)
 
-Set `ENROLL_DOMAIN` in `.env` to serve the public enrolment links (`/e/<token>` and `/sub/<secret>`) from this host.
+Set `ENROLL_DOMAIN` in `.env` to serve the public enrolment links (`/e/<token>`, `/sub/<secret>`) and the
+self-enrolment pages (`/me`, `/i/<token>`, `/oidc/*`) from this host.
 The edge reaches node-control on the compose network: `compose.yaml` sets `ENROLL_PUBLIC_LISTEN=:8081`, so the
 public pages listen there as well as on the tailnet. Without it the edge gets `connection refused`.
-The edge sends only these two paths to node-control. Any other path gets 404. Set `ENROLL_DB`, `ENROLL_CONFIG` and
+
+The edge sends only the public paths to node-control. Any other path gets 404. The paths are in
+`caddy/enroll-paths.caddy`, which the Caddyfile imports (#260). The bridge front of `reality-ingress` uses the same
+file. Do not copy the list into your Caddyfile: when a release adds a path, take the new `caddy/enroll-paths.caddy`. Set `ENROLL_DB`, `ENROLL_CONFIG` and
 `ENROLL_SECRET_KEY` in `node-control.env` (see the node-control README, "Enrolment").
 
 While `ENROLL_DOMAIN` is not set, the site has the reserved name `enroll.invalid` and a local certificate. So Caddy asks

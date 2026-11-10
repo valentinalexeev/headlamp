@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- `examples/compose/control/backup/`: sample continuous backup, restore and recovery drill for the control host (#262). Litestream replicates the headscale database and the node-control SQLite files (`policy.db`, `enroll.db`) to S3-compatible storage about every 10 seconds; `backup.sh` copies each night what Litestream does not cover (headscale noise and DERP keys, the node-control enrolment export with `ENROLL_REDIS=1`, a Redis snapshot); `restore.sh` puts it all back on a new host and never writes over a live database; `drill.sh` restores into a temporary directory on the live host and compares counts and key hashes. Compose overlay, systemd timer sample and an STE manual included.
+
 ## 0.15.3 - 2026-11-10
 
 ### Fixed

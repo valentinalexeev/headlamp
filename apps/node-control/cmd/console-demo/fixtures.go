@@ -33,7 +33,9 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/overview"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policy"
 	servemod "github.com/valentinalexeev/headlamp/apps/node-control/internal/serve"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/servedns"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tailnet"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tailnetdns"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tasks"
 )
 
@@ -204,6 +206,8 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			"SERVE_BASE_DOMAIN":      "tailnet.example.net",
 			"SERVE_USER":             "demo",
 			"SERVE_DNS":              "off",
+			"TAILNET_DNS_DB":         filepath.Join(w.dir, "dns.db"),
+			"TAILNET_DNS_LISTEN":     "off",
 			"OIDC_ISSUER":            w.idp.URL,
 			"OIDC_CLIENT_ID":         "console-demo",
 			"OIDC_REDIRECT_URL":      "https://links.example.net/oidc/callback",
@@ -248,6 +252,8 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 		}
 		return nil
 	})
+	// Serve and tailnet DNS (#286) share one DNS server, as in node-control.
+	sharedDNS := &servedns.Server{}
 	// The modules before Fleet, for its navigation rule; set once the list is built.
 	var beforeFleet []core.Module
 	mods := []core.Module{
@@ -257,7 +263,8 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 		pol,
 		fun,
 		tasks.New(env, src),
-		servemod.New(env, client),
+		servemod.New(env, client, servemod.WithDNS(sharedDNS)),
+		tailnetdns.New(env, client, sharedDNS),
 		access.New(env),
 		fleet.New(fleet.Deps{Others: func() []core.Module { return beforeFleet },
 			Nodes: src, Headscale: client, TailscalePin: "1.104.5",

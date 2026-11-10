@@ -22,6 +22,7 @@ const (
 	FeaturePolicy   Feature = "policy"
 	FeatureFunnel   Feature = "funnel"
 	FeatureServe    Feature = "serve"
+	FeatureDNS      Feature = "dns"
 	FeatureAudit    Feature = "audit"
 	// FeatureAdmin is the roles and grants page (#123). "*" does not include it: a viewer must not read who holds
 	// what, and a "*.admin" role must not hand out roles. Name it explicitly ("admin.admin").
@@ -29,7 +30,7 @@ const (
 )
 
 // Features lists every feature, in display order.
-var Features = []Feature{FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel, FeatureServe, FeatureAudit, FeatureAdmin}
+var Features = []Feature{FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel, FeatureServe, FeatureDNS, FeatureAudit, FeatureAdmin}
 
 // wildcard lists the features "*" stands for: every feature except admin.
 func wildcard() []Feature {

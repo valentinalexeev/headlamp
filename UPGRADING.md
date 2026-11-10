@@ -9,6 +9,23 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## Unreleased (0.17.0)
+
+### Optional
+
+- **Tailnet names through bridges** (#286): to let bridge clients with a tailnet grant reach tailnet services by name,
+  do these steps. See "Tailnet DNS module" in the node-control README.
+  1. Add `TAILNET_DNS_DB` (for example `/var/lib/tailscale/dns.db`) to node-control, and grant `dns.admin` to an
+     operator in the admin policy.
+  2. Add a policy rule that lets the bridge tag reach node-control on TCP port 53.
+  3. Run the `ingress-agent` role on each bridge, so that the agent accepts the resolver.
+  4. Deploy node-control.
+
+  Check: `GET /dns/state` shows `listening: true` and a `bridge` entry. After the next sync, a granted client opens a
+  tailnet service by its name.
+
+  Without `TAILNET_DNS_DB`, nothing changes.
+
 ## 0.16.0
 
 ### Action required

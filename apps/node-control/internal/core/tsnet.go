@@ -146,6 +146,47 @@ func (t *Tsnet) WhoIs(ctx context.Context, remoteAddr string) (string, []string,
 	return login, tags, nil
 }
 
+// TailnetDNS reads the MagicDNS suffix and the extra_records of the current netmap (#286). Records of another
+// type than A or AAAA, and values that are not addresses, are skipped.
+func (t *Tsnet) TailnetDNS(ctx context.Context) (TailnetDNS, error) {
+	lc, err := t.srv.LocalClient()
+	if err != nil {
+		return TailnetDNS{}, err
+	}
+	st, err := lc.StatusWithoutPeers(ctx)
+	if err != nil {
+		return TailnetDNS{}, err
+	}
+	out := TailnetDNS{}
+	if st.CurrentTailnet != nil {
+		out.Suffix = strings.TrimSuffix(strings.ToLower(st.CurrentTailnet.MagicDNSSuffix), ".")
+	}
+	for _, a := range st.TailscaleIPs {
+		if a.Is4() {
+			out.Self4 = a
+			break
+		}
+	}
+	cfg, err := lc.DNSConfig(ctx)
+	if err != nil {
+		return TailnetDNS{}, err
+	}
+	if cfg == nil {
+		return out, nil
+	}
+	for _, r := range cfg.ExtraRecords {
+		if r.Type != "" && r.Type != "A" && r.Type != "AAAA" {
+			continue
+		}
+		ip, err := netip.ParseAddr(r.Value)
+		if err != nil {
+			continue
+		}
+		out.Extra = append(out.Extra, ExtraRecord{Name: strings.TrimSuffix(strings.ToLower(r.Name), "."), Addr: ip})
+	}
+	return out, nil
+}
+
 // Close shuts the embedded node down.
 func (t *Tsnet) Close() error { return t.srv.Close() }
 

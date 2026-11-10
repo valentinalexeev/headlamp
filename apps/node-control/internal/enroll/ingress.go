@@ -67,6 +67,34 @@ type IngressConfig struct {
 	Clients []ClientChoice `json:"clients,omitempty"`
 
 	key []byte // ENROLL_SECRET_KEY, set by WithKey; never serialised
+	// tailnetDNS gives the tailnet resolver of the bridges (#286); nil: none. Set by WithTailnetDNS.
+	tailnetDNS func() (TailnetDNS, bool)
+}
+
+// TailnetDNS is the tailnet resolver a bridge uses for the tailnet names (#286): node-control's DNS server and the
+// names it answers, as xray domain matchers. It is pushed to the agent of a bridge with tailnet access.
+type TailnetDNS struct {
+	Server  string   `json:"server"`
+	Domains []string `json:"domains"`
+}
+
+// WithTailnetDNS returns a copy that pushes the tailnet resolver from fn to bridges with tailnet access.
+func (c IngressConfig) WithTailnetDNS(fn func() (TailnetDNS, bool)) IngressConfig {
+	c.tailnetDNS = fn
+	return c
+}
+
+// TailnetDNSFor gives the resolver for one bridge: only a bridge whose effective tailnet access is not "off" gets
+// one. nil: none (the agent then removes any it had).
+func (c IngressConfig) TailnetDNSFor(mode string) *TailnetDNS {
+	if c.tailnetDNS == nil || mode == "" || mode == TailnetOff {
+		return nil
+	}
+	d, ok := c.tailnetDNS()
+	if !ok {
+		return nil
+	}
+	return &d
 }
 
 const (

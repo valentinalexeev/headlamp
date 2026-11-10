@@ -4,6 +4,15 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control: tailnet DNS module (#286), on with `TAILNET_DNS_DB`. node-control answers the tailnet names on its tailnet address (the listener it shares with serve): records managed through a new API (`GET /dns/state`, `POST /dns/records`, `PUT`/`DELETE /dns/records/{name}`, permission `dns.view`/`dns.admin`), the headscale `dns.extra_records` from its netmap, the serve zone and the MagicDNS names of the nodes. Answers hold only tailnet addresses; other names are refused. A record points at fixed tailnet addresses, one node, or the online nodes with a tag, and follows them. `GET /dns/state` gives the `dns.nameservers.split` lines, so tailnet devices get the managed names too (a managed record can replace an `extra_records` entry without a headscale restart).
+- Bridges reach tailnet services by name (#286). node-control sends the resolver (`tailnet_dns`: its address and the list of tailnet names) to each bridge with `tailnet_access` `all` or `grants`. ingress-agent puts node-control first in the xray `dns` section for exactly these names (`skipFallback`, `finalQuery`, `expectedIPs` of the tailnet ranges), through `via-exit`. The names resolve to tailnet addresses, so the tailnet rule of a granted client matches; a name with split DNS no longer resolves to its public address. The site must let the bridge tag reach node-control on TCP port 53 in the headscale policy. Off until `TAILNET_DNS_DB` is set; an older agent ignores the new key.
+
+### Changed
+
+- ingress-agent: on a bridge that gets a tailnet resolver, a client without a tailnet grant also resolves the listed names to tailnet addresses, and the block rule stops it (before, it reached the public address of a split-DNS name through the exit node). xray has one resolver for all clients.
+
 ## 0.16.0 - 2026-11-10
 
 ### Added

@@ -105,10 +105,26 @@ func HTTPClientFor(dial func(ctx context.Context, network, addr string) (net.Con
 }
 
 func (a *agentClient) PutCredentials(ctx context.Context, creds []Credential, confirmEmpty bool) error {
+	return a.PutCredentialsDNS(ctx, creds, nil, confirmEmpty)
+}
+
+// dnsPutter is an Agent that also takes the tailnet resolver (#286). An agent before #286 ignores the key.
+type dnsPutter interface {
+	PutCredentialsDNS(ctx context.Context, creds []Credential, dns *TailnetDNS, confirmEmpty bool) error
+}
+
+// PutCredentialsDNS is PutCredentials with the tailnet resolver of the bridge; nil sends none.
+func (a *agentClient) PutCredentialsDNS(
+	ctx context.Context, creds []Credential, dns *TailnetDNS, confirmEmpty bool,
+) error {
 	if creds == nil {
 		creds = []Credential{}
 	}
-	body, err := json.Marshal(map[string]any{"credentials": creds})
+	payload := map[string]any{"credentials": creds}
+	if dns != nil {
+		payload["tailnet_dns"] = dns
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}

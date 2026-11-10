@@ -16,6 +16,7 @@ func TestCatalogLinks(t *testing.T) {
 		"clash":        "clash://install-config?url=https%3A%2F%2Flink.example.com%2Fsub%2Fabc%2Furi&name=tunnel",
 		"stash":        "stash://install-config?url=https%3A%2F%2Flink.example.com%2Fsub%2Fabc%2Furi&name=tunnel",
 		"shadowrocket": "shadowrocket://add/sub://" + base64.StdEncoding.EncodeToString([]byte(sub)) + "?remark=tunnel",
+		"happ":         "happ://add/https://link.example.com/sub/abc/uri",
 	}
 	for id, want := range cases {
 		got, err := DeepLinkFor(id, sub, "tunnel")
@@ -26,14 +27,14 @@ func TestCatalogLinks(t *testing.T) {
 	if _, err := DeepLinkFor("nope", sub, "x"); err == nil {
 		t.Error("unknown client accepted")
 	}
-	if clientsRepr != "('sing-box', 'karing', 'clash', 'shadowrocket', 'stash')" {
+	if clientsRepr != "('sing-box', 'karing', 'clash', 'shadowrocket', 'stash', 'happ')" {
 		t.Errorf("clientsRepr %s", clientsRepr)
 	}
 }
 
 func TestFormatOfStoredClient(t *testing.T) {
 	for client, want := range map[string]string{"sing-box": FormatSingBox, "karing": FormatSingBox, "clash": FormatClash,
-		"stash": FormatStash, "shadowrocket": FormatURIList, "": FormatSingBox, "other": FormatSingBox} {
+		"stash": FormatStash, "shadowrocket": FormatURIList, "happ": FormatURIList, "": FormatSingBox, "other": FormatSingBox} {
 		if got := formatOf(client); got != want {
 			t.Errorf("%q: %s, want %s", client, got, want)
 		}
@@ -198,12 +199,26 @@ func TestSubscriptionFormatPath(t *testing.T) {
 
 func TestNewClientsGetLandingPage(t *testing.T) {
 	f := newPubFx(t)
-	for _, c := range []string{"stash", "shadowrocket"} {
+	for _, c := range []string{"stash", "shadowrocket", "happ"} {
 		d, _ := f.newDevice("x", "y", c)
 		rec := f.get("/e/"+f.token(d), "Mozilla/5.0")
 		def, _ := ClientByID(c)
 		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Open in "+def.Label) || !strings.Contains(rec.Body.String(), c+"://") {
 			t.Errorf("%s: %d %s", c, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// Happ takes the subscription URL as is (#278): only an https URL of URL-safe characters gets a
+// link, so no quote, space or angle bracket can reach the href.
+func TestHappLinkRefusesUnsafeURL(t *testing.T) {
+	for _, u := range []string{"http://link.example.com/sub/abc/uri", "https://x/\"><script>",
+		"https://x/a b", "https://x/a?b=c&d", "javascript:alert(1)"} {
+		if got := happLink(u, "n"); got != "" {
+			t.Errorf("%q: got %q", u, got)
+		}
+	}
+	if got := happLink("https://link.example.com/sub/0a1b/uri", ""); got != "happ://add/https://link.example.com/sub/0a1b/uri" {
+		t.Errorf("got %q", got)
 	}
 }

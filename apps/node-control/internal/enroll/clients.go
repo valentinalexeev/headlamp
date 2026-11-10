@@ -92,6 +92,33 @@ var Catalog = []ClientDef{
 	{ID: "stash", Label: "Stash", Format: FormatStash, Landing: true,
 		Platforms: []string{PlatformIOS, PlatformMacOS},
 		link:      installConfigLink("stash")},
+	// Happ (#278), an xray-core app. Its import link is happ://add/ followed by the plain
+	// subscription URL: Happ takes everything after the prefix as the URL, so the URL is not
+	// encoded. The link has no name: Happ names the subscription from the profile-title
+	// header, else from the host.
+	{ID: "happ", Label: "Happ", Format: FormatURIList, Landing: true,
+		Platforms: []string{
+			PlatformIOS, PlatformMacOS, PlatformAndroid, PlatformWindows, PlatformLinux,
+		},
+		link: happLink},
+}
+
+// happLink is "happ://add/" and the plain subscription URL. Happ reads the URL without decoding,
+// so it is not encoded: it must be an https URL of only URL-safe characters. node-control makes
+// it from link_host and a hex secret, so it always is; anything else gives no link ("") rather
+// than a link that could break out of an attribute.
+func happLink(subURL, _ string) string {
+	if !strings.HasPrefix(subURL, "https://") {
+		return ""
+	}
+	for _, c := range subURL {
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			strings.ContainsRune(":/.-_~", c)
+		if !ok {
+			return ""
+		}
+	}
+	return "happ://add/" + subURL
 }
 
 // Clients are the accepted device client values: the catalog IDs.

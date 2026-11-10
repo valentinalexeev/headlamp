@@ -1,5 +1,6 @@
-// Package fleet reports which version of each part runs (#195): node-control, headscale, the tailscale client of
-// every node, and the agent and xray of every bridge. It is read only: it changes nothing and asks no bridge.
+// Package fleet reports which version of each part runs (#195): node-control, headscale, the
+// tailscale client of every node, and the agent and xray of every bridge. It is read only: it
+// changes nothing and asks no bridge.
 package fleet
 
 import (
@@ -24,8 +25,9 @@ type Deps struct {
 		Version(ctx context.Context) (string, error)
 	}
 	Bridges func(ctx context.Context) []enroll.IngressView
-	// TailscalePin is the tailscale version the fleet should run. Default: the tailscale.com module node-control is
-	// built with, which the image build checks against the repo's TAILSCALE_VERSION.
+	// TailscalePin is the tailscale version the fleet should run. Default: the tailscale.com
+	// module node-control is built with, which the image build checks against the repo's
+	// TAILSCALE_VERSION.
 	TailscalePin string
 }
 
@@ -90,17 +92,19 @@ type Node struct {
 
 // Bridge is one bridge and what its agent last reported.
 type Bridge struct {
-	Name   string     `json:"name"`
-	Source string     `json:"source"`
-	Online *bool      `json:"online"`
-	Agent  string     `json:"agent,omitempty"` // "" for a configured bridge or an agent before 0.16.0
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Online *bool  `json:"online"`
+	// Agent is "" for a configured bridge or an agent before 0.16.0.
+	Agent  string     `json:"agent,omitempty"`
 	Xray   string     `json:"xray,omitempty"`
 	InfoAt *time.Time `json:"info_at,omitempty"`
 }
 
 func (m *module) report(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
-	rep := Report{NodeControl: core.DisplayVersion(), TailscalePin: m.d.TailscalePin, Nodes: []Node{}, Bridges: []Bridge{}}
+	rep := Report{NodeControl: core.DisplayVersion(), TailscalePin: m.d.TailscalePin,
+		Nodes: []Node{}, Bridges: []Bridge{}}
 	if m.d.Headscale != nil {
 		if v, err := m.d.Headscale.Version(ctx); err != nil {
 			rep.HeadscaleError = err.Error()
@@ -130,8 +134,9 @@ func (m *module) report(w http.ResponseWriter, req *http.Request) {
 	}
 	if m.d.Bridges != nil {
 		for _, v := range m.d.Bridges(ctx) {
-			rep.Bridges = append(rep.Bridges, Bridge{Name: v.Name, Source: v.Source, Online: v.Online,
-				Agent: v.AgentVersion, Xray: v.XrayVersion, InfoAt: v.InfoAt})
+			b := Bridge{Name: v.Name, Source: v.Source, Online: v.Online,
+				Agent: v.AgentVersion, Xray: v.XrayVersion, InfoAt: v.InfoAt}
+			rep.Bridges = append(rep.Bridges, b)
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -151,7 +156,8 @@ func firstIP(ips []string) string {
 	return ""
 }
 
-// shortVersion keeps the release part of a tailscale long version: "1.104.5-t0123abcd-g4567" is "1.104.5".
+// shortVersion keeps the release part of a tailscale long version:
+// "1.104.5-t0123abcd-g4567" is "1.104.5".
 func shortVersion(v string) string {
 	v, _, _ = strings.Cut(strings.TrimSpace(v), "-")
 	if _, ok := parse(v); !ok {
@@ -160,10 +166,13 @@ func shortVersion(v string) string {
 	return v
 }
 
-func parse(v string) ([3]int, bool) {
-	var out [3]int
+// versionParts is the number of parts of a release version: major.minor.patch.
+const versionParts = 3
+
+func parse(v string) ([versionParts]int, bool) {
+	var out [versionParts]int
 	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
-	if len(parts) != 3 {
+	if len(parts) != versionParts {
 		return out, false
 	}
 	for i, p := range parts {

@@ -132,8 +132,9 @@ func (t *Tsnet) WhoIs(ctx context.Context, remoteAddr string) (string, []string,
 // Close shuts the embedded node down.
 func (t *Tsnet) Close() error { return t.srv.Close() }
 
-// PeerVersion is the tailscale version a tailnet peer reports (Hostinfo.IPNVersion, e.g. "1.104.5-t1234abcd"), read
-// from this node's own netmap through WhoIs on the peer's address (#195). It sends nothing to the peer.
+// PeerVersion is the tailscale version a tailnet peer reports (Hostinfo.IPNVersion, for example
+// "1.104.5-t1234abcd"), read from this node's own netmap through WhoIs on the peer's address
+// (#195). It sends nothing to the peer.
 func (t *Tsnet) PeerVersion(ctx context.Context, ip string) (string, error) {
 	lc, err := t.srv.LocalClient()
 	if err != nil {

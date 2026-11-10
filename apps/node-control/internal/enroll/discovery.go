@@ -98,8 +98,8 @@ type IngressView struct {
 	Aliases        []string      `json:"aliases,omitempty"` // other names of the same machine: its discovered node
 	Node           string        `json:"node,omitempty"`    // the machine this bridge runs on, when its entry names one
 	Intermittent   bool          `json:"intermittent,omitempty"`
-	// What the bridge agent reports about itself in /v1/info (#195), with the time of the last good answer.
-	// Empty for a configured bridge and for an agent before 0.16.0.
+	// What the bridge agent reports about itself in /v1/info (#195), with the time of the last
+	// good answer. Empty for a configured bridge and for an agent before 0.16.0.
 	AgentVersion string     `json:"agent_version,omitempty"`
 	XrayVersion  string     `json:"xray_version,omitempty"`
 	InfoAt       *time.Time `json:"info_at,omitempty"`
@@ -144,11 +144,15 @@ type probe struct {
 type infoResult struct {
 	ing Ingress
 	fp  string
-	// version and xray are what the agent reports about its own build (#195); "" when an agent before 0.16.0
-	// does not report them. They are not part of fp: an upgrade needs no new approval.
+	// version and xray are what the agent reports about its own build (#195); "" when an agent
+	// before 0.16.0 does not report them. They are not part of fp: an upgrade needs no new
+	// approval.
 	version, xray string
 	at            time.Time // when this answer was read
 }
+
+// maxVersionLen is the longest agent or xray version the fleet view keeps.
+const maxVersionLen = 64
 
 // Registry is the dynamic ingress set. It is safe for concurrent use.
 type Registry struct {
@@ -667,7 +671,8 @@ func parseInfo(node string, body []byte) (*infoResult, error) {
 	}
 	agentVer, _ := rawString(raw["version"])
 	xrayVer, _ := rawString(raw["xray"])
-	return &infoResult{ing: ing, fp: fingerprint(ing), version: plainText(agentVer, 64), xray: plainText(xrayVer, 64)}, nil
+	return &infoResult{ing: ing, fp: fingerprint(ing),
+		version: plainText(agentVer, maxVersionLen), xray: plainText(xrayVer, maxVersionLen)}, nil
 }
 
 // fingerprint is the hex SHA-256 of the canonical JSON of the published parameters: the keys name,

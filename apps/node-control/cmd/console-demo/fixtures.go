@@ -256,14 +256,8 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 		tasks.New(env, src),
 		servemod.New(env, client),
 		access.New(env),
-		fleet.New(fleet.Deps{Nodes: src, Headscale: client, TailscalePin: "1.104.5", Bridges: func(ctx context.Context) []enroll.IngressView {
-			if b, ok := enr.(interface {
-				Bridges(context.Context) []enroll.IngressView
-			}); ok {
-				return b.Bridges(ctx)
-			}
-			return nil
-		}}),
+		fleet.New(fleet.Deps{Nodes: src, Headscale: client, TailscalePin: "1.104.5",
+			Bridges: bridges(enr)}),
 	}
 	others := slices.Clone(mods)
 	return append(mods, overview.New(func() []core.Module { return others })), env, nil
@@ -954,4 +948,16 @@ func (w *world) seedServe(must mustFn) error {
 	proxy(42, "ingress-1", "100.64.0.42", true, ak)        // still on the old key of the rotation
 	proxy(43, "wiki-a", "100.64.0.43", !w.sc.problems, wk) // offline only where problems are seeded
 	return nil
+}
+
+// bridges is the bridge list of the enrolment module for the fleet view.
+func bridges(enr core.Module) func(context.Context) []enroll.IngressView {
+	return func(ctx context.Context) []enroll.IngressView {
+		if b, ok := enr.(interface {
+			Bridges(context.Context) []enroll.IngressView
+		}); ok {
+			return b.Bridges(ctx)
+		}
+		return nil
+	}
 }

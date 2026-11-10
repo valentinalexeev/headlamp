@@ -9,6 +9,15 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## Unreleased (0.16.0)
+
+### Optional
+
+- **Health checks** (#196): run the `ingress-agent` role on each bridge for the bridge self-test (on by default; set
+  `ingress_egress_socks: ""` to turn it off). Take the new `fly.toml` of the exit node and node-control for their Fly
+  checks: `fly checks list -a <app>` shows them after the deploy. After an upgrade, run
+  `NODE_CONTROL_URL=http://<node-control> scripts/smoke-test.sh` from a tailnet node of an operator.
+
 ## 0.15.3
 
 No action required. The fix of #270 is in node-control only: deploy the new image.
@@ -31,13 +40,6 @@ No action required. The fix of #270 is in node-control only: deploy the new imag
   `examples/compose/control/config/acl.json`, mainly `tag:ingress` to `autogroup:internet:*`. The
   `tailscale-userspace-socks` role now fails when traffic does not get through the exit node. Add the rules before
   you run it, or set `socks_egress_check: false` for that run.
-
-### Optional
-
-- **Health checks** (#196): run the `ingress-agent` role on each bridge for the bridge self-test (on by default; set
-  `ingress_egress_socks: ""` to turn it off). Take the new `fly.toml` of the exit node and node-control for their Fly
-  checks: `fly checks list -a <app>` shows them after the deploy. After an upgrade, run
-  `NODE_CONTROL_URL=http://<node-control> scripts/smoke-test.sh` from a tailnet node of an operator.
 
 ## 0.15.1
 

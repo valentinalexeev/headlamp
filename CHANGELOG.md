@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.15.2 - 2026-11-10
+
 ### Fixed
 
 - The example policy `examples/compose/control/config/acl.json` now has the rules that a bridge needs, with tests (#259): `tag:ingress` to its exit node, to `autogroup:internet` and to `tag:node-control:8081`, and `tag:node-control` to `tag:ingress:9000`. Before, a bridge that followed the example could not reach the internet through its exit node: its clients connected and got no reply. The `tailscale-userspace-socks` role now sends one request through the SOCKS port after it selects the exit node, and fails with the cause when the request fails (`socks_egress_check`, default `true`). `make test-bridge-policy-e2e` checks the rules on a real headscale.

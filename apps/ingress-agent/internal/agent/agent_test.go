@@ -224,7 +224,7 @@ func TestEmailIsDeterministicAndOpaque(t *testing.T) {
 
 func render(t *testing.T, b []byte, cs []Cred, ip, site []string) map[string]any {
 	t.Helper()
-	out, err := Render(b, cs, ip, site, nil)
+	out, err := Render(b, cs, ip, site, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,13 +275,13 @@ func TestBlockRuleFirstWithZeroCreds(t *testing.T) {
 }
 
 func TestRenderRefusals(t *testing.T) {
-	if _, err := Render(base, nil, []string{"bad entry"}, nil, nil); err == nil {
+	if _, err := Render(base, nil, []string{"bad entry"}, nil, nil, nil); err == nil {
 		t.Error("an invalid direct list entry is accepted")
 	}
-	if _, err := Render([]byte(`{"inbounds":[],"routing":{}}`), nil, nil, nil, nil); err == nil {
+	if _, err := Render([]byte(`{"inbounds":[],"routing":{}}`), nil, nil, nil, nil, nil); err == nil {
 		t.Error("a base without reality-in is accepted")
 	}
-	if _, err := Render([]byte(`{"inbounds":[{"tag":"reality-in"}]}`), nil, nil, nil, nil); err == nil {
+	if _, err := Render([]byte(`{"inbounds":[{"tag":"reality-in"}]}`), nil, nil, nil, nil, nil); err == nil {
 		t.Error("a base without routing is accepted")
 	}
 }
@@ -296,7 +296,7 @@ func TestHy2(t *testing.T) {
 	jsonEq(t, cfg["routing"].(map[string]any)["rules"].([]any)[1].(map[string]any)["inboundTag"], `["reality-in","hy2-in"]`)
 	b["inbounds"].([]any)[2].(map[string]any)["protocol"] = "vless"
 	hb, _ = json.Marshal(b)
-	if _, err := Render(hb, nil, nil, nil, nil); err == nil {
+	if _, err := Render(hb, nil, nil, nil, nil, nil); err == nil {
 		t.Error("hy2-in with another protocol is accepted")
 	}
 }
@@ -704,7 +704,7 @@ func TestNoGrantNoTailnetRule(t *testing.T) {
 }
 
 func TestGrantWithoutOutboundIsRefused(t *testing.T) {
-	if _, err := Render(base, []Cred{{UUID: u1, Mode: "auto", NotAfter: 9, Tailnet: "all"}}, nil, nil, nil); err == nil || !strings.Contains(err.Error(), "via-tailnet") {
+	if _, err := Render(base, []Cred{{UUID: u1, Mode: "auto", NotAfter: 9, Tailnet: "all"}}, nil, nil, nil, nil); err == nil || !strings.Contains(err.Error(), "via-tailnet") {
 		t.Errorf("got %v", err)
 	}
 }
@@ -853,7 +853,7 @@ func TestDNSDirectSitesResolveLocallyOnly(t *testing.T) {
 
 func TestDNSReplacesBaseSectionAndTakesOverride(t *testing.T) {
 	b := bytes.Replace(base, []byte(`"routing"`), []byte(`"dns": {"servers": ["localhost"]}, "routing"`), 1)
-	out, err := Render(b, nil, nil, nil, []string{"tcp://192.0.2.53:53", "https://192.0.2.1/dns-query"})
+	out, err := Render(b, nil, nil, nil, []string{"tcp://192.0.2.53:53", "https://192.0.2.1/dns-query"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -865,12 +865,12 @@ func TestDNSReplacesBaseSectionAndTakesOverride(t *testing.T) {
 func TestDNSRefusals(t *testing.T) {
 	for _, bad := range []string{"localhost", "1.1.1.1", "udp://1.1.1.1", "https://dns.example.com/dns-query",
 		"tcp://dns.example.com", "https+local://1.1.1.1/dns-query", "tcp://1.1.1.1 x"} {
-		if _, err := Render(base, nil, nil, nil, []string{bad}); err == nil {
+		if _, err := Render(base, nil, nil, nil, []string{bad}, nil); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
 	}
 	noExit := bytes.Replace(base, []byte(`{"tag": "via-exit"}`), []byte(`{"tag": "other"}`), 1)
-	if _, err := Render(noExit, nil, nil, nil, nil); err == nil || !strings.Contains(err.Error(), "via-exit") {
+	if _, err := Render(noExit, nil, nil, nil, nil, nil); err == nil || !strings.Contains(err.Error(), "via-exit") {
 		t.Errorf("a base without via-exit must be refused: %v", err)
 	}
 }

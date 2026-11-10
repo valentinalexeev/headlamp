@@ -21,6 +21,11 @@ base file. It restarts xray when the set changes.
   that have an outbound in the base config.
   Duplicate UUIDs in one push give `422`. The agent drops entries that already expired first. Then an empty
   list gives `409`, unless the request has `?confirm_empty=true`.
+  The body can also have `"tailnet_dns": {"server": "tcp://<tailnet ipv4>:<port>", "domains": [...]}` (#286). node-control
+  sends it to a bridge with tailnet access. `server` must be a tailnet IPv4 address. Each entry of `domains` is
+  `full:<name>` or `domain:<name>`, 1,024 entries or fewer. Another value gives `422`. A push without the key removes
+  the resolver. The agent keeps the resolver in `tailnet-dns.json`, next to `credentials.json`.
+
   The status is `503` if xray rejects the generated config. In that case, the old config, the old set and the running xray do not change.
 - `GET /v1/stats` -> `{"<opaque-id>":{"up":<bytes>,"down":<bytes>}}`. The opaque id is the first 8
   hex chars of `SHA-256(<uuid>)`. The operator side computes the same value from the `auto`
@@ -58,6 +63,14 @@ The agent starts from the base file (`XRAY_BASE_CONFIG`). The base file must con
   `dns-internal`, and a routing rule sends these queries to `via-exit`. Thus the resolver of the bridge network does
   not see the names that clients go to. Only names on `INGRESS_DIRECT_GEOSITE` use the system resolver (server
   `localhost` with `skipFallback`), because their traffic leaves from this host.
+
+  With a tailnet resolver from node-control (#286), the first server is node-control on the tailnet, for the names in
+  `domains` only. It has `skipFallback` and `finalQuery`: the names go to node-control only, and other names never go
+  to it. `expectedIPs` accepts only tailnet addresses. The `dns-internal` rule sends the query to `via-exit`. The
+  tailscaled of the exit node sends a tailnet address over the tailnet.
+
+  The name then resolves to a tailnet address. Rule 0 below sends the traffic of a granted client to the tailnet. The
+  block rule stops the traffic of other clients.
 
   **CAUTION:** Clients of mode `direct` also get their addresses from the exit DNS servers. When the exit node is
   not available, their lookups fail.

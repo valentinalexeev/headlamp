@@ -240,25 +240,31 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 	}
 	pol := policy.New(env, client)
 	enr := enroll.New(env, enroll.WithNodeSource(src), enroll.WithSelfHeadscale(client))
+	fun := funnel.New(env, client, func() funnel.PolicyService {
+		if p, ok := pol.(interface{ Service() *policy.Service }); ok {
+			if svc := p.Service(); svc != nil {
+				return svc
+			}
+		}
+		return nil
+	})
+	// The modules before Fleet, for its navigation rule; set once the list is built.
+	var beforeFleet []core.Module
 	mods := []core.Module{
 		tailnet.New(src, tracked),
 		nm,
 		enr,
 		pol,
-		funnel.New(env, client, func() funnel.PolicyService {
-			if p, ok := pol.(interface{ Service() *policy.Service }); ok {
-				if svc := p.Service(); svc != nil {
-					return svc
-				}
-			}
-			return nil
-		}),
+		fun,
 		tasks.New(env, src),
 		servemod.New(env, client),
 		access.New(env),
-		fleet.New(fleet.Deps{Nodes: src, Headscale: client, TailscalePin: "1.104.5",
-			Bridges: bridges(enr)}),
+		fleet.New(fleet.Deps{Others: func() []core.Module { return beforeFleet },
+			Nodes: src, Headscale: client, TailscalePin: "1.104.5",
+			Bridges: bridges(enr),
+			Funnel:  funnelStatus(fun)}),
 	}
+	beforeFleet = mods[:len(mods)-1]
 	others := slices.Clone(mods)
 	return append(mods, overview.New(func() []core.Module { return others })), env, nil
 }
@@ -333,6 +339,8 @@ func (f *fakeHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method + " " + r.URL.Path {
 	case "GET /api/v1/node":
 		reply(200, map[string]any{"nodes": f.nodes})
+	case "GET /version":
+		reply(http.StatusOK, map[string]any{"version": "v0.29.7", "commit": "demo"})
 	case "GET /api/v1/policy":
 		reply(200, map[string]any{"policy": f.policy, "updatedAt": f.updatedAt.Format(time.RFC3339Nano)})
 	case "PUT /api/v1/policy":
@@ -447,6 +455,8 @@ type ingressInfo struct {
 	SNI       string `json:"sni"`
 	PublicKey string `json:"public_key"`
 	ShortID   string `json:"short_id"`
+	Version   string `json:"version,omitempty"`
+	Xray      string `json:"xray,omitempty"`
 }
 
 // agentHandler stands in for every ingress agent: it takes credentials, reports no traffic and
@@ -473,7 +483,8 @@ func agentHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(ingressInfo{Name: "bridge-3", Host: "bridge-3.example.net", Port: 443,
-			SNI: "bridge-3.example.net", PublicKey: "demo-public-key-3", ShortID: "c9d0e1f2"})
+			SNI: "bridge-3.example.net", PublicKey: "demo-public-key-3", ShortID: "c9d0e1f2",
+			Version: "0.16.0+demo", Xray: "25.10.15"})
 	default:
 		http.NotFound(w, r)
 	}
@@ -869,7 +880,8 @@ func (w *world) seedFunnelReport(ctx context.Context, hc *http.Client, admin str
 	}
 	post := func() error {
 		code, _, err := call(ctx, hc, admin, "POST", "/ingress/v1/state", map[string]any{
-			"applied_version": "demo", "sent_at": time.Now().UTC().Format(time.RFC3339), "snapshot_loaded": true,
+			"build_version": "0.16.0", "applied_version": "demo",
+			"sent_at": time.Now().UTC().Format(time.RFC3339), "snapshot_loaded": true,
 			"peer_count": 3, "routes": routes, "errors": []string{}})
 		if err != nil {
 			return err
@@ -966,5 +978,17 @@ func bridges(enr core.Module) func(context.Context) []enroll.IngressView {
 			return b.Bridges(ctx)
 		}
 		return nil
+	}
+}
+
+// funnelStatus is the funnel ingress status of the funnel module for the fleet view.
+func funnelStatus(fun core.Module) func() (funnel.IngressStatus, bool) {
+	return func() (funnel.IngressStatus, bool) {
+		if f, ok := fun.(interface {
+			Ingress() (funnel.IngressStatus, bool)
+		}); ok {
+			return f.Ingress()
+		}
+		return funnel.IngressStatus{}, false
 	}
 }

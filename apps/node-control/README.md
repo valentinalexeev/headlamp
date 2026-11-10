@@ -374,9 +374,23 @@ The file is optional. Files from the Python version continue to work. Start from
 
 ## API
 
-`GET /` (Overview) · `GET /nodes` (page) · `GET /activity` (page) · `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` · `POST /nodes/{id}/stop` · `GET /tailnet/status` · `GET /healthz`.
+- Pages: `GET /` (Overview) · `GET /nodes` · `GET /activity` · `GET /fleet`.
+- Nodes: `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` · `POST /nodes/{id}/stop`.
+- Other: `GET /fleet.json` · `GET /tailnet/status` · `GET /healthz`.
 
 With `ENROLL_DB` or `ENROLL_REDIS=1`, these are also available: the `/enroll` admin pages and API on `:80`, and the public `/e/<token>` and `/sub/<secret>` on `:8081`.
+
+### Fleet (#195)
+
+`GET /fleet.json` (Overview view permission) is one read-only report of the versions and the state of every part:
+
+- `node_control`, `headscale` (from headscale's `/version`, no API key), `tailscale_pin` (the tailscale.com module of node-control, which the image build checks against `TAILSCALE_VERSION`).
+- `nodes`: every tailnet node with its tailscale version. `status` compares it with the pin: `current`, `older`, `newer` or `unknown`. node-control reads the version from its own tailnet node (`Hostinfo.IPNVersion` through WhoIs). Nothing is sent to the nodes.
+- `bridges`: every bridge with its agent and xray version, as the agent last reported them in `/v1/info` (`info_at`), and its sync state. An agent before 0.16.0 reports no version.
+- `funnel`: the build version of the funnel ingress from its last state report. `stale` is true when that report is older than 90 s.
+- `problems`: what needs action. Examples: a part that does not answer, or an active bridge that is offline or out of sync. Also a funnel ingress that does not report or reports errors. Also a server (tagged node) on a tailscale older than the pin. A person's device on an older tailscale is not a problem: it updates itself. `notes`: worth a look, not a failure.
+
+The Fleet page (`/fleet`, in the configure group) shows the same report. `scripts/fleet-check.sh` prints it as a table and exits 1 when `problems` is not empty (`make fleet-check` in a site repo).
 
 Start and stop are idempotent. A provider failure shows as `error` on that node only.
 
@@ -790,11 +804,12 @@ node-control makes profiles and import links for the apps of a fixed catalog (#2
 | `clash` | Clash Mi | `clash` | `ios`, `macos`, `android`, `windows` | `6744321968` | `com.nebula.clashmi` |
 | `shadowrocket` | Shadowrocket | `uri` | `ios`, `macos` | `932747118` | |
 | `stash` | Stash | `stash` | `ios`, `macos` | `1596063349` | |
+| `happ` | Happ | `uri` | `ios`, `macos`, `android`, `windows`, `linux` | `6504287215` | `com.happproxy` (on Google Play) |
 
 - The `id` is also the `client` value of a device that an operator makes.
-- The App Store id is for the app page on iPhone (#271) and for the default iOS store link. The sing-box documentation links the iOS app "sing-box MT".
-- The Android package is for the app check on Android (#271). Only sing-box is on Google Play. Thus only sing-box has a default Android store link.
-- The one-time link of a `karing`, `clash`, `shadowrocket` or `stash` device opens a page with a button, because these apps open only from a tap. The one-time link of a `sing-box` device redirects at once.
+- The App Store id is for the app page on iPhone (#271) and for the default iOS store link. The sing-box documentation links the iOS app "sing-box MT". For Happ it is the global listing.
+- The Android package is for the app check on Android (#271). Only sing-box and Happ are on Google Play. Thus only they have a default Android store link.
+- The one-time link of a `karing`, `clash`, `shadowrocket`, `stash` or `happ` device opens a page with a button. These apps open only from a tap. The one-time link of a `sing-box` device redirects at once.
 - `https://<link_host>/sub/<secret>` serves the format of the device's `client`. This did not change.
 - `https://<link_host>/sub/<secret>/<format>` serves the profile in one format, for every device. Each import link of the app picker uses this form. Thus one device can go into each app, also into more than one app.
 
@@ -813,9 +828,18 @@ The `clients` key of `enroll.json` selects the apps of the app picker and gives 
 "clients": [
   {"id": "karing", "install": {"ios": "https://apps.example.com/karing", "android": "https://store.example.com/karing"}},
   {"id": "shadowrocket", "install": {"ios": "https://apps.example.com/shadowrocket"}},
-  {"id": "clash"}
+  {"id": "clash"},
+  {"id": "happ", "install": {"ios": "https://apps.example.com/happ", "android": "https://store.example.com/happ"}}
 ]
 ```
+
+Happ (#278) is an xray-core app. Its import link is `happ://add/<subscription URL>`, with the URL as it is (not
+encoded).
+
+Happ reads both kinds of link of the `uri` format: VLESS Reality with `flow=xtls-rprx-vision`, and Hysteria 2
+with `obfs=salamander`. The Hysteria 2 links need an xray-core with the Hysteria 2 outbound and the Salamander mask
+(`finalmask`). The bridges use the same core (26.10 or later). On an older Happ, only the VLESS links work. Happ names
+the subscription after the link host, because its link has no name.
 
 - `id` is required. It must be an `id` of the catalog, and each `id` can occur one time only.
 - `install` is optional. Its keys are platforms (`ios`, `android`, `macos`, `windows`, `linux`). Its values are `https` URLs of the store page of the app, 500 characters or fewer. Without an `ios` link, the iOS link is `https://apps.apple.com/app/id<App Store id>`.

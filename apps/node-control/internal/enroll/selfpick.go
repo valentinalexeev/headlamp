@@ -140,7 +140,8 @@ func (s *SelfWeb) renderPick(
 
 // importHref is the import link of an app as a URL the page template keeps: html/template only lets
 // http(s) and mailto links through, and these links use the app's own scheme. Every part that
-// comes from data (the subscription URL and the profile name) is percent-encoded by the catalog.
+// comes from data (the subscription URL and the profile name) is percent-encoded by the catalog,
+// or, for Happ, which takes the URL as is, checked to hold only URL-safe characters.
 func importHref(def ClientDef, subURL, name string) template.URL {
 	return template.URL(def.Link(subURL, name)) // #nosec G203 -- built from encoded parts only
 }

@@ -25,6 +25,10 @@ says "No action required".
   `ingress_egress_socks: ""` to turn it off). Take the new `fly.toml` of the exit node and node-control for their Fly
   checks: `fly checks list -a <app>` shows them after the deploy. After an upgrade, run
   `NODE_CONTROL_URL=http://<node-control> scripts/smoke-test.sh` from a tailnet node of an operator.
+- **Fleet versions** (#195): run the `ingress-agent` role on each bridge and deploy the new funnel-ingress image, so
+  that they report their versions. Then `make fleet-check` (or `make verify`) in the site repo, or the Fleet page of
+  node-control, shows the version and state of every part. Its login needs the Overview view permission. A bridge
+  agent or funnel ingress before 0.16.0 shows "unknown" and is not a failure.
 
 ## 0.15.3
 

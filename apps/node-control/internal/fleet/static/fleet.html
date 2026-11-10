@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet</title>
+</head>
+<body>
+<div class="hl" id="fleet-page">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>Fleet</h1>
+        <p class="t2">Which version of each part runs, and whether it is healthy</p>
+      </div>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note crit" id="problems" role="status" hidden></div>
+    <div class="note plain" id="notes" role="status" hidden></div>
+
+    <h2>Control</h2>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Part</th><th>Version</th><th>State</th></tr></thead>
+        <tbody id="control"></tbody>
+      </table>
+    </div>
+
+    <h2>Bridges</h2>
+    <p class="t2" id="bridges-empty" hidden>No bridges.</p>
+    <div class="tw" id="bridges-table" hidden>
+      <table>
+        <thead><tr><th>Bridge</th><th>Agent</th><th>xray</th><th>Sync</th><th>Last report</th></tr></thead>
+        <tbody id="bridges"></tbody>
+      </table>
+    </div>
+
+    <h2>Tailscale clients</h2>
+    <p class="t2" id="pin"></p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Node</th><th>Tailscale</th><th>State</th><th>Tags</th></tr></thead>
+        <tbody id="nodes"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script src="/fleet/fleet.js" defer></script>
+</body>
+</html>

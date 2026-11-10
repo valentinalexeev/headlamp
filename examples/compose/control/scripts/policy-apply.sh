@@ -93,10 +93,11 @@ fi
 
 echo "== 2. reload (SIGHUP)"
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-$compose kill -s HUP "$svc" >/dev/null
 echo "== 3. confirm in the headscale log"
+# headscale 0.29.7 sometimes logs the SIGHUP and does not reload: send it again, up to 3 times.
 i=0; result=
 while [ $i -lt 15 ]; do
+  case $i in 0|5|10) $compose kill -s HUP "$svc" >/dev/null ;; esac
   log=$($compose logs --no-log-prefix --since "$since" "$svc" 2>&1)
   case "$log" in
     *"Policy reload completed"*) result=ok; break ;;

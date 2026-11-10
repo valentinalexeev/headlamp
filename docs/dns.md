@@ -51,7 +51,8 @@ Obey these rules:
 A tailnet device sends its queries to tailscale (`100.100.100.100`). tailscale answers from the netmap in this order:
 
 1. MagicDNS names of the nodes.
-2. The extra records of headscale. A name can have more than one record. The device then gets all the addresses.
+2. The extra records of headscale. A name can have more than one record. tailscale then gives the first address of
+   each type (A or AAAA).
 3. Split zones. tailscale sends the query to the resolver of the zone, for example node-control for the serve zone.
 4. Other names. tailscale sends the query to the global nameservers.
 
@@ -237,11 +238,23 @@ under `base_domain` or in the serve zone.
 The API is `GET /dns/state`, `POST /dns/records`, `PUT /dns/records/{name}` and `DELETE /dns/records/{name}`. See the
 node-control README for the procedure and the permissions.
 
-node-control cannot give its records to headscale. Thus tailnet devices do not get them automatically. To give a
-record to tailnet devices, do one of these steps:
+headscale has no API for DNS. node-control gives its records to tailnet devices in one of two ways:
 
-- Add the name to `extra_records` in `headscale.yaml`, and restart headscale.
-- Add the name to `nameservers.split` with the address of node-control, and restart headscale.
+| Way | Where | What the device does |
+|---|---|---|
+| The records file (`TAILNET_DNS_EXTRA_RECORDS_FILE`) | node-control and headscale share a directory, for example the compose stack | Resolves the names itself, from the netmap |
+| A `nameservers.split` line for each name | node-control and headscale are on different hosts, for example Fly.io | Sends the names to node-control |
+
+With the records file, node-control writes its records into the file of `dns.extra_records_path`. When the file
+changes, headscale reads it again, with no restart. The file changes only when the records change. Each write
+replaces the file by rename. Thus mount the directory, not the file. The file contains only the records of
+node-control.
+
+**CAUTION:** headscale does not start when the file of `dns.extra_records_path` does not exist. Create it with `[]`
+first.
+
+A `tag` target with more than one online node gives all addresses to bridges. A tailnet device gets one of them.
+When that node goes offline, it leaves the file at the next refresh.
 
 The split line makes the name depend on node-control. When node-control stops, devices cannot resolve the name.
 
@@ -324,7 +337,7 @@ The table uses the default settings of each component.
 |---|---|---|---|---|---|
 | MagicDNS name | Tailnet address | Tailnet address | Tailnet address, then blocked | No tailnet answer | No tailnet answer |
 | Extra record with a public twin | Tailnet address | Tailnet address | Tailnet address, then blocked | Public address | Public address |
-| Record of the tailnet DNS module | Only with a headscale change (see "Tailnet DNS module") | Tailnet address | Tailnet address, then blocked | Public address, if one exists | Public address, if one exists |
+| Record of the tailnet DNS module | Tailnet address, with the records file or a split line | Tailnet address | Tailnet address, then blocked | Public address, if one exists | Public address, if one exists |
 | Serve name | Proxy addresses, with the split line | Proxy addresses | Proxy addresses, then blocked | No tailnet answer | No tailnet answer |
 | Funnel name | Public address of the edge | Public address of the edge | Public address of the edge | Public address of the edge | Public address of the edge |
 | Public name | Global nameservers, or the exit node | Exit DNS, or the system resolver for direct lists | The same | The same | Public DNS |
@@ -333,8 +346,10 @@ The tailnet DNS module must be on for the bridge columns with tailnet answers.
 
 ## Limits
 
-- headscale has no API for DNS. Records that node-control keeps reach tailnet devices only after a change to
-  `headscale.yaml` and a restart.
+- headscale has no API for DNS. Without a directory that node-control and headscale share, each record needs a
+  split line in `headscale.yaml` and a restart of headscale.
+- The resolver of a tailnet device gives one address of each type for a name. It does not spread the load over the
+  nodes of a tag.
 - An extra record is for one exact name. headscale and tailscale do not accept a wildcard.
 - The xray resolver of a bridge is the same for all its clients. Thus the bridge cannot give a different answer to a
   client with no grant.

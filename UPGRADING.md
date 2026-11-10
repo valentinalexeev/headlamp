@@ -26,6 +26,13 @@ says "No action required".
   tailnet service by its name.
 
   Without `TAILNET_DNS_DB` or `TAILNET_DNS_REDIS=1`, nothing changes.
+- **Tailnet DNS records for all devices** (#286), compose stack only: node-control can write its records into the file
+  of headscale's `dns.extra_records_path`. Do the steps of "Tailnet DNS (optional)" in
+  `examples/compose/control/README.md`. The new `compose.yaml` mounts `${DATA_DIR}/dns` into headscale and
+  node-control. The mount alone changes nothing.
+
+  **CAUTION:** headscale does not start when `dns.extra_records_path` names a file that does not exist. Create the
+  file with `[]` before you set it.
 
 ## 0.16.0
 

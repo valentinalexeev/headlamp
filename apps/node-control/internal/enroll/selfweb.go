@@ -6,7 +6,10 @@ import (
 	"errors"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -155,6 +158,11 @@ func (s *SelfWeb) view(sub, csrf string) (meView, error) {
 }
 
 func (s *SelfWeb) page(w http.ResponseWriter, r *http.Request) {
+	// The session cookie is host-only and made on link_host: /me on another front goes there
+	// (#270).
+	if s.onLinkHost(w, r, "/me") {
+		return
+	}
 	sub, csrf, ok := s.session(r)
 	if !ok {
 		s.render(w, http.StatusOK, meView{}) // no text from the URL: a crafted link must not put words on the page
@@ -173,7 +181,48 @@ func (s *SelfWeb) fail(w http.ResponseWriter, err error) {
 	s.render(w, http.StatusInternalServerError, meView{Error: "Something went wrong. Try again later."})
 }
 
+// onLinkHost sends the browser to the same path on link_host when the request came through a
+// front with another host (#270). The OIDC redirect_uri is on link_host (OIDC_REDIRECT_URL), and
+// the flow and invitation cookies are host-only (__Host-), so a sign-in must start on link_host,
+// or the callback finds no flow cookie. It reports whether it redirected.
+//
+// The target is built from the configured link_host and the route's own path, never from the
+// request URL: the redirect cannot be steered to another site.
+func (s *SelfWeb) onLinkHost(w http.ResponseWriter, r *http.Request, path string) bool {
+	link := s.link().LinkHost
+	if link == "" || sameHost(r.Host, link) {
+		return false
+	}
+	target := url.URL{Scheme: "https", Host: link, Path: path}
+	secHeaders(w)
+	http.Redirect(w, r, target.String(), http.StatusFound)
+	return true
+}
+
+// sameHost compares a request Host with link_host. A port on either side counts only when both have
+// one: a front proxies with the plain name, and link_host is a plain name in production.
+func sameHost(reqHost, link string) bool {
+	rh, rp, rerr := net.SplitHostPort(reqHost)
+	lh, lp, lerr := net.SplitHostPort(link)
+	if rerr != nil {
+		rh = reqHost
+	}
+	if lerr != nil {
+		lh = link
+	}
+	if rerr == nil && lerr == nil && rp != lp {
+		return false
+	}
+	return strings.EqualFold(rh, lh)
+}
+
+// inviteTokenRe is the shape of an invitation token in /i/<token>.
+var inviteTokenRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 func (s *SelfWeb) login(w http.ResponseWriter, r *http.Request) {
+	if s.onLinkHost(w, r, "/oidc/login") {
+		return
+	}
 	f := oidc.NewFlow()
 	if err := s.self.users.SaveFlow(f.State, f.Nonce, f.Verifier, flowTTL); err != nil {
 		s.fail(w, err)
@@ -263,6 +312,15 @@ func (s *SelfWeb) invite(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	if token == "" || isPreview(r.Header.Get("User-Agent")) {
 		notFound(w)
+		return
+	}
+	// The invitation cookie must be on the host where the sign-in ends (#270). The token is 64 hex
+	// characters (the route and the front allow nothing else), so the path stays a fixed shape.
+	if !inviteTokenRe.MatchString(token) {
+		notFound(w)
+		return
+	}
+	if s.onLinkHost(w, r, "/i/"+token) {
 		return
 	}
 	inv, err := s.self.users.InviteByToken(r.Context(), token)

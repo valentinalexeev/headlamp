@@ -47,6 +47,7 @@ Fly.io, `fly.toml`).
 | `ENROLL_ALLOWED_HOSTS` | Optional for the core. **Required** by the policy module (`POLICY_DB`) and the tasks module (on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set). Comma-separated Host values that the admin listener accepts. Any other value gets 400. Set it to block DNS rebinding. `*` allows any host (those two modules refuse it). `*.example.com` allows any host that ends in `.example.com` (list `example.com` too for the bare name), as in the Python app. |
 | `ENROLL_DB` | The path of the SQLite database. It enables enrolment. Put it on the state volume: `/var/lib/tailscale/enroll.db`. |
 | `ENROLL_REDIS` | `1` keeps the enrolment data in Redis, not in SQLite, so no volume is necessary (see "Enrolment in Redis"). It turns on enrolment, like `ENROLL_DB`. It needs `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `ENROLL_CONFIG` and `ENROLL_SECRET_KEY`. The app then does not use `ENROLL_DB`. |
+| `HEALTH_LISTEN` | Optional, `host:port`, for example `:9001` (#196). Serves only `GET /healthz` on this plain TCP address: `200 {"status":"ok"}` while the embedded tailscale node is `Running`, else `503` with the state. For a platform health check, such as the `[checks]` section of `fly.toml`. The admin app stays on the tailnet only. |
 | `ENROLL_PUBLIC_LISTEN` | Optional, `host:port`, for example `:8081`. With enrolment on, the public enrolment pages (`/e/`, `/sub/`, `/me`, `/oidc/*`) are also served on this plain TCP address, not only on the tailnet port 8081. Use it when a TLS edge on the same host (for example the Caddy of `examples/compose/control`) serves `link_host`, so people can enrol before they have any tunnel. The admin app stays on the tailnet only. Do not publish this port on the host: only the edge may reach it. |
 | `ENROLL_REDIS_KEY` | The key prefix of the enrolment data, `<app>:<name>`. The default is `<app>:enroll`. |
 | `ENROLL_IMPORT_FROM` | With `ENROLL_REDIS=1`: the path of an old enrolment SQLite file. The app copies it into Redis one time, when Redis holds no enrolment data. The app opens the file read-only and does not change it. |
@@ -444,6 +445,12 @@ The file gives one or more bridge nodes. Each entry is a bridge host with its ow
 ### Intermittent bridges
 
 `"intermittent": true` is for a bridge that you expect to come and go. While its agent is `unreachable`, Attention shows an info item in place of a critical one. Its row on the Nodes page has no At risk state, and the lamp does not count it. Every other sync failure (`unauthorized`, `rejected`, `conflict`, `error`) stays critical, because a reachable agent that refuses credentials is a real problem.
+
+**Bridge path self-test (#196).** The agent of each bridge checks every minute that a request through its exit node
+gets an answer (`GET /v1/egress`, see the ingress-agent README). When it fails, Attention shows a critical item
+"`<bridge>` cannot reach the internet through its exit node", with the error. Clients of such a bridge connect and get
+no reply, though the bridge is in sync. `GET /enroll/ingresses` has the result of each bridge in `egress`. An agent
+before 0.15.2 has no self-test, and node-control then shows nothing for it.
 
 > **WARNING:** Mark a bridge as intermittent only if you accept this risk for it. `unreachable` over the tailnet does not prove that the bridge no longer serves clients. Its tailnet connection can be down while its front still accepts connections. Revocations and extensions that you make during that time are then not in effect on it. A revoked device can continue to work there until the agent answers again.
 
@@ -981,7 +988,7 @@ Set `OIDC_ISSUER` to turn it on. It needs:
 4. The app picker opens (see "App picker"). It shows the tailnet key one time only. A reload does not show the key again.
 5. The person selects the button of the installed app. The app opens and adds the profile.
 
-The page lists the person's devices. For each active device, **Add to an app** opens the app picker again. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*`, `/oidc/*` and `/i/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`.
+The page lists the person's devices. For each active device, **Add to an app** opens the app picker again. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*`, `/oidc/*` and `/i/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`. A bridge front with another name can serve these pages too: `/me`, `/oidc/login` and `/i/<token>` send the browser to `link_host`, where the sign-in runs (#270). The redirect URL at the identity provider and the cookies of the sign-in are on `link_host` only.
 
 ### The headscale user of a person
 

@@ -169,6 +169,66 @@ func (a *agentClient) TailnetGroups() ([]string, bool) {
 	return slices.Clone(a.groups), a.groups != nil
 }
 
+// Egress is the bridge path self-test of an agent (#196): its last request through the SOCKS
+// port of its exit node. Known is false when the agent did not answer, or runs no probe (an older
+// agent, or no INGRESS_EGRESS_SOCKS).
+type Egress struct {
+	Known   bool   `json:"-"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+	Checked int64  `json:"checked"`
+	Since   int64  `json:"since,omitempty"`
+}
+
+const (
+	maxEgressBody  = 4096 // an egress answer is a few dozen bytes
+	maxEgressError = 200  // characters of the agent's error kept for the console
+)
+
+// egressReporter is an Agent that reports its egress self-test (#196).
+type egressReporter interface {
+	Egress(ctx context.Context) Egress
+}
+
+// Egress asks GET /v1/egress. Any failure, an old agent (404) or a disabled probe gives Known
+// false.
+func (a *agentClient) Egress(ctx context.Context) Egress {
+	ctx, cancel := context.WithTimeout(ctx, statsTimeout)
+	defer cancel()
+	base, err := a.baseURL(ctx)
+	if err != nil {
+		return Egress{}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/egress", nil)
+	if err != nil {
+		return Egress{}
+	}
+	req.Header.Set("Authorization", "Bearer "+a.token)
+	resp, err := a.hc.Do(req)
+	if err != nil {
+		return Egress{}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Egress{}
+	}
+	var r struct {
+		OK       bool   `json:"ok"`
+		Error    string `json:"error"`
+		Checked  int64  `json:"checked"`
+		Since    int64  `json:"since"`
+		Disabled bool   `json:"disabled"`
+	}
+	dec := json.NewDecoder(io.LimitReader(resp.Body, maxEgressBody))
+	if dec.Decode(&r) != nil || r.Disabled || r.Checked == 0 {
+		return Egress{}
+	}
+	if len(r.Error) > maxEgressError {
+		r.Error = r.Error[:maxEgressError]
+	}
+	return Egress{Known: true, OK: r.OK, Error: r.Error, Checked: r.Checked, Since: r.Since}
+}
+
 // groupReporter is an Agent that reports its provisioned grant groups (#139).
 type groupReporter interface {
 	TailnetGroups() ([]string, bool)

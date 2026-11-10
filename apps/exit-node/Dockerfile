@@ -25,6 +25,7 @@ COPY --from=tailscale /app/start.sh /app/start.sh
 COPY --from=tailscale /app/direct-hosts.txt /app/direct-hosts.txt
 COPY --from=tailscale /app/update-direct-routes.sh /app/update-direct-routes.sh
 COPY --from=tailscale /app/state-sync.sh /app/state-sync.sh
+COPY --from=tailscale /app/health.sh /app/health.sh
 
 # Run on container startup.
 USER root

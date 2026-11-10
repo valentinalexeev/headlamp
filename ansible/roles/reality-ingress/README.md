@@ -272,7 +272,11 @@ slashes are allowed.
 The proxy strips `X-Forwarded-*`, sets `Host` to `ingress_host` and uses short timeouts. Anything else gets an empty
 `404`.
 
-With `enroll_self_service: true`, the front also proxies the pages of self-enrolment with OIDC (#102). These are `/me`, `/me/devices`, `/me/devices/<id>`, `/me/devices/<id>/revoke`, `/me/devices/<id>/app/<app>`, `/me/logout`, `/me/icons/<app>`, `/i/<token>`, `/oidc/login` and `/oidc/callback`, and nothing below them. The default is `false`.
+With `enroll_self_service: true`, the front also proxies the pages of self-enrolment with OIDC (#102). These are `/me`, 
+`/me/devices`, `/me/devices/<id>`, `/me/devices/<id>/revoke`, `/me/devices/<id>/app/<app>`, `/me/logout`,
+`/me/icons/<app>`, `/i/<token>`, `/oidc/login` and `/oidc/callback`, and nothing below them. The default is `false`.
+Always runs on `link_host` (#270). On a front with another name, `/me`, `/oidc/login` and `/i/<token>` send the
+browser to the same page on `link_host`. That is where the redirect URL of the identity provider points.
 
 There is no access log. Runtime and ACME errors of Caddy go to the journal (level ERROR). The logged request is removed,
 so enrolment tokens in paths never appear. `journalctl -u caddy-ingress`

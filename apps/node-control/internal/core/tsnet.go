@@ -83,6 +83,23 @@ func upError(err error, authKey string) error {
 	return errors.New(msg)
 }
 
+// Healthy reports an error when the embedded node is not Running (#196): logged out, or no
+// state yet.
+func (t *Tsnet) Healthy(ctx context.Context) error {
+	lc, err := t.srv.LocalClient()
+	if err != nil {
+		return errors.New("no local client")
+	}
+	st, err := lc.StatusWithoutPeers(ctx)
+	if err != nil {
+		return errors.New("no status")
+	}
+	if st.BackendState != ipn.Running.String() {
+		return fmt.Errorf("tailnet state %s", st.BackendState)
+	}
+	return nil
+}
+
 func (t *Tsnet) ListenAdmin() (net.Listener, error)  { return t.srv.Listen("tcp", ":80") }
 func (t *Tsnet) ListenPublic() (net.Listener, error) { return t.srv.Listen("tcp", ":8081") }
 
@@ -131,3 +148,21 @@ func (t *Tsnet) WhoIs(ctx context.Context, remoteAddr string) (string, []string,
 
 // Close shuts the embedded node down.
 func (t *Tsnet) Close() error { return t.srv.Close() }
+
+// PeerVersion is the tailscale version a tailnet peer reports (Hostinfo.IPNVersion, for example
+// "1.104.5-t1234abcd"), read from this node's own netmap through WhoIs on the peer's address
+// (#195). It sends nothing to the peer.
+func (t *Tsnet) PeerVersion(ctx context.Context, ip string) (string, error) {
+	lc, err := t.srv.LocalClient()
+	if err != nil {
+		return "", err
+	}
+	who, err := lc.WhoIs(ctx, ip)
+	if err != nil {
+		return "", err
+	}
+	if who.Node == nil || !who.Node.Hostinfo.Valid() {
+		return "", nil
+	}
+	return who.Node.Hostinfo.IPNVersion(), nil
+}

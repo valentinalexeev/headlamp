@@ -19,6 +19,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/enroll"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/fleet"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/funnel"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/nodes"
@@ -129,6 +130,9 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		servemod.New(env, hsClient),
 		// Access (#123): roles and grants stored by the UI, on with ADMIN_DB or REDIS_URL.
 		access.New(env),
+		// Fleet (#195): read-only versions of node-control, headscale, every tailscale client and
+		// every bridge agent.
+		fleet.New(fleet.Deps{Nodes: src, Headscale: hsClient, Bridges: bridges(enr)}),
 	}
 	// Overview is last: it counts the navigation of everything before it.
 	others := slices.Clone(mods)
@@ -225,5 +229,17 @@ func main() {
 	if err != nil {
 		slog.Error("node-control stopped", "err", err)
 		os.Exit(1)
+	}
+}
+
+// bridges is the bridge list of the enrolment module for the fleet view, or nil when it has none.
+func bridges(enr core.Module) func(context.Context) []enroll.IngressView {
+	return func(ctx context.Context) []enroll.IngressView {
+		if b, ok := enr.(interface {
+			Bridges(context.Context) []enroll.IngressView
+		}); ok {
+			return b.Bridges(ctx)
+		}
+		return nil
 	}
 }

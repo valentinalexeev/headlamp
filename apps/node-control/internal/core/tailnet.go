@@ -16,6 +16,12 @@ type Tailnet interface {
 	WhoIs(ctx context.Context, remoteAddr string) (login string, tags []string, err error)
 }
 
+// Healther is an optional Tailnet capability: whether the node is on the tailnet now (#196).
+// HEALTH_LISTEN uses it.
+type Healther interface {
+	Healthy(ctx context.Context) error
+}
+
 // DNSListener is an optional Tailnet capability: listeners for a DNS server on the node's own tailnet address, port
 // 53 (serve, #117). A Tailnet without it cannot answer DNS; the serve module then refuses to start its zone.
 type DNSListener interface {
@@ -97,4 +103,10 @@ func (l *Local) Dial(ctx context.Context, network, addr string) (net.Conn, error
 // WhoIs is a test-only stub: it always reports login "local" and no tags.
 func (l *Local) WhoIs(ctx context.Context, remoteAddr string) (string, []string, error) {
 	return "local", nil, nil
+}
+
+// PeerVersions is an optional Tailnet capability: the tailscale version of a peer, by its tailnet
+// address (#195).
+type PeerVersions interface {
+	PeerVersion(ctx context.Context, ip string) (string, error)
 }

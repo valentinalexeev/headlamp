@@ -76,6 +76,17 @@
       tcp://<ipv4>[:port] entries (an IP, not a name).
     quiet: true
 
+# The same checks as the agent (LoadEgress): a bad value would stop it at start.
+- name: Check the egress self-test settings (#196)
+  ansible.builtin.assert:
+    that:
+      - ingress_egress_socks | string == '' or ingress_egress_socks is regex('^(127\\.0\\.0\\.1|\\[::1\\]):[0-9]{1,5}\\Z')
+      - ingress_egress_url is regex('^https://[^/@\\s]+(/\\S*)?\\Z')
+    fail_msg: >-
+      ingress-agent: ingress_egress_socks must be empty or a loopback host:port (the socks_listen of
+      reality-ingress), and ingress_egress_url an https URL without user info.
+    quiet: true
+
 # Gate: only the two variables that are NEW with /v1/info. ingress_host and
 # reality_short_id are required by the reality-ingress role, so hosts that have
 # only those must keep passing. The gate is a superset of env.j2's export

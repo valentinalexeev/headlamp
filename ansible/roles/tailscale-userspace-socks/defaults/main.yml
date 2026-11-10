@@ -16,6 +16,11 @@ socks_state_dir: /var/lib/tailscaled-socks
 socks_socket: /run/tailscaled-socks/tailscaled.sock
 # headscale_login_server comes from the caller / base `tailscale` role (no fallback here).
 socks_login_server: "{{ headscale_login_server | default('') }}"
+# After the exit node is selected, one request through the SOCKS port must succeed (#259). It fails the run when the
+# headscale policy blocks the bridge's egress (no autogroup:internet for tag:ingress). Set false to skip it, for
+# example on a host that cannot reach the URL through any exit node.
+socks_egress_check: true
+socks_egress_check_url: "https://www.gstatic.com/generate_204"
 # URL fetched by the opt-in verification tasks (tag: socks-verify).
 socks_verify_url: "https://ifconfig.me"
 # Binaries installed by the base `tailscale` role (.deb).

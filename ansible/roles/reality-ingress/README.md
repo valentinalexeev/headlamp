@@ -170,6 +170,13 @@ read one-time link tokens and subscription secrets. It can also serve phones a m
 Credentials are different for each bridge (`uuids: derived` in `enroll.json` of node-control). This limits what such a host holds, but it does not limit this risk.
 node-control ships `scripts/profile-canary.sh` to detect altered profiles. See "Compromised bridge" in its README.
 
+## Policy needed by a bridge
+
+The headscale policy must let the bridge (`tag:ingress`) use its exit node for the internet (`autogroup:internet`),
+and let node-control reach the bridge agent. Without the `autogroup:internet` rule, clients connect but get no
+reply (#259). See "Policy needed by a bridge" in the `tailscale-userspace-socks` README for the rules. The example
+policy `examples/compose/control/config/acl.json` has them.
+
 ## Who owns which config file
 
 The role writes `/etc/xray/config.base.json`. The **bridge agent** (`apps/ingress-agent`) owns

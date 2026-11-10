@@ -1,34 +1,41 @@
 {
+  // headscale policy (HuJSON) for examples/compose/control. Copy it to your private repo and add your people.
+  // Tags (each is the tag of a pre-auth key):
+  //   tag:node-control  node-control                     tag:exit     exit nodes
+  //   tag:ingress       bridges (reality-ingress, ingress-agent, tailscale-userspace-socks)
+  //   tag:gateway       subnet routers (optional)
   "tagOwners": {
-    "tag:exit": [
-      "admin@",
-      "_svcs@"
-    ],
-    "tag:gateway": [
-      "admin@",
-      "_svcs@"
-    ],
-    "tag:node-control": [
-      "_svcs@"
-    ]
+    "tag:exit": ["admin@", "_svcs@"],
+    "tag:gateway": ["admin@", "_svcs@"],
+    "tag:node-control": ["_svcs@"],
+    "tag:ingress": ["admin@", "_svcs@"]
   },
   "autoApprovers": {
-    "exitNode": [
-      "tag:exit"
-    ],
+    "exitNode": ["tag:exit"],
     "routes": {
-      "0.0.0.0/1": [
-        "tag:gateway"
-      ],
-      "128.0.0.0/1": [
-        "tag:gateway"
-      ],
-      "::/1": [
-        "tag:gateway"
-      ],
-      "8000::/1": [
-        "tag:gateway"
-      ]
+      "0.0.0.0/1": ["tag:gateway"],
+      "128.0.0.0/1": ["tag:gateway"],
+      "::/1": ["tag:gateway"],
+      "8000::/1": ["tag:gateway"]
     }
-  }
+  },
+  "acls": [
+    // Bridges (#259). Without the first two rules, bridge clients connect and send, but get no reply.
+    // A bridge reaches its exit node, and node-control's public enrolment listener (enroll_upstream).
+    {"action": "accept", "src": ["tag:ingress"], "dst": ["tag:exit:*", "tag:node-control:8081"]},
+    // The bridge's SOCKS node (tailscale-userspace-socks) sends client traffic to the internet through its exit
+    // node. headscale allows the internet through an exit node only with autogroup:internet for the source.
+    {"action": "accept", "src": ["tag:ingress"], "dst": ["autogroup:internet:*"]},
+    // node-control pushes credentials to the agent of each bridge (ingress_agent_port).
+    {"action": "accept", "src": ["tag:node-control"], "dst": ["tag:ingress:9000"]}
+    // Add the rules for your people here, for example:
+    // {"action": "accept", "src": ["admin@"], "dst": ["*:*"]},
+    // {"action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:internet:*", "tag:exit:*"]}
+  ],
+  // headscale policy check runs these. Nothing else reaches a bridge.
+  "tests": [
+    {"src": "tag:ingress", "accept": ["tag:node-control:8081"], "deny": ["tag:node-control:22", "tag:node-control:80"]},
+    {"src": "tag:node-control", "accept": ["tag:ingress:9000"], "deny": ["tag:ingress:22", "tag:ingress:8443"]},
+    {"src": "tag:exit", "deny": ["tag:ingress:9000", "tag:ingress:22", "tag:node-control:8081"]}
+  ]
 }

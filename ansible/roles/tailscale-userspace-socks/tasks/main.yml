@@ -153,6 +153,10 @@
   ansible.builtin.include_tasks: assert-exit-node.yml
   when: not ansible_check_mode
 
+- name: Check egress through the exit node (#259)
+  ansible.builtin.include_tasks: egress-check.yml
+  when: not ansible_check_mode and socks_egress_check | bool
+
 - name: Tailnet grant groups (#139)
   ansible.builtin.include_tasks: groups.yml
 

@@ -52,6 +52,11 @@ type ClientDef struct {
 	// AppStoreID is the numeric id of the app in the Apple App Store, for the Smart App Banner of
 	// the app page (#271) and the default iOS store link. "" when the app has no iOS listing.
 	AppStoreID string
+	// AndroidPackage is the application id of the Android app, for the intent:// links of the
+	// picker on Android (#271): Chrome opens that app when it is installed, else a fallback URL.
+	AndroidPackage string
+	// OnPlay says the Android app is on Google Play, so its Play page is a good fallback.
+	OnPlay bool
 	// Landing: the one-time link answers with a page and a button instead of a redirect, because
 	// the app only opens from a tap.
 	Landing bool
@@ -75,18 +80,21 @@ func installConfigLink(scheme string) func(string, string) string {
 var Catalog = []ClientDef{
 	// The iOS listing that the sing-box documentation links ("sing-box MT").
 	{ID: "sing-box", Label: "sing-box", Format: FormatSingBox, AppStoreID: "6785326793",
+		AndroidPackage: "io.nekohasekai.sfa", OnPlay: true,
 		Platforms: []string{PlatformIOS, PlatformMacOS, PlatformAndroid},
 		link: func(subURL, name string) string {
 			return "sing-box://import-remote-profile?url=" + quote(subURL) + "#" + quote(name)
 		}},
 	{ID: "karing", Label: "Karing", Format: FormatSingBox, Landing: true, AppStoreID: "6472431552",
+		AndroidPackage: "com.nebula.karing",
 		Platforms: []string{
 			PlatformIOS, PlatformMacOS, PlatformAndroid, PlatformWindows, PlatformLinux,
 		},
 		link: installConfigLink("karing")},
 	{ID: "clash", Label: "Clash Mi", Format: FormatClash, Landing: true, AppStoreID: "6744321968",
-		Platforms: []string{PlatformIOS, PlatformMacOS, PlatformAndroid, PlatformWindows},
-		link:      installConfigLink("clash")},
+		AndroidPackage: "com.nebula.clashmi",
+		Platforms:      []string{PlatformIOS, PlatformMacOS, PlatformAndroid, PlatformWindows},
+		link:           installConfigLink("clash")},
 	{ID: "shadowrocket", Label: "Shadowrocket", Format: FormatURIList, Landing: true,
 		AppStoreID: "932747118",
 		Platforms:  []string{PlatformIOS, PlatformMacOS},
@@ -143,6 +151,38 @@ type ClientChoice struct {
 	Install map[string]string `json:"install,omitempty"`
 	// AppStoreID replaces the App Store id of the catalog (#271), because listings change.
 	AppStoreID string `json:"app_store_id,omitempty"`
+	// AndroidPackage replaces the Android application id of the catalog (#271).
+	AndroidPackage string `json:"android_package,omitempty"`
+}
+
+// androidPackageRe is the form of an Android application id.
+var androidPackageRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
+
+// maxAndroidPackage bounds an application id of enroll.json.
+const maxAndroidPackage = 255
+
+// Package is the Android application id of the app: the site's, else the catalog's.
+func (ch ClientChoice) Package() string {
+	if ch.AndroidPackage != "" {
+		return ch.AndroidPackage
+	}
+	def, _ := ClientByID(ch.ID)
+	return def.AndroidPackage
+}
+
+// PlayURL is the Google Play page of an Android application id.
+func PlayURL(pkg string) string { return "https://play.google.com/store/apps/details?id=" + pkg }
+
+// intentLink makes an import link an Android intent:// link for one package. Chrome opens the
+// package with the import link when it is installed, else it goes to fallback. The data part
+// keeps the import link whole: Android splits the link at its last "#", the one of "#Intent;".
+func intentLink(importLink, pkg, fallback string) string {
+	scheme, rest, ok := strings.Cut(importLink, "://")
+	if !ok {
+		return importLink
+	}
+	return "intent://" + rest + "#Intent;scheme=" + scheme + ";package=" + pkg +
+		";S.browser_fallback_url=" + quote(fallback) + ";end"
 }
 
 // appStoreIDRe is the form of an App Store id.
@@ -169,6 +209,10 @@ func (ch ClientChoice) installLinks() map[string]string {
 	}
 	if id := ch.StoreID(); id != "" && out[PlatformIOS] == "" {
 		out[PlatformIOS] = AppStoreURL(id)
+	}
+	def, _ := ClientByID(ch.ID)
+	if out[PlatformAndroid] == "" && def.OnPlay && ch.Package() != "" {
+		out[PlatformAndroid] = PlayURL(ch.Package())
 	}
 	return out
 }
@@ -218,7 +262,7 @@ func parseClientChoice(i int, raw map[string]json.RawMessage) (ClientChoice, err
 		return ClientChoice{}, fmt.Errorf("ENROLL_CONFIG: clients[%d] must be an object", i)
 	}
 	for k := range raw {
-		if k != "id" && k != "install" && k != "app_store_id" {
+		if k != "id" && k != "install" && k != "app_store_id" && k != "android_package" {
 			if !keyNameRe.MatchString(k) {
 				k = "(a key with an unusual name)"
 			}
@@ -238,6 +282,14 @@ func parseClientChoice(i int, raw map[string]json.RawMessage) (ClientChoice, err
 				"app_store_id must be a string of 1 to 12 digits", i, id)
 		}
 		ch.AppStoreID = s
+	}
+	if v, present := raw["android_package"]; present {
+		s, _ := rawString(v)
+		if !androidPackageRe.MatchString(s) || len(s) > maxAndroidPackage {
+			return ClientChoice{}, fmt.Errorf("ENROLL_CONFIG: clients[%d] %s: android_package "+
+				"must be an Android application id, for example com.example.app", i, id)
+		}
+		ch.AndroidPackage = s
 	}
 	if inst, present := raw["install"]; present {
 		m, err := parseInstall(inst)

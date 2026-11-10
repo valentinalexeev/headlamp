@@ -47,9 +47,12 @@ type pickView struct {
 	Enrolment *Enrolment
 	Apps      []pickApp
 	// Platform is the name of the detected platform, "" when unknown or when every app is shown.
-	Platform   string
-	Hidden     int // apps for other platforms, not shown
-	All        bool
+	Platform string
+	Hidden   int // apps for other platforms, not shown
+	All      bool
+	// Missing is the name of the app that Chrome did not find on this device (the fallback of an
+	// intent:// link). Only a catalog id of the query is read, never free text.
+	Missing    string
 	Formats    []pickFormat
 	ProfileTag string
 }
@@ -94,11 +97,25 @@ func (s *SelfWeb) renderPick(
 		_, icon := s.icons[def.ID]
 		app := pickApp{ID: def.ID, Label: def.Label, Icon: icon,
 			Href: importHref(def, FormatURL(subURL, def.Format), link.ProfileName)}
-		if platform == PlatformIOS && ch.StoreID() != "" {
+		installs := ch.installLinks()
+		switch {
+		case platform == PlatformIOS && ch.StoreID() != "":
 			// On an iPhone, the app page checks with Safari's banner whether the app is there.
 			app.Direct, app.Href = app.Href, appPageHref(d.ID, def.ID)
+		case platform == PlatformAndroid && ch.Package() != "":
+			// On Android, an intent:// link opens the app if it is there, else the fallback: the
+			// store link of the site or Google Play, else this page with a "not installed" note.
+			fallback := installs[PlatformAndroid]
+			if fallback == "" {
+				fallback = "https://" + link.Link().Host + "/me/devices/" +
+					strconv.FormatInt(d.ID, 10) + "?missing=" + def.ID
+			}
+			imp := def.Link(FormatURL(subURL, def.Format), link.ProfileName)
+			app.Direct, app.Href = app.Href, intentHref(intentLink(imp, ch.Package(), fallback))
 		}
-		installs := ch.installLinks()
+		if r.URL.Query().Get("missing") == def.ID {
+			v.Missing = def.Label
+		}
 		for _, p := range platforms {
 			if url, ok := installs[p]; ok && (platform == "" || p == platform) {
 				label := "Get " + def.Label
@@ -132,6 +149,12 @@ func importHref(def ClientDef, subURL, name string) template.URL {
 func appPageHref(id int64, app string) template.URL {
 	p := "/me/devices/" + strconv.FormatInt(id, 10) + "/app/" + app
 	return template.URL(p) // #nosec G203 -- digits and a catalog id only
+}
+
+// intentHref keeps an intent:// link in the page template: built from the catalog, the encoded
+// import link and an https fallback URL.
+func intentHref(s string) template.URL {
+	return template.URL(s) // #nosec G203 -- built from encoded parts only
 }
 
 // pickPage answers GET /me/devices/{id}: the picker of an own, active device.

@@ -7,6 +7,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Added
 
 - node-control self-enrolment: an app page for iPhone, `/me/devices/{id}/app/{app}` (#271). It has Safari's Smart App Banner, which shows **Open** when the app is installed and **Get** when it is not, and gives the import link to the app. On an iPhone, the app picker buttons open this page, and **Open without the check** under each button is the import link itself (it also works while the edge does not proxy the new path). The client catalog has the App Store id of each app (sing-box: "sing-box MT", the listing that the sing-box documentation links). `enroll.json` `clients[].app_store_id` replaces it. Without an `ios` store link, each picker view that lists iOS links (iPhone, and **Show all apps**) shows the App Store page of the id. `enroll-paths.caddy` has the new path.
+- node-control self-enrolment: an app check on Android (#271). Each Android picker button is an `intent://` link with the app's package: Chrome opens that app when it is installed, else the fallback (the site's `android` store link, else the Google Play page for an app on Google Play, else the picker with a "not installed" note). **Open without the check** keeps the plain import link. The catalog has the Android package of sing-box (`io.nekohasekai.sfa`), Karing (`com.nebula.karing`) and Clash Mi (`com.nebula.clashmi`); `enroll.json` `clients[].android_package` replaces it.
 
 ## 0.15.2 - 2026-11-10
 

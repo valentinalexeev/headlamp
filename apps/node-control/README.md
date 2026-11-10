@@ -776,16 +776,17 @@ Differences from the Python app that this replaced:
 
 node-control makes profiles and import links for the apps of a fixed catalog (#241):
 
-| `id` | App | Profile format | Platforms | App Store id |
-|---|---|---|---|---|
-| `sing-box` | sing-box (iOS: "sing-box MT") | `sing-box` | `ios`, `macos`, `android` | `6785326793` |
-| `karing` | Karing | `sing-box` | `ios`, `macos`, `android`, `windows`, `linux` | `6472431552` |
-| `clash` | Clash Mi | `clash` | `ios`, `macos`, `android`, `windows` | `6744321968` |
-| `shadowrocket` | Shadowrocket | `uri` | `ios`, `macos` | `932747118` |
-| `stash` | Stash | `stash` | `ios`, `macos` | `1596063349` |
+| `id` | App | Profile format | Platforms | App Store id | Android package |
+|---|---|---|---|---|---|
+| `sing-box` | sing-box (iOS: "sing-box MT") | `sing-box` | `ios`, `macos`, `android` | `6785326793` | `io.nekohasekai.sfa` (on Google Play) |
+| `karing` | Karing | `sing-box` | `ios`, `macos`, `android`, `windows`, `linux` | `6472431552` | `com.nebula.karing` |
+| `clash` | Clash Mi | `clash` | `ios`, `macos`, `android`, `windows` | `6744321968` | `com.nebula.clashmi` |
+| `shadowrocket` | Shadowrocket | `uri` | `ios`, `macos` | `932747118` | |
+| `stash` | Stash | `stash` | `ios`, `macos` | `1596063349` | |
 
 - The `id` is also the `client` value of a device that an operator makes.
 - The App Store id is for the app page on iPhone (#271) and for the default iOS store link. The sing-box documentation links the iOS app "sing-box MT".
+- The Android package is for the app check on Android (#271). Only sing-box is on Google Play. Thus only sing-box has a default Android store link.
 - The one-time link of a `karing`, `clash`, `shadowrocket` or `stash` device opens a page with a button, because these apps open only from a tap. The one-time link of a `sing-box` device redirects at once.
 - `https://<link_host>/sub/<secret>` serves the format of the device's `client`. This did not change.
 - `https://<link_host>/sub/<secret>/<format>` serves the profile in one format, for every device. Each import link of the app picker uses this form. Thus one device can go into each app, also into more than one app.
@@ -812,6 +813,7 @@ The `clients` key of `enroll.json` selects the apps of the app picker and gives 
 - `id` is required. It must be an `id` of the catalog, and each `id` can occur one time only.
 - `install` is optional. Its keys are platforms (`ios`, `android`, `macos`, `windows`, `linux`). Its values are `https` URLs of the store page of the app, 500 characters or fewer. Without an `ios` link, the iOS link is `https://apps.apple.com/app/id<App Store id>`.
 - `app_store_id` is optional: a string of 1 to 12 digits. It replaces the App Store id of the catalog, for example when an app gets a new listing.
+- `android_package` is optional: an Android application id, for example `com.example.app`. It replaces the Android package of the catalog.
 - An empty list is an error. To show all apps, remove the key.
 - Which apps your people can get depends on the app stores that they can use. Keep the list and the store links in your private repo.
 
@@ -1017,6 +1019,21 @@ A web page cannot find which apps are installed. Safari can, for one app on each
 Only Safari on iPhone and iPad shows the bar. The in-app browser of a messenger does not. Thus send the invitation link, and tell people to open it in Safari. Safari on an iPad asks for desktop pages by default and shows as a Mac. Thus an iPad gets the import links of the Mac, without the app page.
 
 > **CAUTION:** Make sure that each app opens the import link from **Open** before you tell people to use the bar. The device test of #243 includes this check. If an app does not open the link, people can use the button.
+
+### App check on Android
+
+On Android, each picker button of an app with an Android package is an `intent://` link (#271), for example:
+
+```
+intent://install-config?url=<subscription URL>&name=tunnel#Intent;scheme=karing;package=com.nebula.karing;S.browser_fallback_url=<fallback>;end
+```
+
+- If the app is installed, Chrome opens only that app, with the import link.
+- If the app is not installed, Chrome opens the fallback. The fallback is the `android` link of `install`. Without one, it is the Google Play page of an app on Google Play. Else it is the picker again, with a note that the app is not installed.
+- Chrome, Edge, Samsung Internet and Chrome Custom Tabs use these links. Most messengers open links in Chrome Custom Tabs.
+- Under each button, **Open without the check** is the import link itself, for browsers that do not use `intent://` links.
+
+No edge change is necessary: the links use the paths of the picker.
 
 ### Invitations
 

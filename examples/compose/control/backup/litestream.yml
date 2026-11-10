@@ -1,0 +1,32 @@
+dbs:
+  # Litestream replicates the SQLite files of the control host to S3-compatible storage, about every 10 seconds.
+  # headscale: users, nodes, pre-auth keys and API keys.
+  - path: /data/headscale/db.sqlite
+    replicas:
+      - type: s3
+        bucket: ${BACKUP_BUCKET}
+        path: headscale/db.sqlite
+        region: ${BACKUP_REGION}
+        sync-interval: 10s
+        snapshot-interval: 24h
+        retention: 168h
+  # node-control policy console history (POLICY_DB). Remove this entry if you do not set POLICY_DB.
+  - path: /data/node-control/policy.db
+    replicas:
+      - type: s3
+        bucket: ${BACKUP_BUCKET}
+        path: node-control/policy.db
+        region: ${BACKUP_REGION}
+        sync-interval: 10s
+        snapshot-interval: 24h
+        retention: 168h
+  # node-control enrolment store with ENROLL_DB (SQLite). Remove this entry if you use ENROLL_REDIS=1.
+  - path: /data/node-control/enroll.db
+    replicas:
+      - type: s3
+        bucket: ${BACKUP_BUCKET}
+        path: node-control/enroll.db
+        region: ${BACKUP_REGION}
+        sync-interval: 10s
+        snapshot-interval: 24h
+        retention: 168h

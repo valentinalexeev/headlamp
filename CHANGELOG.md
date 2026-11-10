@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- `examples/compose/control/backup/`: sample continuous backup, restore and recovery drill for the control host (#262). Litestream replicates the headscale database and the node-control SQLite files (`policy.db`, `enroll.db`) to S3-compatible storage about every 10 seconds; `backup.sh` copies each night what Litestream does not cover (headscale noise and DERP keys, the node-control enrolment export with `ENROLL_REDIS=1`, a Redis snapshot); `restore.sh` puts it all back on a new host and never writes over a live database; `drill.sh` restores into a temporary directory on the live host and compares counts and key hashes. Compose overlay, systemd timer sample and an STE manual included.
+
 ### Fixed
 
 - `examples/compose/control`: `scripts/policy-apply.sh` applies a changed `config/acl.json` safely (#261). It checks the file in the running headscale against the live users and nodes (without the `tests` block), stops on a failure, then loads the policy with `SIGHUP`. It makes a new container when the bind mount still shows an old file, and restarts headscale when only a `tests` entry blocks the `SIGHUP` load. `--check-only` runs only the check. The README ("Change the policy") explains the traps: `docker compose up -d` does not load a changed policy, a new file can stay invisible to the container, and a policy that passes CI can stop headscale at its next restart. `make test-policy-apply-e2e` checks it.

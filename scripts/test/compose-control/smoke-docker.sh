@@ -51,6 +51,7 @@ HEADSCALE_IMAGE=hl-compose-headscale:local
 NODE_CONTROL_IMAGE=hl-compose-node-control:local
 HEADSCALE_DOMAIN=$domain
 ACME_EMAIL=test@example.com
+ENROLL_DOMAIN=enroll.compose.test
 DATA_DIR=$T/data
 EDGE_SUBNET=172.30.77.0/24
 EOF
@@ -68,7 +69,9 @@ services:
       - "127.0.0.1::443"
     volumes: !override
       - ./Caddyfile.test:/etc/caddy/Caddyfile:ro
+      - ./caddy/enroll-paths.caddy:/etc/caddy/enroll-paths.caddy:ro
       - ./caddy/dns:/etc/caddy/dns:ro
+      - ./caddy/tls:/etc/caddy/tls:ro
       - $T/data/caddy:/data
     networks:
       default:
@@ -84,6 +87,7 @@ services:
 EOF
 mkdir -p "$T/ca"
 # the production Caddyfile with the ACME issuer swapped for the internal CA (the global options block only). The
+# enrolment name then uses tls/acme.caddy, which local_certs also covers. The
 # funnel block stays: with the default FUNNEL_DNS=ondemand it runs on the plain image.
 awk '/^\{$/ && !done { print; print "\tlocal_certs"; skip = 1; next } skip && /^\}$/ { skip = 0; done = 1 } !skip { print }' \
   "$src/caddy/Caddyfile" > "$T/app/Caddyfile.test"
@@ -100,6 +104,7 @@ for v in "ondemand|" "none|" "route53|github.com/caddy-dns/route53@v1.6.0" "goog
      docker run --rm -e HEADSCALE_DOMAIN=h.example.test -e ACME_EMAIL=a@example.test -e FUNNEL_DOMAIN=f.example.test \
        -e FUNNEL_DNS="$dns" -e GCP_PROJECT=demo-project -e RFC2136_KEY_NAME=k -e RFC2136_KEY_ALG=hmac-sha256 -e RFC2136_KEY=YQ== -e RFC2136_SERVER=192.0.2.1:53 \
        -v "$src/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$src/caddy/dns:/etc/caddy/dns:ro" \
+       -v "$src/caddy/tls:/etc/caddy/tls:ro" -v "$src/caddy/enroll-paths.caddy:/etc/caddy/enroll-paths.caddy:ro" \
        "hl-compose-edge-$dns:local" caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
     ok "the edge builds and validates with FUNNEL_DNS=$dns"
   else nok "the edge builds and validates with FUNNEL_DNS=$dns"; fi
@@ -118,6 +123,17 @@ if wait_for 30 curl -fsS --cacert "$T/ca/root.crt" --resolve "$domain:$edge_port
 else nok "headscale answers over HTTPS through the edge"; fi
 code=$(curl -s -o /dev/null -w '%{http_code}' -k --resolve "other.compose.test:$edge_port:127.0.0.1" "https://other.compose.test:$edge_port/" || true)
 case "$code" in 000|404|421) ok "the edge serves no unknown name ($code)";; *) nok "the edge serves no unknown name ($code)";; esac
+
+# #260: the enrolment name uses the shared path file. node-control is not up yet, so a proxied path gets 502 from
+# Caddy, and any other path gets the edge's own 404.
+en=enroll.compose.test
+ecode() { curl -s -o /dev/null -w '%{http_code}' -k --resolve "$en:$edge_port:127.0.0.1" "https://$en:$edge_port$1" || true; }
+for p in /sub/abc /sub/abc/stash /me /oidc/login "/i/$(printf 'ab%.0s' $(seq 32))"; do
+  c=$(ecode "$p"); [ "$c" = 502 ] && ok "the edge proxies $p (enroll-paths.caddy)" || nok "the edge does not proxy $p ($c)"
+done
+for p in /admin /me/ /sub/abc/bad; do
+  c=$(ecode "$p"); [ "$c" = 404 ] && ok "the edge refuses $p" || nok "the edge passes $p ($c)"
+done
 
 hsx() { dc exec -T headscale headscale -c /config/headscale.yaml "$@"; }
 hsx users create e2e >/dev/null || die "user"

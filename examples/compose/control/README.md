@@ -27,6 +27,7 @@ DERP and the funnel wildcards, and no cloud certificate service is necessary.
 | `compose.yaml` | The services. Use it without a change. | yes |
 | `caddy/Caddyfile`, `caddy/Dockerfile` | The TLS edge: one block for each public name | yes |
 | `config/headscale.yaml`, `config/acl.json` | The headscale settings and policy, mounted read-only | yes, in your private repo |
+| `scripts/policy-apply.sh` | Checks a changed policy against the live users, and loads it (see "Change the policy") | yes |
 | `config/node-control/` | Optional `nodes.json`, `enroll.json` and `admin.json`, mounted at `/srv/app` | yes, in your private repo |
 | `.env` | The image digests, the names and the data directory | no |
 | `node-control.env`, `funnel-ingress.env` | The secrets of each app | no |
@@ -151,10 +152,14 @@ The edge sends `X-Forwarded-For`. `compose.yaml` thus sets `FUNNEL_CLIENT_IP_HEA
 
 ## Enrolment (optional)
 
-Set `ENROLL_DOMAIN` in `.env` to serve the public enrolment links (`/e/<token>` and `/sub/<secret>`) from this host.
+Set `ENROLL_DOMAIN` in `.env` to serve the public enrolment links (`/e/<token>`, `/sub/<secret>`) and the
+self-enrolment pages (`/me`, `/i/<token>`, `/oidc/*`) from this host.
 The edge reaches node-control on the compose network: `compose.yaml` sets `ENROLL_PUBLIC_LISTEN=:8081`, so the
 public pages listen there as well as on the tailnet. Without it the edge gets `connection refused`.
-The edge sends only these two paths to node-control. Any other path gets 404. Set `ENROLL_DB`, `ENROLL_CONFIG` and
+
+The edge sends only the public paths to node-control. Any other path gets 404. The paths are in
+`caddy/enroll-paths.caddy`, which the Caddyfile imports (#260). The bridge front of `reality-ingress` uses the same
+file. Do not copy the list into your Caddyfile: when a release adds a path, take the new `caddy/enroll-paths.caddy`. Set `ENROLL_DB`, `ENROLL_CONFIG` and
 `ENROLL_SECRET_KEY` in `node-control.env` (see the node-control README, "Enrolment").
 
 While `ENROLL_DOMAIN` is not set, the site has the reserved name `enroll.invalid` and a local certificate. So Caddy asks
@@ -208,6 +213,8 @@ To restore on AWS:
 
 The old volume stays in the account. Delete it yourself after you make sure that the restore worked.
 
+The daily snapshot can lose up to one day of changes. For continuous backup to S3-compatible storage, a restore on a new host and a recovery drill, see the sample in [`backup/`](backup/README.md).
+
 ### Upgrades
 
 1. Read the release notes of the new version.
@@ -223,6 +230,45 @@ If the new version does not work, put the old digests back and run `docker compo
 - The headscale API key of node-control expires. Make a new key, change `node-control.env`, and run
   `docker compose up -d node-control`. Then expire the old key with `headscale apikeys expire`.
 - The pre-auth keys are used only at the first start. The nodes keep their identity in the data directory.
+
+### Change the policy
+
+`config/acl.json` is a file in your private repo (`policy.mode: file`). Know these 3 traps (#261):
+
+1. **`docker compose up -d` does not load a changed `acl.json`.** The file is a bind mount, so compose sees no
+   change, and headscale keeps the old policy.
+2. **A new file can stay invisible to the container.** `git pull`, `sed -i` and most editors write a new file. On
+   Linux, the bind mount still shows the old file, also after a restart. Only a new container sees the new file.
+3. **A policy that passes CI can stop headscale at its next restart.** CI checks the policy against test users. On
+   the live server a login can match 2 users (#253). Then headscale refuses the policy at start. It stays in a
+   restart loop. A running headscale does not check again, so the fault waits for the next restart.
+
+To change the policy, run this script from this directory after you change `config/acl.json`:
+
+```sh
+scripts/policy-apply.sh               # check, load, confirm
+scripts/policy-apply.sh --check-only  # only the check (for example in a deploy script, before a restart)
+```
+
+1. It checks the file with `headscale policy check` in the running headscale, against the live users and nodes.
+   It leaves out the `tests` block, because the test sources need the tagged nodes of CI. On a failed check, it
+   stops, and headscale keeps the old policy.
+2. If the container sees an old file, it makes a new container (`up -d --force-recreate headscale`).
+3. Else it loads the policy with `SIGHUP`, with no restart. It confirms the load in the headscale log.
+4. headscale 0.29 refuses a `SIGHUP` load when only a `tests` entry fails, for example a tag with no node yet. In
+   that case the script restarts headscale, which loads the policy with a warning.
+
+Run `scripts/policy-apply.sh --check-only` before each restart of headscale, also for an upgrade. Then a restart
+cannot start a policy that the live users refuse.
+
+**Database mode.** With `policy.mode: database`, the policy is in the headscale database. Change it in the policy
+console of node-control. The console checks the policy against the live state, and reverts it if you do not confirm
+it.
+
+Use database mode when more than one person changes the policy, or when you change it often. Use file mode when
+you want each policy change in git, with a review. To move to database mode, set `policy.mode: database` and remove
+`policy.path` in `config/headscale.yaml`. Then put the policy in with `headscale policy set -f <file>` in the
+container, and restart headscale.
 
 ## Test
 

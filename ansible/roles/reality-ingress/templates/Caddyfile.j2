@@ -36,15 +36,12 @@
 		}
 	}
 
-	# Exactly /e/<token>, /sub/<token> and /sub/<token>/<format> (#241): no
-	# trailing slash, no other segments, no encoded slashes, no dot-only tokens
-	# ("." / "..").
-	@enroll path_regexp `^/(e/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}|sub/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}(/(sing-box|clash|stash|uri))?)$`
+	# The public enrolment paths (@enroll, @self) come from one shared file (#260), the same that
+	# examples/compose/control imports. A release that adds a path changes only that file.
+	import {{ caddy_config_dir }}/enroll-paths.caddy
 
 {% if enroll_self_service | bool %}
-	# Self-enrolment (#102): the exact pages of /me and the OIDC login, nothing below them. #241 adds
-	# the app picker (/me/devices/<id>), the app icons and the invitation links (/i/<token>).
-	@self path_regexp `^/(me|me/devices|me/devices/[0-9]{1,18}|me/devices/[0-9]{1,18}/revoke|me/logout|me/icons/[a-z0-9-]{1,32}|i/[0-9a-f]{64}|oidc/login|oidc/callback)$`
+	# Self-enrolment (#102): @self of enroll-paths.caddy.
 	handle @self {
 		reverse_proxy http://{{ enroll_upstream }} {
 			header_up -X-Forwarded-For

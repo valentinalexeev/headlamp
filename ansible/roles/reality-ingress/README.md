@@ -253,7 +253,10 @@ API are loopback only.
 
 `:80` answers `404` to everything except ACME HTTP-01.
 
-`<ingress_host>:8443` (bound to loopback) is the Reality `dest`. It reverse-proxies only these paths to
+`<ingress_host>:8443` (bound to loopback) is the Reality `dest`. The public paths come from `files/enroll-paths.caddy`
+(#260), which the role copies next to the Caddyfile. `examples/compose/control` uses the same file.
+
+The front reverse-proxies only these paths to
 `http://<enroll_upstream>`: `/e/<token>`, `/sub/<token>` and `/sub/<token>/<format>`. The format is `sing-box`, `clash`,
 `stash` or `uri` (#241). The token is 1-80 characters of
 `A-Za-z0-9_.-` and does not start with a dot. No trailing slash, no other segments and no encoded

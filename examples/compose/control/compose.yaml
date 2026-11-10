@@ -31,6 +31,7 @@ services:
         required: false
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/enroll-paths.caddy:/etc/caddy/enroll-paths.caddy:ro
       - ./caddy/dns:/etc/caddy/dns:ro
       # Optional key files of the DNS provider (Google Cloud DNS service account). Not in git.
       - ./caddy/secrets:/etc/caddy/secrets:ro

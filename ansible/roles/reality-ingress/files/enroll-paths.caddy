@@ -1,0 +1,14 @@
+# The public paths of the node-control enrolment listener (:8081), as Caddy matchers (#260). Each front that serves
+# link_host imports this one file, so a release that adds a path needs no hand edit of a site's edge config:
+#   - the reality-ingress role copies it next to the bridge front's Caddyfile;
+#   - examples/compose/control/caddy/Caddyfile imports its copy (caddy/enroll-paths.caddy).
+# scripts/check-enroll-paths.sh keeps the two copies equal, and checks every path against node-control's routes.
+#
+# Exact paths only: no trailing slash, no other segments, no encoded slashes, no dot-only tokens ("." / "..").
+
+# One-time links and subscriptions (/e/<token>, /sub/<secret>, /sub/<secret>/<format>, #241).
+@enroll path_regexp enroll `^/(e/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}|sub/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}(/(sing-box|clash|stash|uri))?)$`
+
+# Self-enrolment with OIDC (#102): the pages of /me and the OIDC login, the app picker and its icons, and the
+# invitation links (#241).
+@self path_regexp self `^/(me|me/devices|me/devices/[0-9]{1,18}|me/devices/[0-9]{1,18}/revoke|me/logout|me/icons/[a-z0-9-]{1,32}|i/[0-9a-f]{64}|oidc/login|oidc/callback)$`

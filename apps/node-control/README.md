@@ -804,9 +804,10 @@ node-control makes profiles and import links for the apps of a fixed catalog (#2
 | `clash` | Clash Mi | `clash` | `ios`, `macos`, `android`, `windows` |
 | `shadowrocket` | Shadowrocket | `uri` | `ios`, `macos` |
 | `stash` | Stash | `stash` | `ios`, `macos` |
+| `happ` | Happ | `uri` | `ios`, `macos`, `android`, `windows`, `linux` |
 
 - The `id` is also the `client` value of a device that an operator makes.
-- The one-time link of a `karing`, `clash`, `shadowrocket` or `stash` device opens a page with a button, because these apps open only from a tap. The one-time link of a `sing-box` device redirects at once.
+- The one-time link of a `karing`, `clash`, `shadowrocket`, `stash` or `happ` device opens a page with a button. These apps open only from a tap. The one-time link of a `sing-box` device redirects at once.
 - `https://<link_host>/sub/<secret>` serves the format of the device's `client`. This did not change.
 - `https://<link_host>/sub/<secret>/<format>` serves the profile in one format, for every device. Each import link of the app picker uses this form. Thus one device can go into each app, also into more than one app.
 
@@ -825,9 +826,18 @@ The `clients` key of `enroll.json` selects the apps of the app picker and gives 
 "clients": [
   {"id": "karing", "install": {"ios": "https://apps.example.com/karing", "android": "https://store.example.com/karing"}},
   {"id": "shadowrocket", "install": {"ios": "https://apps.example.com/shadowrocket"}},
-  {"id": "clash"}
+  {"id": "clash"},
+  {"id": "happ", "install": {"ios": "https://apps.example.com/happ", "android": "https://store.example.com/happ"}}
 ]
 ```
+
+Happ (#278) is an xray-core app. Its import link is `happ://add/<subscription URL>`, with the URL as it is (not
+encoded).
+
+Happ reads both kinds of link of the `uri` format: VLESS Reality with `flow=xtls-rprx-vision`, and Hysteria 2
+with `obfs=salamander`. The Hysteria 2 links need an xray-core with the Hysteria 2 outbound and the Salamander mask
+(`finalmask`). The bridges use the same core (26.10 or later). On an older Happ, only the VLESS links work. Happ names
+the subscription after the link host, because its link has no name.
 
 - `id` is required. It must be an `id` of the catalog, and each `id` can occur one time only.
 - `install` is optional. Its keys are platforms (`ios`, `android`, `macos`, `windows`, `linux`). Its values are `https` URLs of the store page of the app, 500 characters or fewer.

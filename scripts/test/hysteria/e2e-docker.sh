@@ -9,7 +9,8 @@
 #
 # Flow: the bridge joins the tailnet. Its agent gets the credentials from node-control. An admin on the tailnet
 # enrols a device, and the test fetches the device's sing-box and Clash profiles.
-# Real sing-box and mihomo clients then use each generated outbound: VLESS and Hysteria 2, in each mode.
+# Real sing-box and mihomo clients then use each generated outbound: VLESS and Hysteria 2, in each mode. An xray-core
+# client (the xray of the bridge image, as in Happ) reads the `uri` subscription of a Happ device (#278).
 #   direct    -> the pub web server sees the bridge, and the far one is out of reach.
 #   exit/auto -> the far web server sees the exit node.
 #   Private and tailnet destinations are refused on both protocols.
@@ -259,12 +260,15 @@ newdev() { docker exec "$adm" curl -fsS --max-time 20 -X POST -H 'Content-Type: 
   -d "{\"name\":\"$1\",\"owner\":\"e2e\",\"client\":\"$2\",\"expires_at\":$exp}" "http://$NC_TS/enroll/devices"; }
 d1=$(newdev phone sing-box) || die "create device: $(docker logs --tail 5 "$nc" 2>&1)"
 d2=$(newdev laptop clash) || die "create clash device"
+d3=$(newdev tablet happ) || die "create happ device"
 s1=$(echo "$d1" | sed -n 's#.*"subscription_url":"https://[^/]*/sub/\([^"]*\)".*#\1#p')
 s2=$(echo "$d2" | sed -n 's#.*"subscription_url":"https://[^/]*/sub/\([^"]*\)".*#\1#p')
-[ -n "$s1" ] && [ -n "$s2" ] && ok "the admin enrolled a sing-box and a Clash device" || die "no subscription urls ($d1)"
+s3=$(echo "$d3" | sed -n 's#.*"subscription_url":"https://[^/]*/sub/\([^"]*\)".*#\1#p')
+[ -n "$s1" ] && [ -n "$s2" ] && [ -n "$s3" ] && ok "the admin enrolled a sing-box, a Clash and a Happ device" || die "no subscription urls ($d1)"
 sub() { docker exec "$adm" curl -fsS --max-time 10 -A e2e-client "http://$NC_TS:8081/sub/$1"; }
 sub "$s1" > "$T/cl/singbox.json" || die "sing-box subscription"
 sub "$s2" > "$T/cl/clash.json" || die "clash subscription"
+sub "$s3" > "$T/cl/happ.uri" || die "happ subscription"
 python3 - "$T/cl/singbox.json" <<'PY' && ok "the sing-box profile has VLESS and Hysteria 2 for each mode, grouped" || nok "sing-box profile shape"
 import json, sys
 p = json.load(open(sys.argv[1])); by = {o["tag"]: o for o in p["outbounds"]}
@@ -273,8 +277,8 @@ for m in ("auto", "direct", "exit"):
     h = by[m + "-bridge-1-hy2"]; assert h["type"] == "hysteria2" and h["obfs"]["type"] == "salamander", h
 PY
 # the agent applied the device credentials on both inbounds
-wait_for 60 docker exec "$br" sh -c "python3 -c \"import json;c=json.load(open('/etc/xray/config.json'));i={x['tag']:x for x in c['inbounds']};assert len(i['hy2-in']['settings']['clients'])==6 and len(i['reality-in']['settings']['clients'])==6\"" \
-  && ok "the agent put the six device credentials on both inbounds" || die "credentials not applied"
+wait_for 60 docker exec "$br" sh -c "python3 -c \"import json;c=json.load(open('/etc/xray/config.json'));i={x['tag']:x for x in c['inbounds']};assert len(i['hy2-in']['settings']['clients'])==9 and len(i['reality-in']['settings']['clients'])==9\"" \
+  && ok "the agent put the nine device credentials on both inbounds" || die "credentials not applied"
 sleep 2
 
 echo "# clients"
@@ -305,6 +309,9 @@ client() { # kind tag -> starts the client, prints the container name
   if [ "$1" = sb ]; then pin_sb "$2"; f="$T/cl/sb-$2.json"
     dk run -d --name "$c" --network "$net" --add-host "$host:$BR_IP" -e SSL_CERT_FILE=/ca.pem -v "$T/tls/ca.pem:/ca.pem:ro" \
       -v "$f:/c.json:ro" "$sb_image" run -c /c.json >/dev/null || return 1
+  elif [ "$1" = xr ]; then python3 "$here/uri2xray.py" "$T/cl/happ.uri" "$2" /ca.pem > "$T/cl/xr-$2.json" || return 1
+    dk run -d --name "$c" --network "$net" --add-host "$host:$BR_IP" -e SSL_CERT_FILE=/ca.pem -v "$T/tls/ca.pem:/ca.pem:ro" \
+      -v "$T/cl/xr-$2.json:/c.json:ro" --entrypoint xray hy2-e2e-bridge run -c /c.json >/dev/null || return 1
   else pin_mh "$2"; f="$T/cl/mh-$2.yaml"
     mkdir -p "$T/cl/mh-$2.d"; cp "$f" "$T/cl/mh-$2.d/config.yaml"
     dk run -d --name "$c" --network "$net" --add-host "$host:$BR_IP" -e SSL_CERT_FILE=/ca.pem -v "$T/tls/ca.pem:/ca.pem:ro" \
@@ -333,6 +340,12 @@ check mh direct-bridge-1-hy2 "$near"   "$BR_IP"  "mihomo Hysteria 2, direct"
 check mh exit-bridge-1-hy2   "$farurl" "$EX_FAR" "mihomo Hysteria 2, exit"
 check mh direct-bridge-1     "$near"   "$BR_IP"  "mihomo VLESS Reality, direct"
 check mh exit-bridge-1       "$farurl" "$EX_FAR" "mihomo VLESS Reality, exit"
+# The Happ device's `uri` subscription in xray-core: each link of it, as Happ would read it (#278).
+check xr direct-bridge-1-hy2 "$near"   "$BR_IP"  "xray (Happ) Hysteria 2, direct"
+check xr exit-bridge-1-hy2   "$farurl" "$EX_FAR" "xray (Happ) Hysteria 2, exit"
+check xr auto-bridge-1-hy2   "$farurl" "$EX_FAR" "xray (Happ) Hysteria 2, auto"
+check xr direct-bridge-1     "$near"   "$BR_IP"  "xray (Happ) VLESS Reality, direct"
+check xr exit-bridge-1       "$farurl" "$EX_FAR" "xray (Happ) VLESS Reality, exit"
 
 # Known upstream problem, recorded and not counted: Xray-core 26.9.8 and later needs an X25519MLKEM768 key share
 # in the Reality ClientHello, and stock sing-box (1.14.4) does not send one (SagerNet/sing-box#4520). Thus sing-box
@@ -366,7 +379,7 @@ docker rm -f "$c" >/dev/null 2>&1
 id1=$(echo "$d1" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
 docker exec "$adm" curl -fsS --max-time 20 -X POST -H 'Content-Type: application/json' -d '{}' "http://$NC_TS/enroll/devices/$id1/revoke" >/dev/null \
   && ok "the admin revoked the sing-box device" || nok "revoke"
-wait_for 60 docker exec "$br" sh -c "python3 -c \"import json;c=json.load(open('/etc/xray/config.json'));i={x['tag']:x for x in c['inbounds']};assert len(i['hy2-in']['settings']['clients'])==3\"" \
+wait_for 60 docker exec "$br" sh -c "python3 -c \"import json;c=json.load(open('/etc/xray/config.json'));i={x['tag']:x for x in c['inbounds']};assert len(i['hy2-in']['settings']['clients'])==6\"" \
   && ok "its credentials left the Hysteria 2 inbound" || nok "credentials still on the bridge"
 sleep 2
 c=$(client sb direct-bridge-1-hy2)

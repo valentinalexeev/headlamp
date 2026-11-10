@@ -19,8 +19,9 @@ type Info struct {
 	// Hy2Port is the public UDP port of the Hysteria 2 inbound (#110), when the bridge has one. The Salamander
 	// password is a secret and is never here.
 	Hy2Port int `json:"hy2_port,omitempty"`
-	// Version is this agent's build (the repo VERSION plus the commit, or "dev") and Xray the version of its
-	// xray binary (#195). They are for the fleet view only: node-control does not read them into the
+	// Version is this agent's build (the repo VERSION plus the commit, or "dev") and Xray the
+	// version of its xray binary (#195). They are for the fleet view only: node-control does not
+	// read them into the
 	// fingerprint, so an upgrade does not need a new approval.
 	Version string `json:"version,omitempty"`
 	Xray    string `json:"xray,omitempty"`

@@ -32,6 +32,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/servedns"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/statestore"
 )
 
 // Headscale is what the module needs from headscale: the nodes, for MagicDNS names and node or tag targets.
@@ -65,7 +66,8 @@ func InTailnet(a netip.Addr) bool {
 	return false
 }
 
-// Module is the tailnet DNS module. It is on when TAILNET_DNS_DB is set.
+// Module is the tailnet DNS module. It is on when TAILNET_DNS_DB (SQLite) is set, or TAILNET_DNS_REDIS=1 (the shared
+// Redis of REDIS_URL, no volume needed).
 type Module struct {
 	env core.Env
 	hs  Headscale
@@ -101,15 +103,55 @@ func (m *Module) Name() string { return "tailnetdns" }
 // Enabled says whether the module is active (after Register).
 func (m *Module) Enabled() bool { return m.st != nil }
 
-const on = "tailnet DNS enabled (TAILNET_DNS_DB set)"
+const on = "tailnet DNS enabled (TAILNET_DNS_DB or TAILNET_DNS_REDIS=1 set)"
+
+// redisPrefix is the key prefix in the shared Redis: TAILNET_DNS_REDIS_KEY, else "<app>:dns".
+func redisPrefix(env core.Env) string {
+	if k := env.Getenv("TAILNET_DNS_REDIS_KEY"); k != "" {
+		return k
+	}
+	app := env.Getenv("FLY_APP_NAME")
+	if app == "" {
+		app = env.Default("TAILNET_HOSTNAME", "node-control")
+	}
+	return app + ":dns"
+}
+
+// openStore opens the configured backend; nil, nil: the module is off. A new feature is off until the operator turns
+// it on, so REDIS_URL alone does not enable it.
+func openStore(env core.Env) (Store, error) {
+	path, useRedis := env.Getenv("TAILNET_DNS_DB"), env.Getenv("TAILNET_DNS_REDIS")
+	switch {
+	case useRedis != "" && useRedis != "1" && useRedis != "0":
+		return nil, errors.New("TAILNET_DNS_REDIS must be 1 or 0")
+	case path != "" && useRedis == "1":
+		return nil, errors.New("set either TAILNET_DNS_DB or TAILNET_DNS_REDIS=1, not both")
+	case path != "":
+		return OpenSQLite(path)
+	case useRedis == "1":
+		url := env.Getenv("REDIS_URL")
+		if url == "" {
+			return nil, errors.New("TAILNET_DNS_REDIS=1 needs REDIS_URL")
+		}
+		rdb, _, err := statestore.OpenClient(url)
+		if err != nil {
+			return nil, fmt.Errorf("tailnet DNS store: %w", err)
+		}
+		s, err := NewRedisStore(rdb, redisPrefix(env))
+		if err != nil {
+			rdb.Close()
+		}
+		return s, err
+	}
+	return nil, nil
+}
 
 func (m *Module) Register(r *core.Routes) error {
 	m.log = r.Log
 	if m.log == nil {
 		m.log = slog.Default()
 	}
-	path := m.env.Getenv("TAILNET_DNS_DB")
-	if path == "" {
+	if v := m.env.Getenv("TAILNET_DNS_REDIS"); m.env.Getenv("TAILNET_DNS_DB") == "" && (v == "" || v == "0") {
 		return nil
 	}
 	m.zone = servedns.Normalize(m.env.Getenv("SERVE_ZONE"))
@@ -134,8 +176,8 @@ func (m *Module) Register(r *core.Routes) error {
 		m.dns = &servedns.Server{}
 	}
 	m.tn = r.Tailnet
-	st, err := OpenSQLite(path)
-	if err != nil {
+	st, err := openStore(m.env)
+	if err != nil || st == nil {
 		return err
 	}
 	m.st = st

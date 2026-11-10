@@ -1364,6 +1364,8 @@ address of the name.
 | Variable | Meaning |
 |---|---|
 | `TAILNET_DNS_DB` | The path of the SQLite database. It turns the module on. Put it on the state volume. |
+| `TAILNET_DNS_REDIS` | `1` keeps the records in the shared Redis of `REDIS_URL` and turns the module on. No volume is necessary. Do not set it together with `TAILNET_DNS_DB`. `REDIS_URL` alone does not turn the module on. |
+| `TAILNET_DNS_REDIS_KEY` | The key prefix in Redis. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:dns`. The records are in the hash `<prefix>:records`, and the audit log is in the list `<prefix>:audit`. |
 | `TAILNET_DNS_REFRESH` | How often the answers follow the nodes and the netmap. The default is `15s`. The range is `2s` to `10m`. |
 | `TAILNET_DNS_LISTEN` | `off` turns off the DNS listener (for tests). |
 | `SERVE_ZONE` | Optional. The module adds the serve zone to the names of a bridge, and refuses a record in it. |
@@ -1373,7 +1375,7 @@ The module needs a policy that gives `dns.admin` to a user. Without it, node-con
 
 ### Set up the module
 
-1. Set `TAILNET_DNS_DB`, and restart node-control.
+1. Set `TAILNET_DNS_DB`, or set `TAILNET_DNS_REDIS=1` with `REDIS_URL`. Then restart node-control.
 2. In the headscale policy, let the bridges reach node-control on TCP port 53. Use the bridge tag
    (`ENROLL_INGRESS_TAG`) and the tag or the address of node-control. For example, add
    `{"action": "accept", "src": ["tag:ingress"], "dst": ["tag:node-control:53"]}`. The tags of the grant groups need

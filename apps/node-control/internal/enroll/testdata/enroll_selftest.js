@@ -1,4 +1,4 @@
-// Run with: node enroll_selftest.js <path to hl.js> <path to approve.js> [<path to enroll.js>]. Exits non-zero on a failed check.
+// Run with: node enroll_selftest.js <hl.js> <approve.js> [<enroll.js> [<tailnet.js> [<invites.js>]]]. Exits non-zero on a failed check.
 const assert = require('assert');
 const path = require('path');
 
@@ -266,7 +266,7 @@ const fieldValue = (els, label) => {
   const mk = (tag) => { const n = new FakeNode(tag); n.isRoot = true; return n; };
   function pageEls() {
     const els = { sub: mk('p'), chips: mk('div'), error: mk('div'), notice: mk('div'), syncnote: mk('section'), empty: mk('div'), tablewrap: mk('div'),
-      rows: mk('tbody'), foot: mk('p'), traffic: mk('th'), drawer: mk('div') };
+      rows: mk('tbody'), foot: mk('p'), traffic: mk('th'), drawer: mk('div'), search: mk('div'), inviteSection: mk('section'), inviteEmail: mk('input'), inviteDays: mk('input') };
     ['error', 'notice', 'syncnote', 'empty', 'chips'].forEach((k) => { els[k].hidden = true; });
     return els;
   }
@@ -275,8 +275,11 @@ const fieldValue = (els, label) => {
   const laters = [];
   function setup(opts) {
     opts = opts || {};
-    global.window.location.search = opts.search || '';
-    global.window.location.href = 'http://localhost/enroll' + (opts.search || '');
+    // Every device test runs with its groups open (#287): the owners of these tests are "sam", "jo" and a long one.
+    const open = 'open=o:sam,o:jo,o:' + 'o'.repeat(300);
+    const search = opts.search ? opts.search + '&' + open : '?' + open;
+    global.window.location.search = opts.closed ? (opts.search || '') : search;
+    global.window.location.href = 'http://localhost/enroll' + global.window.location.search;
     polls.length = 0; copied.length = 0; laters.length = 0; fetches.length = 0; replaced.length = 0;
     const els = pageEls();
     const ctrl = devices.mount(els, {
@@ -289,8 +292,10 @@ const fieldValue = (els, label) => {
     return { els, ctrl };
   }
   const update = (ctrl, list, extra) => ctrl.update(Object.assign({ devices: list, sync: { pending: false, state: 'ok', since: null }, ingresses: [], pending_ingresses: [], stats_partial: false }, extra));
-  const rowTexts = (els) => findAll(els.rows, (n) => n.tag === 'tr').map((tr) => tr.children.map((c) => c.textContent));
-  const rowOf = (els, name) => findAll(els.rows, (n) => n.tag === 'tr' && n.children[0] && n.children[0].textContent === name)[0];
+  // Device and invitation rows are "leaf" rows under a group row (#287); the device tests read only those.
+  const rowTexts = (els) => findAll(els.rows, (n) => n.tag === 'tr' && hasClass(n, 'leaf')).map((tr) => tr.children.map((c) => c.textContent));
+  const rowOf = (els, name) => findAll(els.rows, (n) => n.tag === 'tr' && hasClass(n, 'leaf') && n.children[0] && n.children[0].textContent === name)[0];
+  const groupRows = (els) => findAll(els.rows, (n) => n.tag === 'tr' && hasClass(n, 'grp'));
   const rowBtn = (els, name, label) => buttonNamed(rowOf(els, name), label);
   const chip = (els, label) => findAll(els.chips, (n) => n.tag === 'button' && n.textContent === label)[0];
   const drawerNode = (els) => findAll(els.drawer, (n) => n.tag === 'aside')[0];
@@ -811,63 +816,113 @@ const fieldValue = (els, label) => {
     assert.ok(/Could not load the devices/.test(fresh.els.sub.textContent));
   }
 
-  // ----- People (#102)
-  if (process.argv[5]) {
-    require(path.resolve(process.argv[5]));
-    const people = global.window.hl.people;
-    const calls = [];
-    let list = [
-      { subject: 's1', owner: 'oidc:s1', email: 'anna@example.test', locked: false, active_devices: 2, last_login: 1, last_check: 1 },
-      { subject: 's2', owner: 'oidc:s2', email: '<b>x</b>', locked: true, lock_reason: 'left', active_devices: 0, last_login: 1, last_check: 1 },
-      { subject: 's/3', owner: 'oidc:s/3', email: '', locked: false, check_failed: 5, active_devices: 1, last_login: 0, last_check: 0 },
+  // ----- the tree of people, devices and invitations (#287)
+  {
+    const people = [
+      { subject: 's1', owner: 'oidc:s1', email: 'anna@example.test', locked: false, active_devices: 1, last_login: sec(NOW - 7200000), last_check: 1 },
+      { subject: 's/2', owner: 'oidc:s/2', email: 'bob@example.test', locked: true, lock_reason: 'left', active_devices: 0, last_login: 1, last_check: 1 },
     ];
-    let failWith = null;
-    global.window.hl.api = (method, url, body) => {
-      calls.push([method, url, body]);
-      if (failWith) { const e = new Error('nf'); e.status = failWith; return Promise.reject(e); }
-      if (method === 'GET') { return Promise.resolve({ people: list }); }
+    const invites = [
+      { id: 7, email: 'anna@example.test', state: 'pending', expires_at: sec(NOW + 6 * DAYMS), created_by: 'admin' },
+      { id: 8, email: '<b>carol</b>@example.test', state: 'pending', expires_at: sec(NOW + 6 * DAYMS), created_by: 'admin' },
+      { id: 9, email: 'ANNA@example.test', state: 'used', used_by: 'oidc:s1', device_id: 21, expires_at: 1, created_by: 'admin' },
+    ];
+    const devs = [
+      dev(21, 'anna-phone', { owner: 'oidc:s1', owner_email: 'anna@example.test' }),
+      dev(22, 'anna-old', { owner: 'oidc:s1', owner_email: 'anna@example.test', revoked: true }),
+      dev(23, 'kiosk-1', { owner: 'kiosk team', enrol_count: 0, enrolled_at: 0, last_active: 0 }),
+    ];
+    // grouping, without the page
+    const g = devices.groupTree(devs, people, invites, 'active', NOW, '');
+    assert.deepStrictEqual(g.map((x) => [x.kind, x.label]), [['person', 'anna@example.test'], ['person', 'bob@example.test'], ['owner', 'kiosk team'], ['invited', 'Invited, not signed in yet']]);
+    assert.deepStrictEqual(g[0].devices.map((d) => d.name), ['anna-phone'], 'the revoked device is filtered out by default');
+    assert.deepStrictEqual(g[0].invites.map((i) => i.id), [7], 'the waiting invitation for her email is under her; the used one only with All');
+    assert.deepStrictEqual(g[3].invites.map((i) => i.id), [8]);
+    assert.strictEqual(devices.groupCounts(g[0], NOW), '1 device, 1 invitation waiting');
+    assert.strictEqual(devices.groupCounts(g[2], NOW), '1 device, 1 need attention', 'a never-used device needs attention');
+    const all = devices.groupTree(devs, people, invites, 'all', NOW, '');
+    assert.deepStrictEqual(all[0].invites.map((i) => i.id).sort(), [7, 9], 'the used invitation goes under the person who used it');
+    assert.deepStrictEqual(all[0].devices.map((d) => d.name).sort(), ['anna-old', 'anna-phone']);
+    const rev = devices.groupTree(devs, people, invites, 'revoked', NOW, '');
+    assert.deepStrictEqual(rev.map((x) => x.label), ['anna@example.test'], 'a filter drops groups with nothing that matches');
+    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'active', NOW, 'kiosk').map((x) => x.label), ['kiosk team']);
+    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'active', NOW, 'carol').map((x) => x.kind), ['invited']);
+    assert.deepStrictEqual(devices.groupTree(devs, null, null, 'active', NOW, '').map((x) => x.label), ['anna@example.test', 'kiosk team'],
+      'with self-enrolment off the tree is the devices by owner');
+
+    // the page: closed groups, open one, actions
+    const { els, ctrl } = setup({ closed: true });
+    const calls = [];
+    global.window.hl.api = (m, u, b) => {
+      calls.push([m, u, b]);
+      if (u === '/enroll/people/s%2F2/unlock') { return Promise.resolve({ ok: true }); }
+      if (u.indexOf('/lock') > 0) { return Promise.resolve({ ok: false, detail: 'locked, but a tailnet step failed: down' }); }
       return Promise.resolve({ ok: true });
     };
-    const root = new FakeNode('section'); root.hidden = true; root.isRoot = true;
-    const rows = root.appendChild(new FakeNode('tbody'));
-    const error = root.appendChild(new FakeNode('div')); error.hidden = true;
-    const ctrl = people.mount({ root, rows, error });
-    await ctrl.load();
-    assert.strictEqual(root.hidden, false);
-    assert.strictEqual(rows.children.length, 3);
-    const t = rows.children.map(textOf);
-    assert.ok(t[0].includes('anna@example.test') && t[0].includes('Active') && t[0].includes('Lock'));
-    assert.ok(t[1].includes('<b>x</b>') && t[1].includes('Locked: left') && t[1].includes('Unlock'));
-    assert.ok(t[2].includes('oidc:s/3') && /unreachable/.test(t[2]));
-    // Lock asks first, then posts with the subject encoded
-    buttonNamed(rows.children[2], 'Lock').click();
-    assert.strictEqual(calls.filter((c) => c[0] === 'POST').length, 0, 'lock must confirm first');
-    // no redraw while the confirmation is open
-    await ctrl.load();
-    assert.ok(findAll(rows, (n) => hasClass(n, 'confirm')).length === 1);
-    findAll(rows, (n) => n.tag === 'button' && hasClass(n, 'danger') && n.textContent === 'Lock').pop().click();
-    await new Promise((r) => setTimeout(r, 0));
-    const post = calls.find((c) => c[0] === 'POST');
-    assert.deepStrictEqual(post.slice(0, 2), ['POST', '/enroll/people/s%2F3/lock']);
-    // Unlock posts at once
-    buttonNamed(rows.children[1], 'Unlock').click();
-    await new Promise((r) => setTimeout(r, 0));
-    assert.ok(calls.some((c) => c[1] === '/enroll/people/s2/unlock'));
-    // a partial lock shows the detail
-    global.window.hl.api = (m) => Promise.resolve(m === 'GET' ? { people: list } : { ok: false, detail: 'locked, but a tailnet step failed: down' });
-    buttonNamed(rows.children[1], 'Unlock').click();
-    await new Promise((r) => setTimeout(r, 0));
-    assert.ok(/tailnet step failed/.test(error.textContent) && !error.hidden);
-    // self-enrolment off: 404 keeps the section hidden
-    const root2 = new FakeNode('section'); root2.hidden = true;
-    global.window.hl.api = () => { const e = new Error('nf'); e.status = 404; return Promise.reject(e); };
-    await people.mount({ root: root2, rows: new FakeNode('tbody'), error: new FakeNode('div') }).load();
-    assert.strictEqual(root2.hidden, true);
+    ctrl.loadPeople = () => Promise.resolve();
+    ctrl.loadInvites = () => Promise.resolve();
+    update(ctrl, devs);
+    ctrl.updatePeople(people);
+    ctrl.updateInvites(invites);
+    assert.strictEqual(groupRows(els).length, 4);
+    assert.strictEqual(rowTexts(els).length, 0, 'groups start closed');
+    assert.ok(/1 person|2 people/.test(els.sub.textContent) && /2 invitations waiting/.test(els.sub.textContent), els.sub.textContent);
+    const anna = groupRows(els)[0];
+    assert.ok(textOf(anna).includes('anna@example.test') && textOf(anna).includes('Active') && textOf(anna).includes('1 device, 1 invitation waiting'));
+    assert.ok(textOf(anna).includes('last sign-in 2 h 0 min ago'), textOf(anna));
+    assert.ok(textOf(groupRows(els)[1]).includes('Locked: left') && buttonNamed(groupRows(els)[1], 'Unlock'));
+    assert.ok(!buttonNamed(groupRows(els)[2], 'Lock'), 'an operator-made owner has no lock');
+    assert.ok(textOf(groupRows(els)[3]).includes('<b>carol</b>@example.test') === false, 'a closed group shows only its counts');
+    // open anna: her device and her invitation, and the URL keeps it
+    const tog = findAll(anna, (n) => n.tag === 'button' && n.getAttribute('aria-expanded') === 'false')[0];
+    tog.click();
+    assert.deepStrictEqual(rowTexts(els).map((r) => r[0]), ['anna-phone', '✉ anna@example.test']);
+    assert.ok(/open=p%3Aoidc%3As1|open=p:oidc:s1/.test(replaced[replaced.length - 1]), replaced[replaced.length - 1]);
+    assert.ok(buttonNamed(rowOf(els, '✉ anna@example.test'), 'Withdraw'));
+    // the 15 s refresh keeps it open
+    update(ctrl, devs);
+    assert.strictEqual(rowTexts(els).length, 2);
+    // withdraw
+    buttonNamed(rowOf(els, '✉ anna@example.test'), 'Withdraw').click();
+    await flush();
+    assert.ok(calls.some((c) => c[0] === 'POST' && c[1] === '/enroll/invites/7/revoke'));
+    assert.ok(/Withdrew the invitation for anna@example.test/.test(els.notice.textContent));
+    // invite a device: fills the form with her email
+    buttonNamed(groupRows(els)[0], 'Invite device').click();
+    assert.strictEqual(els.inviteEmail.value, 'anna@example.test');
+    // lock asks first, then posts with the subject; a partial lock shows the detail
+    buttonNamed(groupRows(els)[0], 'Lock').click();
+    assert.strictEqual(calls.filter((c) => c[1].indexOf('/lock') > 0).length, 0, 'lock must confirm first');
+    update(ctrl, devs);
+    assert.strictEqual(findAll(els.rows, (n) => hasClass(n, 'confirm')).length, 1, 'no redraw under an open confirmation');
+    findAll(els.rows, (n) => n.tag === 'button' && n.textContent === 'Lock' && hasClass(n, 'danger')).pop().click();
+    await flush();
+    assert.deepStrictEqual(calls.find((c) => c[1].indexOf('/lock') > 0).slice(0, 2), ['POST', '/enroll/people/s1/lock']);
+    assert.ok(/tailnet step failed/.test(els.error.textContent) && !els.error.hidden);
+    // unlock posts at once, with the subject encoded
+    buttonNamed(groupRows(els)[1], 'Unlock').click();
+    await flush();
+    assert.ok(calls.some((c) => c[1] === '/enroll/people/s%2F2/unlock'));
+    // search opens what it finds
+    ctrl.setQuery('Kiosk');
+    assert.strictEqual(groupRows(els).length, 1);
+    assert.deepStrictEqual(rowTexts(els).map((r) => r[0]), ['kiosk-1']);
+    ctrl.setQuery('nobody');
+    assert.ok(/Nothing matches this search/.test(els.rows.textContent));
+    ctrl.setQuery('');
+    // the invited group holds carol's invitation as text
+    const invited = groupRows(els)[3];
+    findAll(invited, (n) => n.tag === 'button' && n.getAttribute('aria-expanded'))[0].click();
+    assert.ok(rowTexts(els).some((r) => r[0] === '✉ <b>carol</b>@example.test'));
+    // self-enrolment off: no person rows, no lock, devices by owner
+    ctrl.updatePeople(null);
+    ctrl.updateInvites(null);
+    assert.ok(groupRows(els).every((r) => !buttonNamed(r, 'Lock')));
   }
 
-  if (process.argv[6]) {
+  if (process.argv[5]) {
     // tailnet grants (#139): the devices view lists targets direct and through the owner; Save posts the checked set
-    require(path.resolve(process.argv[6]));
+    require(path.resolve(process.argv[5]));
     const tn = global.window.hl.tailnet;
     const view = { targets: [{ name: 'nas', dst: ['tag:nas:22'] }, { name: 'printer', dst: ['100.64.0.20:631'] }],
       grants: [{ bridge: 'b', kind: 'device', subject: '1', target: 'nas' }, { bridge: 'b', kind: 'owner', subject: 'carol', target: 'printer' }],
@@ -900,32 +955,24 @@ const fieldValue = (els, label) => {
     assert.ok(calls.some((c) => c[0] === 'POST' && c[1] === '/enroll/tailnet-acl'));
   }
 
-  if (process.argv[7]) {
-    // invitations (#241): list, make one (its link shows once), withdraw a waiting one
-    require(path.resolve(process.argv[7]));
+  if (process.argv[6]) {
+    // the invitation form (#241): it makes one (its link shows once) and asks the tree to read the list again
+    require(path.resolve(process.argv[6]));
     const inv = global.window.hl.invites;
     const calls = [];
-    const list = [
-      { id: 2, email: '<b>b</b>@example.test', device_name: 'Phone', state: 'pending', expires_at: 1, created_by: 'admin' },
-      { id: 1, email: 'a@example.test', device_name: 'Laptop', state: 'used', expires_at: 1, created_by: 'admin' },
-    ];
     global.window.hl.api = (m, u, b) => {
       calls.push([m, u, b]);
-      if (m === 'GET') { return Promise.resolve({ invites: list }); }
-      if (u === '/enroll/invites') { return Promise.resolve({ id: 3, url: 'https://l.example.com/i/abc' }); }
-      return Promise.resolve({ ok: true });
+      if (m === 'GET') { return Promise.resolve({ invites: [] }); }
+      return Promise.resolve({ id: 3, url: 'https://l.example.com/i/abc' });
     };
     const mk = (t) => new FakeNode(t);
-    const els = { root: mk('section'), rows: mk('tbody'), error: mk('div'), made: mk('div'), form: mk('form'),
-      email: mk('input'), name: mk('input'), days: mk('input') };
+    const els = { root: mk('section'), error: mk('div'), made: mk('div'), form: mk('form'), email: mk('input'), days: mk('input') };
     els.root.hidden = els.made.hidden = els.error.hidden = true;
-    const ctrl = inv.mount(els);
+    let reloaded = 0;
+    const ctrl = inv.mount(els, () => { reloaded++; });
     await ctrl.load();
     assert.strictEqual(els.root.hidden, false);
-    assert.strictEqual(els.rows.children.length, 2);
-    assert.ok(textOf(els.rows.children[0]).includes('<b>b</b>@example.test') && textOf(els.rows.children[0]).includes('Waiting'));
-    assert.ok(!buttonNamed(els.rows.children[1], 'Withdraw'), 'a used invitation cannot be withdrawn');
-    els.email.value = ' c@example.test '; els.name.value = ''; els.days.value = '14';
+    els.email.value = ' c@example.test '; els.days.value = '14';
     fire(els.form, 'submit');
     await flush();
     assert.deepStrictEqual(calls.find((c) => c[0] === 'POST'), ['POST', '/enroll/invites', { email: 'c@example.test', days: 14 }]);
@@ -933,9 +980,7 @@ const fieldValue = (els, label) => {
     const linkNode = els.made.children.find((c) => c.tag === 'code');
     assert.ok(linkNode && !els.made.hidden, 'the new invitation link is shown');
     assert.strictEqual(textOf(linkNode), 'https://l.example.com/i/abc');
-    buttonNamed(els.rows.children[0], 'Withdraw').click();
-    await flush();
-    assert.ok(calls.some((c) => c[0] === 'POST' && c[1] === '/enroll/invites/2/revoke'));
+    assert.strictEqual(reloaded, 1, 'the tree reads the invitations again');
     const root2 = mk('section'); root2.hidden = true;
     global.window.hl.api = () => { const e = new Error('nf'); e.status = 404; return Promise.reject(e); };
     await inv.mount(Object.assign({}, els, { root: root2 })).load();

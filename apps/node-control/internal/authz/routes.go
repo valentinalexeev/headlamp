@@ -72,7 +72,6 @@ var Routes = map[string]Rule{
 	// enroll
 	"GET /enroll":                             need(FeatureEnroll, LevelView),
 	"GET /enroll/static/enroll.js":            open,
-	"GET /enroll/static/people.js":            open,
 	"GET /enroll/qrcode.js":                   open,
 	"GET /enroll/approve":                     need(FeatureEnroll, LevelOperate),
 	"GET /enroll/static/approve.js":           open,

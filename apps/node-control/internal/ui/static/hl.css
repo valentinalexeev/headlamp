@@ -170,6 +170,11 @@ button.search:hover{border-color:var(--line2);color:var(--t2)}
 /* a long identifier (an owner) keeps one line and is cut; the whole value is in the title */
 .hl td.clip{white-space:nowrap;max-width:28ch;overflow:hidden;text-overflow:ellipsis}
 .hl td.detail{white-space:normal;height:auto;padding:12px 14px}
+/* the Devices tree (#287): a group row per person or owner, its devices and invitations indented below it */
+.hl tr.grp td{background:var(--surface);font-weight:500}
+.hl tr.leaf td:first-child{padding-left:38px}
+.hl .tog{gap:8px;padding-left:0;font-weight:500}
+.hl .tog .caret{display:inline-block;width:1.2em;font-size:15px;line-height:1;color:var(--t2)}
 /* a side column with nothing in it gives its room back, and tables in one are tighter */
 .colside:empty{display:none}
 .hl .colside th,.hl .colside td,.hl .colside td.detail{padding-left:10px;padding-right:10px}

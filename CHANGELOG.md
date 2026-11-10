@@ -8,6 +8,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 - node-control: Throne in the client catalog (#295). `client: "throne"` makes a device with the `uri` format. The app picker shows a Throne button on Android, Windows, macOS and Linux (Throne has no iOS app), with the import link `throne://addsub/<standard Base64 of URL#name>`. On Android the button checks for the app (`com.nb4a.throne`); Throne is not on Google Play, so a site gives its download link in `clients[].install.android`.
 
+### Changed
+
+- node-control: the Devices page is one tree of people, owners, devices and invitations (#287). Each self-enrolled person is one row, with their state, last sign-in, **Lock** / **Unlock** and **Invite device**; their devices and invitations are under it. Each owner that an operator typed is one row with its devices. A waiting invitation for an email that has not signed in yet is under "Invited, not signed in yet", and moves under the person after use. A closed row shows its counts (devices, how many need attention, invitations waiting). The filters still apply; a new search box finds people, owners, devices and invitation emails and opens what it finds. Open rows stay open across the refresh and in the URL (`?open=`). The separate People and Invitations tables are gone; the invitation form stays. No change to the APIs or permissions.
+
 ## 0.16.1 - 2026-11-11
 
 ### Fixed

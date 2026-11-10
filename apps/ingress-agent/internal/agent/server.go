@@ -284,8 +284,8 @@ func (s *Server) now() int64 {
 	return time.Now().Unix()
 }
 
-// Handler serves PUT /v1/credentials, GET /v1/stats and GET /v1/info, each behind the bearer
-// token. Every error has an empty body. Nothing else exists.
+// Handler serves PUT /v1/credentials, GET /v1/stats and GET /v1/info, each behind the bearer token. Every error
+// has an empty body. Nothing else exists.
 func (s *Server) Handler() http.Handler {
 	want := []byte("Bearer " + s.Token)
 	authed := func(h http.HandlerFunc) http.HandlerFunc {
@@ -306,8 +306,7 @@ func (s *Server) Handler() http.Handler {
 		h, pattern := mux.Handler(r)
 		if pattern == "" {
 			// no body, and a wrong method on a known path is still answered after the token check
-			p := r.URL.Path
-			if p == "/v1/credentials" || p == "/v1/stats" || p == "/v1/info" {
+			if r.URL.Path == "/v1/credentials" || r.URL.Path == "/v1/stats" || r.URL.Path == "/v1/info" {
 				authed(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusMethodNotAllowed) })(w, r)
 				return
 			}

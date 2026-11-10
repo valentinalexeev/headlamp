@@ -977,7 +977,7 @@ Set `OIDC_ISSUER` to turn it on. It needs:
 4. The app picker opens (see "App picker"). It shows the tailnet key one time only. A reload does not show the key again.
 5. The person selects the button of the installed app. The app opens and adds the profile.
 
-The page lists the person's devices. For each active device, **Add to an app** opens the app picker again. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*`, `/oidc/*` and `/i/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`.
+The page lists the person's devices. For each active device, **Add to an app** opens the app picker again. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*`, `/oidc/*` and `/i/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`. A bridge front with another name can serve these pages too: `/me`, `/oidc/login` and `/i/<token>` send the browser to `link_host`, where the sign-in runs (#270). The redirect URL at the identity provider and the cookies of the sign-in are on `link_host` only.
 
 ### The headscale user of a person
 

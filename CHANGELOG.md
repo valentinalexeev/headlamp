@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Fixed
+
+- node-control self-enrolment: a sign-in on a bridge front whose host is not `link_host` failed with 400 (#270). The redirect URL of the identity provider is on `link_host`, but the sign-in cookie was set on the front's host. Now `/me`, `/oidc/login` and `/i/<token>` on another host send the browser to the same page on `link_host` first, so the sign-in starts and ends there. No change at the identity provider.
+
 ## 0.15.2 - 2026-11-10
 
 ### Fixed

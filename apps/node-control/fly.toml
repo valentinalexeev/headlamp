@@ -14,8 +14,6 @@ kill_timeout = "25s"
 
 [env]
   HEADSCALE_LOGIN_SERVER = "https://headscale.example.com"
-  # Health (#196): GET /healthz on this private address, for the Fly check below. Only /healthz is served there.
-  HEALTH_LISTEN = ":9001"
   # Name this app registers under on the tailnet.
   TAILNET_HOSTNAME = "node-control"
   # Optional overrides for discovered nodes (default /srv/app/nodes.json; a missing file is fine).
@@ -55,17 +53,6 @@ kill_timeout = "25s"
 [mounts]
   source = "tailscale_state"
   destination = "/var/lib/tailscale"
-
-# Health (#196): a top-level check, on the private network only (no [[services]], so nothing public). It fails while
-# the embedded tailscale node is not Running. The grace period covers the start (tailnet login).
-[checks]
-  [checks.tailnet]
-    type = "http"
-    port = 9001
-    path = "/healthz"
-    interval = "30s"
-    timeout = "5s"
-    grace_period = "60s"
 
 # Memory hint: a Go binary with an embedded tailscale node should fit in 256 MB. Verify with
 # scripts/measure-memory.sh on a trial app before relying on it; do not raise it silently.

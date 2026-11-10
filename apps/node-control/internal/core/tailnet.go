@@ -16,12 +16,6 @@ type Tailnet interface {
 	WhoIs(ctx context.Context, remoteAddr string) (login string, tags []string, err error)
 }
 
-// Healther is an optional Tailnet capability: whether the node is on the tailnet now (#196).
-// HEALTH_LISTEN uses it.
-type Healther interface {
-	Healthy(ctx context.Context) error
-}
-
 // DNSListener is an optional Tailnet capability: listeners for a DNS server on the node's own tailnet address, port
 // 53 (serve, #117). A Tailnet without it cannot answer DNS; the serve module then refuses to start its zone.
 type DNSListener interface {

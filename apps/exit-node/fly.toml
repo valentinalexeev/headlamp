@@ -29,18 +29,6 @@ kill_timeout = "5s"
   internal_port = 41641
   processes = ["app"]
 
-# Health (#196): health.sh on HEALTH_PORT (9002). Fly runs it on the private network only; no public port. It fails
-# when tailscaled is not Running, the exit route is not approved, forwarding or NAT is off, or the node cannot reach
-# the internet. The grace period covers the start (tailscale up, route approval).
-[checks]
-  [checks.exit]
-    type = "http"
-    port = 9002
-    path = "/"
-    interval = "30s"
-    timeout = "10s"
-    grace_period = "60s"
-
   [[services.ports]]
     port = 41641
   [services.concurrency]

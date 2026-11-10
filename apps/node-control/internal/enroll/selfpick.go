@@ -17,9 +17,12 @@ import (
 // one.
 
 type pickApp struct {
-	ID      string
-	Label   string
-	Href    template.URL // a custom-scheme import link, built here from quoted parts
+	ID    string
+	Label string
+	Href  template.URL // a custom-scheme import link, built here from quoted parts
+	// Direct is the import link when Href is the app page: a way in without the banner, also
+	// while the edge of the site does not proxy the app page yet.
+	Direct  template.URL
 	Icon    bool
 	Install []pickInstall
 }
@@ -93,7 +96,7 @@ func (s *SelfWeb) renderPick(
 			Href: importHref(def, FormatURL(subURL, def.Format), link.ProfileName)}
 		if platform == PlatformIOS && ch.StoreID() != "" {
 			// On an iPhone, the app page checks with Safari's banner whether the app is there.
-			app.Href = appPageHref(d.ID, def.ID)
+			app.Direct, app.Href = app.Href, appPageHref(d.ID, def.ID)
 		}
 		installs := ch.installLinks()
 		for _, p := range platforms {
@@ -212,11 +215,12 @@ func (s *SelfWeb) appPage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	imp := def.Link(FormatURL(SubURL(link, secret), def.Format), link.ProfileName)
+	feed := FormatURL(SubURL(link, secret), def.Format)
+	imp := def.Link(feed, link.ProfileName)
 	_, icon := s.icons[def.ID]
 	v := appView{DeviceID: d.ID, Name: d.Name, ID: def.ID, Label: def.Label, Icon: icon,
 		AppStoreID: ch.StoreID(), Argument: imp, GetURL: ch.installLinks()[PlatformIOS],
-		Href: importHref(def, FormatURL(SubURL(link, secret), def.Format), link.ProfileName)}
+		Href: importHref(def, feed, link.ProfileName)}
 	secHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

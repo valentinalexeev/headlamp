@@ -99,7 +99,8 @@ func TestSiteStoreIDAndLinkWin(t *testing.T) {
 	}
 	// the picker: iPhone buttons go to the app pages, with the App Store page as the default iOS link
 	_, p = get("/me/devices/"+id, iphoneUA)
-	if !strings.Contains(p, `href="/me/devices/`+id+`/app/stash"`) || !strings.Contains(p, `href="https://apps.apple.com/app/id6472431552"`) {
+	if !strings.Contains(p, `href="/me/devices/`+id+`/app/stash"`) || !strings.Contains(p, `href="https://apps.apple.com/app/id6472431552"`) ||
+		!strings.Contains(p, `href="stash://install-config?url=`) || !strings.Contains(p, "Open without the check") {
 		t.Errorf("picker on iPhone: %s", p)
 	}
 	// Android keeps the direct import link and the site's store link only

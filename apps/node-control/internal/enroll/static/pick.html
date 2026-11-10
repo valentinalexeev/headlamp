@@ -28,6 +28,7 @@ a{color:#0a66ff}
 <p>Tap the app you have installed. It opens and adds the profile "{{.ProfileTag}}".{{if .Platform}} The list shows the apps for {{.Platform}}.{{end}}</p>
 {{if .Apps}}<ul class="apps">
 {{range .Apps}}<li><a class="app" href="{{.Href}}">{{if .Icon}}<img src="/me/icons/{{.ID}}" alt="">{{else}}<span class="badge" aria-hidden="true">{{slice .Label 0 1}}</span>{{end}}<span>{{.Label}}</span></a>
+{{if .Direct}}<a class="get" href="{{.Direct}}">Open without the check</a>{{end}}
 {{range .Install}}<a class="get" href="{{.URL}}" rel="noreferrer">{{.Label}}</a>{{end}}</li>
 {{end}}</ul>{{else}}<p class="muted">No app of this site runs on this platform.</p>{{end}}
 {{if .Hidden}}<p class="muted"><a href="/me/devices/{{.DeviceID}}?all=1">Show all apps</a> ({{.Hidden}} more for other platforms).</p>{{end}}

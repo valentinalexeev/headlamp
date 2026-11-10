@@ -1000,12 +1000,12 @@ A person who enrolled before 0.15.2 keeps the user that node-control recorded. T
 
 - The page finds the platform from the User-Agent of the browser and shows only the apps for that platform. **Show all apps** shows all of them. An iPad that asks for desktop pages shows as a Mac. Each app of the catalog for iOS also runs on a Mac.
 - A web page cannot find which apps are installed. Thus each button has the store link of `install` for that platform, when `enroll.json` gives one.
-- Each button is the import link of the app, with the subscription URL of the app's format (`/sub/<secret>/<format>`). On an iPhone or iPad, a button of an app with an App Store id opens the app page of that app (next section).
+- Each button is the import link of the app, with the subscription URL of the app's format (`/sub/<secret>/<format>`). On an iPhone, a button of an app with an App Store id opens the app page of that app (next section). Under the button, **Open without the check** is the import link itself.
 - **Add the profile by hand** shows the subscription URL of each format.
 
 > **CAUTION:** The app picker shows the subscription URLs each time the person opens it. Anyone with such a URL can use the device. The page is only for the signed-in owner of the device, and it is never cached.
 
-### App page on iPhone and iPad
+### App page on iPhone
 
 A web page cannot find which apps are installed. Safari can, for one app on each page, with the Smart App Banner (#271). `/me/devices/{id}/app/{app}` uses it:
 
@@ -1014,7 +1014,7 @@ A web page cannot find which apps are installed. Safari can, for one app on each
 - The page also has an **Open in &lt;app&gt;** button with the same import link, and a **Get &lt;app&gt;** link. Use them in other browsers, and when the bar is closed.
 - The page is only for an active device of the signed-in person. The app must be one that the site offers, with an App Store id. Other requests get 404.
 
-Only Safari on iPhone and iPad shows the bar. The in-app browser of a messenger does not. Thus send the invitation link, and tell people to open it in Safari.
+Only Safari on iPhone and iPad shows the bar. The in-app browser of a messenger does not. Thus send the invitation link, and tell people to open it in Safari. Safari on an iPad asks for desktop pages by default and shows as a Mac. Thus an iPad gets the import links of the Mac, without the app page.
 
 > **CAUTION:** Make sure that each app opens the import link from **Open** before you tell people to use the bar. The device test of #243 includes this check. If an app does not open the link, people can use the button.
 

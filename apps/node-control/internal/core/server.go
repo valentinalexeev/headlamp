@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -54,6 +55,31 @@ func hostGuard(allowed []string, next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// healthHandler serves only GET /healthz: 200 {"status":"ok"} while the tailnet is up, else 503
+// with the reason.
+// healthTimeout bounds the status call of one health request.
+const healthTimeout = 3 * time.Second
+
+func healthHandler(tn Tailnet) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		status, code := "ok", http.StatusOK
+		if h, ok := tn.(Healther); ok {
+			ctx, cancel := context.WithTimeout(r.Context(), healthTimeout)
+			defer cancel()
+			if err := h.Healthy(ctx); err != nil {
+				status, code = err.Error(), http.StatusServiceUnavailable
+			}
+		}
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 	})
 }
 
@@ -214,6 +240,19 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 				closeAll()
 				return err
 			}
+		}
+	}
+
+	// HEALTH_LISTEN (optional, host:port, #196): GET /healthz on a plain address, for a platform
+	// health check (the Fly check of node-control). It answers 200 while the tailnet node is
+	// Running and 503 otherwise, and serves nothing else: the admin app stays tailnet-only.
+	if addr := env.Getenv("HEALTH_LISTEN"); addr != "" {
+		listen := func() (net.Listener, error) {
+			return (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+		}
+		if err := add("health", healthHandler(tn), listen); err != nil {
+			closeAll()
+			return err
 		}
 	}
 

@@ -4,6 +4,15 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- Health checks and self-tests (#196):
+  - ingress-agent: `GET /v1/egress`, a bridge path self-test. Every minute the agent requests a URL through the SOCKS port of the exit node (`INGRESS_EGRESS_SOCKS`, `INGRESS_EGRESS_URL`; role variables `ingress_egress_socks`, default the `socks_listen` of `reality-ingress`, and `ingress_egress_url`). node-control shows a failed self-test as a critical Attention item, and `GET /enroll/ingresses` has the results in `egress`. It finds the case where every component is healthy and clients get no reply (an offline or replaced exit node, or no `autogroup:internet`, #259).
+  - exit-node: a health endpoint on port 9002 (`HEALTH_PORT`): tailscaled Running, the approved exit route, forwarding, NAT and the internet. `fly.toml` checks it. On a kernel without `xt_connmark` (Fly), `start.sh` logs one `info:` line that explains the "router config failed (enabling connmark rules ...)" line of tailscale.
+  - node-control: `HEALTH_LISTEN` serves only `GET /healthz` on a plain address, `503` while the tailnet node is not `Running`. `fly.toml` sets it to `:9001` and checks it.
+  - funnel-ingress: the grace period of its Fly check is 60 s, so a slow tailnet login at start does not fail it.
+  - `scripts/smoke-test.sh`: after an upgrade, it checks that every bridge is in sync and passes its self-test, makes a test device, checks its subscription through `link_host`, revokes it, and checks the public paths.
+
 ### Fixed
 
 - node-control self-enrolment: `/me` no longer makes a second headscale user for a person who already has one (#253). Before, a person who had logged in through the OIDC login of headscale got a second user `oidc-<hash>` with the same email, and headscale did not start again when the policy named the person by email. Now the first device reuses, in this order: the user with the provider ID `<OIDC_ISSUER>/<subject>`, the user `oidc-<hash>`, or the one user with the person's email when the ID token says `email_verified: true`. More than one user with that email: node-control refuses the device and says why. The OIDC database gets an `email_verified` column at start.

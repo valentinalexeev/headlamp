@@ -274,7 +274,9 @@ type Server struct {
 	A     *Applier
 	Token string
 	Info  *Info
-	Clock func() int64
+	// Egress is the bridge path self-test (#196); nil: GET /v1/egress answers {"disabled": true}.
+	Egress *Egress
+	Clock  func() int64
 }
 
 func (s *Server) now() int64 {
@@ -284,7 +286,8 @@ func (s *Server) now() int64 {
 	return time.Now().Unix()
 }
 
-// Handler serves PUT /v1/credentials, GET /v1/stats and GET /v1/info, each behind the bearer token. Every error
+// Handler serves PUT /v1/credentials, GET /v1/stats, GET /v1/info and GET /v1/egress, each behind
+// the bearer token. Every error
 // has an empty body. Nothing else exists.
 func (s *Server) Handler() http.Handler {
 	want := []byte("Bearer " + s.Token)
@@ -302,11 +305,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/credentials", authed(s.putCredentials))
 	mux.HandleFunc("GET /v1/stats", authed(s.stats))
 	mux.HandleFunc("GET /v1/info", authed(s.info))
+	mux.HandleFunc("GET /v1/egress", authed(s.egress))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h, pattern := mux.Handler(r)
 		if pattern == "" {
 			// no body, and a wrong method on a known path is still answered after the token check
-			if r.URL.Path == "/v1/credentials" || r.URL.Path == "/v1/stats" || r.URL.Path == "/v1/info" {
+			switch r.URL.Path {
+			case "/v1/credentials", "/v1/stats", "/v1/info", "/v1/egress":
 				authed(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusMethodNotAllowed) })(w, r)
 				return
 			}
@@ -362,6 +367,11 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, out)
+}
+
+// egress gives the last bridge path self-test (#196). It never probes on request: the loop does.
+func (s *Server) egress(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, s.Egress.Result())
 }
 
 func (s *Server) info(w http.ResponseWriter, _ *http.Request) {

@@ -17,6 +17,13 @@ says "No action required".
   through the exit node. Check: `jq '.dns, .routing.rules[0]' /etc/xray/config.json` shows tag `dns-internal` and a
   rule that sends it to `via-exit`. To use other resolvers, set `ingress_exit_dns` (IP addresses only).
 
+### Optional
+
+- **Health checks** (#196): run the `ingress-agent` role on each bridge for the bridge self-test (on by default; set
+  `ingress_egress_socks: ""` to turn it off). Take the new `fly.toml` of the exit node and node-control for their Fly
+  checks: `fly checks list -a <app>` shows them after the deploy. After an upgrade, run
+  `NODE_CONTROL_URL=http://<node-control> scripts/smoke-test.sh` from a tailnet node of an operator.
+
 ## 0.15.1
 
 ### Optional

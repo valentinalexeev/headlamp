@@ -44,7 +44,7 @@ run() {
     rm -f "$out"
     ansible-playbook "$tmp/render.yml" -i localhost, -c local -e "$all" -e "out=$out" \
       -e ingress_agent_token=x -e ingress_agent_state_dir=/s -e xray_base_config=/b -e xray_config=/c -e xray_bin=/x \
-      -e xray_unit=x -e xray_api=a -e xray_asset_dir=/d -e '{"ingress_direct_geoip":[],"ingress_direct_geosite":[],"ingress_exit_dns":[]}' >"$tmp/render.log" 2>&1
+      -e xray_unit=x -e xray_api=a -e xray_asset_dir=/d -e '{"ingress_direct_geoip":[],"ingress_direct_geosite":[],"ingress_exit_dns":[],"ingress_egress_socks":"127.0.0.1:1055","ingress_egress_url":"https://www.gstatic.com/generate_204"}' >"$tmp/render.log" 2>&1
     local n; n="$(grep -c '^INGRESS_\(NAME\|HOST\|PORT\|SNI\|PUBLIC_KEY\|SHORT_ID\)=' "$out" 2>/dev/null || true)"; n="${n:-0}"
     if [ "$lines" = none ] && [ "$n" != 0 ]; then ok=0; fi
     if [ "$lines" = six ] && [ "$n" != 6 ]; then ok=0; fi

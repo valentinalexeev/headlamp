@@ -23,6 +23,9 @@ type RouteState struct {
 
 // State is what the ingress reports after each sync cycle. It holds no secrets: no keys, no URLs.
 type State struct {
+	// BuildVersion is the funnel-ingress build (the repo VERSION, or "dev"), for the fleet
+	// view (#195).
+	BuildVersion   string
 	AppliedVersion string
 	SentAt         time.Time
 	SnapshotLoaded bool
@@ -39,6 +42,7 @@ type Reporter interface {
 }
 
 type wireState struct {
+	BuildVersion     string           `json:"build_version,omitempty"`
 	AppliedVersion   string           `json:"applied_version"`
 	SentAt           time.Time        `json:"sent_at"`
 	SnapshotLoaded   bool             `json:"snapshot_loaded"`
@@ -62,6 +66,7 @@ type wireStateRoute struct {
 
 func encodeState(s State) ([]byte, error) {
 	w := wireState{
+		BuildVersion:   s.BuildVersion,
 		AppliedVersion: s.AppliedVersion, SentAt: s.SentAt.UTC(), SnapshotLoaded: s.SnapshotLoaded, PeerCount: s.PeerCount,
 		ConfigAgeSeconds: int64(s.ConfigAge / time.Second), Routes: []wireStateRoute{}, Errors: append([]string{}, s.Errors...),
 	}

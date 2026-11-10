@@ -34,7 +34,14 @@ const (
 	shutdownTimeout  = 20 * time.Second
 )
 
+// version is set at build time: -ldflags "-X main.version=<VERSION>" (#195).
+var version = "dev"
+
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(version)
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	err := run(ctx, os.Getenv)
 	stop()
@@ -169,7 +176,8 @@ func observe(ctx context.Context, node tsnode.Node, table *routes.Table, rec *re
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	snap, err := node.Snapshot(sctx)
-	st := controlsync.State{SnapshotLoaded: err == nil && snap.Loaded, PeerCount: len(snap.Peers), LastReconcile: rec.LastTick()}
+	st := controlsync.State{BuildVersion: version, SnapshotLoaded: err == nil && snap.Loaded,
+		PeerCount: len(snap.Peers), LastReconcile: rec.LastTick()}
 	byID := map[string]tsnode.Peer{}
 	byTarget := map[string]tsnode.Peer{}
 	for _, p := range snap.Peers {

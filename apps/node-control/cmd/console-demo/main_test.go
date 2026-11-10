@@ -78,7 +78,7 @@ func TestDemoServesEveryScenario(t *testing.T) {
 					t.Fatalf("minimal: want one item, got %v", labels)
 				}
 			case "partial":
-				want := []string{"Overview", "Nodes", "Devices", "Activity"}
+				want := []string{"Overview", "Nodes", "Devices", "Fleet", "Activity"}
 				if !slices.Equal(labels, want) {
 					t.Fatalf("partial: want %v, got %v", want, labels)
 				}

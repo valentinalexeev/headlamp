@@ -5,9 +5,13 @@
 # compiled into the binary (tsnet); there is no tailscaled and no start script. No volume: the node's
 # state lives in the shared Redis (see README "State").
 ARG TSVERSION=1.104.5
+# VERSION is the headlamp release the image is built from (the repo's VERSION file, passed by CI). node-control's
+# fleet view shows it (#195).
+ARG VERSION=dev
 
 FROM golang:1.27.3-alpine AS build
 ARG TSVERSION
+ARG VERSION
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN grep -q "tailscale.com v${TSVERSION}$" go.mod \
@@ -15,7 +19,7 @@ RUN grep -q "tailscale.com v${TSVERSION}$" go.mod \
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/funnel-ingress ./cmd/funnel-ingress
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/funnel-ingress ./cmd/funnel-ingress
 
 # alpine rather than a bare image: `fly ssh console` needs a shell.
 FROM alpine:3.22

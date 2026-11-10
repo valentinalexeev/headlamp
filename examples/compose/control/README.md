@@ -212,6 +212,8 @@ To restore on AWS:
 
 The old volume stays in the account. Delete it yourself after you make sure that the restore worked.
 
+The daily snapshot can lose up to one day of changes. For continuous backup to S3-compatible storage, a restore on a new host and a recovery drill, see the sample in [`backup/`](backup/README.md).
+
 ### Upgrades
 
 1. Read the release notes of the new version.

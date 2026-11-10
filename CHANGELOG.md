@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- `examples/compose/control/backup/`: sample continuous backup, restore and recovery drill for the control host (#262). Litestream replicates the headscale database and the node-control SQLite files (`policy.db`, `enroll.db`) to S3-compatible storage about every 10 seconds; `backup.sh` copies each night what Litestream does not cover (headscale noise and DERP keys, the node-control enrolment export with `ENROLL_REDIS=1`, a Redis snapshot); `restore.sh` puts it all back on a new host and never writes over a live database; `drill.sh` restores into a temporary directory on the live host and compares counts and key hashes. Compose overlay, systemd timer sample and an STE manual included.
+
 ### Fixed
 
 - The public enrolment paths are in one file, `enroll-paths.caddy` (#260). The `reality-ingress` front and the edge of `examples/compose/control` import it. Before, each kept its own list, and a site that had copied the example Caddyfile before 0.15.0 had no `/i/*` and `/sub/<secret>/<format>`: these links answered 404. A node-control test fails when the file and the public routes differ, and `make lint` fails when the compose copy differs from the role's file.

@@ -455,6 +455,13 @@ func agentHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/stats":
 		_, _ = w.Write([]byte(`{}`))
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/egress":
+		// The bridge path self-test (#196): every demo bridge reaches the internet through its
+		// exit node.
+		now := time.Now().Unix()
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "checked": now,
+			"since": now - int64(time.Hour/time.Second), "status": http.StatusNoContent,
+			"target": "www.gstatic.com"})
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/info":
 		host, _, _ := net.SplitHostPort(r.Host)
 		if host != "100.64.0.23" {

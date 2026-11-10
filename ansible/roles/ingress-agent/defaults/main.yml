@@ -38,6 +38,12 @@ ingress_direct_geosite: []
 # on ingress_direct_geosite resolve with the system resolver. Each entry: https://<ipv4>/<path> or tcp://<ipv4>[:port]
 # (TCP only, through the SOCKS outbound). Empty = https://1.1.1.1/dns-query, https://1.0.0.1/dns-query.
 ingress_exit_dns: []
+# Bridge path self-test (#196): the agent requests ingress_egress_url through the SOCKS port of the exit node
+# (the via-exit outbound) every minute, and serves the result at GET /v1/egress. node-control shows an Attention
+# item when it fails: clients then connect and get no reply. The default is the socks_listen of reality-ingress.
+# Empty: no self-test. It sends one HEAD request a minute through the exit node, and opens no port.
+ingress_egress_socks: "{{ socks_listen | default('127.0.0.1:1055') }}"
+ingress_egress_url: "https://www.gstatic.com/generate_204"
 
 # Geodata directory (xray run -test needs it for geoip:/geosite: rules).
 xray_asset_dir: /usr/local/share/xray

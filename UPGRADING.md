@@ -32,6 +32,13 @@ No action required. The fix of #270 is in node-control only: deploy the new imag
   `tailscale-userspace-socks` role now fails when traffic does not get through the exit node. Add the rules before
   you run it, or set `socks_egress_check: false` for that run.
 
+### Optional
+
+- **Health checks** (#196): run the `ingress-agent` role on each bridge for the bridge self-test (on by default; set
+  `ingress_egress_socks: ""` to turn it off). Take the new `fly.toml` of the exit node and node-control for their Fly
+  checks: `fly checks list -a <app>` shows them after the deploy. After an upgrade, run
+  `NODE_CONTROL_URL=http://<node-control> scripts/smoke-test.sh` from a tailnet node of an operator.
+
 ## 0.15.1
 
 ### Optional

@@ -494,3 +494,50 @@ func TestEnrollPublicListenIgnoredWithoutEnrolment(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 }
+
+// downTailnet is a Local tailnet whose node reports a state other than Running.
+type downTailnet struct {
+	*Local
+	err error
+}
+
+func (d *downTailnet) Healthy(context.Context) error { return d.err }
+
+// #196: HEALTH_LISTEN serves only GET /healthz on a plain address, 200 while the tailnet is up and 503 otherwise.
+func TestHealthListen(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		code int
+	}{{"up", nil, 200}, {"down", errors.New("tailnet state NeedsLogin"), 503}} {
+		t.Run(c.name, func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			addr := ln.Addr().String()
+			ln.Close()
+			tn := &downTailnet{Local: NewLocal("127.0.0.1"), err: c.err}
+			stop := runBG(t, nil, MapEnv(map[string]string{"HEALTH_LISTEN": addr}), tn)
+			tn.AdminAddr()
+			for i := 0; i < 50; i++ {
+				if cn, e := net.Dial("tcp", addr); e == nil {
+					cn.Close()
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			code, body := get(t, addr, "", "/healthz")
+			if code != c.code || (c.err != nil && !strings.Contains(body, "NeedsLogin")) {
+				t.Fatalf("/healthz: %d %q", code, body)
+			}
+			// nothing else is served there: no admin route
+			if code, _ = get(t, addr, "", "/"); code != 404 {
+				t.Fatalf("/ on the health listener: %d", code)
+			}
+			if err := stop(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

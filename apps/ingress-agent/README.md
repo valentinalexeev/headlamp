@@ -32,6 +32,13 @@ base file. It restarts xray when the set changes.
   everything else. The response never contains the Reality private key, the agent token or any credential.
   With `INGRESS_HY2_PORT` it also has `hy2_port`. The Salamander password is a secret and is never in it.
 
+- `GET /v1/egress` -> the bridge path self-test (#196): `{"ok", "checked", "since", "error", "duration_ms", "status",
+  "target"}`. Every minute the agent requests `INGRESS_EGRESS_URL` through the SOCKS port of the exit node (the
+  `via-exit` outbound). The exit node resolves the host name, as for clients. `ok` is false when that fails.
+  Then clients connect and get no reply, though every component looks healthy. Common causes are an offline or
+  replaced exit node, or a policy without `autogroup:internet` for `tag:ingress` (#259). Without
+  `INGRESS_EGRESS_SOCKS` the answer is `{"disabled": true}`. node-control shows a failed self-test as an Attention item.
+
 Hysteria 2 (#110): the base config can have an inbound with the tag `hy2-in` and the protocol `hysteria`. The agent
 then adds every credential to it as well. The uuid is the Hysteria `auth` value, and the email is the same as on
 `reality-in`. Thus the per-user routing rules, the block rule and the statistics apply to both inbounds.
@@ -93,6 +100,8 @@ the agent removes expired entries and applies the config again.
 | `XRAY_API` | `127.0.0.1:10085` (xray stats API, must be enabled in the base config) |
 | `INGRESS_DIRECT_GEOIP` | empty. Comma-separated geodata list names; in `auto` mode, destinations on them leave from this host |
 | `INGRESS_DIRECT_GEOSITE` | empty. Same, for geosite lists |
+| `INGRESS_EGRESS_SOCKS` | empty: no self-test. `host:port` of the SOCKS port of the exit node (the `socks_listen` of `reality-ingress`, `127.0.0.1:1055`). The role sets it by default (#196) |
+| `INGRESS_EGRESS_URL` | empty: `https://www.gstatic.com/generate_204`. The `https` URL of the self-test. The agent sends one `HEAD` request a minute |
 | `INGRESS_EXIT_DNS` | empty: `https://1.1.1.1/dns-query,https://1.0.0.1/dns-query`. Comma-separated resolvers for the lookups of xray, through `via-exit`. Each is `https://<ipv4>/<path>` or `tcp://<ipv4>[:port]`. A name is not accepted, because its lookup leaves through the local network |
 | `INGRESS_NAME` | unset. Short label of this bridge, `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`. Needed for `/v1/info` |
 | `INGRESS_HOST` | unset. Public DNS name of the bridge (lowercase, no scheme, port or path). Needed for `/v1/info` |

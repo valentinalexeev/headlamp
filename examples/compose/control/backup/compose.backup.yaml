@@ -1,0 +1,19 @@
+services:
+  # Add this file to the control compose: docker compose -f compose.yaml -f backup/compose.backup.yaml up -d
+  litestream:
+    image: ${LITESTREAM_IMAGE:?pin litestream/litestream:<version>@sha256:<digest> in .env}
+    restart: unless-stopped
+    command: ["replicate", "-config", "/etc/litestream.yml"]
+    # Host network: on a cloud VM, Litestream then gets credentials from the instance role (for example IMDSv2).
+    network_mode: host
+    environment:
+      BACKUP_BUCKET: ${BACKUP_BUCKET:?set BACKUP_BUCKET in .env}
+      BACKUP_REGION: ${BACKUP_REGION:?set BACKUP_REGION in .env}
+    volumes:
+      - ./backup/litestream.yml:/etc/litestream.yml:ro
+      # The same directories as headscale and node-control, so Litestream sees their SQLite files and WAL.
+      - ${DATA_DIR:-/srv/headlamp/data}/headscale:/data/headscale
+      - ${DATA_DIR:-/srv/headlamp/data}/node-control:/data/node-control
+    depends_on:
+      headscale:
+        condition: service_healthy

@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control: an MCP endpoint for AI agents, `POST /mcp` (Model Context Protocol, Streamable HTTP, JSON answers). It is off by default: set `MCP_ENABLED=1`. Only admins connect: a caller needs the new permission `mcp.admin`, which the `owner` role holds and `*.admin` does not. A caller is a person's tailnet login, or, with `MCP_OIDC_ISSUER` and `MCP_RESOURCE_URL`, the login in an OIDC access token (a JWT whose `aud` is the endpoint). Each tool runs one console route as the caller, with that route's permission and audit, so the audit log names the person. Tools that return secrets or change roles are left out. `MCP_PUBLIC=1` also serves it on the public listener (token only). See the node-control README, "MCP endpoint (optional)".
+
 ## 0.15.1 - 2026-11-09
 
 ### Fixed

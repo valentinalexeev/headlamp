@@ -23,6 +23,9 @@ const (
 	KindOpen
 	// KindMachine is checked by the module itself, by tailnet tag (funnel-ingress). No human may use it.
 	KindMachine
+	// KindSelf is checked by the module itself: a human tailnet login or an OIDC bearer token (the MCP endpoint).
+	// A tagged node may reach it, because a bearer token, not the node, then names the caller.
+	KindSelf
 )
 
 // Rule is the check for one admin route.
@@ -37,6 +40,7 @@ var (
 	open    = Rule{Kind: KindOpen}
 	anyUser = Rule{Kind: KindAnyUser}
 	machine = Rule{Kind: KindMachine}
+	self    = Rule{Kind: KindSelf}
 )
 
 // Routes is the permission of every admin route, by its exact ServeMux pattern. A route that is not here makes
@@ -171,6 +175,13 @@ var Routes = map[string]Rule{
 	"PUT /admin/roles/{name}":     need(FeatureAdmin, LevelAdmin),
 	"DELETE /admin/roles/{name}":  need(FeatureAdmin, LevelAdmin),
 	"POST /admin/import":          need(FeatureAdmin, LevelAdmin),
+
+	// mcp: the module checks the caller (tailnet login or OIDC bearer token) and mcp.admin itself. Each tool then
+	// runs as an admin route of its own, with the permission listed above.
+	"POST /mcp": self,
+	// RFC 9728 metadata: where an MCP client gets a token. It holds no data.
+	"GET /.well-known/oauth-protected-resource":     open,
+	"GET /.well-known/oauth-protected-resource/mcp": open,
 }
 
 // Authorizer is the core.Authorizer of the admin listener. Open is the transition mode of #122 decision 3: when
@@ -202,7 +213,7 @@ func (a *Authorizer) Wrap(pattern string, h http.Handler) (http.Handler, error) 
 	if !ok {
 		return nil, fmt.Errorf("no permission for %q", pattern)
 	}
-	if r.Kind == KindOpen || r.Kind == KindMachine {
+	if r.Kind == KindOpen || r.Kind == KindMachine || r.Kind == KindSelf {
 		return h, nil
 	}
 	log := a.Log
@@ -210,18 +221,14 @@ func (a *Authorizer) Wrap(pattern string, h http.Handler) (http.Handler, error) 
 		log = slog.Default()
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		login, tags, err := a.Tailnet.WhoIs(req.Context(), req.RemoteAddr)
-		l := NormalizeLogin(login)
-		switch {
-		case err != nil:
-			deny(w, log, "whois_error")
-			return
-		case len(tags) > 0 || l == "tagged-devices" || l == "":
-			deny(w, log, "tagged")
+		s, internal, reason := a.subject(req)
+		if reason != "" {
+			deny(w, log, reason)
 			return
 		}
-		s := Subject{Login: l}
-		if !(a.Open && a.Policy.Empty()) {
+		l := s.Login
+		// Open mode never applies to an in-process caller: the module that made it requires a policy.
+		if internal || !(a.Open && a.Policy.Empty()) {
 			switch r.Kind {
 			case KindAnyUser:
 				if len(a.Policy.Role(s)) == 0 {
@@ -239,4 +246,24 @@ func (a *Authorizer) Wrap(pattern string, h http.Handler) (http.Handler, error) 
 		ctx = context.WithValue(ctx, loginKey, l)
 		h.ServeHTTP(w, req.WithContext(ctx))
 	}), nil
+}
+
+// subject names the caller of req: the in-process Caller when there is one (internal is then true), else the tailnet
+// login of the remote address. A non-empty reason means the caller is refused.
+func (a *Authorizer) subject(req *http.Request) (s Subject, internal bool, reason string) {
+	if c, ok := core.CallerFrom(req.Context()); ok {
+		if l := NormalizeLogin(c.Login); l != "" && l != "tagged-devices" {
+			return Subject{Login: l, Groups: c.Groups}, true, ""
+		}
+		return Subject{}, true, "tagged"
+	}
+	login, tags, err := a.Tailnet.WhoIs(req.Context(), req.RemoteAddr)
+	l := NormalizeLogin(login)
+	switch {
+	case err != nil:
+		return Subject{}, false, "whois_error"
+	case len(tags) > 0 || l == "tagged-devices" || l == "":
+		return Subject{}, false, "tagged"
+	}
+	return Subject{Login: l}, false, ""
 }

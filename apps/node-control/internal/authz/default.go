@@ -60,11 +60,21 @@ func Gate(tn core.Tailnet, perm Perm, legacy Allowed, log *slog.Logger) func(htt
 				deny(w, log, "whois_error")
 			case len(tags) > 0 || l == "tagged-devices" || l == "":
 				deny(w, log, "tagged")
-			case !Can(l, perm, legacy):
+			case !canCaller(r.Context(), l, perm, legacy):
 				deny(w, log, "not_allowed")
 			default:
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), loginKey, l)))
 			}
 		})
 	}
+}
+
+// canCaller is Can for a request: an in-process Caller (core.WithCaller) is checked with its groups too.
+func canCaller(ctx context.Context, login string, perm Perm, legacy Allowed) bool {
+	if c, ok := core.CallerFrom(ctx); ok && len(c.Groups) > 0 {
+		if p := current.Load(); p != nil {
+			return p.Can(Subject{Login: login, Groups: c.Groups}, perm)
+		}
+	}
+	return Can(login, perm, legacy)
 }

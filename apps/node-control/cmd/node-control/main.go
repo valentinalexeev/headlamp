@@ -21,6 +21,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/enroll"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/funnel"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/mcp"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/nodes"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/overview"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policy"
@@ -34,7 +35,8 @@ const defaultNodesConfig = "/srv/app/nodes.json"
 // trackedTimeout bounds the headscale lookup done on behalf of the tailnet status route.
 const trackedTimeout = 10 * time.Second
 
-// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy, funnel, tasks, overview (funnel submits its ACL changes through the policy module). One cached
+// buildModules wires the modules in registration order: tailnet, nodes, enroll, policy, funnel, tasks, serve, access,
+// mcp, overview (funnel submits its ACL changes through the policy module). One cached
 // headscale source feeds the tailnet, nodes, enroll and tasks modules, so a page load costs one fetch.
 func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	cfg, err := nodes.LoadConfig(env.Default("NODES_CONFIG", defaultNodesConfig))
@@ -129,6 +131,8 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		servemod.New(env, hsClient),
 		// Access (#123): roles and grants stored by the UI, on with ADMIN_DB or REDIS_URL.
 		access.New(env),
+		// MCP: an agent endpoint for admins (tailnet login or OIDC token), on with MCP_ENABLED=1.
+		mcp.New(env),
 	}
 	// Overview is last: it counts the navigation of everything before it.
 	others := slices.Clone(mods)

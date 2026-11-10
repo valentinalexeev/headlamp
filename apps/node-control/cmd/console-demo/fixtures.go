@@ -26,6 +26,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/enroll"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/funnel"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/mcp"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/nodes"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/oidc/oidctest"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/overview"
@@ -206,6 +207,9 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			"OIDC_CLIENT_ID":         "console-demo",
 			"OIDC_REDIRECT_URL":      "https://links.example.net/oidc/callback",
 			"OIDC_DB":                filepath.Join(w.dir, "oidc.db"),
+			"MCP_ENABLED":            "1",
+			"MCP_OIDC_ISSUER":        w.idp.URL,
+			"MCP_RESOURCE_URL":       "https://node-control.example.net/mcp",
 		} {
 			m[k] = v
 		}
@@ -253,6 +257,7 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 		tasks.New(env, src),
 		servemod.New(env, client),
 		access.New(env),
+		mcp.New(env),
 	}
 	others := slices.Clone(mods)
 	return append(mods, overview.New(func() []core.Module { return others })), env, nil

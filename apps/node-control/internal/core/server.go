@@ -122,6 +122,8 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 	}
 	log := slog.Default()
 	log.Info("node-control starting", "version", DisplayVersion())
+	// An in-process request (an MCP tool call) names its caller in the context; every WhoIs then reports that login.
+	tn = CallerAware(tn)
 
 	// The enrolment module owns its database; the core only decides whether a
 	// public listener exists.

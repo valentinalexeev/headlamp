@@ -208,6 +208,28 @@ func (is *Issuer) sign(nonce string) string {
 	return s
 }
 
+// AccessToken signs an access token (a JWT, RFC 9068) for the current user with audience, as an issuer does for a
+// resource server. edit, when not nil, changes the claims before signing.
+func (is *Issuer) AccessToken(audience string, edit func(jwt.MapClaims)) string {
+	is.mu.Lock()
+	defer is.mu.Unlock()
+	now := is.Now()
+	c := jwt.MapClaims{"iss": is.URL, "aud": audience, "sub": is.user.Subject, "email": is.user.Email,
+		"groups": is.user.Groups, "iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(),
+		"client_id": is.ClientID}
+	if edit != nil {
+		edit(c)
+	}
+	t := jwt.NewWithClaims(jwt.SigningMethodRS256, c)
+	t.Header["kid"] = is.kid
+	t.Header["typ"] = "at+jwt"
+	s, err := t.SignedString(is.key)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
 func oauthErr(w http.ResponseWriter, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)

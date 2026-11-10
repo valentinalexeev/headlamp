@@ -153,24 +153,9 @@ func (p *Provider) token(ctx context.Context, form url.Values) (tokenResponse, e
 
 // Verify checks an ID token. nonce must match when not empty (a refresh may return a token without one).
 func (p *Provider) Verify(ctx context.Context, raw, nonce, groupsClaim string) (Identity, error) {
-	if raw == "" {
-		return Identity{}, fmt.Errorf("%w: missing", ErrToken)
-	}
-	claims := jwt.MapClaims{}
-	_, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
-		kid, _ := t.Header["kid"].(string)
-		return p.key(ctx, kid)
-	},
-		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "ES256", "ES384", "PS256"}),
-		jwt.WithIssuer(p.cfg.Issuer),
-		jwt.WithAudience(p.cfg.ClientID),
-		jwt.WithExpirationRequired(),
-		jwt.WithIssuedAt(),
-		jwt.WithLeeway(time.Minute),
-		jwt.WithTimeFunc(p.cfg.Now),
-	)
+	claims, err := p.parse(ctx, raw, p.cfg.ClientID)
 	if err != nil {
-		return Identity{}, fmt.Errorf("%w: %v", ErrToken, err)
+		return Identity{}, err
 	}
 	// With several audiences, azp must name this client.
 	if aud, _ := claims.GetAudience(); len(aud) > 1 {
@@ -201,6 +186,80 @@ func (p *Provider) Verify(ctx context.Context, raw, nonce, groupsClaim string) (
 	}
 	if groupsClaim != "" {
 		id.Groups = stringsOf(claims[groupsClaim])
+		id.GroupsKnown = true
+	}
+	return id, nil
+}
+
+// parse checks a signed JWT of this issuer for audience: signature by a key of the JWKS, iss, aud, exp and iat.
+func (p *Provider) parse(ctx context.Context, raw, audience string) (jwt.MapClaims, error) {
+	if raw == "" {
+		return nil, fmt.Errorf("%w: missing", ErrToken)
+	}
+	claims := jwt.MapClaims{}
+	_, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
+		kid, _ := t.Header["kid"].(string) // a token without a kid fails the key lookup
+		return p.key(ctx, kid)
+	},
+		jwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "ES256", "ES384", "PS256"}),
+		jwt.WithIssuer(p.cfg.Issuer),
+		jwt.WithAudience(audience),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithLeeway(time.Minute),
+		jwt.WithTimeFunc(p.cfg.Now),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrToken, err)
+	}
+	return claims, nil
+}
+
+// AccessClaims names the claims that VerifyAccess reads.
+type AccessClaims struct {
+	Audience string // the resource: the aud the token must name
+	Login    string // the claim that names the caller, for example "email" or "preferred_username"
+	Groups   string // the claim with the groups ("" for none)
+}
+
+// VerifyAccess checks an access token that is a JWT (RFC 9068) for a resource server, such as the MCP endpoint:
+// signature, iss, exp, iat and aud (it must name c.Audience). The login is the c.Login claim, lower-cased. When that
+// claim is "email", a token with email_verified false is refused. An issuer that hands out opaque access tokens
+// cannot be used.
+func (p *Provider) VerifyAccess(ctx context.Context, raw string, c AccessClaims) (Identity, error) {
+	if c.Audience == "" || c.Login == "" {
+		return Identity{}, errors.New("oidc: VerifyAccess needs an audience and a login claim")
+	}
+	claims, err := p.parse(ctx, raw, c.Audience)
+	if err != nil {
+		return Identity{}, err
+	}
+	sub, _ := claims["sub"].(string)
+	if sub == "" {
+		return Identity{}, fmt.Errorf("%w: no sub", ErrToken)
+	}
+	id := Identity{Subject: sub}
+	login, _ := claims[c.Login].(string)
+	id.Email = strings.ToLower(strings.TrimSpace(login))
+	if id.Email == "" {
+		return Identity{}, fmt.Errorf("%w: no %s claim", ErrToken, c.Login)
+	}
+	if c.Login == "email" {
+		switch v := claims["email_verified"].(type) {
+		case bool:
+			id.EmailUnverified = !v
+		case string:
+			id.EmailUnverified = strings.EqualFold(v, "false")
+		}
+		if id.EmailUnverified {
+			return Identity{}, fmt.Errorf("%w: the email address is not verified", ErrToken)
+		}
+	}
+	if exp, err := claims.GetExpirationTime(); err == nil && exp != nil {
+		id.Expiry = exp.Time
+	}
+	if c.Groups != "" {
+		id.Groups = stringsOf(claims[c.Groups])
 		id.GroupsKnown = true
 	}
 	return id, nil

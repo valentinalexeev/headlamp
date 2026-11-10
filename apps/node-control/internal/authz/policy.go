@@ -26,16 +26,20 @@ const (
 	// FeatureAdmin is the roles and grants page (#123). "*" does not include it: a viewer must not read who holds
 	// what, and a "*.admin" role must not hand out roles. Name it explicitly ("admin.admin").
 	FeatureAdmin Feature = "admin"
+	// FeatureMCP is the MCP endpoint: an agent that acts with the caller's own permissions. Only "mcp.admin" lets a
+	// caller connect. "*" does not include it, so a "*.admin" role does not open the endpoint: name it explicitly.
+	FeatureMCP Feature = "mcp"
 )
 
 // Features lists every feature, in display order.
-var Features = []Feature{FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel, FeatureServe, FeatureAudit, FeatureAdmin}
+var Features = []Feature{FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel,
+	FeatureServe, FeatureAudit, FeatureAdmin, FeatureMCP}
 
-// wildcard lists the features "*" stands for: every feature except admin.
+// wildcard lists the features "*" stands for: every feature except admin and mcp.
 func wildcard() []Feature {
 	out := make([]Feature, 0, len(Features))
 	for _, f := range Features {
-		if f != FeatureAdmin {
+		if f != FeatureAdmin && f != FeatureMCP {
 			out = append(out, f)
 		}
 	}
@@ -88,7 +92,7 @@ func (p Perm) String() string { return string(p.Feature) + "." + p.Level.String(
 // P builds a Perm; it is for route tables.
 func P(f Feature, l Level) Perm { return Perm{f, l} }
 
-// ParsePerm reads "feature.level", or "*.level" for every feature except admin.
+// ParsePerm reads "feature.level", or "*.level" for every feature except admin and mcp.
 func ParsePerm(s string) ([]Perm, error) {
 	f, l, ok := strings.Cut(strings.TrimSpace(s), ".")
 	if !ok {
@@ -141,7 +145,7 @@ func roleOf(perms ...string) Role {
 var BuiltinRoles = map[string]Role{
 	"viewer":   roleOf("*.view"),
 	"operator": roleOf("*.view", "nodes.operate", "tasks.operate", "enroll.operate"),
-	"owner":    roleOf("*.admin", "admin.admin"),
+	"owner":    roleOf("*.admin", "admin.admin", "mcp.admin"),
 }
 
 // Policy maps users to roles. The zero value grants nothing.

@@ -74,6 +74,8 @@ Fly.io, `fly.toml`).
 | `ADMIN_USERS` | Optional. Comma-separated tailnet logins that get the `owner` role. |
 | `ADMIN_DB` | Optional. The path of the SQLite file for the roles and grants that you change in the UI (see "Change roles in the UI"). If it is not set and `REDIS_URL` is set, Redis keeps them. If neither is set, the Access page is off. |
 | `ADMIN_REDIS_KEY` | Optional. The Redis key prefix for the roles and grants. The default is `<app>:admin`, with the app named as for the tailnet state. |
+| `MCP_ENABLED` | Optional. `1` turns on the MCP endpoint `POST /mcp` for AI agents. The default is off. See "MCP endpoint (optional)". |
+| `MCP_OIDC_ISSUER`, `MCP_RESOURCE_URL`, `MCP_OIDC_AUDIENCE`, `MCP_OIDC_LOGIN_CLAIM`, `MCP_OIDC_GROUPS_CLAIM`, `MCP_PUBLIC` | Optional. OIDC access tokens for the MCP endpoint, and the endpoint on the public listener. See "MCP endpoint (optional)". |
 
 ## Admin roles
 
@@ -96,6 +98,7 @@ A permission is a feature and a level. A higher level includes the lower ones:
 | `funnel` | state, config, audit | | namespaces, keys, routes, blocks |
 | `audit` | the activity page, the change log of roles and grants | | |
 | `admin` | the Access page: roles, grants, export | | change roles and grants, import |
+| `mcp` | | | connect to the MCP endpoint (see "MCP endpoint (optional)") |
 
 The built-in roles:
 
@@ -103,7 +106,7 @@ The built-in roles:
 |---|---|
 | `viewer` | `view` on every feature |
 | `operator` | `viewer`, plus `operate` on `nodes`, `tasks` and `enroll` |
-| `owner` | `admin` on every feature, `admin` included |
+| `owner` | `admin` on every feature, `admin` and `mcp` included |
 
 A user who holds no permission sees no page and gets `403` everywhere. A tagged node is never a user. The menu shows
 only the pages a user can open. Buttons for actions a user cannot do still show, but the server refuses the request.
@@ -134,11 +137,11 @@ An example file is in
 }
 ```
 
-- A custom role is a list of `feature.level`. `*.level` means every feature, but not `admin`. To give `admin`, write
-  `admin.view` or `admin.admin`.
+- A custom role is a list of `feature.level`. `*.level` means every feature, but not `admin` and not `mcp`. To give
+  `admin`, write `admin.view` or `admin.admin`. To give `mcp`, write `mcp.admin`.
 - A built-in role name cannot be redefined.
-- A `subject` is a tailnet login, written as in the old lists. The group subject `group:<name>` is reserved for OIDC
-  (#102).
+- A `subject` is a tailnet login, written as in the old lists. The group subject `group:<name>` is for OIDC groups.
+  The MCP endpoint uses it (see "MCP endpoint (optional)").
 
 ### Change roles in the UI
 
@@ -181,6 +184,107 @@ NOTE: With no OIDC sign-in on the console, a `group:<name>` grant has no effect 
 
 If no source names anyone, node-control logs a warning at every start. Every user who can reach the console can
 then use all of it, as in earlier releases. Set `ADMIN_USERS` to close it. This open mode is removed in 1.0.0.
+
+## MCP endpoint (optional)
+
+The MCP endpoint lets an AI agent manage headlamp through node-control. It uses the Model Context Protocol (MCP),
+transport "Streamable HTTP", at `POST /mcp`. The server sends JSON answers only. It has no event stream and no
+sessions.
+
+The endpoint is off by default. Set `MCP_ENABLED=1` to turn it on.
+
+### Who can connect
+
+Only admins can connect. An admin is a caller who holds `mcp.admin`. The `owner` role has it. `*.admin` does not
+include it. The endpoint identifies the caller in one of two ways:
+
+- **Tailnet login.** A person on the tailnet sends the request to the admin listener (port 80). The request has
+  no token. node-control gets the login from the tailnet, as for the console.
+- **OIDC access token.** The client sends `Authorization: Bearer <token>`. node-control checks the token against
+  `MCP_OIDC_ISSUER`. The login is the value of the claim `MCP_OIDC_LOGIN_CLAIM`, in lower case.
+
+A request with a bearer token always uses the token. If the token is not correct, node-control refuses the request.
+It does not use the tailnet login in its place. A tagged node is not a person: it must send a token.
+
+The endpoint does not use the open mode of "No admin configured". With no admin configured, it refuses everyone.
+
+### What a tool can do
+
+Each tool runs one admin route of the console, in the node-control process, as the caller. These rules apply:
+
+- The tool needs the permission of its route (see "Admin roles"). `tools/list` shows only the tools that the caller
+  can use. A viewer with `mcp.admin` gets the read tools only.
+- The route does its usual checks.
+- The audit log records the action with the login of the caller, as for the console. For an OIDC token, the login is
+  the email address (the default claim).
+- node-control also writes one log line for each tool call: `mcp tool call`, with the login, the tool and the HTTP
+  status.
+
+The tools cover the overview, the attention items, the activity log, the exit nodes, enrolment, tasks, browser
+sessions, the headscale policy and the funnel routes. They read the state of the serve module and of the roles.
+
+No tool gives a secret, because the result goes to the model of the client. These routes have no tool: task secrets,
+new device links, secret rotation, new invitations, funnel keys and serve keys. No tool changes roles or grants.
+Change them on the Access page or in `ADMIN_CONFIG`.
+
+A policy change from a tool works as in the console. `policy_apply` applies the change on probation. Confirm it
+with `policy_confirm` before the deadline, or node-control reverts it.
+
+### Environment
+
+| variable | purpose |
+|---|---|
+| `MCP_ENABLED` | `1` turns on the endpoint. The default is off. A value other than `0`, `1`, `true` or `false` stops the start. |
+| `MCP_OIDC_ISSUER` | Optional. The issuer URL of the access tokens. Without it, only tailnet logins can connect. |
+| `MCP_RESOURCE_URL` | The URL that MCP clients use for the endpoint, for example `https://node-control.example.com/mcp`. It is required with `MCP_OIDC_ISSUER`. Its path must be `/mcp`. |
+| `MCP_OIDC_AUDIENCE` | Optional. The `aud` that a token must contain. The default is `MCP_RESOURCE_URL`. Do not use the client ID of an application: then an ID token of that application can also connect. |
+| `MCP_OIDC_LOGIN_CLAIM` | Optional. The claim that gives the login. The default is `email`. With `email`, node-control refuses a token with `email_verified: false`. |
+| `MCP_OIDC_GROUPS_CLAIM` | Optional. The claim that gives the groups. A grant to `group:<name>` then applies to the members. |
+| `MCP_PUBLIC` | Optional. `1` also serves the endpoint on the public listener. There, only a bearer token can identify the caller. It needs `MCP_OIDC_ISSUER` and enrolment (`ENROLL_DB` or `ENROLL_REDIS=1`). With `ENROLL_PUBLIC_LISTEN`, the endpoint is also on that address. |
+
+### Connect over the tailnet
+
+1. Set `MCP_ENABLED=1`.
+2. Give your login the `owner` role, or a role with `mcp.admin`.
+3. Deploy node-control.
+4. In the MCP client, add a server of type "HTTP" with the URL `http://<tailnet name of node-control>/mcp`.
+
+The client must run on a device that is on the tailnet as you.
+
+### Connect with OIDC
+
+Use this procedure for a client that is not on the tailnet as a person. An example is an agent on a tagged node, or
+a client behind the public listener.
+
+1. Register an application for the MCP client at your OIDC issuer.
+2. Configure the issuer to put `MCP_RESOURCE_URL` in the `aud` claim of the access token.
+3. Configure the issuer to give access tokens as signed JWTs (RFC 9068).
+4. Set `MCP_ENABLED=1`, `MCP_OIDC_ISSUER` and `MCP_RESOURCE_URL`.
+5. Optional: set `MCP_OIDC_GROUPS_CLAIM`, and grant a role to `group:<name>`.
+6. Grant `mcp.admin` and the necessary roles to the login of each person, for example `alice@example.com`.
+7. Deploy node-control.
+8. In the MCP client, add the server with the URL `MCP_RESOURCE_URL`.
+
+**NOTE:** An issuer that gives opaque access tokens does not work. node-control cannot read them.
+
+When a request has no token, node-control answers `401` with a `WWW-Authenticate` header. The header points to
+`/.well-known/oauth-protected-resource/mcp` (RFC 9728). That document gives the issuer, so the client can get a
+token. node-control finds the keys of the issuer at the first token. If the issuer does not answer, node-control
+answers `503` and tries again after 30 s.
+
+**WARNING:** Do not grant roles to an OIDC login that can be the same as a tailnet login of another person. The policy
+uses one name for both. For example, a grant to `alice@example.com` applies to the tailnet login
+`alice@example.com` and to an OIDC token with that email address.
+
+**WARNING:** Do not set `MCP_PUBLIC=1` unless the issuer only gives tokens to people that you trust. Each person with
+`mcp.admin` can then operate the site from the internet.
+
+### Limits
+
+- The endpoint refuses a request with an `Origin` header of another host (a page of another site).
+- A message can have at most 1 MiB. A tool result can have at most 256 KiB. node-control cuts off a longer result.
+- A group grant counts for the endpoint and for each route. Some pages filter by the login only, for example the
+  attention items of tasks. For full access, grant the role to the login.
 
 ## Tailscale state
 

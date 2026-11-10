@@ -56,6 +56,7 @@ var Routes = map[string]Rule{
 	"GET /activity":             need(FeatureAudit, LevelView),
 	"GET /activity/activity.js": open,
 	"GET /tailnet/status":       need(FeatureOverview, LevelView),
+	"GET /fleet.json":           need(FeatureOverview, LevelView),
 
 	// nodes
 	"GET /nodes":             need(FeatureNodes, LevelView),

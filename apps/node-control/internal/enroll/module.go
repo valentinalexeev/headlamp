@@ -242,6 +242,15 @@ func (m *Module) AuditLog() core.AuditLog {
 	return m.store
 }
 
+// Bridges is the bridge list with what each agent last reported about its version (#195), or nil when
+// enrolment is off. It does not ask the bridges: the answers are at most one discovery interval old.
+func (m *Module) Bridges(ctx context.Context) []IngressView {
+	if m.reg == nil {
+		return nil
+	}
+	return m.reg.Current(ctx, false).Views
+}
+
 // Nav puts the enrolment page in the top bar, but only when the module registered (enrolment enabled).
 func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {

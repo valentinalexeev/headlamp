@@ -98,6 +98,11 @@ type IngressView struct {
 	Aliases        []string      `json:"aliases,omitempty"` // other names of the same machine: its discovered node
 	Node           string        `json:"node,omitempty"`    // the machine this bridge runs on, when its entry names one
 	Intermittent   bool          `json:"intermittent,omitempty"`
+	// What the bridge agent reports about itself in /v1/info (#195), with the time of the last good answer.
+	// Empty for a configured bridge and for an agent before 0.16.0.
+	AgentVersion string     `json:"agent_version,omitempty"`
+	XrayVersion  string     `json:"xray_version,omitempty"`
+	InfoAt       *time.Time `json:"info_at,omitempty"`
 	// What the stored approval pinned, for a discovered bridge that has one. The store keeps these three only
 	// (not the key or short id), so a review of a changed identity can compare these and no more.
 	ApprovedFingerprint    string `json:"approved_fingerprint,omitempty"`
@@ -139,6 +144,10 @@ type probe struct {
 type infoResult struct {
 	ing Ingress
 	fp  string
+	// version and xray are what the agent reports about its own build (#195); "" when an agent before 0.16.0
+	// does not report them. They are not part of fp: an upgrade needs no new approval.
+	version, xray string
+	at            time.Time // when this answer was read
 }
 
 // Registry is the dynamic ingress set. It is safe for concurrent use.
@@ -629,6 +638,7 @@ func (r *Registry) fetchInfo(ctx context.Context, n headscale.Node, name, token 
 	if err != nil {
 		return nil, stInvalid, err.Error()
 	}
+	info.at = r.now()
 	return info, "", ""
 }
 
@@ -655,7 +665,9 @@ func parseInfo(node string, body []byte) (*infoResult, error) {
 	if err != nil {
 		return nil, errors.New(strings.TrimPrefix(err.Error(), "ENROLL_CONFIG: "))
 	}
-	return &infoResult{ing: ing, fp: fingerprint(ing)}, nil
+	agentVer, _ := rawString(raw["version"])
+	xrayVer, _ := rawString(raw["xray"])
+	return &infoResult{ing: ing, fp: fingerprint(ing), version: plainText(agentVer, 64), xray: plainText(xrayVer, 64)}, nil
 }
 
 // fingerprint is the hex SHA-256 of the canonical JSON of the published parameters: the keys name,
@@ -794,6 +806,11 @@ func (r *Registry) buildLocked() Current {
 			ing := p.info.ing
 			infos[k] = p.info
 			v.Host, v.Fingerprint = ing.Host, p.info.fp
+			v.AgentVersion, v.XrayVersion = p.info.version, p.info.xray
+			if !p.info.at.IsZero() {
+				at := p.info.at
+				v.InfoAt = &at
+			}
 			v.PublicKeyPref, v.ShortIDPref = prefix(ing.PublicKey), prefix(ing.ShortID)
 			switch {
 			case !approved:

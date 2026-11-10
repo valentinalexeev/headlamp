@@ -25,6 +25,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/enroll"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/fleet"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/funnel"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/nodes"
@@ -238,10 +239,11 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 		return append(mods, overview.New(func() []core.Module { return others })), env, nil
 	}
 	pol := policy.New(env, client)
+	enr := enroll.New(env, enroll.WithNodeSource(src), enroll.WithSelfHeadscale(client))
 	mods := []core.Module{
 		tailnet.New(src, tracked),
 		nm,
-		enroll.New(env, enroll.WithNodeSource(src), enroll.WithSelfHeadscale(client)),
+		enr,
 		pol,
 		funnel.New(env, client, func() funnel.PolicyService {
 			if p, ok := pol.(interface{ Service() *policy.Service }); ok {
@@ -254,6 +256,14 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 		tasks.New(env, src),
 		servemod.New(env, client),
 		access.New(env),
+		fleet.New(fleet.Deps{Nodes: src, Headscale: client, TailscalePin: "1.104.5", Bridges: func(ctx context.Context) []enroll.IngressView {
+			if b, ok := enr.(interface {
+				Bridges(context.Context) []enroll.IngressView
+			}); ok {
+				return b.Bridges(ctx)
+			}
+			return nil
+		}}),
 	}
 	others := slices.Clone(mods)
 	return append(mods, overview.New(func() []core.Module { return others })), env, nil

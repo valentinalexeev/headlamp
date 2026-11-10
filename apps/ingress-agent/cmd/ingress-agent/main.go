@@ -19,6 +19,9 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/ingress-agent/internal/agent"
 )
 
+// version is set at build time: -ldflags "-X main.version=<VERSION>+<commit>" (#195).
+var version = "dev"
+
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
@@ -27,6 +30,10 @@ func env(k, def string) string {
 }
 
 func main() {
+	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
+		fmt.Println(version)
+		return
+	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if err := run(log); err != nil {
 		log.Error("ingress-agent cannot start: " + err.Error())
@@ -51,6 +58,11 @@ func run(log *slog.Logger) error {
 		Runner: runner, DirectGeoIP: agent.ParseList(os.Getenv("INGRESS_DIRECT_GEOIP")),
 		DirectGeoSite: agent.ParseList(os.Getenv("INGRESS_DIRECT_GEOSITE")),
 		ExitDNS:       agent.ParseList(os.Getenv("INGRESS_EXIT_DNS")), Log: log}
+	if info != nil {
+		info.Version = version
+		info.Xray = runner.XrayVersion(context.Background())
+	}
+	log.Info("ingress-agent " + version)
 	listen := env("AGENT_LISTEN", "127.0.0.1:9000")
 	if _, _, err := net.SplitHostPort(listen); err != nil {
 		return fmt.Errorf("AGENT_LISTEN must be host:port")

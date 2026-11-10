@@ -4,6 +4,11 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- Fleet versions, part 1 (#195). node-control serves `GET /fleet.json` (Overview view permission). It shows the node-control version, the headscale version, the tailscale version of every tailnet node compared with the pin (current, older, newer, unknown), and the agent and xray version of every discovered bridge. It is read only. The tailscale versions come from node-control's own tailnet node, so nothing is sent to the nodes.
+- ingress-agent reports its build version and its xray version in `GET /v1/info` (`version`, `xray`), and prints its version with `--version`. These fields are not in the bridge fingerprint, so an agent upgrade needs no new approval. The `ingress-agent` role stamps the version (repo VERSION plus the last commit that changed the agent) and prints "old -> new" when it changes.
+
 ## 0.15.3 - 2026-11-10
 
 ### Fixed

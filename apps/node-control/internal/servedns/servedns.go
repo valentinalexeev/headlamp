@@ -1,6 +1,11 @@
-// Package servedns answers DNS for the serve zone (#117). headscale sends the zone to node-control with
-// dns.nameservers.split, and node-control answers on its tailnet address. The zone must not be under the MagicDNS
-// base_domain: clients answer every name under it themselves and never ask a split resolver.
+// Package servedns answers DNS for the serve zone (#117) and the tailnet names (#286). headscale sends the zone to
+// node-control with dns.nameservers.split, and node-control answers on its tailnet address. The zone must not be
+// under the MagicDNS base_domain: clients answer every name under it themselves and never ask a split resolver.
+// Bridges ask node-control for every tailnet name, MagicDNS names included: their xray resolver is not a tailnet
+// client.
+//
+// A Server answers from several tables, in a fixed order (Slots): the first table that holds a name, or whose zone
+// contains it, gives the answer. A name in no table is refused.
 //
 // The answers come from a Table that the serve module replaces as a whole. A name is either exact
 // ("grafana.svc.example.com") or a wildcard ("*.apps.svc.example.com"), which matches one or more labels in front of
@@ -33,9 +38,9 @@ type Record struct {
 	Addrs []netip.Addr
 }
 
-// Table is an immutable lookup table for one zone.
+// Table is an immutable lookup table for one zone, or for a set of exact names (NewNames).
 type Table struct {
-	zone  string                  // normalised, no trailing dot
+	zone  string                  // normalised, no trailing dot; "" for a set of names
 	exact map[string][]netip.Addr // normalised name -> addrs
 	wild  []wildEntry             // longest suffix first
 }
@@ -72,12 +77,40 @@ func NewTable(zone string, recs []Record) *Table {
 
 func (t *Table) inZone(n string) bool { return t.zone != "" && strings.HasSuffix(n, "."+t.zone) }
 
+// NewNames builds a table of exact names in any domain (#286): managed records and the headscale extra_records.
+// It holds only the names it has: any other name is outside it. Wildcards are dropped.
+func NewNames(recs []Record) *Table {
+	t := &Table{exact: map[string][]netip.Addr{}}
+	for _, r := range recs {
+		n := Normalize(r.Name)
+		if n == "" || strings.HasPrefix(n, "*.") {
+			continue
+		}
+		t.exact[n] = append(t.exact[n], r.Addrs...)
+	}
+	return t
+}
+
+// Names gives the exact names of the table, sorted.
+func (t *Table) Names() []string {
+	out := make([]string, 0, len(t.exact))
+	for n := range t.exact {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Zone returns the normalised zone.
 func (t *Table) Zone() string { return t.zone }
 
 // Lookup returns the addresses for name and whether the name exists. inZone is false for a name outside the zone.
 func (t *Table) Lookup(name string) (addrs []netip.Addr, found, inZone bool) {
 	n := Normalize(name)
+	if t.zone == "" {
+		a, ok := t.exact[n]
+		return a, ok, ok
+	}
 	if n != t.zone && !t.inZone(n) {
 		return nil, false, false
 	}
@@ -92,14 +125,101 @@ func (t *Table) Lookup(name string) (addrs []netip.Addr, found, inZone bool) {
 	return nil, false, true
 }
 
-// Server answers queries from the current table.
+// The table slots of a Server, in the order a query checks them (#286).
+const (
+	SlotRecords = "records" // records managed in node-control
+	SlotExtra   = "extra"   // the headscale dns.extra_records, from the netmap
+	SlotServe   = "serve"   // the serve zone (#117)
+	SlotMagic   = "magic"   // the MagicDNS names of the nodes
+)
+
+// Slots is the order in which a query checks the tables.
+var Slots = []string{SlotRecords, SlotExtra, SlotServe, SlotMagic}
+
+// Server answers queries from its tables. The serve module and the tailnet DNS module share one Server and one
+// listener.
 type Server struct {
-	table atomic.Pointer[Table]
-	Log   *slog.Logger
+	mu     sync.Mutex
+	slots  map[string]*Table
+	tables atomic.Pointer[[]*Table] // the non-nil slots, in Slots order
+	listen sync.Once
+	Log    *slog.Logger
 }
 
-// SetTable replaces the answers atomically.
-func (s *Server) SetTable(t *Table) { s.table.Store(t) }
+// SetTable replaces the answers of the serve zone atomically.
+func (s *Server) SetTable(t *Table) { s.SetSlot(SlotServe, t) }
+
+// SetSlot replaces the table of one slot atomically. A nil table removes the slot.
+func (s *Server) SetSlot(slot string, t *Table) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.slots == nil {
+		s.slots = map[string]*Table{}
+	}
+	if t == nil {
+		delete(s.slots, slot)
+	} else {
+		s.slots[slot] = t
+	}
+	var ts []*Table
+	for _, k := range Slots {
+		if x := s.slots[k]; x != nil {
+			ts = append(ts, x)
+		}
+	}
+	s.tables.Store(&ts)
+}
+
+// Slot gives the table of one slot, or nil.
+func (s *Server) Slot(slot string) *Table {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.slots[slot]
+}
+
+// lookup asks the tables in order; the first that holds the name or its zone decides.
+func (s *Server) lookup(name string) (addrs []netip.Addr, found, known, ready bool) {
+	p := s.tables.Load()
+	if p == nil || len(*p) == 0 {
+		return nil, false, false, false
+	}
+	for _, t := range *p {
+		if a, f, in := t.Lookup(name); in {
+			return a, f, true, true
+		}
+	}
+	return nil, false, false, true
+}
+
+// Listener gives a DNS server its sockets: UDP and TCP on port 53 of the node's tailnet address.
+type Listener interface {
+	ListenDNS() (net.PacketConn, net.Listener, error)
+}
+
+// ListenOnce opens the listeners and serves them until ctx ends. Only the first call opens them; later calls (the
+// second module that shares the Server) return nil.
+func (s *Server) ListenOnce(ctx context.Context, l Listener, log *slog.Logger) error {
+	var err error
+	s.listen.Do(func() {
+		var pc net.PacketConn
+		var ln net.Listener
+		pc, ln, err = l.ListenDNS()
+		if err != nil {
+			return
+		}
+		go func() {
+			if e := s.ServeUDP(ctx, pc); e != nil {
+				log.Error("dns: UDP stopped", "error", e)
+			}
+		}()
+		go func() {
+			if e := s.ServeTCP(ctx, ln); e != nil {
+				log.Error("dns: TCP stopped", "error", e)
+			}
+		}()
+	})
+	return err
+}
 
 // Answer builds the response to one query message. It returns nil for a message it cannot parse.
 func (s *Server) Answer(msg []byte) []byte {
@@ -115,12 +235,10 @@ func (s *Server) Answer(msg []byte) []byte {
 	if h.OpCode != 0 {
 		return reply(h, &q, dnsmessage.RCodeNotImplemented, nil)
 	}
-	t := s.table.Load()
-	if t == nil {
-		return reply(h, &q, dnsmessage.RCodeServerFailure, nil)
-	}
-	addrs, found, inZone := t.Lookup(q.Name.String())
+	addrs, found, inZone, ready := s.lookup(q.Name.String())
 	switch {
+	case !ready:
+		return reply(h, &q, dnsmessage.RCodeServerFailure, nil)
 	case !inZone:
 		// not our zone: refuse, never recurse
 		return reply(h, &q, dnsmessage.RCodeRefused, nil)

@@ -265,7 +265,7 @@ func SyncAll(ctx context.Context, store Backend, cfg IngressConfig, targets []Sy
 					t.State.Failed("error")
 				}
 			}()
-			results[i] = pushTo(ctx, t, creds)
+			results[i] = pushTo(ctx, t, creds, cfg.TailnetDNSFor(plan.doc.EffectiveMode(t.Ingress)))
 		}()
 	}
 	wg.Wait()
@@ -295,8 +295,9 @@ func safeCredentials(
 	return cfg.credentialsWith(t.Ingress, base, plan)
 }
 
-// pushTo pushes one target's set and records the outcome in its state.
-func pushTo(ctx context.Context, t SyncTarget, creds []Credential) bool {
+// pushTo pushes one target's set, and its tailnet resolver when it has one (#286), and records the outcome in its
+// state.
+func pushTo(ctx context.Context, t SyncTarget, creds []Credential, dns *TailnetDNS) bool {
 	if t.Refuse != nil {
 		if why := t.Refuse(); why != "" {
 			syncLog(t.Name, "enrolment sync refused: "+why+" (COMPAT_STRICT)")
@@ -304,7 +305,13 @@ func pushTo(ctx context.Context, t SyncTarget, creds []Credential) bool {
 			return false
 		}
 	}
-	if err := t.Agent.PutCredentials(ctx, creds, len(creds) == 0); err != nil {
+	var err error
+	if p, ok := t.Agent.(dnsPutter); ok {
+		err = p.PutCredentialsDNS(ctx, creds, dns, len(creds) == 0)
+	} else {
+		err = t.Agent.PutCredentials(ctx, creds, len(creds) == 0)
+	}
+	if err != nil {
 		var au *AgentUnavailable
 		if errors.As(err, &au) {
 			if au.Status != 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -231,7 +232,7 @@ func bridgeIntermittent(name string, views []IngressView) bool {
 
 // activityPrefixes are the audit actions this module owns. The shared log also holds node actions, which the nodes
 // module reports.
-var activityPrefixes = []string{"device.", "bridge.", "audit.", "tailnet."}
+var activityPrefixes = []string{"device.", "bridge.", "audit.", "tailnet.", "person.", "invite."}
 
 // auditRead is how many log entries Activity reads before filtering by prefix: the whole bounded log.
 const auditRead = 1000
@@ -250,11 +251,13 @@ func (m *Module) Activity(_ context.Context, _ string, limit int) ([]core.Activi
 		return nil, fmt.Errorf("enrolment audit log: %w", err)
 	}
 	var out []core.ActivityEntry
+	label := m.ownerLabels()
 	for _, e := range log {
 		if !hasAnyPrefix(e.Action, activityPrefixes) {
 			continue
 		}
-		out = append(out, core.ActivityEntry{At: e.At, Actor: e.Actor, Source: "Devices", Action: e.Action, Detail: e.Detail})
+		out = append(out, core.ActivityEntry{At: e.At, Actor: label(e.Actor), Source: "Devices",
+			Action: e.Action, Detail: label(e.Detail)})
 		if len(out) >= limit {
 			break
 		}
@@ -285,4 +288,58 @@ func (m *Module) Search(_ context.Context, _ string) ([]core.SearchItem, error) 
 		out = append(out, core.SearchItem{Label: d.Name, Kind: "Device", Path: "/enroll"})
 	}
 	return out, nil
+}
+
+// ownerLabels gives a function that puts the email of each self-enrolled person in place of its
+// "oidc:<subject>" identifier, in an actor or a detail of the audit log (#290). The log keeps the
+// identifier: an email can change, and the subject cannot. A person without an email, or with
+// self-enrolment off, keeps the identifier.
+func (m *Module) ownerLabels() func(string) string {
+	var emails map[string]string
+	if m.admin != nil {
+		emails = m.admin.ownerEmails()
+	}
+	return func(s string) string { return replaceOwners(s, emails) }
+}
+
+// replaceOwners puts the email in place of each "oidc:<subject>" in s that emails knows. An
+// identifier counts only as a whole: at the end of s or before a space, ":", ",", ")" or "]", the
+// only things the audit lines put after an owner. So "oidc:sub-1" is not found inside
+// "oidc:sub-10". Longer identifiers go first.
+func replaceOwners(s string, emails map[string]string) string {
+	if len(emails) == 0 || !strings.Contains(s, OwnerPrefix) {
+		return s
+	}
+	keys := make([]string, 0, len(emails))
+	for k := range emails {
+		if strings.Contains(s, k) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		hit := ""
+		if strings.HasPrefix(s[i:], OwnerPrefix) {
+			for _, k := range keys {
+				if strings.HasPrefix(s[i:], k) && ownerEnds(s, i+len(k)) {
+					hit = k
+					break
+				}
+			}
+		}
+		if hit == "" {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		b.WriteString(emails[hit])
+		i += len(hit)
+	}
+	return b.String()
+}
+
+// ownerEnds says whether an owner identifier can end at position i of s.
+func ownerEnds(s string, i int) bool {
+	return i == len(s) || strings.ContainsRune(" :,)]", rune(s[i]))
 }

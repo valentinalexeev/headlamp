@@ -30,6 +30,22 @@
         return m ? m[1] + ' extended until ' + m[2] : detail + ' extended';
       case 'device.rotate_secret':
         return 'Secret of ' + detail + ' rotated';
+      case 'device.self_enrol':
+        return detail + ' enrolled by its owner';
+      case 'device.self_revoke':
+        return detail + ' revoked by its owner';
+      case 'person.lock':
+        m = /^(.*?): (.*)$/.exec(detail);
+        return m ? m[1] + ' locked (' + m[2] + ')' : detail + ' locked';
+      case 'person.unlock':
+        return detail + ' unlocked';
+      case 'invite.create':
+        m = /^invitation (\d+) for (.*), until (\S+)$/.exec(detail);
+        return m ? m[2] + ' invited (invitation ' + m[1] + ', until ' + m[3] + ')' : 'Invitation made: ' + detail;
+      case 'invite.revoke':
+        return detail.replace(/^invitation/, 'Invitation') + ' withdrawn';
+      case 'invite.redeem':
+        return detail.replace(/^invitation/, 'Invitation') + ' used';
       case 'bridge.approve':
         return 'Bridge ' + detail + ' approved';
       case 'bridge.unapprove':

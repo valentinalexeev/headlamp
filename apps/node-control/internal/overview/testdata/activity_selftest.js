@@ -44,6 +44,14 @@ const rowText = (tr) => tr.children.map((td) => td.textContent);
     assert.strictEqual(d('device.revoke', 'phone-3'), 'phone-3 revoked');
     assert.strictEqual(d('device.extend', 'phone, expires 2027-02-01'), 'phone extended until 2027-02-01');
     assert.strictEqual(d('bridge.approve', 'bridge-1'), 'Bridge bridge-1 approved');
+    // self-enrolment, locks and invitations (#290): the detail already has the email in place of the identifier
+    assert.strictEqual(d('device.self_enrol', 'phone'), 'phone enrolled by its owner');
+    assert.strictEqual(d('device.self_revoke', 'phone'), 'phone revoked by its owner');
+    assert.strictEqual(d('person.lock', 'anna@example.test: left the team'), 'anna@example.test locked (left the team)');
+    assert.strictEqual(d('person.unlock', 'anna@example.test'), 'anna@example.test unlocked');
+    assert.strictEqual(d('invite.create', 'invitation 5 for bob@example.test, until 2027-01-01'), 'bob@example.test invited (invitation 5, until 2027-01-01)');
+    assert.strictEqual(d('invite.revoke', 'invitation 5'), 'Invitation 5 withdrawn');
+    assert.strictEqual(d('invite.redeem', 'invitation 5, device 9'), 'Invitation 5, device 9 used');
     assert.strictEqual(d('node.stop', 'exit-c: ok'), 'exit-c stopped');
     assert.strictEqual(d('node.start', 'exit-a: failed (timeout)'), 'Starting exit-a failed (timeout)');
     assert.strictEqual(d('namespace.create', 'demo ports 9000-9010'), 'Namespace demo created, ports 9000-9010');

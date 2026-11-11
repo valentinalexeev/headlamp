@@ -805,11 +805,12 @@ node-control makes profiles and import links for the apps of a fixed catalog (#2
 | `shadowrocket` | Shadowrocket | `uri` | `ios`, `macos` | `932747118` | |
 | `stash` | Stash | `stash` | `ios`, `macos` | `1596063349` | |
 | `happ` | Happ | `uri` | `ios`, `macos`, `android`, `windows`, `linux` | `6504287215` | `com.happproxy` (on Google Play) |
+| `throne` | Throne | `uri` | `android`, `windows`, `macos`, `linux` | | `com.nb4a.throne` |
 
 - The `id` is also the `client` value of a device that an operator makes.
 - The App Store id is for the app page on iPhone (#271) and for the default iOS store link. The sing-box documentation links the iOS app "sing-box MT". For Happ it is the global listing.
 - The Android package is for the app check on Android (#271). Only sing-box and Happ are on Google Play. Thus only they have a default Android store link.
-- The one-time link of a `karing`, `clash`, `shadowrocket`, `stash` or `happ` device opens a page with a button. These apps open only from a tap. The one-time link of a `sing-box` device redirects at once.
+- The one-time link of a `karing`, `clash`, `shadowrocket`, `stash`, `happ` or `throne` device opens a page with a button. These apps open only from a tap. The one-time link of a `sing-box` device redirects at once.
 - `https://<link_host>/sub/<secret>` serves the format of the device's `client`. This did not change.
 - `https://<link_host>/sub/<secret>/<format>` serves the profile in one format, for every device. Each import link of the app picker uses this form. Thus one device can go into each app, also into more than one app.
 
@@ -840,6 +841,18 @@ Happ reads both kinds of link of the `uri` format: VLESS Reality with `flow=xtls
 with `obfs=salamander`. The Hysteria 2 links need an xray-core with the Hysteria 2 outbound and the Salamander mask
 (`finalmask`). The bridges use the same core (26.10 or later). On an older Happ, only the VLESS links work. Happ names
 the subscription after the link host, because its link has no name.
+
+Throne (#295) is a sing-box client for Windows, macOS, Linux and Android. It has no iOS app, so the picker does not
+show it on an iPhone. Its import link is `throne://addsub/<Base64>`: the standard Base64 of
+`<subscription URL>#<profile_name>`. Throne asks before it adds the subscription.
+
+- Throne for Android is on GitHub only, not on Google Play. Give its download link in `install.android`. Without it,
+  the Android app check sends a person without Throne back to the picker with a "not installed" note.
+- On macOS, the Throne download has no Apple developer signature. The person must allow it in the system settings
+  before it opens.
+- On Windows and Linux, the installer and the `.deb` and `.rpm` packages register `throne://`. A ZIP copy does not.
+  Its user must turn on **Register throne:// links at startup** in its settings, or copy the subscription URL and
+  paste it into Throne.
 
 - `id` is required. It must be an `id` of the catalog, and each `id` can occur one time only.
 - `install` is optional. Its keys are platforms (`ios`, `android`, `macos`, `windows`, `linux`). Its values are `https` URLs of the store page of the app, 500 characters or fewer. Without an `ios` link, the iOS link is `https://apps.apple.com/app/id<App Store id>`.

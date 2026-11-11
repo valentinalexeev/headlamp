@@ -3,9 +3,14 @@ package enroll
 import (
 	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCatalogLinks(t *testing.T) {
@@ -17,6 +22,7 @@ func TestCatalogLinks(t *testing.T) {
 		"stash":        "stash://install-config?url=https%3A%2F%2Flink.example.com%2Fsub%2Fabc%2Furi&name=tunnel",
 		"shadowrocket": "shadowrocket://add/sub://" + base64.StdEncoding.EncodeToString([]byte(sub)) + "?remark=tunnel",
 		"happ":         "happ://add/https://link.example.com/sub/abc/uri",
+		"throne":       "throne://addsub/" + base64.StdEncoding.EncodeToString([]byte(sub+"#tunnel")),
 	}
 	for id, want := range cases {
 		got, err := DeepLinkFor(id, sub, "tunnel")
@@ -27,14 +33,14 @@ func TestCatalogLinks(t *testing.T) {
 	if _, err := DeepLinkFor("nope", sub, "x"); err == nil {
 		t.Error("unknown client accepted")
 	}
-	if clientsRepr != "('sing-box', 'karing', 'clash', 'shadowrocket', 'stash', 'happ')" {
+	if clientsRepr != "('sing-box', 'karing', 'clash', 'shadowrocket', 'stash', 'happ', 'throne')" {
 		t.Errorf("clientsRepr %s", clientsRepr)
 	}
 }
 
 func TestFormatOfStoredClient(t *testing.T) {
 	for client, want := range map[string]string{"sing-box": FormatSingBox, "karing": FormatSingBox, "clash": FormatClash,
-		"stash": FormatStash, "shadowrocket": FormatURIList, "happ": FormatURIList, "": FormatSingBox, "other": FormatSingBox} {
+		"stash": FormatStash, "shadowrocket": FormatURIList, "happ": FormatURIList, "throne": FormatURIList, "": FormatSingBox, "other": FormatSingBox} {
 		if got := formatOf(client); got != want {
 			t.Errorf("%q: %s, want %s", client, got, want)
 		}
@@ -199,7 +205,7 @@ func TestSubscriptionFormatPath(t *testing.T) {
 
 func TestNewClientsGetLandingPage(t *testing.T) {
 	f := newPubFx(t)
-	for _, c := range []string{"stash", "shadowrocket", "happ"} {
+	for _, c := range []string{"stash", "shadowrocket", "happ", "throne"} {
 		d, _ := f.newDevice("x", "y", c)
 		rec := f.get("/e/"+f.token(d), "Mozilla/5.0")
 		def, _ := ClientByID(c)
@@ -220,5 +226,83 @@ func TestHappLinkRefusesUnsafeURL(t *testing.T) {
 	}
 	if got := happLink("https://link.example.com/sub/0a1b/uri", ""); got != "happ://add/https://link.example.com/sub/0a1b/uri" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// Throne (#295): standard Base64 (Throne refuses the URL-safe form) of "<url>#<name>"; the name has
+// no line breaks and is at most 64 characters; no name gives the URL alone.
+func TestThroneLink(t *testing.T) {
+	decode := func(link string) string {
+		t.Helper()
+		p, ok := strings.CutPrefix(link, "throne://addsub/")
+		if !ok {
+			t.Fatalf("prefix: %q", link)
+		}
+		if strings.ContainsAny(p, "-_") {
+			t.Errorf("URL-safe Base64 in %q", p)
+		}
+		b, err := base64.StdEncoding.DecodeString(p)
+		if err != nil {
+			t.Fatalf("%q: %v", p, err)
+		}
+		return string(b)
+	}
+	// "?>>" in the URL gives "+" and "/" in standard Base64: they must stay.
+	sub := "https://l.example.com/sub/a?>>/uri"
+	if got := decode(throneLink(sub, "My  VPN\nname")); got != sub+"#My VPN name" {
+		t.Errorf("got %q", got)
+	}
+	if p := strings.TrimPrefix(throneLink(sub, "x"), "throne://addsub/"); !strings.ContainsAny(p, "+/") {
+		t.Errorf("want standard Base64 with + or /: %q", p)
+	}
+	if got := decode(throneLink(sub, "")); got != sub {
+		t.Errorf("no name: %q", got)
+	}
+	long := strings.Repeat("я", 100)
+	if got := decode(throneLink(sub, long)); got != sub+"#"+strings.Repeat("я", 64) {
+		t.Errorf("long name: %d bytes", len(got))
+	}
+	def, _ := ClientByID("throne")
+	if def.RunsOn(PlatformIOS) || !def.RunsOn(PlatformAndroid) || !def.RunsOn(PlatformMacOS) || def.OnPlay || def.AppStoreID != "" {
+		t.Errorf("platforms: %+v", def)
+	}
+}
+
+// The picker shows Throne on Android with the app check, and never on an iPhone (#295).
+func TestThroneOnThePicker(t *testing.T) {
+	f := newSelfFx(t, SelfConfig{})
+	mux := http.NewServeMux()
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	cfg := adminCfg
+	cfg.Clients = []ClientChoice{{ID: "throne"}, {ID: "happ"}}
+	(&SelfWeb{self: f.self, link: func() IngressConfig { return cfg }}).Register(mux)
+	_ = f.self.users.RecordLogin("sub-1", "anna@example.test", true, "")
+	sid, _, _ := f.self.users.NewSession("sub-1", time.Hour)
+	d, _, _ := f.store.CreateDevice("Phone", "oidc:sub-1", "sing-box", adminFuture)
+	get := func(ua string) string {
+		req, _ := http.NewRequest("GET", srv.URL+"/me/devices/"+strconv.FormatInt(d.ID, 10), nil)
+		req.Header.Set("User-Agent", ua)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: sid})
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return string(b)
+	}
+	android := get("Mozilla/5.0 (Linux; Android 16; Pixel 9) AppleWebKit/537.36 Chrome/140 Mobile")
+	if !strings.Contains(android, "<span>Throne</span>") || !strings.Contains(android, "package=com.nb4a.throne") ||
+		!strings.Contains(android, "throne://addsub/") {
+		t.Errorf("android: no Throne intent link")
+	}
+	iphone := get("Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1")
+	if !strings.Contains(android, "intent://") {
+		t.Error("android: want an intent link")
+	}
+	if strings.Contains(iphone, "throne://") || strings.Contains(iphone, "<span>Throne</span>") ||
+		!strings.Contains(iphone, "<span>Happ</span>") {
+		t.Errorf("iphone: Throne must not show")
 	}
 }

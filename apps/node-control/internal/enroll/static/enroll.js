@@ -17,7 +17,7 @@
   var SEEN_MS = DAY;
   var DEFAULT_DAYS = 90;
   var LINK_TTL = 86400;
-  var CLIENTS = ['karing', 'sing-box', 'clash', 'shadowrocket', 'stash', 'happ']; // the catalog of clients.go
+  var CLIENTS = ['karing', 'sing-box', 'clash', 'shadowrocket', 'stash', 'happ', 'throne']; // the catalog of clients.go
   var CLIENT_KEY = 'enrollClient';
   var FILTERS = [['active', 'Active'], ['expiring', 'Expiring soon'], ['never', 'Never used'], ['revoked', 'Revoked'], ['all', 'All']];
   var COLUMNS = 8;

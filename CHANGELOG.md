@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control: Throne in the client catalog (#295). `client: "throne"` makes a device with the `uri` format. The app picker shows a Throne button on Android, Windows, macOS and Linux (Throne has no iOS app), with the import link `throne://addsub/<standard Base64 of URL#name>`. On Android the button checks for the app (`com.nb4a.throne`); Throne is not on Google Play, so a site gives its download link in `clients[].install.android`.
+
 ## 0.16.1 - 2026-11-11
 
 ### Fixed

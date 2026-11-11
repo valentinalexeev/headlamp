@@ -116,6 +116,31 @@ var Catalog = []ClientDef{
 			PlatformIOS, PlatformMacOS, PlatformAndroid, PlatformWindows, PlatformLinux,
 		},
 		link: happLink},
+	// Throne (#295), a sing-box client for desktop and Android; there is no iOS app. It is not on
+	// Google Play, so it has no default Android store link.
+	{ID: "throne", Label: "Throne", Format: FormatURIList, Landing: true,
+		AndroidPackage: "com.nb4a.throne",
+		Platforms:      []string{PlatformAndroid, PlatformWindows, PlatformMacOS, PlatformLinux},
+		link:           throneLink},
+}
+
+// maxThroneName bounds the subscription name in a Throne link.
+const maxThroneName = 64
+
+// throneLink is "throne://addsub/" and the standard Base64 (with "+", "/" and padding; Throne
+// refuses URL-safe Base64) of "<subscription URL>#<name>". Throne reads the URL as it is and the
+// name after the first "#" (https://throneproj.github.io/advanced/deeplinks/). The subscription
+// URL has no "#", so the split is exact. Line breaks leave the name, which is also shortened.
+func throneLink(subURL, name string) string {
+	name = strings.Join(strings.Fields(name), " ")
+	if r := []rune(name); len(r) > maxThroneName {
+		name = string(r[:maxThroneName])
+	}
+	payload := subURL
+	if name != "" {
+		payload += "#" + name
+	}
+	return "throne://addsub/" + base64.StdEncoding.EncodeToString([]byte(payload))
 }
 
 // happLink is "happ://add/" and the plain subscription URL. Happ reads the URL without decoding,

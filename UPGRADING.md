@@ -9,6 +9,11 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## 0.16.1
+
+No action required. Deploy the new node-control and funnel-ingress images (Go 1.27.4). The fix of #288 also
+removes the need for the manual `hs_user_id` reset after you delete a headscale user of a person.
+
 ## 0.16.0
 
 ### Action required

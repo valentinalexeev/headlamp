@@ -128,6 +128,12 @@ func TestParseAppStoreID(t *testing.T) {
 		}
 	}
 	for _, c := range Catalog {
+		if !c.RunsOn(PlatformIOS) {
+			if c.AppStoreID != "" {
+				t.Errorf("%s: no iOS app, but an App Store id", c.ID)
+			}
+			continue
+		}
 		if !appStoreIDRe.MatchString(c.AppStoreID) {
 			t.Errorf("%s: catalog App Store id %q", c.ID, c.AppStoreID)
 		}

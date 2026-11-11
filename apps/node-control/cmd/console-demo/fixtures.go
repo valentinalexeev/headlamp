@@ -250,19 +250,21 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 	})
 	// The modules before Fleet, for its navigation rule; set once the list is built.
 	var beforeFleet []core.Module
+	tsk := tasks.New(env, src)
 	mods := []core.Module{
 		tailnet.New(src, tracked),
 		nm,
 		enr,
 		pol,
 		fun,
-		tasks.New(env, src),
+		tsk,
 		servemod.New(env, client),
 		access.New(env),
 		fleet.New(fleet.Deps{Others: func() []core.Module { return beforeFleet },
 			Nodes: src, Headscale: client, TailscalePin: "1.104.5",
 			Bridges: bridges(enr),
-			Funnel:  funnelStatus(fun)}),
+			Funnel:  funnelStatus(fun),
+			Runners: runnerAPIs(tsk), Strict: core.CompatStrict(env)}),
 	}
 	beforeFleet = mods[:len(mods)-1]
 	others := slices.Clone(mods)
@@ -1002,5 +1004,18 @@ func funnelStatus(fun core.Module) func() (funnel.IngressStatus, bool) {
 			return f.Ingress()
 		}
 		return funnel.IngressStatus{}, false
+	}
+}
+
+// runnerAPIs is the runner API version of each task runner, from the tasks module, for the fleet
+// view (#300).
+func runnerAPIs(tsk core.Module) func() map[string]tasks.RunnerAPI {
+	return func() map[string]tasks.RunnerAPI {
+		if t, ok := tsk.(interface {
+			RunnerAPIs() map[string]tasks.RunnerAPI
+		}); ok {
+			return t.RunnerAPIs()
+		}
+		return nil
 	}
 }

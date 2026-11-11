@@ -44,3 +44,10 @@ func (e Env) List(key string) []string {
 	}
 	return out
 }
+
+// CompatStrict is COMPAT_STRICT (#300): "true" makes node-control refuse a component whose
+// interface version is
+// outside its compatibility matrix (no credential push to the agent, 409 to the funnel ingress, no
+// task for the
+// runner). Anything else, and unset, is warn only: the default.
+func CompatStrict(env Env) bool { return env.Getenv("COMPAT_STRICT") == "true" }

@@ -11,15 +11,18 @@
     fail_msg: "ingress-agent: only x86_64 and aarch64 bridges are supported (got {{ ansible_facts.architecture }})."
     quiet: true
 
-# The build stamps the repo VERSION and the commit into the binary (#195): `ingress-agent --version`, /v1/info and
-# the console fleet view show it. The commit is the last one that changed the agent source, not HEAD: an
-# unrelated commit must not change the binary and restart the agent. Outside a git checkout it is left out.
+# The build stamps a version and the commit into the binary (#195): `ingress-agent --version`, /v1/info and the
+# console fleet view show it. Both come from the last commit that changed the agent source, not HEAD (#300): the
+# repo VERSION at that commit and its short hash. A release that did not touch the agent then builds the same
+# binary, the copy below reports no change, and the agent is not restarted. Outside a git checkout: the VERSION
+# file, without a commit.
 - name: Work out the agent version
   ansible.builtin.shell:
     cmd: |
       set -eu
-      v=$(cat ../../VERSION 2>/dev/null || echo dev)
       c=$(git log -1 --format=%h --abbrev=7 -- . 2>/dev/null || true)
+      v=$( { [ -n "$c" ] && git show "$c:VERSION" 2>/dev/null; } || cat ../../VERSION 2>/dev/null || echo dev)
+      v=${v%%[[:space:]]*}
       if [ -n "$c" ] && [ -n "$(git status --porcelain -- . 2>/dev/null)" ]; then c="$c-dirty"; fi
       echo "$v${c:++$c}"
     chdir: "{{ ingress_agent_src | realpath }}"

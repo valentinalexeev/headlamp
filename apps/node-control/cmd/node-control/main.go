@@ -122,13 +122,14 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 	})
 	// The modules before Fleet, for its navigation rule; set once the list is built.
 	var beforeFleet []core.Module
+	tsk := tasks.New(env, src)
 	mods := []core.Module{
 		tailnet.New(src, tracked, tailnet.WithKeyExpiry(hsClient.APIKeyExpiry), tailnet.WithKeyViewers(keyViewers(env))),
 		nm,
 		enr,
 		pol,
 		fun,
-		tasks.New(env, src),
+		tsk,
 		// Serve (#117): on with SERVE_DB. It reads nodes uncached, so a new replica answers DNS within one refresh.
 		servemod.New(env, hsClient),
 		// Access (#123): roles and grants stored by the UI, on with ADMIN_DB or REDIS_URL.
@@ -137,7 +138,8 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		// every bridge agent.
 		fleet.New(fleet.Deps{Others: func() []core.Module { return beforeFleet },
 			Nodes: src, Headscale: hsClient, Bridges: bridges(enr),
-			Funnel: funnelStatus(fun)}),
+			Funnel:  funnelStatus(fun),
+			Runners: runnerAPIs(tsk), Strict: core.CompatStrict(env)}),
 	}
 	beforeFleet = mods[:len(mods)-1]
 	// Overview is last: it counts the navigation of everything before it.
@@ -259,5 +261,18 @@ func funnelStatus(fun core.Module) func() (funnel.IngressStatus, bool) {
 			return f.Ingress()
 		}
 		return funnel.IngressStatus{}, false
+	}
+}
+
+// runnerAPIs is the runner API version of each task runner, from the tasks module, for the fleet
+// view (#300).
+func runnerAPIs(tsk core.Module) func() map[string]tasks.RunnerAPI {
+	return func() map[string]tasks.RunnerAPI {
+		if t, ok := tsk.(interface {
+			RunnerAPIs() map[string]tasks.RunnerAPI
+		}); ok {
+			return t.RunnerAPIs()
+		}
+		return nil
 	}
 }

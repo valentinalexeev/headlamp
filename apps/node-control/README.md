@@ -1027,6 +1027,10 @@ If more than one headscale user has the email, node-control does not make the de
 
 A person who enrolled before 0.15.2 keeps the user that node-control recorded. To merge such a person, move the nodes and delete the extra user in headscale.
 
+node-control uses the recorded user only while it is still in headscale (#288). If you delete it, the next device of the person does the lookup above again and records the result. The log then has `step=headscale_user cause=user_not_found`. Before 0.16.1, the person got "Something went wrong" until you set `hs_user_id` to `0` in `OIDC_DB` by hand.
+
+A failed self-enrolment writes the step and a safe cause to the log, for example `step=pre_auth_key cause=create_failed`. It never writes text from headscale.
+
 ### App picker
 
 `/me/devices/{id}` shows one button for each app of `clients` in `enroll.json` (all apps of the catalog without the key). It shows the page only for an active device of the signed-in person.

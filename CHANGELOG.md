@@ -6,7 +6,11 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Fixed
 
+<<<<<<< HEAD
 - node-control Activity: self-enrolled people show by their email, not by `oidc:<subject>` (#290). This is for the actor of self-enrolment, self-revoke and invitation use, and in the detail of a lock, an unlock and an owner tailnet grant. The audit log keeps the identifier, because an email can change. Locks, unlocks and invitations (made, withdrawn, used) now show in Activity at all; before, the log had them, but the page left them out.
+=======
+- node-control self-enrolment: a person whose recorded headscale user was deleted (for example a duplicate removed by hand, the #253 workaround) could not add a device again; every try showed "Something went wrong" (#288). node-control now checks that the recorded user is still in headscale. If it is not, it clears the record and finds or makes the right user. A failed step now writes the step and a safe cause to the log (`step=headscale_user cause=user_not_found`), never text from headscale.
+>>>>>>> 3d71496 (fix(node-control): find the headscale user again when the recorded one was deleted (#288))
 
 ### Security
 

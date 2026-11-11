@@ -177,7 +177,13 @@ func (s *SelfWeb) page(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *SelfWeb) fail(w http.ResponseWriter, err error) {
-	slog.Warn("self-enrolment request failed", "error_type", errType(err))
+	var se *StepError
+	if errors.As(err, &se) {
+		slog.Warn("self-enrolment request failed", "step", se.Step, "cause", se.Cause,
+			"error_type", errType(se.Err))
+	} else {
+		slog.Warn("self-enrolment request failed", "error_type", errType(err))
+	}
 	s.render(w, http.StatusInternalServerError, meView{Error: "Something went wrong. Try again later."})
 }
 

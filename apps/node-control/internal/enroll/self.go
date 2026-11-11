@@ -24,6 +24,17 @@ type SelfHeadscale interface {
 	ExpireNode(ctx context.Context, id uint64) error
 }
 
+// StepError is a failed step of self-enrolment with a fixed, safe name of the step and the cause,
+// for the log (#288). Err is kept for errors.Is and errors.As but is never logged: it can hold
+// text from headscale.
+type StepError struct {
+	Step, Cause string
+	Err         error
+}
+
+func (e *StepError) Error() string { return e.Step + ": " + e.Cause }
+func (e *StepError) Unwrap() error { return e.Err }
+
 // Refresher re-checks a person at the issuer (oidc.Provider.Refresh).
 type Refresher interface {
 	Refresh(ctx context.Context, refreshToken, subject, groupsClaim string) (oidc.Identity, error)
@@ -174,11 +185,11 @@ func (s *Self) Enrol(ctx context.Context, sub, name, client string, link Ingress
 	}
 	hsID, err := s.hsUser(ctx, u)
 	if err != nil {
-		return Enrolment{}, fmt.Errorf("headscale user: %w", err)
+		return Enrolment{}, err
 	}
 	key, err := s.hs.CreatePreAuthKey(ctx, hsID, nil, s.cfg.KeyTTL, false, false)
 	if err != nil {
-		return Enrolment{}, fmt.Errorf("pre-auth key: %w", err)
+		return Enrolment{}, &StepError{Step: "pre_auth_key", Cause: "create_failed", Err: err}
 	}
 	exp := s.store.Clock()().Add(s.cfg.DeviceTTL).Unix()
 	d, secret, err := s.store.CreateDevice(name, ownerOf(sub), client, exp)
@@ -257,15 +268,28 @@ func hsProviderID(issuer, sub string) string {
 //  3. when the issuer said that the email is verified: the one user with that email
 //     (more than one: refuse);
 //  4. else a new user oidc-<hash>.
+//
+// The recorded user is used only while it is still in headscale (#288). A deleted user (for
+// example a duplicate removed by hand, the #253 workaround) clears the record, and the steps
+// above find or make the right one.
 func (s *Self) hsUser(ctx context.Context, u SelfUser) (uint64, error) {
-	if u.HSUserID != 0 {
-		return u.HSUserID, nil
-	}
-	name := hsUserName(u.Subject)
 	users, err := s.hs.ListUsers(ctx)
 	if err != nil {
-		return 0, err
+		return 0, &StepError{Step: "headscale_user", Cause: "list_failed", Err: err}
 	}
+	if u.HSUserID != 0 {
+		for _, x := range users {
+			if x.ID == u.HSUserID {
+				return u.HSUserID, nil
+			}
+		}
+		slog.Warn("the recorded headscale user of a person is gone; looking it up again",
+			"step", "headscale_user", "cause", "user_not_found", "user_id", u.HSUserID)
+		if err := s.users.SetHSUser(u.Subject, 0); err != nil {
+			return 0, &StepError{Step: "headscale_user", Cause: "store_failed", Err: err}
+		}
+	}
+	name := hsUserName(u.Subject)
 	var id uint64
 	if pid := hsProviderID(s.issuer, u.Subject); pid != "" {
 		for _, x := range users {
@@ -299,11 +323,14 @@ func (s *Self) hsUser(ctx context.Context, u SelfUser) (uint64, error) {
 	if id == 0 {
 		cu, err := s.hs.CreateUser(ctx, name, "", u.Email)
 		if err != nil {
-			return 0, err
+			return 0, &StepError{Step: "headscale_user", Cause: "create_failed", Err: err}
 		}
 		id = cu.ID
 	}
-	return id, s.users.SetHSUser(u.Subject, id)
+	if err := s.users.SetHSUser(u.Subject, id); err != nil {
+		return 0, &StepError{Step: "headscale_user", Cause: "store_failed", Err: err}
+	}
+	return id, nil
 }
 
 // RevokeOwn revokes one of the person's own devices.

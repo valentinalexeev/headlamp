@@ -9,6 +9,31 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## Unreleased (0.18.0)
+
+### Optional
+
+- **Tailnet names through bridges** (#286): to let bridge clients with a tailnet grant reach tailnet services by name,
+  do these steps. See "Tailnet DNS module" in the node-control README.
+  1. Set `TAILNET_DNS_DB` on node-control, for example `/var/lib/tailscale/dns.db`. Or set `TAILNET_DNS_REDIS=1`
+     with `REDIS_URL`.
+  2. Grant `dns.admin` to an operator in the admin policy.
+  3. Add a policy rule that lets the bridge tag reach node-control on TCP port 53.
+  4. Run the `ingress-agent` role on each bridge, so that the agent accepts the resolver.
+  5. Deploy node-control.
+
+  Check: `GET /dns/state` shows `listening: true` and a `bridge` entry. After the next sync, a granted client opens a
+  tailnet service by its name.
+
+  Without `TAILNET_DNS_DB` or `TAILNET_DNS_REDIS=1`, nothing changes.
+- **Tailnet DNS records for all devices** (#286), compose stack only: node-control can write its records into the file
+  of headscale's `dns.extra_records_path`. Do the steps of "Tailnet DNS (optional)" in
+  `examples/compose/control/README.md`. The new `compose.yaml` mounts `${DATA_DIR}/dns` into headscale and
+  node-control. The mount alone changes nothing.
+
+  **CAUTION:** headscale does not start when `dns.extra_records_path` names a file that does not exist. Create the
+  file with `[]` before you set it.
+
 ## 0.17.0
 
 No action required. Deploy the new node-control image.

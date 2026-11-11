@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
@@ -65,7 +66,23 @@ type rig struct {
 	dns *servedns.Server
 }
 
-func newRig(t *testing.T) *rig {
+// backend is the store env of a rig: SQLite by default.
+type backend func(t *testing.T) map[string]string
+
+func sqliteEnv(t *testing.T) map[string]string {
+	return map[string]string{"TAILNET_DNS_DB": filepath.Join(t.TempDir(), "dns.db")}
+}
+
+func redisEnv(t *testing.T) map[string]string {
+	mr := miniredis.RunT(t)
+	return map[string]string{"TAILNET_DNS_REDIS": "1", "REDIS_URL": "redis://" + mr.Addr()}
+}
+
+var backends = map[string]backend{"sqlite": sqliteEnv, "redis": redisEnv}
+
+func newRig(t *testing.T) *rig { return newRigWith(t, sqliteEnv) }
+
+func newRigWith(t *testing.T, be backend) *rig {
 	t.Helper()
 	p, _ := authz.NewPolicy(authz.Config{
 		Grants: []authz.Grant{{Subject: "owner@", Roles: []string{"owner"}}, {Subject: "viewer@", Roles: []string{"viewer"}}},
@@ -78,8 +95,11 @@ func newRig(t *testing.T) *rig {
 		{Name: "llm-proxy.example.com", Addr: netip.MustParseAddr("100.64.0.20")},
 		{Name: "public.example.com", Addr: netip.MustParseAddr("192.0.2.1")}, // not a tailnet address: skipped
 	}}}
-	env := core.MapEnv(map[string]string{"TAILNET_DNS_DB": filepath.Join(t.TempDir(), "dns.db"), "SERVE_ZONE": zone,
-		"TAILNET_DNS_LISTEN": "off"})
+	envMap := map[string]string{"SERVE_ZONE": zone, "TAILNET_DNS_LISTEN": "off"}
+	for k, v := range be(t) {
+		envMap[k] = v
+	}
+	env := core.MapEnv(envMap)
 	hs := &fakeHS{nodes: []headscale.Node{
 		{GivenName: "nas", IPAddresses: []string{"100.64.0.30", "fd7a:115c:a1e0::30"}, Online: true, Tags: []string{"tag:nas"}},
 		{GivenName: "llm-a", IPAddresses: []string{"100.64.0.41"}, Online: true, Tags: []string{"tag:llm-proxy"}},
@@ -160,7 +180,12 @@ func TestMirrorsExtraRecordsAndMagicDNS(t *testing.T) {
 }
 
 func TestRecordLifecycle(t *testing.T) {
-	r := newRig(t)
+	for name, be := range backends {
+		t.Run(name, func(t *testing.T) { testRecordLifecycle(t, newRigWith(t, be)) })
+	}
+}
+
+func testRecordLifecycle(t *testing.T, r *rig) {
 	// a viewer may not write
 	if c, _ := r.do("POST", "/dns/records", ipViewer, map[string]any{"name": "x.example.com", "addresses": []string{"100.64.0.5"}}); c != http.StatusForbidden {
 		t.Errorf("viewer create: %d", c)
@@ -276,5 +301,54 @@ func TestHeadscaleFailureKeepsAnswers(t *testing.T) {
 	}
 	if c, b := r.do("GET", "/dns/state", ipViewer, nil); c != 200 || !strings.Contains(string(b), "headscale") {
 		t.Errorf("state does not report the error: %s", b)
+	}
+}
+
+// The backend is chosen by TAILNET_DNS_DB or TAILNET_DNS_REDIS=1; REDIS_URL alone does not turn the module on.
+func TestBackendSelection(t *testing.T) {
+	mr := miniredis.RunT(t)
+	url := "redis://" + mr.Addr()
+	for _, c := range []struct {
+		env    map[string]string
+		on     bool
+		errSub string
+	}{
+		{map[string]string{"REDIS_URL": url}, false, ""},
+		{map[string]string{"REDIS_URL": url, "TAILNET_DNS_REDIS": "0"}, false, ""},
+		{map[string]string{"REDIS_URL": url, "TAILNET_DNS_REDIS": "1"}, true, ""},
+		{map[string]string{"TAILNET_DNS_REDIS": "1"}, false, "needs REDIS_URL"},
+		{map[string]string{"TAILNET_DNS_REDIS": "yes", "REDIS_URL": url}, false, "must be 1 or 0"},
+		{map[string]string{"TAILNET_DNS_REDIS": "1", "REDIS_URL": url,
+			"TAILNET_DNS_DB": filepath.Join(t.TempDir(), "x.db")}, false, "not both"},
+	} {
+		p, _ := authz.NewPolicy(authz.Config{Grants: []authz.Grant{{Subject: "owner@", Roles: []string{"owner"}}}})
+		old := authz.SetDefault(p)
+		m := New(core.MapEnv(c.env), &fakeHS{}, nil)
+		err := m.Register(&core.Routes{Admin: core.NewMux(), Env: core.MapEnv(c.env),
+			Tailnet: authz.NewFakeTailnet(nil), Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		authz.SetDefault(old)
+		if c.errSub != "" {
+			if err == nil || !strings.Contains(err.Error(), c.errSub) {
+				t.Errorf("%v: err %v", c.env, err)
+			}
+			continue
+		}
+		if err != nil || m.Enabled() != c.on {
+			t.Errorf("%v: on=%v err=%v", c.env, m.Enabled(), err)
+		}
+		_ = m.Stop(context.Background())
+	}
+}
+
+func TestRedisKeys(t *testing.T) {
+	mr := miniredis.RunT(t)
+	r := newRigWith(t, func(*testing.T) map[string]string {
+		return map[string]string{"TAILNET_DNS_REDIS": "1", "REDIS_URL": "redis://" + mr.Addr(), "FLY_APP_NAME": "nc"}
+	})
+	if c, b := r.do("POST", "/dns/records", ipOwner, map[string]any{"name": "x.example.com", "node": "nas"}); c != http.StatusCreated {
+		t.Fatalf("%d %s", c, b)
+	}
+	if !mr.Exists("nc:dns:records") || !mr.Exists("nc:dns:audit") {
+		t.Errorf("keys: %v", mr.Keys())
 	}
 }

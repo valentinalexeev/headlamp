@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Security
+
+- Go 1.27.4 for node-control and funnel-ingress (GO-2026-6859 in `net/http`, fixed in 1.27.4). The images, the CI test job and `make vulncheck` use it.
+
 ## 0.16.0 - 2026-11-10
 
 ### Added

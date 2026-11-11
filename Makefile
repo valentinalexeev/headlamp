@@ -196,8 +196,8 @@ ACTIONLINT_VERSION   := 1.7.7
 DOCKERFILES          := $(shell git ls-files '*Dockerfile*')
 # git dir mounted into the golangci-lint container so --new-from-rev works in worktrees too
 GIT_COMMON_DIR       := $(abspath $(shell git rev-parse --git-common-dir))
-# govulncheck scans with the toolchain the images ship (FROM golang:1.27.3 in the Dockerfiles)
-GO_VULN_TOOLCHAIN    ?= go1.27.3
+# govulncheck scans with the toolchain the images ship (FROM golang:1.27.4 in the Dockerfiles)
+GO_VULN_TOOLCHAIN    ?= go1.27.4
 
 # Caches of the golangci-lint container: docker volumes by default. With LINT_CACHE_DIR=<dir> (CI) they are host
 # directories, so actions/cache can keep them between runs.

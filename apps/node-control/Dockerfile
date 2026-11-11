@@ -7,7 +7,7 @@ ARG TSVERSION=1.104.5
 # VERSION is the headlamp release the image is built from (the repo's VERSION file, passed by CI). The console shows it.
 ARG VERSION=dev
 
-FROM golang:1.27.3-alpine AS build
+FROM golang:1.27.4-alpine AS build
 ARG TSVERSION
 ARG VERSION
 WORKDIR /src

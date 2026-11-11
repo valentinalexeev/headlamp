@@ -1421,6 +1421,7 @@ address of the name.
 |---|---|
 | `TAILNET_DNS_DB` | The path of the SQLite database. It turns the module on. Put it on the state volume. |
 | `TAILNET_DNS_REDIS` | `1` keeps the records in the shared Redis of `REDIS_URL` and turns the module on. No volume is necessary. Do not set it together with `TAILNET_DNS_DB`. `REDIS_URL` alone does not turn the module on. |
+| `TAILNET_DNS_EXTRA_RECORDS_FILE` | Optional. The absolute path of the headscale `dns.extra_records_path` file. node-control writes its records into it (see "Give tailnet devices the records"). The name must end in `.json`, and its directory must exist. |
 | `TAILNET_DNS_REDIS_KEY` | The key prefix in Redis. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:dns`. The records are in the hash `<prefix>:records`, and the audit log is in the list `<prefix>:audit`. |
 | `TAILNET_DNS_REFRESH` | How often the answers follow the nodes and the netmap. The default is `15s`. The range is `2s` to `10m`. |
 | `TAILNET_DNS_LISTEN` | `off` turns off the DNS listener (for tests). |
@@ -1442,27 +1443,60 @@ The module needs a policy that gives `dns.admin` to a user. Without it, node-con
 WARNING: Without the policy rule of step 2, xray cannot resolve the names in the list. A lookup of these names fails,
 and the names never go to the public resolvers.
 
-### Give tailnet devices a record
+### Give tailnet devices the records
 
-Tailnet devices ask node-control for a record name only when headscale sends that name to node-control with split
-DNS. `GET /dns/state` shows the lines in `split`. Add them to `headscale.yaml`:
+headscale has no API for DNS. node-control can give its records to headscale in two ways.
+
+#### The records file
+
+This is the recommended way. Use it when node-control and headscale share a directory, for example on the compose
+stack. Then node-control writes its records into the file of `dns.extra_records_path`. When the file changes,
+headscale reads it again and sends the records to all tailnet devices. Each device then resolves the names itself,
+also when node-control stops. To set it up, do these steps:
+
+1. Create the file with an empty list, for example `printf '[]\n' > /srv/headlamp/data/dns/extra-records.json`.
+2. Mount its directory into headscale (read only) and into node-control (read and write).
+3. In `headscale.yaml`, set `dns.extra_records_path` to the path of the file in headscale.
+4. Set `TAILNET_DNS_EXTRA_RECORDS_FILE` to the path of the file in node-control.
+5. Restart headscale and node-control.
+
+**CAUTION:** headscale does not start when the file does not exist. Do step 1 before step 3.
+
+**CAUTION:** Mount the directory, not the file. node-control replaces the file with a new file. A mount of the file
+keeps the old file, and headscale does not see the change.
+
+**CAUTION:** node-control writes the full file. It removes all other records from it. Put static records in
+`dns.extra_records` of `headscale.yaml`.
+
+node-control writes one record for each name and address, with the type `A` or `AAAA`. It writes the file only when
+the records change. A failed refresh does not change the file. `GET /dns/state` shows `extra_records_file`, the time
+of the last write and the last error.
+
+NOTE: The resolver of a tailnet device gives one address of each type for a name. With a `tag` target, a device
+thus gets one node, and node-control gives all of them. When that node goes offline, it leaves the file at the next
+refresh. A name with no online node leaves the file, and the device then gets the public answer of the name, if
+there is one.
+
+#### Split DNS
+
+Use it when node-control and headscale do not share a directory, for example on Fly.io. Then
+`GET /dns/state` shows a `split` line for each record. Add the lines to `headscale.yaml`, and restart headscale:
 
 ```yaml
 dns:
   nameservers:
     split:
-      llm-proxy.example.com:
+      proxy.example.com:
         - 100.64.0.1
 ```
 
-A record can replace an `extra_records` entry of headscale. Then you change it with the API, and headscale needs no
-restart.
+With split DNS, devices send these names to node-control. When node-control stops, the names do not resolve.
 
 ### API
 
 | Route | Permission | What it does |
 |---|---|---|
-| `GET /dns/state` | `dns.view` | The server, the base domain, the serve zone, each record with its current answer, the `extra_records` names, the `split` lines, the resolver for bridges and the last error |
+| `GET /dns/state` | `dns.view` | The server, the base domain, the serve zone, each record with its current answer, the `extra_records` names, the records file and its last write, the `split` lines (without the records file), the resolver for bridges and the last error |
 | `POST /dns/records` | `dns.admin` | Add a record. The body is `{"name", "addresses" or "node" or "tag", "note"}`. |
 | `PUT /dns/records/{name}` | `dns.admin` | Change the target or the note of a record. A record has no rename. |
 | `DELETE /dns/records/{name}` | `dns.admin` | Remove a record |

@@ -55,6 +55,9 @@ services:
       - ./config/headscale.yaml:/config/headscale.yaml:ro
       - ./config/acl.json:/config/acl.json:ro
       - ${DATA_DIR:-/srv/headlamp/data}/headscale:/data
+      # Tailnet DNS records (#286), optional: node-control writes the file, headscale reads it when
+      # dns.extra_records_path is set. A directory, not the file: node-control replaces the file by rename.
+      - ${DATA_DIR:-/srv/headlamp/data}/dns:/dns:ro
     healthcheck:
       # No curl in the distroless image: ask headscale itself (over its unix socket).
       test: ["CMD", "headscale", "health"]
@@ -74,6 +77,8 @@ services:
     volumes:
       - ${DATA_DIR:-/srv/headlamp/data}/node-control:/var/lib/tailscale
       - ./config/node-control:/srv/app:ro
+      # Tailnet DNS records (#286), optional: TAILNET_DNS_EXTRA_RECORDS_FILE=/dns/extra-records.json
+      - ${DATA_DIR:-/srv/headlamp/data}/dns:/dns
     depends_on:
       headscale:
         condition: service_healthy

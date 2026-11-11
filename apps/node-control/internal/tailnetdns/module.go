@@ -80,6 +80,8 @@ type Module struct {
 	zone, baseEnv string // SERVE_ZONE and SERVE_BASE_DOMAIN, normalised
 	refresh       time.Duration
 	listen        bool
+	// extra publishes the managed records to headscale's extra_records_path file; nil: off.
+	extra *extraFile
 
 	mu  sync.Mutex // serialises record changes
 	cur struct {
@@ -157,6 +159,12 @@ func (m *Module) Register(r *core.Routes) error {
 	m.zone = servedns.Normalize(m.env.Getenv("SERVE_ZONE"))
 	m.baseEnv = servedns.Normalize(m.env.Getenv("SERVE_BASE_DOMAIN"))
 	m.listen = m.env.Getenv("TAILNET_DNS_LISTEN") != "off"
+	if p := m.env.Getenv("TAILNET_DNS_EXTRA_RECORDS_FILE"); p != "" {
+		if err := checkExtraPath(p); err != nil {
+			return err
+		}
+		m.extra = &extraFile{path: p}
+	}
 	m.refresh = 15 * time.Second
 	if v := m.env.Getenv("TAILNET_DNS_REFRESH"); v != "" {
 		d, err := time.ParseDuration(v)
@@ -282,7 +290,14 @@ func (m *Module) Refresh(ctx context.Context) {
 		if rerr != nil {
 			errs = append(errs, "store: "+rerr.Error())
 		} else {
-			m.dns.SetSlot(servedns.SlotRecords, servedns.NewNames(answers(recs, nodes)))
+			t := servedns.NewNames(answers(recs, nodes))
+			m.dns.SetSlot(servedns.SlotRecords, t)
+			// Only after a full rebuild: a failed source never empties the file.
+			if m.extra != nil {
+				if werr := m.extra.write(extraContent(t), m.now()); werr != nil {
+					errs = append(errs, werr.Error())
+				}
+			}
 		}
 	}
 	m.cur.Lock()
@@ -623,11 +638,15 @@ type stateResp struct {
 	Extra      []string     `json:"extra_records"` // the extra_records names answered (from the netmap)
 	// Split is the dns.nameservers.split block for headscale: tailnet devices then ask node-control for the managed
 	// names.
-	Split     map[string][]string `json:"split"`
-	Bridge    *Bridge             `json:"bridge,omitempty"`
-	CanAdmin  bool                `json:"can_admin"`
-	Refreshed time.Time           `json:"refreshed"`
-	Error     string              `json:"error,omitempty"`
+	Split  map[string][]string `json:"split"`
+	Bridge *Bridge             `json:"bridge,omitempty"`
+	// ExtraFile is the headscale extra_records_path file that node-control writes; empty: not configured.
+	ExtraFile        string     `json:"extra_records_file,omitempty"`
+	ExtraFileWritten *time.Time `json:"extra_records_file_written,omitempty"`
+	ExtraFileError   string     `json:"extra_records_file_error,omitempty"`
+	CanAdmin         bool       `json:"can_admin"`
+	Refreshed        time.Time  `json:"refreshed"`
+	Error            string     `json:"error,omitempty"`
 }
 
 func (m *Module) state(w http.ResponseWriter, r *http.Request) {
@@ -646,7 +665,22 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 		out.Server = "tcp://" + self.String() + ":53"
 	}
 	out.CanAdmin = authz.Can(authz.LoginFrom(r.Context()), authz.P(authz.FeatureDNS, authz.LevelAdmin), authz.Allowed{})
+	if m.extra != nil {
+		out.ExtraFile = m.extra.path
+		at, ferr := m.extra.status()
+		if !at.IsZero() {
+			out.ExtraFileWritten = &at
+		}
+		out.ExtraFileError = ferr
+	}
 	t := m.dns.Slot(servedns.SlotRecords)
+	// The managed records come back from headscale as extra records when node-control writes the file: list them
+	// once, under records.
+	managed := map[string]bool{}
+	for _, rec := range recs {
+		managed[rec.Name] = true
+	}
+	out.Extra = slices.DeleteFunc(out.Extra, func(n string) bool { return managed[n] })
 	for _, rec := range recs {
 		v := recordView{Record: rec, Answer: []string{}}
 		if t != nil {
@@ -657,7 +691,8 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		out.Records = append(out.Records, v)
-		if self.IsValid() {
+		// With the file, headscale already sends the records to devices: no split line is needed.
+		if self.IsValid() && m.extra == nil {
 			out.Split[rec.Name] = []string{self.String()}
 		}
 	}

@@ -55,9 +55,12 @@ type obj = map[string]any
 // directGeoSite are geodata list names whose destinations leave from this host in auto mode.
 // exitDNS are the
 // resolvers xray uses for its own lookups, reached through via-exit (empty: DefaultExitDNS).
-// The base is not changed.
+// tdns is the tailnet resolver (#286); nil: none. The base is not changed.
 func Render(base []byte, creds []Cred,
-	directGeoIP, directGeoSite, exitDNS []string) ([]byte, error) {
+	directGeoIP, directGeoSite, exitDNS []string, tdns *TailnetDNS) ([]byte, error) {
+	if err := tdns.Validate(); err != nil {
+		return nil, fmt.Errorf("tailnet DNS: %w", err)
+	}
 	for _, e := range append(append([]string{}, directGeoIP...), directGeoSite...) {
 		if !listEntry.MatchString(e) {
 			return nil, fmt.Errorf("invalid direct list entry: %q", e)
@@ -96,7 +99,7 @@ func Render(base []byte, creds []Cred,
 
 	// Domain destinations must resolve before the block rule.
 	routing["domainStrategy"] = "IPOnDemand"
-	dnsRule, err := setDNS(cfg, directGeoSite, exitDNS)
+	dnsRule, err := setDNS(cfg, directGeoSite, exitDNS, tdns.normalized())
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +163,12 @@ func modeRules(creds []Cred, directGeoIP, directGeoSite []string) []any {
 // Names on the direct site lists resolve with the system resolver (their traffic leaves from
 // this host, so the local answer is the right one); skipFallback keeps every other name off
 // it. All other lookups use exitDNS (empty: DefaultExitDNS).
-func setDNS(cfg obj, directGeoSite, exitDNS []string) (obj, error) {
+//
+// The tailnet names (#286) come first: node-control answers them over the tailnet, reached through the same
+// via-exit SOCKS (its tailscaled routes a tailnet address over the tailnet). skipFallback keeps other names off this
+// server, finalQuery keeps these names off every other server (a failed lookup fails, it never goes to the public
+// resolver), and expectedIPs drops an answer that is not a tailnet address.
+func setDNS(cfg obj, directGeoSite, exitDNS []string, tdns *TailnetDNS) (obj, error) {
 	if len(exitDNS) == 0 {
 		exitDNS = DefaultExitDNS
 	}
@@ -168,6 +176,10 @@ func setDNS(cfg obj, directGeoSite, exitDNS []string) (obj, error) {
 		return nil, fmt.Errorf("base config has no outbound tagged %s", ExitOut)
 	}
 	var servers []any
+	if tdns != nil {
+		servers = append(servers, obj{"address": tdns.Server, "domains": toAny(tdns.Domains),
+			"skipFallback": true, "finalQuery": true, "expectedIPs": tailnetIPs})
+	}
 	if len(directGeoSite) > 0 {
 		servers = append(servers, obj{"address": "localhost",
 			"domains": prefixed("geosite:", directGeoSite), "skipFallback": true})
@@ -264,6 +276,14 @@ func addClients(in obj, mk func(Cred) obj, creds []Cred) {
 		clients = []any{}
 	}
 	settings["clients"] = clients
+}
+
+func toAny(xs []string) []any {
+	out := make([]any, len(xs))
+	for i, x := range xs {
+		out[i] = x
+	}
+	return out
 }
 
 func prefixed(p string, xs []string) []any {

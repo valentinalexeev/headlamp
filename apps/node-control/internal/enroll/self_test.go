@@ -29,6 +29,7 @@ type fakeHS struct {
 	nodes   []headscale.Node
 	expired map[uint64]bool
 	fail    error
+	listErr error // ListUsers fails with it (#288)
 }
 
 func (h *fakeHS) CreateUser(_ context.Context, name, _, _ string) (headscale.User, error) {
@@ -41,6 +42,9 @@ func (h *fakeHS) CreateUser(_ context.Context, name, _, _ string) (headscale.Use
 func (h *fakeHS) ListUsers(context.Context) ([]headscale.User, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.listErr != nil {
+		return nil, h.listErr
+	}
 	return append([]headscale.User(nil), h.users...), nil
 }
 func (h *fakeHS) CreatePreAuthKey(_ context.Context, uid uint64, _ []string, ttl time.Duration, eph, reuse bool) (headscale.PreAuthKey, error) {

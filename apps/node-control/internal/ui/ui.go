@@ -63,8 +63,8 @@ func Handler() http.Handler {
 	})
 }
 
-// Font returns an embedded .woff2 font by its file name, for the public pages of the enrolment listener, which
-// cannot reach /_ui/. Nil for any other name.
+// Font returns an embedded .woff2 font by its file name, for the public pages
+// of the enrolment listener, which cannot reach /_ui/. Nil for any other name.
 func Font(file string) []byte {
 	if path.Ext(file) != ".woff2" || strings.ContainsAny(file, "/\\") || path.Clean(file) != file {
 		return nil

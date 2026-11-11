@@ -92,7 +92,8 @@ func (s *SelfWeb) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /i/{token}", s.invite)
 }
 
-// serveStyle and serveFont serve the style of the public pages. They hold no secret, so a browser may keep them.
+// serveStyle and serveFont serve the style of the public pages.
+// They hold no secret, so a browser may keep them.
 func serveStyle(w http.ResponseWriter, _ *http.Request) {
 	staticHeaders(w, "text/css; charset=utf-8")
 	_, _ = w.Write(selfCSS)

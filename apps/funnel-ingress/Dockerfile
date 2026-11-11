@@ -9,7 +9,7 @@ ARG TSVERSION=1.104.5
 # fleet view shows it (#195).
 ARG VERSION=dev
 
-FROM golang:1.27.3-alpine AS build
+FROM golang:1.27.4-alpine AS build
 ARG TSVERSION
 ARG VERSION
 WORKDIR /src

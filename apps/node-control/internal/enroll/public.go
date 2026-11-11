@@ -44,8 +44,10 @@ const landingTemplate = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Open in {client}</title>
 <link rel="stylesheet" href="/s/style.css">
-</head><body><main class="center"><div class="brand"><span class="lamp" aria-hidden="true"></span>headlamp</div>
-<p>Tap the button to add the profile in {client}.</p><p><a class="btn" href="{href}">Open in {client}</a></p></main></body></html>
+</head><body><main class="center">` +
+	`<div class="brand"><span class="lamp" aria-hidden="true"></span>headlamp</div>
+<p>Tap the button to add the profile in {client}.</p>` +
+	`<p><a class="btn" href="{href}">Open in {client}</a></p></main></body></html>
 `
 
 // pyEscape is Python's html.escape(s, quote=True).

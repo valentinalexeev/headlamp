@@ -1,0 +1,23 @@
+{
+  "comment": "Interface versions between headlamp components (#300). node-control checks what each part reports against these ranges. Change an interface version, and its range here, in the same PR as the interface.",
+  "interfaces": {
+    "agent-api": {
+      "between": ["node-control", "ingress-agent"],
+      "current": 1,
+      "accepted": {"min": 1, "max": 1},
+      "covers": ["apps/ingress-agent/internal/agent/server.go", "apps/ingress-agent/internal/agent/info.go"]
+    },
+    "funnel-api": {
+      "between": ["node-control", "funnel-ingress"],
+      "current": 1,
+      "accepted": {"min": 1, "max": 1},
+      "covers": ["apps/funnel-ingress/internal/controlsync/report.go", "apps/funnel-ingress/internal/controlsync/source.go"]
+    },
+    "runner-api": {
+      "between": ["node-control", "task-runner"],
+      "current": 1,
+      "accepted": {"min": 1, "max": 1},
+      "covers": ["apps/task-runner/internal/runner/server.go"]
+    }
+  }
+}

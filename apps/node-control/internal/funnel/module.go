@@ -122,7 +122,8 @@ func (m *Module) Register(r *core.Routes) error {
 	// The module gate is view; the admin listener's Authorizer checks each route's exact level.
 	human := authz.Gate(r.Tailnet, authz.P(authz.FeatureFunnel, authz.LevelView), s.Admins, m.log)
 	machine := authz.TagGate(r.Tailnet, s.IngressTag, m.log)
-	(&ingress{st: st, s: s, outcome: m.outcome, now: m.now, log: m.log}).register(r.Admin, machine)
+	(&ingress{st: st, s: s, outcome: m.outcome, now: m.now, log: m.log,
+		strict: core.CompatStrict(r.Env)}).register(r.Admin, machine)
 	m.registerHuman(r.Admin, human)
 	return nil
 }

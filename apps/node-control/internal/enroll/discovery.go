@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/compat"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 	"tailscale.com/util/dnsname"
 )
@@ -70,6 +71,10 @@ type RegistryConfig struct {
 	AgentURL    string // AGENT_URL, the agent of the first configured ingress without an agent_url
 	LinkHostSet bool   // enroll.json names link_host: discovery needs the shared host
 	Legacy      bool   // the old single-host file: its token is AGENT_TOKEN and nothing else
+	// Strict is COMPAT_STRICT (#300): a discovered bridge whose agent reports an agent API outside
+	// the
+	// compatibility matrix gets no credentials.
+	Strict bool
 	// Agents are ready-made agents by ingress name (tests and the single-agent constructor); an
 	// ingress listed here needs no URL and no token variable.
 	Agents map[string]Agent
@@ -102,6 +107,7 @@ type IngressView struct {
 	// good answer. Empty for a configured bridge and for an agent before 0.16.0.
 	AgentVersion string     `json:"agent_version,omitempty"`
 	XrayVersion  string     `json:"xray_version,omitempty"`
+	AgentAPI     int        `json:"agent_api,omitempty"` // the agent API version (#300)
 	InfoAt       *time.Time `json:"info_at,omitempty"`
 	// What the stored approval pinned, for a discovered bridge that has one. The store keeps these three only
 	// (not the key or short id), so a review of a changed identity can compare these and no more.
@@ -148,11 +154,15 @@ type infoResult struct {
 	// before 0.16.0 does not report them. They are not part of fp: an upgrade needs no new
 	// approval.
 	version, xray string
+	api           int       // the agent API version (#300); 0: an agent before #300
 	at            time.Time // when this answer was read
 }
 
 // maxVersionLen is the longest agent or xray version the fleet view keeps.
 const maxVersionLen = 64
+
+// maxAPIVersion bounds a reported interface version (#300); a bigger number counts as none.
+const maxAPIVersion = 1000
 
 // Registry is the dynamic ingress set. It is safe for concurrent use.
 type Registry struct {
@@ -164,6 +174,7 @@ type Registry struct {
 	configured   []SyncTarget
 	src          headscale.NodeSource
 	getenv       func(string) string
+	strict       bool // COMPAT_STRICT (#300)
 	hc           *http.Client
 	now          func() time.Time
 	discoveryOff string
@@ -187,7 +198,8 @@ type nodeAgent struct {
 // and a variable, never a value.
 func NewRegistry(rc RegistryConfig) (*Registry, error) {
 	r := &Registry{base: rc.Cfg, src: rc.Src, getenv: rc.Getenv, hc: rc.HC, now: rc.Now,
-		probes: map[string]*probe{}, dstate: map[string]*SyncState{}, dagent: map[string]nodeAgent{}, legacy: rc.Legacy}
+		probes: map[string]*probe{}, dstate: map[string]*SyncState{},
+		dagent: map[string]nodeAgent{}, legacy: rc.Legacy, strict: rc.Strict}
 	if r.getenv == nil {
 		r.getenv = func(string) string { return "" }
 	}
@@ -669,9 +681,16 @@ func parseInfo(node string, body []byte) (*infoResult, error) {
 	if err != nil {
 		return nil, errors.New(strings.TrimPrefix(err.Error(), "ENROLL_CONFIG: "))
 	}
+	var api int
+	if v, ok := raw["api"]; ok {
+		_ = json.Unmarshal(v, &api) // anything but a small number counts as none
+		if api < 0 || api > maxAPIVersion {
+			api = 0
+		}
+	}
 	agentVer, _ := rawString(raw["version"])
 	xrayVer, _ := rawString(raw["xray"])
-	return &infoResult{ing: ing, fp: fingerprint(ing),
+	return &infoResult{ing: ing, fp: fingerprint(ing), api: api,
 		version: plainText(agentVer, maxVersionLen), xray: plainText(xrayVer, maxVersionLen)}, nil
 }
 
@@ -811,7 +830,7 @@ func (r *Registry) buildLocked() Current {
 			ing := p.info.ing
 			infos[k] = p.info
 			v.Host, v.Fingerprint = ing.Host, p.info.fp
-			v.AgentVersion, v.XrayVersion = p.info.version, p.info.xray
+			v.AgentVersion, v.XrayVersion, v.AgentAPI = p.info.version, p.info.xray, p.info.api
 			if !p.info.at.IsZero() {
 				at := p.info.at
 				v.InfoAt = &at
@@ -955,7 +974,30 @@ func (r *Registry) discoveredTarget(name string, nodeID uint64, machineKey strin
 		na = nodeAgent{nodeID, machineKey, NewAgentFunc(r.resolverFor(name, nodeID, machineKey), r.getenv(tokenVar(name)), r.hc)}
 		r.dagent[name] = na
 	}
-	return SyncTarget{Name: name, Agent: na.agent, State: st, Ingress: ing}
+	t := SyncTarget{Name: name, Agent: na.agent, State: st, Ingress: ing}
+	if r.strict {
+		t.Refuse = func() string { return r.refusal(name) }
+	}
+	return t
+}
+
+// refusal is why a discovered bridge gets no credentials under COMPAT_STRICT (#300): its agent
+// reported an agent
+// API outside the compatibility matrix. An agent that has not answered yet, or that reports no API
+// version (older
+// than #300), is not refused: strict mode refuses only what is known to be incompatible.
+func (r *Registry) refusal(name string) string {
+	r.mu.Lock()
+	p := r.probes[name]
+	api := 0
+	if p != nil && p.info != nil {
+		api = p.info.api
+	}
+	r.mu.Unlock()
+	if c := compat.Must().Check(compat.AgentAPI, api); c.State == compat.Incompatible {
+		return fmt.Sprintf("agent API %d is %s", api, c.Hint)
+	}
+	return ""
 }
 
 // onlineByIDLocked is the online flag of the tagged node with this id, or nil.

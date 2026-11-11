@@ -92,10 +92,18 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # check-compat compares with the base of the PR
       - name: Tailscale and headscale pins agree
         run: |
           make check-tailscale-pins test-tailscale-pins
           make check-headscale-pin test-headscale-pin
+      - name: An interface change changes the compatibility matrix (#300)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          make test-check-compat
+          if [ -n "$BASE" ] && git cat-file -e "$BASE" 2>/dev/null; then scripts/check-compat.sh "$BASE" HEAD; else scripts/check-compat.sh; fi
 
   go-lint:
     # ADR 0002 checks (#160). New code is strict (--new-from-rev); the full report is warnings only. The Make

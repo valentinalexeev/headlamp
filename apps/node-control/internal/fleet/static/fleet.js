@@ -31,8 +31,17 @@
   }
 
   // bridgeSync: the word and level of a bridge's sync and reachability.
+  // compatWord (#300): an incompatible part outranks every other state of its row.
+  function compatWord(c) {
+    c = hl.obj(c);
+    if (c.state !== 'incompatible') { return null; }
+    return ['crit', 'incompatible: ' + text(c.interface, 20) + ' ' + (Number(c.reported) || 0) + ', ' + text(c.hint, 80)];
+  }
+
   function bridgeSync(b) {
     if (!b.active) { return ['off', 'not active']; }
+    var cw = compatWord(b.compat);
+    if (cw) { return cw; }
     if (b.online === false) { return ['crit', 'offline']; }
     if (b.sync === 'pending') { return ['crit', 'not in sync']; }
     if (b.sync === 'ok' || b.sync === 'empty') { return ['ok', 'in sync']; }
@@ -53,11 +62,24 @@
     els.control.appendChild(row(['headscale', text(d.headscale) || '-',
       d.headscale_error ? hl.status('crit', text(d.headscale_error, 120)) : hl.status('ok', 'answers')]));
     if (d.funnel) {
-      var f = hl.obj(d.funnel), fs;
-      if (f.stale) { fs = hl.status('crit', 'no report since ' + hl.relTime(f.reported_at, now)); }
+      var f = hl.obj(d.funnel), fs, fc = compatWord(f.compat);
+      if (fc) { fs = hl.status(fc[0], fc[1]); }
+      else if (f.stale) { fs = hl.status('crit', 'no report since ' + hl.relTime(f.reported_at, now)); }
       else if (f.errors > 0) { fs = hl.status('warn', f.errors + ' errors in its report'); }
       else { fs = hl.status('ok', 'reported ' + hl.relTime(f.reported_at, now)); }
       els.control.appendChild(row(['funnel ingress', text(f.version) || 'unknown (before 0.16.0)', fs]));
+    }
+    // the task runners that answered a health check, with the runner API they report (#300)
+    hl.arr(d.runners).forEach(function (r) {
+      r = hl.obj(r);
+      var c = hl.obj(r.compat), rc = compatWord(c);
+      var st = rc ? hl.status(rc[0], rc[1]) : c.state === 'ok' ? hl.status('ok', 'compatible') : hl.status('off', 'API unknown');
+      els.control.appendChild(row(['task runner ' + (text(r.node, 63) || text(r.address, 45)),
+        c.reported ? 'runner-api ' + (Number(c.reported) || 0) : '-', st]));
+    });
+    if (els.strict) {
+      els.strict.textContent = d.compat_strict ? 'COMPAT_STRICT is on: node-control refuses an incompatible part.' : '';
+      els.strict.hidden = !d.compat_strict;
     }
 
     var bridges = hl.arr(d.bridges);
@@ -98,12 +120,12 @@
     return { load: load };
   }
 
-  window.hlFleet = { create: create, nodeState: nodeState, bridgeSync: bridgeSync };
+  window.hlFleet = { create: create, nodeState: nodeState, bridgeSync: bridgeSync, compatWord: compatWord };
 
   if (typeof document === 'undefined' || !document.getElementById('fleet-page')) { return; }
   var g = function (id) { return document.getElementById(id); };
   var page = create({ error: g('error'), problems: g('problems'), notes: g('notes'), control: g('control'),
     bridges: g('bridges'), bridgesEmpty: g('bridges-empty'), bridgesTable: g('bridges-table'), pin: g('pin'),
-    nodes: g('nodes') });
+    nodes: g('nodes'), strict: g('strict') });
   hl.poll(page.load, POLL_MS);
 })();

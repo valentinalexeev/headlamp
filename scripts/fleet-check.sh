@@ -44,16 +44,20 @@ else
     ["PART", "NAME", "VERSION", "STATE"],
     ["control", "node-control", (.node_control | v), "running"],
     ["control", "headscale", (.headscale | v), (if .headscale_error then "error" else "ok" end)],
+    def compat: if .compat and .compat.state == "incompatible" then ", INCOMPATIBLE " + (.compat.interface | s) + " " + (.compat.reported | s)
+      elif .compat and .compat.state == "unknown" then ", api unknown" else "" end;
     (if .funnel then ["control", "funnel-ingress", (.funnel.version | v),
-      (if .funnel.stale then "stale" elif .funnel.errors > 0 then "errors" else "ok" end)] else empty end),
+      (if .funnel.stale then "stale" elif .funnel.errors > 0 then "errors" else "ok" end) + (.funnel | compat)] else empty end),
     (.bridges[] | ["bridge", (.name | v), "agent " + (.agent | v) + " xray " + (.xray | v),
       (if .active | not then "not active" elif .online == false then "offline" elif .sync == "pending" then "not in sync"
-       else (.sync | v) end)]),
+       else (.sync | v) end) + compat]),
+    ((.runners // [])[] | ["runner", ((.node // .address) | v), "runner-api " + (.compat.reported | v),
+      (.compat.state | s) + (if .compat.state == "incompatible" then " " + (.compat.hint | s) else "" end)]),
     (.nodes[] | select($all or ((.tags // []) | length > 0)) |
       ["tailscale", (.name | v), (.tailscale | v), (.status | s) + (if .online then "" else ", offline" end)])
     | @tsv' "$T/fleet.json" > "$T/table"
   if command -v column >/dev/null 2>&1; then column -t -s "$(printf '\t')" "$T/table"; else cat "$T/table"; fi
-  echo "tailscale pin: $(jq -r '.tailscale_pin // "-"' "$T/fleet.json")"
+  echo "tailscale pin: $(jq -r '.tailscale_pin // "-"' "$T/fleet.json")$(jq -r 'if .compat_strict then ", COMPAT_STRICT on" else "" end' "$T/fleet.json")"
   jq -r '.notes[]? | "note: " + (tostring | gsub("[^A-Za-z0-9 .:+_/@()-]"; "?"))' "$T/fleet.json"
 fi
 n=$(jq '.problems | length' "$T/fleet.json")

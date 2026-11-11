@@ -47,6 +47,17 @@ run >/dev/null
 if grep -q "$(printf '\033')" "$T/out"; then echo "FAIL escape characters reach the terminal"; fails=$((fails + 1)); else echo "ok   control characters are removed"; fi
 check "--json prints the report" 1 "$(run --json)" '"node_control"'
 
+# #300: compatibility shows on the rows, runners are listed, strict mode in the footer
+echo 200 > "$T/code"
+cat > "$T/body" <<'J'
+{"node_control":"v0.18.0","tailscale_pin":"1.104.5","compat_strict":true,"nodes":[],
+ "bridges":[{"name":"br-2","source":"discovered","online":true,"active":true,"sync":"ok","agent":"0.19.0","compat":{"interface":"agent-api","state":"incompatible","reported":2}}],
+ "funnel":{"version":"0.16.0","reported_at":"2026-11-10T10:00:00Z","stale":false,"errors":0,"compat":{"interface":"funnel-api","state":"unknown"}},
+ "runners":[{"address":"100.64.0.8","node":"runner-1","compat":{"interface":"runner-api","state":"incompatible","reported":5,"hint":"newer than node-control accepts: upgrade node-control"}}],
+ "problems":["bridge br-2: agent-api version 2 is newer"],"notes":[]}
+J
+check "compatibility on the rows" 1 "$(run)" "INCOMPATIBLE agent-api 2" "api unknown" "runner-1" "runner-api 5" "incompatible newer than node-control accepts" "COMPAT_STRICT on"
+
 echo 403 > "$T/code"; echo '{"detail":"no"}' > "$T/body"
 check "no access exits 2" 2 "$(run)" "HTTP 403"
 echo 200 > "$T/code"; echo '<html>' > "$T/body"

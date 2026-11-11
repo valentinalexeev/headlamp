@@ -56,6 +56,7 @@ type Module struct {
 	sessionsTag string
 	sess        *sessionAPI // set with sessionsTag
 
+	runner    Runner                        // set at Start: RunnerAPIs (#300)
 	sessRead  core.SharedRead[sessionsRead] // polls share one read of the runners
 	sessMu    sync.Mutex                    // guards the cached session attention; never held across the read
 	sessAt    time.Time
@@ -335,12 +336,16 @@ func (m *Module) open(ctx context.Context) error {
 		runner = m.newRunner()
 	} else {
 		runner = NewRunnerClient(m.tn, m.port, m.token, nil)
+		if core.CompatStrict(m.env) {
+			runner = NewStrictRunnerClient(m.tn, m.port, m.token, nil)
+		}
 	}
 	eng := NewEngine(Deps{Store: store, Nodes: m.src, Runner: runner, Notifier: notifier,
 		PollEvery: m.pollEvery, Log: m.log, Metrics: m.metrics, RunnerTag: m.tag})
 	done := make(chan struct{})
 	m.mu.Lock()
 	m.store, m.engine, m.closeKV, m.engineDone = store, eng, closeKV, done
+	m.runner = runner
 	m.mu.Unlock()
 	go func() {
 		defer close(done)
@@ -409,6 +414,18 @@ func (m *Module) Stop(ctx context.Context) error {
 	}
 	if closeKV != nil {
 		closeKV()
+	}
+	return nil
+}
+
+// RunnerAPIs is the runner API version each runner last reported at its health check (#300), by
+// tailnet address; nil while the tasks module is off or no runner was asked yet.
+func (m *Module) RunnerAPIs() map[string]RunnerAPI {
+	m.mu.Lock()
+	r := m.runner
+	m.mu.Unlock()
+	if a, ok := r.(RunnerAPIs); ok {
+		return a.APIs()
 	}
 	return nil
 }

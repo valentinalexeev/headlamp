@@ -78,7 +78,7 @@ func (f *pubFx) req(method, path string, ua ...string) *httptest.ResponseRecorde
 	return rec
 }
 
-var hrefRe = regexp.MustCompile(`href="([^"]+)"`)
+var hrefRe = regexp.MustCompile(`<a [^>]*href="([^"]+)"`)
 
 // target is the deep link a client is sent to: the Location of a 302 or the landing page's href.
 func target(t *testing.T, rec *httptest.ResponseRecorder) string {

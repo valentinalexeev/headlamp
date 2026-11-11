@@ -6,8 +6,9 @@
 #
 # Exact paths only: no trailing slash, no other segments, no encoded slashes, no dot-only tokens ("." / "..").
 
-# One-time links and subscriptions (/e/<token>, /sub/<secret>, /sub/<secret>/<format>, #241).
-@enroll path_regexp enroll `^/(e/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}|sub/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}(/(sing-box|clash|stash|uri))?)$`
+# One-time links and subscriptions (/e/<token>, /sub/<secret>, /sub/<secret>/<format>, #241), and the style of the
+# public pages (/s/style.css, /s/fonts/<font>.woff2).
+@enroll path_regexp enroll `^/(e/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}|sub/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,79}(/(sing-box|clash|stash|uri))?|s/style\.css|s/fonts/[a-z0-9-]{1,64}\.woff2)$`
 
 # Self-enrolment with OIDC (#102): the pages of /me and the OIDC login, the app picker, its app pages (#271) and
 # icons, and the invitation links (#241).

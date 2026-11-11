@@ -1,23 +1,9 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Add to an app</title>
-<style>
-body{font:16px/1.5 system-ui,sans-serif;margin:0;background:#f6f7f9;color:#14171a}
-main{max-width:40rem;margin:0 auto;padding:1.5rem}
-h1{font-size:1.4rem;margin:.2em 0 1em}
-section{background:#fff;border:1px solid #dde1e6;border-radius:.6rem;padding:1rem 1.2rem;margin:0 0 1rem}
-.ok{background:#eaf6ee;border-color:#a9d8b8}
-code{word-break:break-all;background:#f1f3f5;padding:.1em .3em;border-radius:.3em}
-.muted{color:#5b6570}
-ul.apps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(9rem,1fr));gap:.8rem}
-ul.apps li{display:flex;flex-direction:column;align-items:center;text-align:center}
-a.app{display:flex;flex-direction:column;align-items:center;gap:.4rem;width:100%;padding:.8rem .4rem;border:1px solid #dde1e6;border-radius:.8rem;color:#14171a;text-decoration:none;font-weight:600}
-a.app:hover,a.app:focus{border-color:#0a66ff}
-a.app img,a.app .badge{width:56px;height:56px;border-radius:12px}
-a.app .badge{display:flex;align-items:center;justify-content:center;background:#0a66ff;color:#fff;font-size:1.6rem}
-.get{font-size:.85rem;margin-top:.3rem}
-a{color:#0a66ff}
-</style></head><body><main>
+<link rel="stylesheet" href="/s/style.css">
+</head><body><main>
+<div class="brand"><span class="lamp" aria-hidden="true"></span>headlamp</div>
 <h1>Add {{.Name}} to an app</h1>
 {{with .Enrolment}}
 <section class="ok"><p><strong>{{$.Name}} is ready.</strong> Choose your app below. You can open this page again from your device list.</p>

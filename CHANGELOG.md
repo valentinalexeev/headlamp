@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Fixed
+
+- node-control Activity: self-enrolled people show by their email, not by `oidc:<subject>` (#290). This is for the actor of self-enrolment, self-revoke and invitation use, and in the detail of a lock, an unlock and an owner tailnet grant. The audit log keeps the identifier, because an email can change. Locks, unlocks and invitations (made, withdrawn, used) now show in Activity at all; before, the log had them, but the page left them out.
+
 ### Security
 
 - Go 1.27.4 for node-control and funnel-ingress (GO-2026-6859 in `net/http`, fixed in 1.27.4). The images, the CI test job and `make vulncheck` use it.

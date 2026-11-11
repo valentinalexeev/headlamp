@@ -4,6 +4,16 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- A compatibility matrix between components (#300). Each interface between node-control and another component has an interface version: `agent-api`, `funnel-api` and `runner-api`, now 1. The ingress agent reports it in `/v1/info` (`api`), the funnel ingress in its state report, the task runner in `/v1/health`. node-control compares it with its embedded matrix (`apps/node-control/internal/compat/compat.json`). An incompatible part is a problem on the Fleet page and an Attention item, and `fleet-check.sh` exits 1. A part that reports no version is a note.
+- `COMPAT_STRICT=true` (default `false`) also makes node-control refuse an incompatible part. The ingress agent gets no credentials, the funnel ingress gets `409`, and the task runner gets no task.
+- CI: `scripts/check-compat.sh` fails a PR that changes an interface without a change of the matrix (or a `compat: unchanged <interface>` line).
+
+### Changed
+
+- The `ingress-agent` role builds the agent with the repo version of the last commit that changed the agent, not of the release. A release that did not change the agent no longer restarts it.
+
 ## 0.17.0 - 2026-11-11
 
 ### Added

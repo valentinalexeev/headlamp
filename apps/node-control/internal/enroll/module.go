@@ -141,7 +141,8 @@ func (m *Module) Register(r *core.Routes) error {
 		dial = HTTPClientFor(r.Tailnet.Dial)
 	}
 	reg, err := NewRegistry(RegistryConfig{Cfg: cfg, Src: m.src, Getenv: m.env.Getenv, HC: dial, Now: m.now,
-		AgentURL: agentURL, LinkHostSet: linkHostSet, Legacy: legacy})
+		AgentURL: agentURL, LinkHostSet: linkHostSet, Legacy: legacy,
+		Strict: core.CompatStrict(m.env)})
 	if err != nil {
 		return err
 	}

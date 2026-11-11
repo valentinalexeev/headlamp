@@ -617,7 +617,7 @@ func TestInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(i)
-	if string(b) != `{"name":"ingress-1","host":"relay.example.com","port":443,"sni":"relay.example.com","public_key":"PUBKEY-fake","short_id":"0123456789abcdef"}` {
+	if string(b) != `{"name":"ingress-1","host":"relay.example.com","port":443,"sni":"relay.example.com","public_key":"PUBKEY-fake","short_id":"0123456789abcdef","api":1}` {
 		t.Errorf("info %s", b)
 	}
 	i, _ = LoadInfo(envOf(with(infoEnv, "INGRESS_PORT", "8443", "INGRESS_SNI", "front.example.com", "INGRESS_HY2_PORT", "443")))

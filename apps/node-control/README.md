@@ -47,6 +47,7 @@ Fly.io, `fly.toml`).
 | `ENROLL_ALLOWED_HOSTS` | Optional for the core. **Required** by the policy module (`POLICY_DB`) and the tasks module (on when `REDIS_URL`, `NODE_CONTROL_STATE_KEY` and `TASKS_RUNNER_TOKEN` are set). Comma-separated Host values that the admin listener accepts. Any other value gets 400. Set it to block DNS rebinding. `*` allows any host (those two modules refuse it). `*.example.com` allows any host that ends in `.example.com` (list `example.com` too for the bare name), as in the Python app. |
 | `ENROLL_DB` | The path of the SQLite database. It enables enrolment. Put it on the state volume: `/var/lib/tailscale/enroll.db`. |
 | `ENROLL_REDIS` | `1` keeps the enrolment data in Redis, not in SQLite, so no volume is necessary (see "Enrolment in Redis"). It turns on enrolment, like `ENROLL_DB`. It needs `REDIS_URL`, `NODE_CONTROL_STATE_KEY`, `ENROLL_CONFIG` and `ENROLL_SECRET_KEY`. The app then does not use `ENROLL_DB`. |
+| `COMPAT_STRICT` | `true` or `false`. The default is `false` (#300). With `true`, node-control refuses a component whose interface version is outside its compatibility matrix. It sends no credentials to such an ingress agent, and answers `409` to such a funnel ingress. Such a task runner gets no task. With `false`, it only warns: on the Fleet page, in Attention and in `fleet-check.sh`. A component that reports no interface version (before 0.18.0) is never refused. See "Compatibility" under "Fleet". |
 | `HEALTH_LISTEN` | Optional, `host:port`, for example `:9001` (#196). Serves only `GET /healthz` on this plain TCP address: `200 {"status":"ok"}` while the embedded tailscale node is `Running`, else `503` with the state. For a platform health check, such as the `[checks]` section of `fly.toml`. The admin app stays on the tailnet only. |
 | `ENROLL_PUBLIC_LISTEN` | Optional, `host:port`, for example `:8081`. With enrolment on, the public enrolment pages (`/e/`, `/sub/`, `/me`, `/oidc/*`) are also served on this plain TCP address, not only on the tailnet port 8081. Use it when a TLS edge on the same host (for example the Caddy of `examples/compose/control`) serves `link_host`, so people can enrol before they have any tunnel. The admin app stays on the tailnet only. Do not publish this port on the host: only the edge may reach it. |
 | `ENROLL_REDIS_KEY` | The key prefix of the enrolment data, `<app>:<name>`. The default is `<app>:enroll`. |
@@ -391,6 +392,20 @@ With `ENROLL_DB` or `ENROLL_REDIS=1`, these are also available: the `/enroll` ad
 - `problems`: what needs action. Examples: a part that does not answer, or an active bridge that is offline or out of sync. Also a funnel ingress that does not report or reports errors. Also a server (tagged node) on a tailscale older than the pin. A person's device on an older tailscale is not a problem: it updates itself. `notes`: worth a look, not a failure.
 
 The Fleet page (`/fleet`, in the configure group) shows the same report. `scripts/fleet-check.sh` prints it as a table and exits 1 when `problems` is not empty (`make fleet-check` in a site repo).
+
+**Compatibility (#300).** node-control compares the interface version that each component reports with its own
+compatibility matrix (see VERSIONING.md, "Interface versions and the compatibility matrix"):
+
+- Each active discovered bridge, the funnel ingress and each task runner gets `compat` in `/fleet.json`. Its `state`
+  is `ok`, `incompatible` or `unknown`, with `reported`, `accepted` and a `hint`.
+- `runners` lists the task runners that answered a health check, with their `compat`.
+- An `incompatible` part is a problem and an Attention item, with the action to take. It is "Waiting", or
+  "At risk" with `COMPAT_STRICT=true`.
+- An `unknown` part (a component before 0.18.0) is a note.
+- `compat_strict` says whether `COMPAT_STRICT` is on.
+
+A component that did not change in a release does not need to be redeployed. The check tells you when the mix that you
+run no longer works together.
 
 Start and stop are idempotent. A provider failure shows as `error` on that node only.
 

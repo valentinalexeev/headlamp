@@ -26,6 +26,10 @@ import (
 // Version is reported by /v1/health.
 const Version = "0.1.0"
 
+// APIVersion is the runner API version this build speaks (#300), reported by /v1/health as "api".
+// node-control checks it against its compatibility matrix.
+const APIVersion = 1
+
 const (
 	maxBody        = 1 << 20
 	maxEnvJSON     = 100_000 // Linux caps a single environment string at 128 KiB
@@ -185,7 +189,8 @@ func (s *Server) health(w http.ResponseWriter) {
 	s.mu.Lock()
 	busy := s.active != nil || s.activeSession != nil
 	s.mu.Unlock()
-	writeJSON(w, 200, map[string]any{"version": Version, "busy": busy, "mem_available_mb": memAvailableMB()})
+	writeJSON(w, http.StatusOK, map[string]any{"version": Version, "api": APIVersion, "busy": busy,
+		"mem_available_mb": memAvailableMB()})
 }
 
 // memAvailableMB reads MemAvailable from /proc/meminfo, -1 when unavailable.

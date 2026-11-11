@@ -113,6 +113,10 @@ type SyncTarget struct {
 	Agent   Agent
 	State   *SyncState
 	Ingress Ingress
+	// Refuse, when set, says why this target gets no push: COMPAT_STRICT and an agent API outside
+	// the
+	// range of the compatibility matrix (#300). "" pushes as usual.
+	Refuse func() string
 }
 
 // CredentialsFor maps the store's base credentials to the credentials of one ingress: every UUID
@@ -293,6 +297,13 @@ func safeCredentials(
 
 // pushTo pushes one target's set and records the outcome in its state.
 func pushTo(ctx context.Context, t SyncTarget, creds []Credential) bool {
+	if t.Refuse != nil {
+		if why := t.Refuse(); why != "" {
+			syncLog(t.Name, "enrolment sync refused: "+why+" (COMPAT_STRICT)")
+			t.State.Failed("incompatible")
+			return false
+		}
+	}
 	if err := t.Agent.PutCredentials(ctx, creds, len(creds) == 0); err != nil {
 		var au *AgentUnavailable
 		if errors.As(err, &au) {

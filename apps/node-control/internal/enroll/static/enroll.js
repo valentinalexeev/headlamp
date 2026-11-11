@@ -129,6 +129,82 @@
 
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
 
+  var OIDC = 'oidc:';
+  var INVITED = 'i:';
+  var INVITE_WORD = { pending: ['ok', 'Waiting'], used: ['off', 'Used'], expired: ['warn', 'Expired'], revoked: ['off', 'Withdrawn'] };
+
+  // groupTree (#287) puts each device and invitation under its person or owner. people and invites are null when
+  // self-enrolment is off. A self-enrolled person (owner "oidc:<subject>") is one group, with the devices of that
+  // owner and the invitations it used or that name its email. An operator-made owner is one group of its devices.
+  // A waiting invitation for an email with no person yet goes to the group "Invited, not signed in yet". Used,
+  // expired and withdrawn invitations show only with the filter "all", waiting ones under "active" and "all". q is a search text (lower case): a group
+  // shows when its label, owner or one of its device names or invitation emails contains it.
+  // Each group: { key, kind: person|owner|invited, label, person, devices: [device], invites: [invite], hidden }.
+  function groupTree(devices, people, invites, filter, nowMs, q) {
+    var groups = {};
+    var byEmail = {};
+    function group(key, kind, label) {
+      if (!groups[key]) { groups[key] = { key: key, kind: kind, label: label, person: null, devices: [], invites: [], all: 0 }; }
+      return groups[key];
+    }
+    hl.arr(people).forEach(function (p) {
+      if (!p || typeof p.owner !== 'string') { return; }
+      var g = group('p:' + p.owner, 'person', hl.plain(p.email, 120) || hl.plain(p.owner, 120));
+      g.person = p;
+      if (p.email) { byEmail[String(p.email).toLowerCase()] = g; }
+    });
+    hl.arr(devices).forEach(function (d) {
+      var owner = typeof d.owner === 'string' ? d.owner : '';
+      var self = owner.indexOf(OIDC) === 0;
+      var label = self ? (hl.plain(d.owner_email, 120) || hl.plain(owner, 120)) : (hl.plain(owner, 120) || 'No owner');
+      var g = group((self ? 'p:' : 'o:') + owner, self ? 'person' : 'owner', label);
+      if (self && d.owner_email && !byEmail[String(d.owner_email).toLowerCase()]) { byEmail[String(d.owner_email).toLowerCase()] = g; }
+      g.all++;
+      if (matches(filter, stateOf(d, nowMs))) { g.devices.push(d); }
+    });
+    hl.arr(invites).forEach(function (inv) {
+      if (!inv) { return; }
+      // A waiting invitation is open work: it shows under Active and All. The other filters are about devices.
+      // Used, expired and withdrawn invitations are history: only under All.
+      if (filter !== 'all' && !(filter === 'active' && inv.state === 'pending')) { return; }
+      var email = String(inv.email || '').toLowerCase();
+      var g = (typeof inv.used_by === 'string' && inv.used_by && groups['p:' + inv.used_by]) || byEmail[email];
+      if (!g) { g = group(INVITED, 'invited', 'Invited, not signed in yet'); }
+      g.invites.push(inv);
+    });
+    var rank = { person: 0, owner: 0, invited: 1 };
+    return Object.keys(groups).map(function (k) { return groups[k]; }).filter(function (g) {
+      // A group with nothing that matches the filter is left out, except a person under the default and "all"
+      // filters: that row is where the person is locked.
+      if (!g.devices.length && !g.invites.length && !(g.person && (filter === 'active' || filter === 'all'))) { return false; }
+      if (!q) { return true; }
+      var hay = [g.label, g.person ? g.person.owner : ''].concat(g.devices.map(function (d) { return d.name + ' ' + d.owner; }),
+        g.invites.map(function (i) { return i.email; })).join(' ').toLowerCase();
+      return hay.indexOf(q) >= 0;
+    }).sort(function (a, b) {
+      return (rank[a.kind] - rank[b.kind]) || (a.label.toLowerCase() < b.label.toLowerCase() ? -1 : a.label.toLowerCase() > b.label.toLowerCase() ? 1 : 0);
+    });
+  }
+
+  // groupCounts: the short summary of a group, so that a closed group hides nothing that needs attention.
+  function groupCounts(g, nowMs) {
+    var parts = [];
+    var n = g.devices.length;
+    if (g.kind !== 'invited') { parts.push(n === 1 ? '1 device' : n + ' devices'); }
+    var attention = g.devices.filter(function (d) { var l = stateOf(d, nowMs).level; return l === 'warn' || l === 'crit'; }).length;
+    if (attention) { parts.push(attention + ' need attention'); }
+    var waiting = g.invites.filter(function (i) { return i.state === 'pending'; }).length;
+    if (waiting) { parts.push(waiting === 1 ? '1 invitation waiting' : waiting + ' invitations waiting'); }
+    return parts.join(', ');
+  }
+
+  // personState: the state word of a self-enrolled person.
+  function personState(p) {
+    if (p.locked) { return { level: 'crit', word: 'Locked' + (p.lock_reason ? ': ' + hl.plain(p.lock_reason, 80) : '') }; }
+    if (p.check_failed) { return { level: 'warn', word: 'Identity provider unreachable at the last check' }; }
+    return { level: 'ok', word: 'Active' };
+  }
+
   // focusKey names the focused control inside box by its data-fk, so a rebuild can give focus back.
 
   // qrOf draws the link as an SVG inside a white box with a quiet zone, in the browser: the link never goes to
@@ -195,7 +271,11 @@
     var st = {
       devices: [], sync: null, ingresses: [], partial: false, loaded: false, failed: false,
       filter: plainFilter(hl.queryParam('filter')), busy: {}, open: null, tableSig: null, chipSig: null,
-      chips: {}, drawer: null
+      chips: {}, drawer: null,
+      // #287: people and invitations (null while self-enrolment is off or not read yet), the search text, and the
+      // open groups (kept in the URL, so a reload and the 15 s refresh keep them)
+      people: null, invites: null, selfOn: false, query: '',
+      openGroups: String(hl.queryParam('open') || '').split(',').filter(function (k) { return k && k.length <= 400; }).slice(0, 200)
     };
     var ctrl = { loadDevices: null };
 
@@ -417,28 +497,208 @@
     function openPanel(d, key) {
       if (st.busy[d.id]) { return; }
       if (st.open && st.open.id === d.id && st.open.key === key) { return; }
-      st.open = { id: d.id, key: key, el: null };
+      st.open = { id: d.id, key: key, el: null, person: d.person || null };
       render(true);
       var cell = st.open && st.open.cell;
       if (!cell) { return; }
-      var panel = key === 'extend' ? openExtend(d, cell) : openConfirm(d, key, cell);
+      var panel = key === 'extend' ? openExtend(d, cell) : key === 'lock' ? openLock(d.person, cell) : openConfirm(d, key, cell);
       st.open.el = panel;
       if (key === 'extend') {
         hl.refocus(panel, 'extend:30');
       }
     }
 
+    // ----- person and invitation actions (#287)
+
+    function personAction(p, path, body) {
+      var key = 'p:' + p.owner;
+      if (st.busy[key]) { return Promise.resolve(); }
+      st.busy[key] = true;
+      setError('');
+      setNotice('');
+      st.open = null;
+      render();
+      return hl.api('POST', '/enroll/people/' + encodeURIComponent(p.subject) + '/' + path, body || {}).then(function (j) {
+        delete st.busy[key];
+        j = hl.obj(j);
+        var who = hl.plain(p.email, 120) || hl.plain(p.owner, 120);
+        if (j.ok === false) { setError(hl.plain(j.detail, 300)); } else { setNotice((path === 'lock' ? 'Locked ' : 'Unlocked ') + who + '.'); }
+        return ctrl.loadPeople();
+      }, function (e) {
+        delete st.busy[key];
+        setError(hl.plain(e && e.message, 200) || 'The request failed.');
+        render();
+      });
+    }
+
+    function openLock(p, td) {
+      var who = hl.plain(p.email, 120) || hl.plain(p.owner, 120);
+      return hl.confirmPanel({
+        title: 'Lock ' + who + '?', object: hl.plain(p.owner, 120),
+        consequence: 'All relay devices of this person are revoked on every bridge at once, their tailnet devices must sign in again, and they cannot sign in to enrol. Unlock lets them sign in, but revoked devices stay revoked.',
+        confirmLabel: 'Lock', cancelLabel: 'Keep', icon: 'ban', into: td,
+        onConfirm: function () { personAction(p, 'lock', { reason: 'locked in the console' }); }, onCancel: closeOpen
+      });
+    }
+
+    function withdrawInvite(inv) {
+      var key = 'inv' + inv.id;
+      if (st.busy[key]) { return; }
+      st.busy[key] = true;
+      setError('');
+      render();
+      hl.api('POST', '/enroll/invites/' + encodeURIComponent(inv.id) + '/revoke', {}).then(function () {
+        delete st.busy[key];
+        setNotice('Withdrew the invitation for ' + hl.plain(inv.email, 120) + '.');
+        return ctrl.loadInvites();
+      }, function (e) {
+        delete st.busy[key];
+        setError(hl.plain(e && e.message, 200) || 'The request failed.');
+        render();
+      });
+    }
+
+    // inviteFor fills the invitation form with the person's email and puts focus on it.
+    function inviteFor(email) {
+      if (!els.inviteEmail) { return; }
+      els.inviteEmail.value = hl.plain(email, 254);
+      if (els.inviteSection) { els.inviteSection.hidden = false; }
+      if (els.inviteDays && els.inviteDays.focus) { els.inviteDays.focus(); }
+    }
+
     function rowAction(d, a) {
       if (a.key === 'link') { doLink(d); } else { openPanel(d, a.key); }
+    }
+
+    // ----- the tree (#287): a group row per person or owner, then its devices and its invitations
+
+    function isOpen(key) {
+      if (st.query) { return true; } // a search opens what it found
+      return st.openGroups.indexOf(key) >= 0;
+    }
+    function toggleGroup(key) {
+      var i = st.openGroups.indexOf(key);
+      if (i >= 0) { st.openGroups.splice(i, 1); } else { st.openGroups.push(key); }
+      hl.setQueryParam('open', st.openGroups.length ? st.openGroups.join(',') : null);
+      render(true);
+    }
+
+    function groupRow(g, t) {
+      var open = isOpen(g.key);
+      var tr = hl.el('tr', 'grp');
+      var head = hl.el('td', 'name');
+      head.setAttribute('colspan', '3');
+      var tog = keyed(hl.el('button', 'btn quiet sm tog'), 'grp:' + g.key);
+      tog.setAttribute('type', 'button');
+      tog.setAttribute('aria-expanded', open ? 'true' : 'false');
+      tog.appendChild(hl.el('span', 'caret', open ? '▾' : '▸'));
+      tog.appendChild(hl.el('span', null, g.label));
+      if (g.person) { tog.setAttribute('title', hl.plain(g.person.owner, 120)); }
+      tog.addEventListener('click', function () { toggleGroup(g.key); });
+      head.appendChild(tog);
+      tr.appendChild(head);
+      var stc = hl.el('td');
+      if (g.person) { var ps = personState(g.person); stc.appendChild(hl.status(ps.level, ps.word)); }
+      tr.appendChild(stc);
+      var info = hl.el('td', 't2');
+      info.setAttribute('colspan', '3');
+      var bits = [groupCounts(g, t)];
+      if (g.person) { bits.push('last sign-in ' + (g.person.last_login ? hl.relTime(new Date(g.person.last_login * 1000).toISOString(), t) : 'never')); }
+      info.textContent = bits.join(' · ');
+      tr.appendChild(info);
+      var act = hl.el('td', 'act');
+      var box = hl.el('div', 'rowbtns');
+      if (g.person && st.selfOn) {
+        var p = g.person;
+        if (p.locked) {
+          box.appendChild(keyed(hl.button('Unlock', 'extend', 'sm quiet', function () { personAction(p, 'unlock'); }), 'unlock:' + g.key));
+        } else {
+          box.appendChild(keyed(hl.button('Lock', 'ban', 'sm quiet', function () { openPanel({ id: g.key, person: p }, 'lock'); }), 'lock:' + g.key));
+          if (p.email) {
+            box.appendChild(keyed(hl.button('Invite device', 'plus', 'sm quiet', function () { inviteFor(p.email); }), 'inv:' + g.key));
+          }
+        }
+      }
+      act.appendChild(box);
+      tr.appendChild(act);
+      return tr;
+    }
+
+    function deviceRow(r) {
+      var d = find(r.id);
+      var tr = hl.el('tr', 'leaf' + (st.open && st.open.id === r.id ? ' sel' : ''));
+      tr.appendChild(hl.el('td', 'name', r.name));
+      var oc = hl.el('td', 't2 clip', r.owner);
+      oc.setAttribute('title', r.ownerId);
+      tr.appendChild(oc);
+      tr.appendChild(hl.el('td', 'mono t2', r.client));
+      var state = hl.el('td');
+      state.appendChild(hl.status(r.level, r.word));
+      tr.appendChild(state);
+      tr.appendChild(hl.el('td', 't2', r.seen));
+      var tc = hl.el('td', 'mono t2', r.traffic);
+      if (r.trafficTitle) { tc.setAttribute('title', r.trafficTitle); }
+      tr.appendChild(tc);
+      tr.appendChild(hl.el('td', 'mono t2', r.exp));
+      var actCell = hl.el('td', 'act');
+      var box = hl.el('div', 'rowbtns');
+      r.actions.forEach(function (a) {
+        var b = keyed(hl.button(a.label, a.icon, 'sm quiet', function () { rowAction(d, a); }), 'act:' + r.id + ':' + a.key);
+        b.disabled = !!st.busy[r.id];
+        box.appendChild(b);
+      });
+      actCell.appendChild(box);
+      tr.appendChild(actCell);
+      return tr;
+    }
+
+    function inviteRow(inv) {
+      var key = 'inv' + inv.id;
+      var tr = hl.el('tr', 'leaf' + (st.open && st.open.id === key ? ' sel' : ''));
+      var who = hl.el('td', 'name');
+      who.appendChild(hl.el('span', 't3', '✉ '));
+      who.appendChild(hl.el('span', null, hl.plain(inv.email, 120)));
+      tr.appendChild(who);
+      tr.appendChild(hl.el('td', 't2', 'Invitation'));
+      tr.appendChild(hl.el('td', 't2 clip', inv.created_by ? 'by ' + hl.plain(inv.created_by, 80) : ''));
+      var w = INVITE_WORD[inv.state] || ['warn', hl.plain(inv.state, 20)];
+      var stc = hl.el('td');
+      stc.appendChild(hl.status(w[0], w[1]));
+      tr.appendChild(stc);
+      tr.appendChild(hl.el('td', 't2', ''));
+      tr.appendChild(hl.el('td', 't2', ''));
+      tr.appendChild(hl.el('td', 'mono t2', inv.expires_at ? fmtDate(inv.expires_at) : ''));
+      var act = hl.el('td', 'act');
+      var box = hl.el('div', 'rowbtns');
+      if (inv.state === 'pending') {
+        var b = keyed(hl.button('Withdraw', 'ban', 'sm quiet', function () { withdrawInvite(inv); }), 'withdraw:' + inv.id);
+        b.disabled = !!st.busy[key];
+        box.appendChild(b);
+      }
+      act.appendChild(box);
+      tr.appendChild(act);
+      return tr;
+    }
+
+    function detailRow(id) {
+      var dr = hl.el('tr');
+      var cell = hl.el('td', 'detail');
+      cell.setAttribute('colspan', String(COLUMNS));
+      dr.appendChild(cell);
+      els.rows.appendChild(dr);
+      st.open.cell = cell;
     }
 
     // render rebuilds the table unless a confirmation or the extension panel is open: that is left as it is until
     // it is answered; closing it renders again. force starts a rebuild for a change the
     // operator made (opening a panel).
     function renderTable(force) {
-      var rows = shownRows();
-      if (st.open && !find(st.open.id)) { st.open = null; }
-      var sig = JSON.stringify([rows, st.filter, st.open && [st.open.id, st.open.key], st.busy]);
+      var t = now();
+      var groups = groupTree(st.devices, st.people, st.invites, st.filter, t, st.query);
+      if (st.open && !st.open.person && String(st.open.id).indexOf('inv') !== 0 && !find(st.open.id)) { st.open = null; }
+      var sig = JSON.stringify([groups.map(function (g) {
+        return [g.key, g.label, g.person, g.invites, g.devices.map(rowModel), isOpen(g.key)];
+      }), st.filter, st.query, st.open && [st.open.id, st.open.key], st.busy, st.selfOn]);
       if (!force && st.open && st.open.el) {
         return;
       }
@@ -447,54 +707,33 @@
       var fk = hl.focusKey(els.rows);
       hl.clear(els.rows);
       if (st.open) { st.open.cell = null; }
-      if (rows.length === 0) {
+      if (groups.length === 0) {
         var tr0 = hl.el('tr');
-        var td0 = hl.el('td', 't2', 'No devices match this filter.');
+        var td0 = hl.el('td', 't2', st.query ? 'Nothing matches this search.' : 'No devices match this filter.');
         td0.setAttribute('colspan', String(COLUMNS));
         tr0.appendChild(td0);
         els.rows.appendChild(tr0);
       }
-      rows.forEach(function (r) {
-        var d = find(r.id);
-        var tr = hl.el('tr', st.open && st.open.id === r.id ? 'sel' : '');
-        tr.appendChild(hl.el('td', 'name', r.name));
-        var oc = hl.el('td', 't2 clip', r.owner);
-        oc.setAttribute('title', r.ownerId);
-        tr.appendChild(oc);
-        tr.appendChild(hl.el('td', 'mono t2', r.client));
-        var state = hl.el('td');
-        state.appendChild(hl.status(r.level, r.word));
-        tr.appendChild(state);
-        tr.appendChild(hl.el('td', 't2', r.seen));
-        var tc = hl.el('td', 'mono t2', r.traffic);
-        if (r.trafficTitle) { tc.setAttribute('title', r.trafficTitle); }
-        tr.appendChild(tc);
-        tr.appendChild(hl.el('td', 'mono t2', r.exp));
-        var actCell = hl.el('td', 'act');
-        var box = hl.el('div', 'rowbtns');
-        r.actions.forEach(function (a) {
-          var b = keyed(hl.button(a.label, a.icon, 'sm quiet', function () { rowAction(d, a); }), 'act:' + r.id + ':' + a.key);
-          b.disabled = !!st.busy[r.id];
-          box.appendChild(b);
+      var rank = { crit: 0, warn: 1, ok: 2, off: 3 };
+      groups.forEach(function (g) {
+        els.rows.appendChild(groupRow(g, t));
+        if (st.open && st.open.id === g.key) { detailRow(g.key); }
+        if (!isOpen(g.key)) { return; }
+        g.devices.map(rowModel).sort(function (a, b) {
+          return (rank[a.level] - rank[b.level]) || (a.expiresAt - b.expiresAt) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+        }).forEach(function (r) {
+          els.rows.appendChild(deviceRow(r));
+          if (st.open && st.open.id === r.id) { detailRow(r.id); }
         });
-        actCell.appendChild(box);
-        tr.appendChild(actCell);
-        els.rows.appendChild(tr);
-        if (st.open && st.open.id === r.id) {
-          var dr = hl.el('tr');
-          var cell = hl.el('td', 'detail');
-          cell.setAttribute('colspan', String(COLUMNS));
-          dr.appendChild(cell);
-          els.rows.appendChild(dr);
-          st.open.cell = cell;
-        }
+        g.invites.forEach(function (inv) { els.rows.appendChild(inviteRow(inv)); });
       });
       hl.refocus(els.rows, fk);
     }
 
     function renderChips() {
-      var sig = st.devices.length ? 'on' : 'off';
-      els.chips.hidden = st.devices.length === 0;
+      var any = st.devices.length > 0 || hl.arr(st.people).length > 0 || hl.arr(st.invites).length > 0;
+      var sig = any ? 'on' : 'off';
+      els.chips.hidden = !any;
       if (sig !== st.chipSig) {
         st.chipSig = sig;
         st.chips = {};
@@ -521,16 +760,22 @@
         active++;
         if (d.last_active > 0 && d.last_active * 1000 >= t - SEEN_MS) { seen++; }
       });
-      return active + ' active, ' + seen + ' seen today';
+      var out = active + ' active, ' + seen + ' seen today';
+      if (st.people && st.people.length) { out += ', ' + (st.people.length === 1 ? '1 person' : st.people.length + ' people'); }
+      var waiting = hl.arr(st.invites).filter(function (i) { return i && i.state === 'pending'; }).length;
+      if (waiting) { out += ', ' + (waiting === 1 ? '1 invitation waiting' : waiting + ' invitations waiting'); }
+      return out;
     }
 
     function render(force) {
       var text = st.loaded ? summary() : '';
       if (st.failed) { text = st.loaded ? text + '. The data may be out of date.' : 'Could not load the devices. Retrying.'; }
       els.sub.textContent = text;
-      els.empty.hidden = !(st.loaded && st.devices.length === 0);
-      els.tablewrap.hidden = st.devices.length === 0;
-      els.foot.hidden = st.devices.length === 0;
+      var any = st.devices.length > 0 || hl.arr(st.people).length > 0 || hl.arr(st.invites).length > 0;
+      els.empty.hidden = !(st.loaded && !any);
+      els.tablewrap.hidden = !any;
+      els.foot.hidden = !any;
+      if (els.search) { els.search.hidden = !any; }
       renderChips();
       renderTable(force);
     }
@@ -904,6 +1149,16 @@
       render();
     };
     ctrl.setFailed = function (f) { st.failed = !!f; render(); };
+    // updatePeople / updateInvites take the lists of /enroll/people and /enroll/invites; null: self-enrolment is off.
+    ctrl.updatePeople = function (list) { st.people = list === null ? null : hl.arr(list); st.selfOn = list !== null; render(); };
+    ctrl.updateInvites = function (list) { st.invites = list === null ? null : hl.arr(list); render(); };
+    ctrl.setQuery = function (q) {
+      st.query = String(q || '').trim().toLowerCase().slice(0, 100);
+      st.open = null;
+      render(true);
+    };
+    ctrl.loadPeople = function () { return Promise.resolve(); };
+    ctrl.loadInvites = function () { return Promise.resolve(); };
     ctrl.openDrawer = openDrawer;
     ctrl.closeDrawer = closeDrawer;
     ctrl.state = st;
@@ -924,16 +1179,31 @@
     var $ = function (id) { return document.getElementById(id); };
     var ctrl = mount({
       sub: $('sub'), chips: $('chips'), error: $('error'), notice: $('notice'), syncnote: $('syncnote'), empty: $('empty'),
-      tablewrap: $('tablewrap'), rows: $('rows'), foot: $('foot'), traffic: $('trafficth'), drawer: $('drawer')
+      tablewrap: $('tablewrap'), rows: $('rows'), foot: $('foot'), traffic: $('trafficth'), drawer: $('drawer'),
+      search: $('search'), inviteSection: $('invites'), inviteEmail: $('inviteemail'), inviteDays: $('invitedays')
     });
+    var search = $('searchinput');
+    if (search) { search.addEventListener('input', function () { ctrl.setQuery(search.value); }); }
 
+    // People and invitations (#287): a 404 means self-enrolment is off, and the tree shows only devices.
+    function loadPeople() {
+      return hl.api('GET', '/enroll/people').then(function (j) { ctrl.updatePeople(hl.arr(hl.obj(j).people)); },
+        function (e) { if (e && e.status === 404) { ctrl.updatePeople(null); } });
+    }
+    function loadInvites() {
+      return hl.api('GET', '/enroll/invites').then(function (j) { ctrl.updateInvites(hl.arr(hl.obj(j).invites)); },
+        function (e) { if (e && e.status === 404) { ctrl.updateInvites(null); } });
+    }
+    ctrl.loadPeople = loadPeople;
+    ctrl.loadInvites = loadInvites;
     function load() {
-      return hl.api('GET', '/enroll/devices').then(function (j) {
+      return Promise.all([hl.api('GET', '/enroll/devices').then(function (j) {
         ctrl.update(j);
         ctrl.setFailed(false);
-      }, function () { ctrl.setFailed(true); });
+      }, function () { ctrl.setFailed(true); }), loadPeople(), loadInvites()]);
     }
     ctrl.loadDevices = load;
+    hl.devicesCtrl = ctrl; // the invitation form reloads the tree after it makes one
     var poller = hl.poll(load, POLL_MS);
     if (document.hidden) { load(); }
     document.addEventListener('visibilitychange', function () { if (!document.hidden) { poller.now(); } });
@@ -942,7 +1212,7 @@
 
   hl.devices = {
     stateOf: stateOf, actionsFor: actionsFor, mount: mount, init: init, endOfDay: endOfDay, defaultExpiry: defaultExpiry,
-    extendTo: extendTo, lastClient: lastClient
+    extendTo: extendTo, lastClient: lastClient, groupTree: groupTree, groupCounts: groupCounts
   };
   init();
 })();

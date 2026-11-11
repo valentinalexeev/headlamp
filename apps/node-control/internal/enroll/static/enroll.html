@@ -15,50 +15,38 @@
       </div>
       <div class="chips" id="chips" role="group" aria-label="Filter devices" hidden></div>
     </div>
+    <div class="row" id="search" hidden>
+      <label class="field">Search people, owners and devices
+        <input class="input" id="searchinput" type="search" maxlength="100" autocomplete="off">
+      </label>
+    </div>
 
     <div class="note crit" id="error" role="alert" hidden></div>
     <div class="note plain" id="notice" role="status" hidden></div>
     <section class="note crit" id="syncnote" role="status" hidden></section>
 
     <div class="note plain" id="empty" hidden>
-      <h2>No devices yet</h2>
+      <h2>No devices or people yet</h2>
       <p class="t2">Enrol a device to give its owner a one-time link that adds the profile to the phone.</p>
     </div>
 
     <div class="tw" id="tablewrap" hidden>
       <table>
-        <thead><tr><th>Device</th><th>Owner</th><th>Client</th><th>State</th><th title="When the device's traffic last grew, seen every 5 minutes. Not a connection log.">Last active</th><th id="trafficth">Traffic</th><th>Expires</th><th><span class="sr">Actions</span></th></tr></thead>
+        <thead><tr><th>Person, device or invitation</th><th>Owner</th><th>Client</th><th>State</th><th title="When the device's traffic last grew, seen every 5 minutes. Not a connection log.">Last active</th><th id="trafficth">Traffic</th><th>Expires</th><th><span class="sr">Actions</span></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
-    <p class="t3 small" id="foot" hidden>Actions follow the device's state: a link only before first use, Delete only after revoke. Traffic is sampled every 5 minutes and is not a connection log.</p>
-    <section id="people" hidden>
-      <h2>People</h2>
-      <p class="t2">People who enrol their own devices after they sign in with the identity provider. Lock removes all their access at once.</p>
-      <div class="note crit" id="peopleerror" role="alert" hidden></div>
-      <div class="tw">
-        <table>
-          <thead><tr><th>Person</th><th>State</th><th>Active devices</th><th>Last sign-in</th><th>Last check</th><th><span class="sr">Actions</span></th></tr></thead>
-          <tbody id="peoplerows"></tbody>
-        </table>
-      </div>
-    </section>
+    <p class="t3 small" id="foot" hidden>Each person or owner is one row: open it for its devices and invitations. Actions follow the device's state: a link only before first use, Delete only after revoke. Traffic is sampled every 5 minutes and is not a connection log.</p>
     <section id="invites" hidden>
-      <h2>Invitations</h2>
-      <p class="t2">An invitation lets one person add one device. The person signs in with the identity provider; the device is made only when the verified email of the account is the invitation's. The person then picks the app.</p>
+      <h2>Invite a person</h2>
+      <p class="t2">An invitation lets one person add one device. The person signs in with the identity provider; the device is made only when the verified email of the account is the invitation's. The person then picks the app. The invitation shows under the person above, or under "Invited, not signed in yet".</p>
       <div class="note crit" id="inviteerror" role="alert" hidden></div>
-      <form id="inviteform" class="rowbtns">
-        <label>Email <input id="inviteemail" type="email" maxlength="254" required></label>
-        <label>Valid for days <input id="invitedays" type="number" min="1" max="90" value="7"></label>
-        <button type="submit">Invite</button>
+      <form id="inviteform" class="row">
+        <label class="field">Email <input class="input" id="inviteemail" type="email" maxlength="254" required></label>
+        <label class="field">Valid for days <input class="input" id="invitedays" type="number" min="1" max="90" value="7"></label>
+        <button class="btn" type="submit">Invite</button>
       </form>
       <div class="note" id="invitemade" hidden></div>
-      <div class="tw">
-        <table>
-          <thead><tr><th>Invited</th><th>State</th><th>Valid until</th><th>By</th><th><span class="sr">Actions</span></th></tr></thead>
-          <tbody id="inviterows"></tbody>
-        </table>
-      </div>
     </section>
     <section id="tailnet" data-page="devices" hidden>
       <h2>Tailnet</h2>
@@ -76,7 +64,6 @@
 </div>
 <script src="/enroll/qrcode.js" defer></script>
 <script src="/enroll/static/enroll.js" defer></script>
-<script src="/enroll/static/people.js" defer></script>
 <script src="/enroll/static/invites.js" defer></script>
 <script src="/enroll/static/tailnet.js" defer></script>
 </body>

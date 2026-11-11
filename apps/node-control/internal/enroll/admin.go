@@ -45,9 +45,6 @@ var enrollHTML []byte
 //go:embed static/enroll.js
 var enrollJS []byte
 
-//go:embed static/people.js
-var peopleJS []byte
-
 //go:embed static/invites.js
 var invitesJS []byte
 
@@ -107,7 +104,6 @@ func (a *Admin) State() *SyncState { return a.reg.First().State }
 func (a *Admin) Register(mux *core.Mux) {
 	mux.HandleFunc("GET /enroll", asset("text/html; charset=utf-8", enrollHTML))
 	mux.HandleFunc("GET /enroll/static/enroll.js", asset("text/javascript; charset=utf-8", enrollJS))
-	mux.HandleFunc("GET /enroll/static/people.js", asset("text/javascript; charset=utf-8", peopleJS))
 	mux.HandleFunc("GET /enroll/static/invites.js",
 		asset("text/javascript; charset=utf-8", invitesJS))
 	mux.HandleFunc("GET /enroll/qrcode.js", asset("text/javascript; charset=utf-8", qrcodeJS))

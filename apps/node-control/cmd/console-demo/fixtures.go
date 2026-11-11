@@ -707,7 +707,19 @@ func (w *world) seedPerson(ctx context.Context, must mustFn, expires int64) erro
 	_, err = must("creating device phone-7", http.StatusOK, "POST", "/enroll/devices",
 		map[string]any{"name": "phone-7", "owner": enroll.OwnerPrefix + demoSubject,
 			"client": "sing-box", "expires_at": expires})
-	return err
+	if err != nil {
+		return err
+	}
+	// Two waiting invitations (#287): one for dana, who shows them under her row, and one for a
+	// person who has not signed in yet.
+	const inviteDays = 7
+	for _, email := range []string{"dana@example.net", "erik@example.net"} {
+		if _, err := must("inviting "+email, http.StatusOK, "POST", "/enroll/invites",
+			map[string]any{"email": email, "days": inviteDays}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedBridges approves the discovered bridge unless the scenario wants it waiting.

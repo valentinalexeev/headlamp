@@ -861,6 +861,22 @@ show it on an iPhone. Its import link is `throne://addsub/<Base64>`: the standar
 - An empty list is an error. To show all apps, remove the key.
 - Which apps your people can get depends on the app stores that they can use. Keep the list and the store links in your private repo.
 
+## The Devices page tree
+
+The Devices page (#287) shows one tree. Each row of the first level is one of these:
+
+- A person who enrolled themselves through the identity provider. The row shows the email, the state, and the last sign-in. It has **Lock** or **Unlock**, and **Invite device**.
+- An owner that an operator typed when they enrolled a device. The row has no lock: the owner is only a label.
+- "Invited, not signed in yet": the waiting invitations for emails that have no person yet.
+
+Open a row to see its devices and its invitations. A device row has the same columns and actions as before (**New link**, **Extend**, **Revoke**, **Delete**). An invitation row shows its state, its end date and who made it, with **Withdraw** while it waits.
+
+- A closed row shows its counts: devices, how many need attention, and waiting invitations.
+- The filters (**Active**, **Expiring soon**, **Never used**, **Revoked**, **All**) apply to the devices. A waiting invitation shows under **Active** and **All**. A used, expired or withdrawn invitation shows only under **All**.
+- The search box finds people, owners, device names and invitation emails, and opens the rows that it finds.
+- The open rows are in the URL (`?open=`). A reload and the refresh keep them.
+- Without self-enrolment, the tree has only the owners and their devices.
+
 ## Console shell
 
 One shell wraps every admin page. The shell has these parts:
@@ -1089,12 +1105,13 @@ An invitation lets one person add one device. It is bound to one email address (
 
 To invite a person, do these steps:
 
-1. On the Devices page, go to the **Invitations** section.
+1. On the Devices page, go to the **Invite a person** form. For a person who is already in the tree, select **Invite device** on their row: the form gets their email.
 2. Type the email address of the person.
-3. Optional: type a device name. The default is `Invited device`.
-4. Optional: type the number of days that the invitation is valid, 1 to 90. The default is 7.
-5. Select **Invite**. The section shows the link `https://<link_host>/i/<token>` one time only.
-6. Send the link to the person.
+3. Optional: type the number of days that the invitation is valid, 1 to 90. The default is 7.
+4. Select **Invite**. The form shows the link `https://<link_host>/i/<token>` one time only.
+5. Send the link to the person.
+
+The invitation shows in the tree: under the person, or under "Invited, not signed in yet" until the person signs in. **Withdraw** on its row cancels a waiting invitation.
 
 Then this occurs:
 
@@ -1124,7 +1141,7 @@ API:
 
 ### Locks
 
-On the Devices page, the **People** section lists the people who enrolled themselves. **Lock** does these steps at once:
+On the Devices page, each person who enrolled themselves is one row of the tree (see "The Devices page tree"). **Lock** on that row does these steps at once:
 
 1. It refuses new sign-ins and ends the person's sessions.
 2. It revokes all relay devices of the person and pushes the change to every bridge.
@@ -1137,7 +1154,7 @@ The app also checks each person again at the identity provider, every `OIDC_RECH
 - The identity provider refuses the refresh token, for example because it disabled the person.
 - The groups claim no longer has an allowed group.
 
-If the identity provider does not answer, the app locks nobody. The People section shows the failed check, and the app tries again. If the identity provider gives no refresh token, the app cannot do this check. Then only a lock in the console removes access.
+If the identity provider does not answer, the app locks nobody. The person's row shows the failed check, and the app tries again. If the identity provider gives no refresh token, the app cannot do this check. Then only a lock in the console removes access.
 
 API: `GET /enroll/people`, `POST /enroll/people/{subject}/lock` (body `{"reason": "..."}`, optional) and `POST /enroll/people/{subject}/unlock`. Lock and unlock need `enroll.admin`.
 

@@ -9,6 +9,18 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## 0.17.0
+
+No action required. Deploy the new node-control image.
+
+### Optional
+
+- **Throne** (#295): the app picker now offers Throne on Android, Windows, macOS and Linux. If your `enroll.json` has
+  a `clients` list, add `{"id": "throne"}` to offer it. Throne for Android is not on Google Play: give its download
+  link in `install.android`, for example the GitHub release page of Throne for Android.
+- **Devices page** (#287): the People and Invitations tables are now one tree with the devices. Tell your operators.
+  Nothing in `enroll.json` or the APIs changed.
+
 ## 0.16.1
 
 No action required. Deploy the new node-control and funnel-ingress images (Go 1.27.4). The fix of #288 also

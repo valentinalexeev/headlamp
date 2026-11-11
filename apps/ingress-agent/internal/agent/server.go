@@ -115,8 +115,8 @@ func (a *Applier) install(ctx context.Context, cfg []byte) error {
 	return nil
 }
 
-// Apply makes the set desired, without a tailnet resolver: it returns true when something changed. The set is saved
-// only after xray restarted.
+// Apply makes the set desired, without a tailnet resolver: it returns true when something changed.
+// The set is saved only after xray restarted.
 func (a *Applier) Apply(ctx context.Context, desired []Cred) (bool, error) {
 	return a.ApplyDNS(ctx, desired, nil)
 }

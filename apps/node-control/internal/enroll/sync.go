@@ -295,8 +295,8 @@ func safeCredentials(
 	return cfg.credentialsWith(t.Ingress, base, plan)
 }
 
-// pushTo pushes one target's set, and its tailnet resolver when it has one (#286), and records the outcome in its
-// state.
+// pushTo pushes one target's set, and its tailnet resolver when it has one (#286), and records the
+// outcome in its state.
 func pushTo(ctx context.Context, t SyncTarget, creds []Credential, dns *TailnetDNS) bool {
 	if t.Refuse != nil {
 		if why := t.Refuse(); why != "" {

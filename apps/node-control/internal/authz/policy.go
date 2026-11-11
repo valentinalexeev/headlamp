@@ -30,7 +30,10 @@ const (
 )
 
 // Features lists every feature, in display order.
-var Features = []Feature{FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel, FeatureServe, FeatureDNS, FeatureAudit, FeatureAdmin}
+var Features = []Feature{
+	FeatureOverview, FeatureNodes, FeatureEnroll, FeatureTasks, FeaturePolicy, FeatureFunnel,
+	FeatureServe, FeatureDNS, FeatureAudit, FeatureAdmin,
+}
 
 // wildcard lists the features "*" stands for: every feature except admin.
 func wildcard() []Feature {

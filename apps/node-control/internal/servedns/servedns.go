@@ -1,15 +1,16 @@
-// Package servedns answers DNS for the serve zone (#117) and the tailnet names (#286). headscale sends the zone to
-// node-control with dns.nameservers.split, and node-control answers on its tailnet address. The zone must not be
-// under the MagicDNS base_domain: clients answer every name under it themselves and never ask a split resolver.
-// Bridges ask node-control for every tailnet name, MagicDNS names included: their xray resolver is not a tailnet
-// client.
+// Package servedns answers DNS for the serve zone (#117) and the tailnet names (#286). headscale
+// sends the zone to node-control with dns.nameservers.split, and node-control answers on its
+// tailnet address. The zone must not be under the MagicDNS base_domain: clients answer every name
+// under it themselves and never ask a split resolver. Bridges ask node-control for every tailnet
+// name, MagicDNS names included: their xray resolver is not a tailnet client.
 //
-// A Server answers from several tables, in a fixed order (Slots): the first table that holds a name, or whose zone
-// contains it, gives the answer. A name in no table is refused.
+// A Server answers from several tables, in a fixed order (Slots): the first table that holds a
+// name, or whose zone contains it, gives the answer. A name in no table is refused.
 //
 // The answers come from a Table that the serve module replaces as a whole. A name is either exact
-// ("grafana.svc.example.com") or a wildcard ("*.apps.svc.example.com"), which matches one or more labels in front of
-// its suffix. An exact name wins over a wildcard; a longer wildcard wins over a shorter one.
+// ("grafana.svc.example.com") or a wildcard ("*.apps.svc.example.com"), which matches one or more
+// labels in front of its suffix. An exact name wins over a wildcard; a longer wildcard wins over a
+// shorter one.
 package servedns
 
 import (
@@ -77,8 +78,9 @@ func NewTable(zone string, recs []Record) *Table {
 
 func (t *Table) inZone(n string) bool { return t.zone != "" && strings.HasSuffix(n, "."+t.zone) }
 
-// NewNames builds a table of exact names in any domain (#286): managed records and the headscale extra_records.
-// It holds only the names it has: any other name is outside it. Wildcards are dropped.
+// NewNames builds a table of exact names in any domain (#286): managed records and the headscale
+// extra_records. It holds only the names it has: any other name is outside it. Wildcards are
+// dropped.
 func NewNames(recs []Record) *Table {
 	t := &Table{exact: map[string][]netip.Addr{}}
 	for _, r := range recs {
@@ -136,8 +138,8 @@ const (
 // Slots is the order in which a query checks the tables.
 var Slots = []string{SlotRecords, SlotExtra, SlotServe, SlotMagic}
 
-// Server answers queries from its tables. The serve module and the tailnet DNS module share one Server and one
-// listener.
+// Server answers queries from its tables. The serve module and the tailnet DNS module share one
+// Server and one listener.
 type Server struct {
 	mu     sync.Mutex
 	slots  map[string]*Table
@@ -196,8 +198,8 @@ type Listener interface {
 	ListenDNS() (net.PacketConn, net.Listener, error)
 }
 
-// ListenOnce opens the listeners and serves them until ctx ends. Only the first call opens them; later calls (the
-// second module that shares the Server) return nil.
+// ListenOnce opens the listeners and serves them until ctx ends. Only the first call opens them;
+// later calls (the second module that shares the Server) return nil.
 func (s *Server) ListenOnce(ctx context.Context, l Listener, log *slog.Logger) error {
 	var err error
 	s.listen.Do(func() {

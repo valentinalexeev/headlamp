@@ -17,9 +17,9 @@ var ErrNotFound = errors.New("not found")
 // ErrExists is returned when a record with the name exists.
 var ErrExists = errors.New("already exists")
 
-// Record is one name that node-control answers (#286). It points at exactly one of: fixed tailnet addresses, one
-// headscale node (by its given name), or the online nodes with one tag. A node or tag target follows the current
-// addresses of the nodes.
+// Record is one name that node-control answers (#286). It points at exactly one of: fixed tailnet
+// addresses, one headscale node (by its given name), or the online nodes with one tag. A node or
+// tag target follows the current addresses of the nodes.
 type Record struct {
 	Name      string    `json:"name"`
 	Addresses []string  `json:"addresses,omitempty"`
@@ -76,20 +76,26 @@ type sqliteStore struct{ db *sql.DB }
 // OpenSQLite opens (and creates) the store at path.
 func OpenSQLite(path string) (Store, error) {
 	esc := strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(path)
-	db, err := sql.Open("sqlite", "file:"+esc+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(30000)")
+	const pragmas = "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(30000)"
+	db, err := sql.Open("sqlite", "file:"+esc+pragmas)
 	if err != nil {
 		return nil, fmt.Errorf("open tailnet DNS db: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
+	ctx, cancel := opCtx()
+	defer cancel()
+	if _, err := db.ExecContext(ctx, schema); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("open tailnet DNS db: %w", err)
 	}
 	return &sqliteStore{db: db}, nil
 }
 
 func (s *sqliteStore) Records() ([]Record, error) {
-	rows, err := s.db.Query(`SELECT name, target, note, created, updated FROM records ORDER BY name`)
+	ctx, cancel := opCtx()
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT name, target, note, created, updated FROM records ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +125,12 @@ func targetJSON(r Record) string {
 }
 
 func (s *sqliteStore) Create(r Record) error {
-	res, err := s.db.Exec(`INSERT INTO records (name, target, note, created, updated) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(name) DO NOTHING`, r.Name, targetJSON(r), r.Note, r.Created.Unix(), r.Updated.Unix())
+	ctx, cancel := opCtx()
+	defer cancel()
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO records (name, target, note, created, updated) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(name) DO NOTHING`,
+		r.Name, targetJSON(r), r.Note, r.Created.Unix(), r.Updated.Unix())
 	if err != nil {
 		return err
 	}
@@ -131,7 +141,10 @@ func (s *sqliteStore) Create(r Record) error {
 }
 
 func (s *sqliteStore) Replace(r Record) error {
-	res, err := s.db.Exec(`UPDATE records SET target = ?, note = ?, updated = ? WHERE name = ?`,
+	ctx, cancel := opCtx()
+	defer cancel()
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE records SET target = ?, note = ?, updated = ? WHERE name = ?`,
 		targetJSON(r), r.Note, r.Updated.Unix(), r.Name)
 	if err != nil {
 		return err
@@ -143,7 +156,9 @@ func (s *sqliteStore) Replace(r Record) error {
 }
 
 func (s *sqliteStore) Delete(name string) error {
-	res, err := s.db.Exec(`DELETE FROM records WHERE name = ?`, name)
+	ctx, cancel := opCtx()
+	defer cancel()
+	res, err := s.db.ExecContext(ctx, `DELETE FROM records WHERE name = ?`, name)
 	if err != nil {
 		return err
 	}
@@ -154,13 +169,19 @@ func (s *sqliteStore) Delete(name string) error {
 }
 
 func (s *sqliteStore) Audit(at time.Time, actor, action, detail string) error {
-	_, err := s.db.Exec(`INSERT INTO audit (ts, actor, action, detail) VALUES (?, ?, ?, ?)`,
+	ctx, cancel := opCtx()
+	defer cancel()
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO audit (ts, actor, action, detail) VALUES (?, ?, ?, ?)`,
 		at.Unix(), actor, action, detail)
 	return err
 }
 
 func (s *sqliteStore) AuditLog(limit int) ([]AuditEntry, error) {
-	rows, err := s.db.Query(`SELECT ts, actor, action, detail FROM audit ORDER BY id DESC LIMIT ?`, limit)
+	ctx, cancel := opCtx()
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT ts, actor, action, detail FROM audit ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}

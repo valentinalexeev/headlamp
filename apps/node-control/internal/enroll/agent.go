@@ -108,9 +108,12 @@ func (a *agentClient) PutCredentials(ctx context.Context, creds []Credential, co
 	return a.PutCredentialsDNS(ctx, creds, nil, confirmEmpty)
 }
 
-// dnsPutter is an Agent that also takes the tailnet resolver (#286). An agent before #286 ignores the key.
+// dnsPutter is an Agent that also takes the tailnet resolver (#286). An agent before #286 ignores
+// the key.
 type dnsPutter interface {
-	PutCredentialsDNS(ctx context.Context, creds []Credential, dns *TailnetDNS, confirmEmpty bool) error
+	PutCredentialsDNS(
+		ctx context.Context, creds []Credential, dns *TailnetDNS, confirmEmpty bool,
+	) error
 }
 
 // PutCredentialsDNS is PutCredentials with the tailnet resolver of the bridge; nil sends none.

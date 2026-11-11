@@ -146,8 +146,8 @@ func (t *Tsnet) WhoIs(ctx context.Context, remoteAddr string) (string, []string,
 	return login, tags, nil
 }
 
-// TailnetDNS reads the MagicDNS suffix and the extra_records of the current netmap (#286). Records of another
-// type than A or AAAA, and values that are not addresses, are skipped.
+// TailnetDNS reads the MagicDNS suffix and the extra_records of the current netmap (#286). Records
+// of another type than A or AAAA, and values that are not addresses, are skipped.
 func (t *Tsnet) TailnetDNS(ctx context.Context) (TailnetDNS, error) {
 	lc, err := t.srv.LocalClient()
 	if err != nil {
@@ -182,7 +182,8 @@ func (t *Tsnet) TailnetDNS(ctx context.Context) (TailnetDNS, error) {
 		if err != nil {
 			continue
 		}
-		out.Extra = append(out.Extra, ExtraRecord{Name: strings.TrimSuffix(strings.ToLower(r.Name), "."), Addr: ip})
+		name := strings.TrimSuffix(strings.ToLower(r.Name), ".")
+		out.Extra = append(out.Extra, ExtraRecord{Name: name, Addr: ip})
 	}
 	return out, nil
 }

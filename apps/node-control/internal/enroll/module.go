@@ -52,8 +52,8 @@ func WithStoppedNodes(fn func(context.Context) map[string]bool) Option {
 	return func(m *Module) { m.stopped = fn }
 }
 
-// WithTailnetDNS gives the module the tailnet resolver of the bridges (#286): node-control's DNS server and the
-// names it answers. A bridge with tailnet access gets it with its credentials.
+// WithTailnetDNS gives the module the tailnet resolver of the bridges (#286): node-control's DNS
+// server and the names it answers. A bridge with tailnet access gets it with its credentials.
 func WithTailnetDNS(fn func() (TailnetDNS, bool)) Option { return func(m *Module) { m.tdns = fn } }
 
 // withClock replaces the clock of the sync states and the discovery cache (tests).

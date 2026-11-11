@@ -155,19 +155,20 @@ func modeRules(creds []Cred, directGeoIP, directGeoSite []string) []any {
 	return rules
 }
 
-// setDNS writes xray's resolver config into cfg (replacing any dns section of the base) and
-// returns the routing rule that must come first: it sends xray's own queries to via-exit.
-// Without it, IPOnDemand looks up every name a client visits with the system resolver of
-// this host, in the network the clients want to avoid.
+// setDNS writes xray's resolver config into cfg (replacing any dns section of the base) and returns
+// the routing rule that must come first: it sends xray's own queries to via-exit. Without it,
+// IPOnDemand looks up every name a client visits with the system resolver of this host, in the
+// network the clients want to avoid.
 //
-// Names on the direct site lists resolve with the system resolver (their traffic leaves from
-// this host, so the local answer is the right one); skipFallback keeps every other name off
-// it. All other lookups use exitDNS (empty: DefaultExitDNS).
+// Names on the direct site lists resolve with the system resolver (their traffic leaves from this
+// host, so the local answer is the right one); skipFallback keeps every other name off it. All
+// other lookups use exitDNS (empty: DefaultExitDNS).
 //
-// The tailnet names (#286) come first: node-control answers them over the tailnet, reached through the same
-// via-exit SOCKS (its tailscaled routes a tailnet address over the tailnet). skipFallback keeps other names off this
-// server, finalQuery keeps these names off every other server (a failed lookup fails, it never goes to the public
-// resolver), and expectedIPs drops an answer that is not a tailnet address.
+// The tailnet names (#286) come first: node-control answers them over the tailnet, reached through
+// the same via-exit SOCKS (its tailscaled routes a tailnet address over the tailnet). skipFallback
+// keeps other names off this server, finalQuery keeps these names off every other server (a failed
+// lookup fails, it never goes to the public resolver), and expectedIPs drops an answer that is not
+// a tailnet address.
 func setDNS(cfg obj, directGeoSite, exitDNS []string, tdns *TailnetDNS) (obj, error) {
 	if len(exitDNS) == 0 {
 		exitDNS = DefaultExitDNS

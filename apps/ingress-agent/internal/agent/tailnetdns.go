@@ -12,11 +12,12 @@ import (
 	"strings"
 )
 
-// TailnetDNS is the tailnet resolver of the bridge (#286): node-control's DNS server on the tailnet and the names
-// it answers, as xray domain matchers ("full:<name>" or "domain:<suffix>"). Render puts it first in xray's dns
-// section, for these names only, with skipFallback: the public resolver never sees them, and a lookup gives a
-// tailnet address, so the tailnet IP rule of a granted client matches. The answer must be a tailnet address
-// (expectedIPs), and a failed lookup does not go to another server (finalQuery).
+// TailnetDNS is the tailnet resolver of the bridge (#286): node-control's DNS server on the tailnet
+// and the names it answers, as xray domain matchers ("full:<name>" or "domain:<suffix>"). Render
+// puts it first in xray's dns section, for these names only, with skipFallback: the public resolver
+// never sees them, and a lookup gives a tailnet address, so the tailnet IP rule of a granted client
+// matches. The answer must be a tailnet address (expectedIPs), and a failed lookup does not go to
+// another server (finalQuery).
 type TailnetDNS struct {
 	Server  string   `json:"server"`
 	Domains []string `json:"domains"`
@@ -75,9 +76,12 @@ func (t *TailnetDNS) equal(o *TailnetDNS) bool {
 	return a.Server == b.Server && slices.Equal(a.Domains, b.Domains)
 }
 
+// privateFile is the mode of a state file only the agent reads.
+const privateFile = 0o600
+
 // LoadTailnetDNS reads the persisted resolver; a missing file is none.
 func LoadTailnetDNS(path string) (*TailnetDNS, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // the agent's own state path, from its config
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -103,11 +107,11 @@ func SaveTailnetDNS(path string, t *TailnetDNS) error {
 		return nil
 	}
 	b, _ := json.Marshal(t.normalized())
-	return WriteAtomic(path, b, 0o600, "")
+	return WriteAtomic(path, b, privateFile, "")
 }
 
-// parseTailnetDNS reads the optional "tailnet_dns" key of a PUT body. Absent or null is none (a node-control
-// before #286, or a bridge without tailnet access). Any problem is false.
+// parseTailnetDNS reads the optional "tailnet_dns" key of a PUT body. Absent or null is none (a
+// node-control before #286, or a bridge without tailnet access). Any problem is false.
 func parseTailnetDNS(body []byte) (*TailnetDNS, bool) {
 	var raw struct {
 		DNS json.RawMessage `json:"tailnet_dns"`

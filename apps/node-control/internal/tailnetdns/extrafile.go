@@ -15,17 +15,19 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/servedns"
 )
 
-// extraFile publishes the managed records to headscale (#286): the file of headscale's dns.extra_records_path,
-// which headscale watches and applies without a restart. headscale then sends the records to every node in the
-// netmap, so tailnet devices resolve the names themselves and do not depend on node-control.
+// extraFile publishes the managed records to headscale (#286): the file of headscale's
+// dns.extra_records_path, which headscale watches and applies without a restart. headscale then
+// sends the records to every node in the netmap, so tailnet devices resolve the names themselves
+// and do not depend on node-control.
 //
-// It works only where node-control and headscale share a directory (the compose stack). node-control owns the
-// whole file: other records in it are replaced. headscale does not start while the file is missing, so the operator
-// creates it once with "[]".
+// It works only where node-control and headscale share a directory (the compose stack).
+// node-control owns the whole file: other records in it are replaced. headscale does not start
+// while the file is missing, so the operator creates it once with "[]".
 //
-// The file is written only when its content changes, sorted and stable (headscale reloads on a checksum change), and
-// atomically: a temporary file in the same directory, renamed into place. Mount the directory, not the file: a
-// single-file bind mount keeps the old inode, and headscale never sees the rename.
+// The file is written only when its content changes, sorted and stable (headscale reloads on a
+// checksum change), and atomically: a temporary file in the same directory, renamed into place.
+// Mount the directory, not the file: a single-file bind mount keeps the old inode, and headscale
+// never sees the rename.
 type extraFile struct {
 	path string
 
@@ -42,23 +44,26 @@ type extraEntry struct {
 	Value string `json:"value"`
 }
 
-// checkExtraPath validates TAILNET_DNS_EXTRA_RECORDS_FILE at start: an absolute path in a directory that exists.
+// checkExtraPath validates TAILNET_DNS_EXTRA_RECORDS_FILE at start: an absolute path in a directory
+// that exists.
 func checkExtraPath(p string) error {
 	if !filepath.IsAbs(p) {
 		return errors.New("TAILNET_DNS_EXTRA_RECORDS_FILE must be an absolute path")
 	}
 	if filepath.Ext(p) != ".json" {
-		return errors.New("TAILNET_DNS_EXTRA_RECORDS_FILE must end in .json (headscale reads the format from the extension)")
+		return errors.New("TAILNET_DNS_EXTRA_RECORDS_FILE must end in .json " +
+			"(headscale reads the format from the extension)")
 	}
 	st, err := os.Stat(filepath.Dir(p))
 	if err != nil || !st.IsDir() {
-		return errors.New("TAILNET_DNS_EXTRA_RECORDS_FILE: its directory does not exist (mount a directory shared with headscale)")
+		return errors.New("TAILNET_DNS_EXTRA_RECORDS_FILE: its directory does not exist " +
+			"(mount a directory shared with headscale)")
 	}
 	return nil
 }
 
-// extraContent renders the records of a table as the file: one entry per name and address, sorted by name, then
-// type, then address. A name without addresses has no entry.
+// extraContent renders the records of a table as the file: one entry per name and address, sorted
+// by name, then type, then address. A name without addresses has no entry.
 func extraContent(t *servedns.Table) []byte {
 	entries := []extraEntry{}
 	if t != nil {
@@ -85,7 +90,8 @@ func extraContent(t *servedns.Table) []byte {
 	return append(b, '\n')
 }
 
-// write puts content into the file when it differs from the file on disk. now is the time of a write.
+// write puts content into the file when it differs from the file on disk. now is the time of a
+// write.
 func (f *extraFile) write(content []byte, now time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -118,7 +124,9 @@ func (f *extraFile) writeLocked(content []byte, now time.Time) error {
 		return fmt.Errorf("extra records file: write: %w", errors.Join(werr, cerr))
 	}
 	// headscale runs as another user in its own container: the file must be readable by all.
-	if err := os.Chmod(name, 0o644); err != nil {
+	// It holds no secret.
+	const worldReadable = 0o644
+	if err := os.Chmod(name, worldReadable); err != nil { //nolint:gosec // see above
 		return fmt.Errorf("extra records file: %w", err)
 	}
 	if err := os.Rename(name, f.path); err != nil {

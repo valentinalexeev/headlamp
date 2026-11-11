@@ -1,17 +1,20 @@
-// Package tailnetdns makes node-control the resolver of the tailnet names (#286). It answers, on the DNS listener
-// it shares with serve, four kinds of names, in this order:
+// Package tailnetdns makes node-control the resolver of the tailnet names (#286). It answers, on
+// the DNS listener it shares with serve, four kinds of names, in this order:
 //
-//  1. records managed here (API below): a name points at fixed tailnet addresses, one node, or the online nodes
+//  1. records managed here (API below): a name points at fixed tailnet addresses, one node, or the
+//     online nodes
 //     with a tag;
 //  2. the headscale dns.extra_records, read from node-control's own netmap;
 //  3. the serve zone (the serve module fills it);
 //  4. the MagicDNS names of the nodes (<given name>.<base_domain>), from the headscale API.
 //
-// Bridges get the server address and the list of these names with their credentials: their xray resolver then asks
-// node-control for exactly these names and gets tailnet addresses, so the tailnet IP rule of a granted client
-// matches. Tailnet devices ask node-control for the managed names through headscale split DNS.
+// Bridges get the server address and the list of these names with their credentials: their xray
+// resolver then asks node-control for exactly these names and gets tailnet addresses, so the
+// tailnet IP rule of a granted client matches. Tailnet devices ask node-control for the managed
+// names through headscale split DNS.
 //
-// Answers hold only tailnet addresses (100.64.0.0/10, fd7a:115c:a1e0::/48). Subnet routes are out of scope.
+// Answers hold only tailnet addresses (100.64.0.0/10, fd7a:115c:a1e0::/48). Subnet routes are out
+// of scope.
 package tailnetdns
 
 import (
@@ -35,7 +38,8 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/statestore"
 )
 
-// Headscale is what the module needs from headscale: the nodes, for MagicDNS names and node or tag targets.
+// Headscale is what the module needs from headscale: the nodes, for MagicDNS names and node or tag
+// targets.
 type Headscale interface {
 	ListNodes(ctx context.Context) ([]headscale.Node, error)
 }
@@ -46,13 +50,19 @@ const (
 	maxNote      = 200
 	// MaxBridgeNames is the most names a bridge gets; the agent refuses a longer list.
 	MaxBridgeNames = 1024
+
+	defaultRefresh = 15 * time.Second
+	opTimeout      = 10 * time.Second
+	maxBody        = 16 << 10
 )
 
 var (
 	labelRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	tagRE   = regexp.MustCompile(`^tag:[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	// tailnetRanges are the headscale address ranges: the only addresses an answer may hold.
-	tailnetRanges = []netip.Prefix{netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("fd7a:115c:a1e0::/48")}
+	tailnetRanges = []netip.Prefix{
+		netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("fd7a:115c:a1e0::/48"),
+	}
 )
 
 // InTailnet says whether a is a tailnet address.
@@ -66,8 +76,8 @@ func InTailnet(a netip.Addr) bool {
 	return false
 }
 
-// Module is the tailnet DNS module. It is on when TAILNET_DNS_DB (SQLite) is set, or TAILNET_DNS_REDIS=1 (the shared
-// Redis of REDIS_URL, no volume needed).
+// Module is the tailnet DNS module. It is on when TAILNET_DNS_DB (SQLite) is set, or
+// TAILNET_DNS_REDIS=1 (the shared Redis of REDIS_URL, no volume needed).
 type Module struct {
 	env core.Env
 	hs  Headscale
@@ -119,8 +129,8 @@ func redisPrefix(env core.Env) string {
 	return app + ":dns"
 }
 
-// openStore opens the configured backend; nil, nil: the module is off. A new feature is off until the operator turns
-// it on, so REDIS_URL alone does not enable it.
+// openStore opens the configured backend; nil, nil: the module is off. A new feature is off until
+// the operator turns it on, so REDIS_URL alone does not enable it.
 func openStore(env core.Env) (Store, error) {
 	path, useRedis := env.Getenv("TAILNET_DNS_DB"), env.Getenv("TAILNET_DNS_REDIS")
 	switch {
@@ -141,7 +151,7 @@ func openStore(env core.Env) (Store, error) {
 		}
 		s, err := NewRedisStore(rdb, redisPrefix(env))
 		if err != nil {
-			rdb.Close()
+			_ = rdb.Close()
 		}
 		return s, err
 	}
@@ -153,7 +163,8 @@ func (m *Module) Register(r *core.Routes) error {
 	if m.log == nil {
 		m.log = slog.Default()
 	}
-	if v := m.env.Getenv("TAILNET_DNS_REDIS"); m.env.Getenv("TAILNET_DNS_DB") == "" && (v == "" || v == "0") {
+	v := m.env.Getenv("TAILNET_DNS_REDIS")
+	if m.env.Getenv("TAILNET_DNS_DB") == "" && (v == "" || v == "0") {
 		return nil
 	}
 	m.zone = servedns.Normalize(m.env.Getenv("SERVE_ZONE"))
@@ -165,7 +176,7 @@ func (m *Module) Register(r *core.Routes) error {
 		}
 		m.extra = &extraFile{path: p}
 	}
-	m.refresh = 15 * time.Second
+	m.refresh = defaultRefresh
 	if v := m.env.Getenv("TAILNET_DNS_REFRESH"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d < 2*time.Second || d > 10*time.Minute {
@@ -189,8 +200,10 @@ func (m *Module) Register(r *core.Routes) error {
 		return err
 	}
 	m.st = st
-	view := authz.Gate(r.Tailnet, authz.P(authz.FeatureDNS, authz.LevelView), authz.Allowed{}, m.log)
-	admin := authz.Gate(r.Tailnet, authz.P(authz.FeatureDNS, authz.LevelAdmin), authz.Allowed{}, m.log)
+	gate := func(l authz.Level) func(http.Handler) http.Handler {
+		return authz.Gate(r.Tailnet, authz.P(authz.FeatureDNS, l), authz.Allowed{}, m.log)
+	}
+	view, admin := gate(authz.LevelView), gate(authz.LevelAdmin)
 	js := func(h http.HandlerFunc) http.Handler { return authz.RequireJSON(h) }
 	r.Admin.Handle("GET /dns/state", view(http.HandlerFunc(m.state)))
 	r.Admin.Handle("POST /dns/records", admin(js(m.create)))
@@ -245,12 +258,13 @@ func (m *Module) Stop(context.Context) error {
 
 // --- tables ---
 
-// Refresh rebuilds the managed, extra_records and MagicDNS tables. A source that fails keeps its old table.
+// Refresh rebuilds the managed, extra_records and MagicDNS tables. A source that fails keeps its
+// old table.
 func (m *Module) Refresh(ctx context.Context) {
 	var errs []string
 	var info core.TailnetDNS
 	if dr, ok := m.tn.(core.DNSReader); ok {
-		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		c, cancel := context.WithTimeout(ctx, opTimeout)
 		i, err := dr.TailnetDNS(c)
 		cancel()
 		if err != nil {
@@ -263,7 +277,8 @@ func (m *Module) Refresh(ctx context.Context) {
 				if !InTailnet(e.Addr) || validName(e.Name) != nil {
 					continue
 				}
-				recs = append(recs, servedns.Record{Name: e.Name, Addrs: []netip.Addr{e.Addr.Unmap()}})
+				addrs := []netip.Addr{e.Addr.Unmap()}
+				recs = append(recs, servedns.Record{Name: e.Name, Addrs: addrs})
 				names = append(names, e.Name)
 			}
 			slices.Sort(names)
@@ -277,14 +292,15 @@ func (m *Module) Refresh(ctx context.Context) {
 	if suffix == "" {
 		suffix = m.baseEnv
 	}
-	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	c, cancel := context.WithTimeout(ctx, opTimeout)
 	nodes, err := m.hs.ListNodes(c)
 	cancel()
 	if err != nil {
 		errs = append(errs, "headscale: "+err.Error())
 	} else {
 		if suffix != "" {
-			m.dns.SetSlot(servedns.SlotMagic, servedns.NewTable(suffix, magicRecords(nodes, suffix)))
+			magic := servedns.NewTable(suffix, magicRecords(nodes, suffix))
+			m.dns.SetSlot(servedns.SlotMagic, magic)
 		}
 		recs, rerr := m.st.Records()
 		if rerr != nil {
@@ -338,8 +354,9 @@ func magicRecords(nodes []headscale.Node, suffix string) []servedns.Record {
 	return out
 }
 
-// answers resolves the targets of the managed records. A node target gives the node's addresses; a tag target the
-// addresses of the online nodes with the tag. A target with no match is a name without addresses (NODATA).
+// answers resolves the targets of the managed records. A node target gives the node's addresses; a
+// tag target the addresses of the online nodes with the tag. A target with no match is a name
+// without addresses (NODATA).
 func answers(recs []Record, nodes []headscale.Node) []servedns.Record {
 	out := make([]servedns.Record, 0, len(recs))
 	for _, r := range recs {
@@ -372,21 +389,22 @@ func answers(recs []Record, nodes []headscale.Node) []servedns.Record {
 
 // --- bridges ---
 
-// Bridge is what a bridge needs to resolve the tailnet names (#286): the server and the names, as xray domain
-// matchers. node-control sends it with the credentials.
+// Bridge is what a bridge needs to resolve the tailnet names (#286): the server and the names, as
+// xray domain matchers. node-control sends it with the credentials.
 type Bridge struct {
 	Server  string   `json:"server"`
 	Domains []string `json:"domains"`
 }
 
-// BridgeDNS gives the current Bridge. ok is false while the module is off, not listening, or does not know its own
-// address yet: the bridge then gets no tailnet DNS (as before #286).
+// BridgeDNS gives the current Bridge. ok is false while the module is off, not listening, or does
+// not know its own address yet: the bridge then gets no tailnet DNS (as before #286).
 func (m *Module) BridgeDNS() (Bridge, bool) {
 	if m == nil || m.st == nil {
 		return Bridge{}, false
 	}
 	m.cur.Lock()
-	self, listening, suffix, extra := m.cur.self4, m.cur.listening, m.cur.suffix, slices.Clone(m.cur.extra)
+	self, listening, suffix := m.cur.self4, m.cur.listening, m.cur.suffix
+	extra := slices.Clone(m.cur.extra)
 	m.cur.Unlock()
 	if !listening || !self.IsValid() {
 		return Bridge{}, false
@@ -425,13 +443,16 @@ func validName(n string) error {
 	}
 	for _, l := range strings.Split(n, ".") {
 		if !labelRE.MatchString(l) {
-			return errors.New("name must be lower-case letters, digits and dashes, in labels separated by dots")
+			return errors.New("name must be lower-case letters, digits and dashes, " +
+				"in labels separated by dots")
 		}
 	}
 	return nil
 }
 
-func under(n, zone string) bool { return zone != "" && (n == zone || strings.HasSuffix(n, "."+zone)) }
+func under(n, zone string) bool {
+	return zone != "" && (n == zone || strings.HasSuffix(n, "."+zone))
+}
 
 // check normalises and validates a record. The error is for the caller and quotes nothing secret.
 func (m *Module) check(r *Record) error {
@@ -446,7 +467,8 @@ func (m *Module) check(r *Record) error {
 		suffix = m.baseEnv
 	}
 	if under(r.Name, suffix) {
-		return errors.New("name is under the MagicDNS base_domain: tailnet devices answer those names themselves")
+		return errors.New("name is under the MagicDNS base_domain: " +
+			"tailnet devices answer those names themselves")
 	}
 	if under(r.Name, m.zone) {
 		return errors.New("name is in the serve zone: use a serve service")
@@ -470,7 +492,8 @@ func (m *Module) check(r *Record) error {
 	for i, a := range r.Addresses {
 		ip, err := netip.ParseAddr(strings.TrimSpace(a))
 		if err != nil || !InTailnet(ip) {
-			return errors.New("an address is not a tailnet address (100.64.0.0/10 or fd7a:115c:a1e0::/48)")
+			return errors.New("an address is not a tailnet address " +
+				"(100.64.0.0/10 or fd7a:115c:a1e0::/48)")
 		}
 		r.Addresses[i] = ip.Unmap().String()
 	}
@@ -500,9 +523,14 @@ type recordReq struct {
 	Note      string   `json:"note,omitempty"`
 }
 
+// record is the record the request asks for, under the given name.
+func (q recordReq) record(name string) Record {
+	return Record{Name: name, Addresses: q.Addresses, Node: q.Node, Tag: q.Tag, Note: q.Note}
+}
+
 func decode(w http.ResponseWriter, r *http.Request) (recordReq, bool) {
 	var req recordReq
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -538,7 +566,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rec := Record{Name: req.Name, Addresses: req.Addresses, Node: req.Node, Tag: req.Tag, Note: req.Note}
+	rec := req.record(req.Name)
 	m.write(w, r, rec, true)
 }
 
@@ -549,10 +577,11 @@ func (m *Module) replace(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 	if req.Name != "" && servedns.Normalize(req.Name) != servedns.Normalize(name) {
-		http.Error(w, "the name in the body differs from the path; a record has no rename", http.StatusUnprocessableEntity)
+		http.Error(w, "the name in the body differs from the path; a record has no rename",
+			http.StatusUnprocessableEntity)
 		return
 	}
-	rec := Record{Name: name, Addresses: req.Addresses, Node: req.Node, Tag: req.Tag, Note: req.Note}
+	rec := req.record(name)
 	m.write(w, r, rec, false)
 }
 
@@ -635,12 +664,14 @@ type stateResp struct {
 	BaseDomain string       `json:"base_domain"` // the MagicDNS suffix
 	ServeZone  string       `json:"serve_zone,omitempty"`
 	Records    []recordView `json:"records"`
-	Extra      []string     `json:"extra_records"` // the extra_records names answered (from the netmap)
-	// Split is the dns.nameservers.split block for headscale: tailnet devices then ask node-control for the managed
-	// names.
+	// Extra lists the extra_records names answered (from the netmap).
+	Extra []string `json:"extra_records"`
+	// Split is the dns.nameservers.split block for headscale: tailnet devices then ask node-control
+	// for the managed names.
 	Split  map[string][]string `json:"split"`
 	Bridge *Bridge             `json:"bridge,omitempty"`
-	// ExtraFile is the headscale extra_records_path file that node-control writes; empty: not configured.
+	// ExtraFile is the headscale extra_records_path file that node-control writes; empty: not
+	// configured.
 	ExtraFile        string     `json:"extra_records_file,omitempty"`
 	ExtraFileWritten *time.Time `json:"extra_records_file_written,omitempty"`
 	ExtraFileError   string     `json:"extra_records_file_error,omitempty"`
@@ -664,7 +695,8 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 	if self.IsValid() {
 		out.Server = "tcp://" + self.String() + ":53"
 	}
-	out.CanAdmin = authz.Can(authz.LoginFrom(r.Context()), authz.P(authz.FeatureDNS, authz.LevelAdmin), authz.Allowed{})
+	adminP := authz.P(authz.FeatureDNS, authz.LevelAdmin)
+	out.CanAdmin = authz.Can(authz.LoginFrom(r.Context()), adminP, authz.Allowed{})
 	if m.extra != nil {
 		out.ExtraFile = m.extra.path
 		at, ferr := m.extra.status()
@@ -674,8 +706,8 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 		out.ExtraFileError = ferr
 	}
 	t := m.dns.Slot(servedns.SlotRecords)
-	// The managed records come back from headscale as extra records when node-control writes the file: list them
-	// once, under records.
+	// The managed records come back from headscale as extra records when node-control writes the
+	// file: list them once, under records.
 	managed := map[string]bool{}
 	for _, rec := range recs {
 		managed[rec.Name] = true
@@ -708,7 +740,9 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 func (m *Module) HasActivity() bool { return m.st != nil }
 
 // Activity lists record changes for the console's activity page.
-func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.ActivityEntry, error) {
+func (m *Module) Activity(
+	_ context.Context, login string, limit int,
+) ([]core.ActivityEntry, error) {
 	if m.st == nil {
 		return nil, nil
 	}
@@ -721,7 +755,9 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 	}
 	out := make([]core.ActivityEntry, 0, len(es))
 	for _, e := range es {
-		out = append(out, core.ActivityEntry{At: e.At, Actor: e.Actor, Source: "DNS", Action: e.Action, Detail: e.Detail})
+		out = append(out, core.ActivityEntry{
+			At: e.At, Actor: e.Actor, Source: "DNS", Action: e.Action, Detail: e.Detail,
+		})
 	}
 	return out, nil
 }

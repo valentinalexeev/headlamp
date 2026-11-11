@@ -15,8 +15,9 @@ import (
 // auditKeep is how many audit entries the Redis store keeps.
 const auditKeep = 1000
 
-// redisStore keeps the records in the shared Redis: the hash "<prefix>:records" (name -> record JSON) and the list
-// "<prefix>:audit" (newest first). Records are not secret, so they are stored in clear.
+// redisStore keeps the records in the shared Redis: the hash "<prefix>:records" (name -> record
+// JSON) and the list "<prefix>:audit" (newest first). Records are not secret, so they are stored in
+// clear.
 type redisStore struct {
 	rdb    *redis.Client
 	prefix string
@@ -34,7 +35,7 @@ func (r *redisStore) recKey() string   { return r.prefix + ":records" }
 func (r *redisStore) auditKey() string { return r.prefix + ":audit" }
 
 func opCtx() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 10*time.Second)
+	return context.WithTimeout(context.Background(), opTimeout)
 }
 
 func (r *redisStore) Records() ([]Record, error) {

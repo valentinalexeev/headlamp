@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/compat"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 )
 
@@ -156,6 +158,7 @@ type ingress struct {
 	outcome OutcomeFunc
 	now     func() time.Time
 	log     *slog.Logger
+	strict  bool // COMPAT_STRICT (#300)
 }
 
 func (g *ingress) register(mux *core.Mux, gate func(http.Handler) http.Handler) {
@@ -164,6 +167,20 @@ func (g *ingress) register(mux *core.Mux, gate func(http.Handler) http.Handler) 
 }
 
 func (g *ingress) config(w http.ResponseWriter, r *http.Request) {
+	if g.strict {
+		// COMPAT_STRICT (#300): an ingress whose last report names a funnel API outside the
+		// compatibility
+		// matrix gets 409 and no routes. An ingress that has not reported yet, or reports no API
+		// version
+		// (older than #300), is not refused: only what is known to be incompatible.
+		if why := g.refusal(); why != "" {
+			g.log.Warn("funnel ingress refused: " + why + " (COMPAT_STRICT)")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "incompatible: " + why})
+			return
+		}
+	}
 	doc, err := BuildConfig(g.st, g.s, g.outcome)
 	if err != nil {
 		g.log.Error("building the ingress configuration failed", "err", err)
@@ -225,4 +242,23 @@ func (g *ingress) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// refusal is why the funnel ingress is refused under COMPAT_STRICT, from its last state report; ""
+// when it is not.
+func (g *ingress) refusal() string {
+	body, _, ok, err := g.st.LatestState()
+	if err != nil || !ok {
+		return ""
+	}
+	var rep struct {
+		API int `json:"api"`
+	}
+	if json.Unmarshal(body, &rep) != nil {
+		return ""
+	}
+	if c := compat.Must().Check(compat.FunnelAPI, rep.API); c.State == compat.Incompatible {
+		return fmt.Sprintf("funnel API %d is %s", rep.API, c.Hint)
+	}
+	return ""
 }

@@ -9,6 +9,7 @@ import (
 // when it last reported and whether that report is fresh and has no errors.
 type IngressStatus struct {
 	Version    string    `json:"version,omitempty"` // "" for an ingress before 0.16.0
+	API        int       `json:"api,omitempty"`     // the funnel API version (#300); 0: before #300
 	ReportedAt time.Time `json:"reported_at"`
 	Stale      bool      `json:"stale"`
 	Errors     int       `json:"errors"`
@@ -25,11 +26,15 @@ func (m *Module) Ingress() (IngressStatus, bool) {
 		return IngressStatus{}, false
 	}
 	var rep struct {
+		API     int               `json:"api"`
 		Version string            `json:"build_version"`
 		Errors  []json.RawMessage `json:"errors"`
 	}
 	_ = json.Unmarshal(body, &rep)
-	return IngressStatus{Version: plainVersion(rep.Version), ReportedAt: at,
+	if rep.API < 0 || rep.API > maxAPI {
+		rep.API = 0
+	}
+	return IngressStatus{Version: plainVersion(rep.Version), API: rep.API, ReportedAt: at,
 		Stale: m.now().Sub(at) > staleAfter, Errors: len(rep.Errors)}, true
 }
 
@@ -48,3 +53,6 @@ func plainVersion(v string) string {
 	}
 	return v
 }
+
+// maxAPI bounds a reported interface version (#300); a bigger number counts as none.
+const maxAPI = 1000

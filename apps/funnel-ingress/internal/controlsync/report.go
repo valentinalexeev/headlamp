@@ -41,7 +41,12 @@ type Reporter interface {
 	Report(ctx context.Context, s State) error
 }
 
+// APIVersion is the funnel API version this build speaks (#300): the state report and the config
+// it reads. node-control checks it against its compatibility matrix.
+const APIVersion = 1
+
 type wireState struct {
+	API              int              `json:"api"`
 	BuildVersion     string           `json:"build_version,omitempty"`
 	AppliedVersion   string           `json:"applied_version"`
 	SentAt           time.Time        `json:"sent_at"`
@@ -66,6 +71,7 @@ type wireStateRoute struct {
 
 func encodeState(s State) ([]byte, error) {
 	w := wireState{
+		API:            APIVersion,
 		BuildVersion:   s.BuildVersion,
 		AppliedVersion: s.AppliedVersion, SentAt: s.SentAt.UTC(), SnapshotLoaded: s.SnapshotLoaded, PeerCount: s.PeerCount,
 		ConfigAgeSeconds: int64(s.ConfigAge / time.Second), Routes: []wireStateRoute{}, Errors: append([]string{}, s.Errors...),

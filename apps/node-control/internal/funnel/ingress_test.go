@@ -249,7 +249,9 @@ type ingressRig struct {
 	log *bytes.Buffer
 }
 
-func newIngressRig(t *testing.T) *ingressRig {
+func newIngressRig(t *testing.T) *ingressRig { return newIngressRigStrict(t, false) }
+
+func newIngressRigStrict(t *testing.T, strict bool) *ingressRig {
 	t.Helper()
 	st := openTestStore(t)
 	tn := authz.NewFakeTailnet(map[string]authz.Who{
@@ -261,7 +263,7 @@ func newIngressRig(t *testing.T) *ingressRig {
 	logBuf := &bytes.Buffer{}
 	log := slog.New(slog.NewTextHandler(logBuf, nil))
 	rig := &ingressRig{st: st, out: outcomes{}, now: time.Unix(1_700_000_000, 0), log: logBuf}
-	g := &ingress{st: st, s: testSettings(), outcome: func(id int64) string { return rig.out.fn()(id) }, now: func() time.Time { return rig.now }, log: log}
+	g := &ingress{st: st, s: testSettings(), outcome: func(id int64) string { return rig.out.fn()(id) }, now: func() time.Time { return rig.now }, log: log, strict: strict}
 	mux := core.NewMux()
 	g.register(mux, authz.TagGate(tn, "tag:funnel-ingress", log))
 	rig.h = mux

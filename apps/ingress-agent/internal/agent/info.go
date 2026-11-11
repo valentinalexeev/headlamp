@@ -25,7 +25,13 @@ type Info struct {
 	// fingerprint, so an upgrade does not need a new approval.
 	Version string `json:"version,omitempty"`
 	Xray    string `json:"xray,omitempty"`
+	// API is the version of the agent API (#300): node-control checks it against its compatibility
+	// matrix. Raise it, and the range in node-control's compat.json, when the API changes.
+	API int `json:"api"`
 }
+
+// APIVersion is the agent API version this build speaks (#300).
+const APIVersion = 1
 
 // InfoConfigError names an invalid INGRESS_* variable, never its value.
 type InfoConfigError struct{ Var string }
@@ -101,5 +107,6 @@ func LoadInfo(getenv func(string) string) (*Info, error) {
 		sni = g("INGRESS_HOST")
 	}
 	return &Info{Name: g("INGRESS_NAME"), Host: g("INGRESS_HOST"), Port: p, SNI: sni,
-		PublicKey: g("INGRESS_PUBLIC_KEY"), ShortID: g("INGRESS_SHORT_ID"), Hy2Port: hy2}, nil
+		PublicKey: g("INGRESS_PUBLIC_KEY"), ShortID: g("INGRESS_SHORT_ID"), Hy2Port: hy2,
+		API: APIVersion}, nil
 }

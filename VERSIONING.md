@@ -78,6 +78,45 @@ Only a component whose source changed is rebuilt. A release reuses the images `m
 ships. Deploy by digest, or at least by `X.Y.Z`. The images hold placeholders where a site's config belongs: a deployment
 adds its own in a private overlay.
 
+## Interface versions and the compatibility matrix
+
+The repo version is the version of node-control: each release rebuilds it, because the version is built into it. The
+other components change less often. A release does not rebuild or redeploy a component whose source did not change
+(see "Images"). So a site can run node-control of one release with an ingress agent or a funnel ingress of an older
+one (#300).
+
+Each interface between node-control and another component has its own **interface version**, a whole number:
+
+| Interface | Between | Defined in |
+|---|---|---|
+| `agent-api` | node-control and the ingress agent | `apps/ingress-agent/internal/agent/server.go`, `info.go` |
+| `funnel-api` | node-control and the funnel ingress | `apps/funnel-ingress/internal/controlsync/report.go`, `source.go` |
+| `runner-api` | node-control and the task runner | `apps/task-runner/internal/runner/server.go` |
+
+headscale and tailscale keep their upstream versions and pins (see below).
+
+The file `apps/node-control/internal/compat/compat.json` is the compatibility matrix. For each interface, it gives the
+version that this release speaks (`current`) and the range that node-control accepts (`accepted`). node-control embeds
+it. Each component reports its interface version, and node-control compares it with the range:
+
+- Outside the range: a problem on the Fleet page, an Attention item, and `scripts/fleet-check.sh` exits 1. The message
+  names the action: upgrade the component, or upgrade node-control.
+- No version reported (a component before 0.18.0): a note only.
+- With `COMPAT_STRICT=true`, node-control also refuses an incompatible component. The default is `false`: warn only.
+
+To change an interface, change it and `compat.json` in the same PR:
+
+- A compatible change (a new optional field) keeps the version.
+- An incompatible change raises `current`. It moves `accepted` too, so that node-control still accepts the parts that
+  sites run. Remove an old version from `accepted` only in a MINOR release before 1.0.0, or a MAJOR release later.
+
+CI (`scripts/check-compat.sh`, `make check-compat`) fails a PR that changes a file of an interface but not
+`compat.json`. If the change keeps the interface as it is, add the line `compat: unchanged <interface>` to a commit
+message of the PR.
+
+The ingress agent role builds the agent with the version of the last commit that changed the agent. A release that
+does not change the agent builds the same binary, so the role does not restart it.
+
 ## The tailscale version
 
 One tailscale version applies to the whole repo (#145). The file `TAILSCALE_VERSION` holds it. These pins must have the same version:

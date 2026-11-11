@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/compat"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/scrub"
 )
@@ -64,12 +67,49 @@ type runnerClient struct {
 	port    string
 	token   string
 	secrets []string // token plus every secret value, scrubbed out of errors
+
+	apiMu sync.Mutex
+	api   map[string]RunnerAPI // the runner API version each address last reported (#300)
+	// strict is COMPAT_STRICT (#300): a runner whose API is outside the compatibility matrix counts
+	// as
+	// not healthy, so it gets no task.
+	strict bool
+}
+
+// RunnerAPI is what a runner last reported about its API (#300): 0 is a runner older than #300.
+type RunnerAPI struct {
+	API int
+	At  time.Time
+}
+
+// RunnerAPIs is an optional Runner capability: the API version of each runner, by tailnet address.
+type RunnerAPIs interface {
+	APIs() map[string]RunnerAPI
+}
+
+// APIs returns a copy of the API versions the runners reported.
+func (c *runnerClient) APIs() map[string]RunnerAPI {
+	c.apiMu.Lock()
+	defer c.apiMu.Unlock()
+	out := make(map[string]RunnerAPI, len(c.api))
+	for k, v := range c.api {
+		out[k] = v
+	}
+	return out
 }
 
 // NewRunnerClient dials runners through tn on the given port. secrets are
 // values that must never appear in an error; the token is always included.
 func NewRunnerClient(tn core.Tailnet, port int, token string, secrets []string) Runner {
 	return newRunnerClient(tn, port, token, secrets)
+}
+
+// NewStrictRunnerClient is NewRunnerClient that refuses an incompatible runner (COMPAT_STRICT,
+// #300).
+func NewStrictRunnerClient(tn core.Tailnet, port int, token string, secrets []string) Runner {
+	c := newRunnerClient(tn, port, token, secrets)
+	c.strict = true
+	return c
 }
 
 func newRunnerClient(tn core.Tailnet, port int, token string, secrets []string) *runnerClient {
@@ -166,9 +206,23 @@ func (c *runnerClient) Health(ctx context.Context, addr string) (bool, error) {
 	}
 	var h struct {
 		Busy bool `json:"busy"`
+		API  int  `json:"api"`
 	}
 	if err := json.Unmarshal(data, &h); err != nil {
 		return false, c.wrap("health", errors.New("undecodable answer"))
+	}
+	c.apiMu.Lock()
+	if c.api == nil {
+		c.api = map[string]RunnerAPI{}
+	}
+	c.api[addr] = RunnerAPI{API: h.API, At: time.Now()}
+	c.apiMu.Unlock()
+	if c.strict {
+		if res := compat.Must().Check(compat.RunnerAPI, h.API); res.State == compat.Incompatible {
+			slog.Warn("task runner refused: runner API is "+res.Hint+" (COMPAT_STRICT)",
+				"runner_api", h.API)
+			return false, nil
+		}
 	}
 	return !h.Busy, nil
 }

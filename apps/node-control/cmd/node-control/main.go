@@ -27,7 +27,9 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/overview"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policy"
 	servemod "github.com/valentinalexeev/headlamp/apps/node-control/internal/serve"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/servedns"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tailnet"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tailnetdns"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/tasks"
 )
 
@@ -81,15 +83,24 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		}
 		return nil
 	}
-	enr := enroll.New(env, enroll.WithNodeSource(src), enroll.WithStoppedNodes(func(ctx context.Context) map[string]bool {
-		return nm.StoppedNames(ctx)
-	}), enroll.WithSelfHeadscale(hsClient), enroll.WithPolicy(func() enroll.PolicyService {
-		// A typed nil must not become a non-nil interface.
-		if svc := policyService(); svc != nil {
-			return svc
-		}
-		return nil
-	}))
+	// Tailnet DNS (#286): on with TAILNET_DNS_DB. It shares one DNS server and listener with serve,
+	// and gives bridges with tailnet access the resolver for the tailnet names.
+	sharedDNS := &servedns.Server{}
+	tdns := tailnetdns.New(env, hsClient, sharedDNS)
+	bridgeDNS := func() (enroll.TailnetDNS, bool) {
+		b, ok := tdns.BridgeDNS()
+		return enroll.TailnetDNS{Server: b.Server, Domains: b.Domains}, ok
+	}
+	enr := enroll.New(env, enroll.WithNodeSource(src), enroll.WithTailnetDNS(bridgeDNS),
+		enroll.WithStoppedNodes(func(ctx context.Context) map[string]bool {
+			return nm.StoppedNames(ctx)
+		}), enroll.WithSelfHeadscale(hsClient), enroll.WithPolicy(func() enroll.PolicyService {
+			// A typed nil must not become a non-nil interface.
+			if svc := policyService(); svc != nil {
+				return svc
+			}
+			return nil
+		}))
 	audit := func() core.AuditLog {
 		if p, ok := enr.(interface{ AuditLog() core.AuditLog }); ok {
 			return p.AuditLog()
@@ -132,7 +143,8 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		fun,
 		tsk,
 		// Serve (#117): on with SERVE_DB. It reads nodes uncached, so a new replica answers DNS within one refresh.
-		servemod.New(env, hsClient),
+		servemod.New(env, hsClient, servemod.WithDNS(sharedDNS)),
+		tdns,
 		// Access (#123): roles and grants stored by the UI, on with ADMIN_DB or REDIS_URL.
 		access.New(env),
 		// Fleet (#195): read-only versions of node-control, headscale, every tailscale client and

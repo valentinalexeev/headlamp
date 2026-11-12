@@ -152,6 +152,11 @@ var Routes = map[string]Rule{
 	"DELETE /funnel/blocks/{ns}/{service}": need(FeatureFunnel, LevelAdmin),
 	"GET /ingress/v1/config":               machine,
 	"POST /ingress/v1/state":               machine,
+	// tailnet DNS (#286): names node-control answers for bridges and tailnet devices
+	"GET /dns/state":             need(FeatureDNS, LevelView),
+	"POST /dns/records":          need(FeatureDNS, LevelAdmin),
+	"PUT /dns/records/{name}":    need(FeatureDNS, LevelAdmin),
+	"DELETE /dns/records/{name}": need(FeatureDNS, LevelAdmin),
 	// serve (#117): a service is a name plus the pre-auth key its proxies join with
 	"GET /serve/state":                       need(FeatureServe, LevelView),
 	"POST /serve/services":                   need(FeatureServe, LevelAdmin),

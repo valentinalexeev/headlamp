@@ -31,6 +31,8 @@ type Module struct {
 	pol      func() PolicyService // the policy console, for the tailnet ACL entry (#132); nil result: not active
 	// stopped names the machines stopped at their provider; nil when nothing can say.
 	stopped func(context.Context) map[string]bool
+	// tdns gives the tailnet resolver pushed to bridges with tailnet access (#286); nil: none.
+	tdns func() (TailnetDNS, bool)
 
 	loopDone     chan struct{} // closed when the reconcile loop has returned; nil if never started
 	activityDone chan struct{} // the same for the activity loop
@@ -49,6 +51,10 @@ func WithNodeSource(src headscale.NodeSource) Option { return func(m *Module) { 
 func WithStoppedNodes(fn func(context.Context) map[string]bool) Option {
 	return func(m *Module) { m.stopped = fn }
 }
+
+// WithTailnetDNS gives the module the tailnet resolver of the bridges (#286): node-control's DNS
+// server and the names it answers. A bridge with tailnet access gets it with its credentials.
+func WithTailnetDNS(fn func() (TailnetDNS, bool)) Option { return func(m *Module) { m.tdns = fn } }
 
 // withClock replaces the clock of the sync states and the discovery cache (tests).
 func withClock(now func() time.Time) Option { return func(m *Module) { m.now = now } }
@@ -127,7 +133,7 @@ func (m *Module) Register(r *core.Routes) error {
 	if len(key) < 16 {
 		return errors.New("ENROLL_SECRET_KEY must be at least 16 bytes")
 	}
-	cfg = cfg.WithKey([]byte(key))
+	cfg = cfg.WithKey([]byte(key)).WithTailnetDNS(m.tdns)
 	agentURL := m.env.Getenv("AGENT_URL")
 	if agentURL != "" {
 		u, err := url.Parse(agentURL)

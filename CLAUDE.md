@@ -161,7 +161,8 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
 | Push to `main` | **no** | via PR |
 | Open / update PR, fix mechanical conflicts | yes | yes |
 | Merge a PR | only after an owner **Approve** review on the PR's current head commit and green CI | yes |
-| Repo settings, secrets, branch protection, release tags | **no** | yes |
+| Repo settings, secrets, branch protection | **no** | yes |
+| Release tags | only as step 6 of "Follow-up loop": after the owner's **Approve** of the `chore(release): vX.Y.Z` PR on its head, for that version only | yes |
 
 - **Marking.** Issues the bot creates get the `AI` label. Bodies, comments and PR descriptions start with
   `🤖 AI agent:`. Commits are authored by the bot; add
@@ -220,7 +221,9 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   1. Branch `release/X.Y.Z` from `main`; commit `chore(release): vX.Y.Z` that sets `VERSION` and moves `Unreleased`
      under `## X.Y.Z - <date>`. In `UPGRADING.md`, rename `## Unreleased (X.Y.Z)` to `## X.Y.Z`: it lists what a
      site repo must change, or "No action required". PR into `main` titled `chore(release): vX.Y.Z`; the owner approves and merges.
-  2. The owner, or the bot only with explicit permission in that release's issue or PR, tags the merge commit on `main`:
+  2. The owner tags the merge commit on `main`, or the bot does: with explicit permission in that release's issue or
+     PR, or by step 6 of "Follow-up loop" (the owner's **Approve** of the release PR is the permission for that one
+     version):
      `git tag vX.Y.Z <commit> && scripts/check-release.sh vX.Y.Z && git push origin vX.Y.Z`.
      Release candidates use `vX.Y.Z-rc.N`.
   3. CI (`images.yml`) runs `check-release.sh` as a gate: tag format, `VERSION` match, commit on `main`, next version
@@ -235,6 +238,59 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   `main` (moves), `X.Y.Z` / `X.Y.Z-rc.N` (fixed), `X.Y`, `X`, `latest` (move; `X`/`latest` from 1.0.0). Deployments
   pin `X.Y.Z` or a digest, never `main` or `latest`. A forced full rebuild is `workflow_dispatch` with `rebuild_all`
   and is an owner action.
+
+### Follow-up loop
+
+The owner's standing instruction (#318): between sessions with the owner, the bot checks the repo every 5 minutes and
+does these steps in order, as itself (`valentinalexeev-bot`). It does only what the rules above already allow, plus
+the tag of step 6.
+
+1. **Read the news since the last check.** Owner reviews, inline review comments and issue comments; new issues
+   assigned to the bot; CI results of open bot PRs. Answer each owner comment or inline comment: fix the code, push,
+   reply on the thread with what changed. A question to the owner follows "Questions" above.
+2. **Keep two open milestones.** The next **patch** milestone and the next **feature** milestone, from the last stable
+   tag `vX.Y.Z`:
+   - before 1.0.0: patch `X.Y.(Z+1)`, feature `X.(Y+1).0`;
+   - from 1.0.0: the same, and a breaking change needs `(X+1).0.0`, which only the owner opens.
+
+   Create a missing milestone. Never close or rename a milestone that has open issues or merged work. A milestone that
+   the owner closed scope on (a comment like "scope closed") takes no more PRs: use the next one of its class.
+3. **Put each approved PR in a milestone, by its class.** A PR is approved when the owner's last review on its head is
+   **Approve**. Its class is the type of its title (Conventional Commits):
+
+   | Title type | Class | Milestone |
+   |---|---|---|
+   | `feat` | feature | the feature milestone |
+   | `fix`, `perf`, `revert`, `refactor` with a user-visible effect | patch | the patch milestone |
+   | any type with `!`, or `BREAKING CHANGE:` | breaking | the feature milestone before 1.0.0; from 1.0.0 the owner decides |
+   | `docs`, `test`, `ci`, `build`, `chore`, `style` | no release effect | the patch milestone, so that it is not lost |
+
+   Set the same milestone on the issue that the PR closes. Then merge the PR (rules of "Bot and owner"): green CI, the
+   head is the approved one, and branch protection is met. If the branch is behind `main`, merge `main` into it, test,
+   push, and ask for a new review: the approval of the old head does not count.
+4. **Keep one release PR for each milestone that has merged work.** Branch `release/X.Y.Z`, one commit
+   `chore(release): vX.Y.Z` (see "Cutting a release"). The PR description lists each issue and PR of the milestone and
+   its state, and the `UPGRADING.md` steps. After each merge into `main`, rebuild the release branch on `main` and ask
+   for review again. Do not merge a release PR while the milestone has open issues: say which ones on the PR.
+
+   A patch milestone needs a release only when it has a merged `fix` or `perf`. A feature release takes the merged
+   patch work too: when the feature release ships first, move the open patch milestone's merged work into it, and the
+   patch milestone moves to the next patch number.
+5. **Merge the release PR** when the owner's last review on its head is **Approve** and CI is green.
+6. **Tag and release** that merge commit, for that version only:
+
+   ```
+   git fetch origin && git tag vX.Y.Z <merge commit> && scripts/check-release.sh vX.Y.Z && git push origin vX.Y.Z
+   ```
+
+   If `check-release.sh` fails, do not push the tag: delete the local tag, report the error on the release PR, and
+   fix it with a new commit through a PR. Never move, delete or re-push a pushed tag.
+7. **Check the release run** (`images.yml` on the tag, and `wiki`). Report the result on the release PR and on each
+   issue of the milestone: version, run link, images. Close the milestone. Open the next milestone of its class (step 2).
+8. **Report.** One short status comment on the release PR when its state changes. No comment when nothing changed.
+
+The loop stops when the bot token fails (401) or the owner says stop. It never acts as the owner, never pushes to
+`main`, and never changes repo settings, secrets or branch protection.
 
 ### Commits, changelog, manuals and the wiki
 

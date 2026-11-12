@@ -241,12 +241,7 @@ func RenderProfile(cfg IngressConfig, d Device) ([]byte, error) {
 		obj{{"type", "selector"}, {"tag", "select"}, {"outbounds", strs(Modes)}, {"default", "auto"}},
 	}
 	if cfg.grouped() {
-		for _, m := range Modes {
-			outbounds = append(outbounds, obj{
-				{"type", "urltest"}, {"tag", m}, {"outbounds", strs(members(cfg, m))},
-				{"url", probeURL}, {"interval", probeInterval}, {"tolerance", probeTolerance},
-			})
-		}
+		outbounds = append(outbounds, singBoxGroups(cfg)...)
 	}
 	for _, m := range Modes {
 		for _, i := range cfg.Ingresses {
@@ -338,12 +333,7 @@ func renderClash(cfg IngressConfig, d Device, stash bool) ([]byte, error) {
 	}
 	groups := []any{obj{{"name", "select"}, {"type", "select"}, {"proxies", strs(Modes)}}}
 	if cfg.grouped() {
-		for _, m := range Modes {
-			groups = append(groups, obj{
-				{"name", m}, {"type", "url-test"}, {"proxies", strs(members(cfg, m))},
-				{"url", probeURL}, {"interval", probeIntervalS}, {"tolerance", probeTolerance},
-			})
-		}
+		groups = append(groups, clashGroups(cfg)...)
 	}
 	p := obj{
 		{"proxies", proxies},

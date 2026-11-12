@@ -16,7 +16,8 @@
 {{if .Devices}}<table><tr><th>Name</th><th>Until</th><th></th><th></th></tr>
 {{range .Devices}}<tr><td>{{.Name}}</td><td>{{if .Active}}{{date .Expires}}{{else}}<span class="muted">ended</span>{{end}}</td>
 <td>{{if .Active}}<a href="/me/devices/{{.ID}}">Add to an app</a>{{end}}</td>
-<td>{{if .Active}}<form method="post" action="/me/devices/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="quiet">Revoke</button></form>{{end}}</td></tr>{{end}}
+<td>{{if .CanExtend}}<form method="post" action="/me/devices/{{.ID}}/extend"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Extend</button></form>{{end}}
+{{if .Active}}<form method="post" action="/me/devices/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="quiet">Revoke</button></form>{{end}}</td></tr>{{end}}
 </table>{{else}}<p class="muted">No devices yet.</p>{{end}}
 </section>
 {{if .InviteOnly}}<section><h2>Add a device</h2><p class="muted">To add a device, ask an administrator for an invitation.</p></section>

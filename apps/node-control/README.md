@@ -1050,6 +1050,8 @@ Set `OIDC_ISSUER` to turn it on. It needs:
 | `OIDC_KEY_MINUTES` | The lifetime of the tailnet key, 5 to 1440 minutes. The default is 60. |
 | `OIDC_RECHECK_MINUTES` | How often each person is checked again at the identity provider, 5 to 1440 minutes. The default is 60. |
 | `OIDC_SESSION_MINUTES` | The browser session, 5 to 1440 minutes. The default is 480. |
+| `OIDC_EXTEND_WINDOW_DAYS` | Self-extend (#301): a person can extend their own device on `/me` in the last N days before it expires, 0 to 365. The default is 0: off. |
+| `OIDC_EXTEND_GRACE_DAYS` | Self-extend: also up to N days after the expiry, 0 to 365. The default is 0. |
 | `OIDC_INVITE_ONLY` | `true` or `false`. The default is `false`. With `true`, a person can add a device only with an invitation: `/me` has no "Add a device" form, and node-control refuses the form with 403. With `false`, the form stays, as before. Invitations work with both values. |
 | `OIDC_INVITE_REQUIRE_VERIFIED` | `true` or `false`. The default is `true`: an invitation makes a device only when the ID token has `email_verified` set to `true`. Set `false` only when your identity provider does not send the claim and people cannot change the email of their account. See "Invitations". |
 | `ENROLL_CLIENT_ICON_DIR` | Optional. A directory with the app icons of the app picker: `<id>.svg`, `<id>.png` or `<id>.webp` for each `id` of the catalog, 64 KiB or less for each file. node-control reads the files at start and ignores other files. Without an icon, the button shows the first letter of the app. This repository has no app icons, because they are the marks of their makers. Keep the icons in your private repo and lay them over the app. |
@@ -1063,6 +1065,23 @@ Set `OIDC_ISSUER` to turn it on. It needs:
 5. The person selects the button of the installed app. The app opens and adds the profile.
 
 The page lists the person's devices. For each active device, **Add to an app** opens the app picker again. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*`, `/oidc/*` and `/i/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`. A bridge front with another name can serve these pages too: `/me`, `/oidc/login` and `/i/<token>` send the browser to `link_host`, where the sign-in runs (#270). The redirect URL at the identity provider and the cookies of the sign-in are on `link_host` only.
+
+### Extend a device
+
+With `OIDC_EXTEND_WINDOW_DAYS` set, a person can extend an own device on `/me` (#301). The **Extend** button shows in
+the last `OIDC_EXTEND_WINDOW_DAYS` days before the expiry, and up to `OIDC_EXTEND_GRACE_DAYS` days after it. It never
+shows for a revoked device.
+
+- The new expiry is the time of the extend plus `OIDC_DEVICE_DAYS`. It is not added to the old expiry.
+- The device keeps its id, UUIDs and subscription URL. The app keeps working after its next profile update. The
+  person does not import a new profile.
+- node-control asks the identity provider about the person first, as the re-check does. A person that is no longer in
+  `OIDC_ALLOWED_GROUPS`, or that the identity provider refuses, gets 403 and is locked. If node-control cannot reach
+  the identity provider, the extend gets 503 and nobody is locked.
+- Outside the window, the request gets 409.
+- The Activity page shows `device.self_extend` with the device name and the new expiry.
+
+The front of the link host must also proxy `/me/devices/<id>/extend`. The shared `enroll-paths.caddy` allows it.
 
 ### The headscale user of a person
 

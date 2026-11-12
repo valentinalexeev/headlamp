@@ -12,4 +12,4 @@
 
 # Self-enrolment with OIDC (#102): the pages of /me and the OIDC login, the app picker, its app pages (#271) and
 # icons, and the invitation links (#241).
-@self path_regexp self `^/(me|me/devices|me/devices/[0-9]{1,18}|me/devices/[0-9]{1,18}/revoke|me/devices/[0-9]{1,18}/app/[a-z0-9-]{1,32}|me/logout|me/icons/[a-z0-9-]{1,32}|i/[0-9a-f]{64}|oidc/login|oidc/callback)$`
+@self path_regexp self `^/(me|me/devices|me/devices/[0-9]{1,18}|me/devices/[0-9]{1,18}/(revoke|extend)|me/devices/[0-9]{1,18}/app/[a-z0-9-]{1,32}|me/logout|me/icons/[a-z0-9-]{1,32}|i/[0-9a-f]{64}|oidc/login|oidc/callback)$`

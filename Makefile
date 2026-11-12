@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
+.PHONY: test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
   test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -126,6 +126,10 @@ test-oidc-e2e:
 # On demand: examples/compose/control on the local docker (TLS edge, headscale, node-control, a client).
 test-compose-control:
 	sh scripts/test/compose-control/smoke-docker.sh
+
+# On demand (#302): the env file quoting rule of the compose example, on the local docker.
+test-compose-env:
+	sh scripts/test/compose-control/env-quoting.sh
 
 # Plan checks of the AWS control host module with a mocked provider (no account needed).
 test-control-host-aws:

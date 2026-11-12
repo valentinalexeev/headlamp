@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Fixed
+
+- node-control: a provider secret that Docker Compose shortened (a `$` in an `env_file` value) was hard to find (#302). At start, node-control now logs a `credential fingerprint` line for each set secret: its name, length and the first 8 hex digits of its SHA-256, never the value. An OpenStack 401 now says to check the value in the container. The compose example says to write secret values in single quotes. `make test-compose-env` checks the rule on docker.
+
 ### Added
 
 - A compatibility matrix between components (#300). Each interface between node-control and another component has an interface version: `agent-api`, `funnel-api` and `runner-api`, now 1. The ingress agent reports it in `/v1/info` (`api`), the funnel ingress in its state report, the task runner in `/v1/health`. node-control compares it with its embedded matrix (`apps/node-control/internal/compat/compat.json`). An incompatible part is a problem on the Fleet page and an Attention item, and `fleet-check.sh` exits 1. A part that reports no version is a note.

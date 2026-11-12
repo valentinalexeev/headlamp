@@ -20,6 +20,11 @@ import (
 const (
 	openstackDefaultAuthURL = "https://cloud.api.selcloud.ru/identity/v3"
 	openstackTimeout        = 20 * time.Second
+	// keystoneHint follows a 401: the usual cause is a password changed on its way into the
+	// container (#302).
+	keystoneHint = " (check the credential values in the container environment, " +
+		"for example $ expanded in an env_file; " +
+		"compare the credential fingerprint in the start log)"
 	// A token lives 3000s from issue in our books and is replaced once less
 	// than tokenSlack remains.
 	openstackTokenTTL = 3000 * time.Second
@@ -201,7 +206,12 @@ func (s *openstack) auth(ctx context.Context, c openstackCloud, region string) (
 		return "", "", &APIError{Status: resp.StatusCode, Message: "keystone auth failed: " + scrub(err.Error(), s.secrets(c))}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", "", &APIError{Status: resp.StatusCode, Message: fmt.Sprintf("keystone auth failed: %d %s", resp.StatusCode, scrub(string(b), s.secrets(c)))}
+		body := scrub(string(b), s.secrets(c))
+		msg := fmt.Sprintf("keystone auth failed: %d %s", resp.StatusCode, body)
+		if resp.StatusCode == http.StatusUnauthorized {
+			msg += keystoneHint
+		}
+		return "", "", &APIError{Status: resp.StatusCode, Message: msg}
 	}
 	token := resp.Header.Get("X-Subject-Token")
 	var doc struct {

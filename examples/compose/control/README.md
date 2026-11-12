@@ -36,6 +36,21 @@ DERP and the funnel wildcards, and no cloud certificate service is necessary.
 Copy this directory into your private repo. Make each `*.example` file into the file without `.example`, and fill it in.
 The `.gitignore` here keeps `.env` and the `*.env` files out of git.
 
+**CAUTION:** Docker Compose expands `$` in the values of the `*.env` files. A value without quotes, or in double
+quotes, loses each `$name` part, with no warning. A password `ab$cdef1` reaches the container as `ab`. Put each
+secret value in single quotes, for example `OS_PASSWORD='ab$cdef1'`. Compose keeps a single-quoted value as it is.
+Or write each `$` as `$$`.
+
+To see whether a secret reached node-control unchanged, compare the `credential fingerprint` line in its start log
+(`docker compose logs node-control`) with the fingerprint of your value:
+
+```sh
+printf %s 'your value' | wc -c                    # the len= of the log
+printf %s 'your value' | sha256sum | cut -c1-8    # the sha256= of the log
+```
+
+`make test-compose-env` checks the quoting rules on your docker.
+
 ## First start
 
 1. Set `server_url` in `config/headscale.yaml` to `https://<your headscale name>`, and set `dns.base_domain`.

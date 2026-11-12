@@ -303,6 +303,10 @@ func TestSelectelErrorsAreBoundedAndScrubbed(t *testing.T) {
 	if !errors.As(err, &ae) || ae.Status != 401 || strings.Contains(err.Error(), "pw-secret") || !strings.Contains(err.Error(), "bad login *** for svc") {
 		t.Fatalf("keystone: %v", err)
 	}
+	// A 401 says where to look: the value in the container (#302).
+	if !strings.Contains(err.Error(), "credential fingerprint in the start log") {
+		t.Fatalf("keystone 401 has no hint: %v", err)
+	}
 
 	// Compute failure whose body echoes the token.
 	f := &fakeNova{servers: []map[string]string{{"id": "id1", "name": "node-a"}}, status: map[string]string{"id1": "ACTIVE"}, token: "tok-leak", serverErr: "oops tok-leak oops"}

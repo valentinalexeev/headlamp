@@ -458,6 +458,7 @@ The file gives one or more bridge nodes. Each entry is a bridge host with its ow
   - `profile_name`: the label of the imported profile. The default is `tunnel`.
   - `clients`: the apps that the self-service app picker shows, in this order (#241). See "Client apps and profile formats". Without it, the picker shows all apps of the catalog, without store links. The old single-host file also accepts it.
   - Unknown keys are an error.
+  - `urltest`: optional. How a device profile chooses between bridges (#313). See "Bridge selection in device profiles".
 - Required keys of each entry:
   - `name`: `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`, unique.
   - `host`: a unique DNS name.
@@ -473,9 +474,53 @@ The file gives one or more bridge nodes. Each entry is a bridge host with its ow
   - `intermittent`: `true` or `false`. The default is `false`. See "Intermittent bridges".
   - `hy2_port`: the UDP port of the Hysteria 2 inbound of the bridge (#110), 1-65535. Without it the bridge has no Hysteria 2. A discovered bridge publishes it in `/v1/info`.
   - `tailnet_access`: `"off"`, `"all"` or `"grants"`. The default is `"off"`. See "Tailnet access through a bridge" and "Tailnet grants". Only `enroll.json` and the console can set it. A discovered bridge cannot give it to itself.
+  - `group`: a neutral label, with the same pattern as `name` (#313). See "Bridge selection in device profiles".
 - `sni`, `short_id` and `public_key` must equal these values of the `reality-ingress` role: `reality_sni`, `reality_short_id` and the public half of `reality_private_key` (`xray x25519 -i <private>`). `port` must equal its `ingress_listen_port`.
 - `link_host` is the host of subscription URLs and one-time links. Phones fetch `https://<link_host>/sub/<secret>` and `/e/<token>`. Thus the name must resolve to a bridge whose front serves it and proxies to `:8081` of node-control, with a certificate for it. Prerequisite: before you enrol the first device, make DNS for `link_host` available, and a certificate that works on the bridge that it points at. The front of every bridge must be able to serve it, so you can fail over if you move the name to another bridge.
 - The old single-host file has `host`, `public_key`, `short_id`, `sni` and `port` at the top level, and no `ingresses`. It still loads as one bridge with the name `default` and `"uuids": "base"`, and uses `AGENT_TOKEN`. A file with both shapes is an error.
+
+### Bridge selection in device profiles
+
+With more than one bridge, a device profile has one test group (sing-box `urltest`, Clash `url-test`) for each mode.
+The app tests every bridge of the group and uses the fastest one. Without the options below, the profile is the same
+as in earlier releases.
+
+The optional top-level `urltest` object tunes the test (#313):
+
+| Key | Value | Default |
+|---|---|---|
+| `tolerance` | The latency difference in ms that makes the app move to a faster bridge, 0 to 1000. 0: always the fastest. | 50 |
+| `interval` | How often the app tests the bridges, a duration in whole seconds from `30s` to `24h`, for example `"5m"`. | `"3m"` |
+| `url` | The http(s) URL that the app tests each bridge with. | `https://www.gstatic.com/generate_204` |
+| `strategy` | Clash and mihomo only: `"round-robin"` or `"consistent-hashing"`. Each group of bridges becomes a `load-balance` group with that strategy. | none: `url-test` |
+
+sing-box has no load-balance strategy. Its profile always uses `urltest`, and ignores `strategy`.
+
+With `group` on bridges, the profile has one test group for each group of bridges, in each mode, and one top-level
+group over these groups. The app picks the fastest group, and in it the fastest bridge. A bridge without `group` is in
+the group `default`. The groups are in the order of their first bridge.
+
+```json
+{
+  "link_host": "link.example.invalid",
+  "urltest": {"tolerance": 80, "interval": "2m"},
+  "ingresses": [
+    {"name": "ingress-1", "group": "group-a", "host": "ingress-1.example.invalid", "...": "..."},
+    {"name": "ingress-2", "group": "group-a", "host": "ingress-2.example.invalid", "...": "..."},
+    {"name": "ingress-3", "group": "group-b", "host": "ingress-3.example.invalid", "...": "..."}
+  ]
+}
+```
+
+Things to know:
+
+- The app tests the bridges again at each `interval`. It does not follow a move to another network at once.
+- Only new connections move to a new bridge. A connection that is open stays on its bridge.
+- The bridge decides where the traffic of the direct lists leaves: from the bridge itself, not from the device.
+- A change applies to a device at its next subscription update. A bad value stays on a device for that time, and so
+  does the fix. Test a change on one device first.
+- There is no per-device choice of a group. A person can still select one outbound by hand in the app.
+- `make test-profile-clients` checks the profile goldens with the real sing-box and mihomo, on docker.
 
 ### Intermittent bridges
 

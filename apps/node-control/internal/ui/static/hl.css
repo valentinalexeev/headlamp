@@ -110,6 +110,8 @@ body{margin:0} /* the browser's default would show around every page, in its own
 .ico{flex:none;display:block}
 .sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.row.bottom{align-items:flex-end}
+.row.bottom .btn{min-height:38px}
 .stack{display:flex;flex-direction:column;gap:12px}
 .grow{flex:1 1 auto;min-width:0}
 .right{margin-left:auto}

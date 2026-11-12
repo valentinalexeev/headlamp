@@ -38,6 +38,9 @@ type Ingress struct {
 	// of devices with a grant may, each grant group through its own tailnet identity. The console
 	// can override the value per bridge.
 	TailnetAccess string `json:"tailnet_access,omitempty"`
+	// Group is an optional neutral label (#313). Bridges with a group make one urltest group
+	// each in a device profile, under one top-level group. "": no group.
+	Group string `json:"group,omitempty"`
 }
 
 // Tailnet access values of a bridge.
@@ -65,6 +68,8 @@ type IngressConfig struct {
 	// Clients are the apps the self-service picker page offers, in order, with their store links.
 	// Empty: every app of the catalog, without store links.
 	Clients []ClientChoice `json:"clients,omitempty"`
+	// Selection tunes how a device profile chooses between bridges (#313). Zero: the defaults.
+	Selection Selection `json:"-"`
 
 	key []byte // ENROLL_SECRET_KEY, set by WithKey; never serialised
 	// tailnetDNS gives the tailnet resolver of the bridges (#286); nil: none. Set by
@@ -210,6 +215,13 @@ func ParseIngressConfig(data []byte) (IngressConfig, error) {
 		}
 		cfg.Targets = ts
 	}
+	if v, ok := raw["urltest"]; ok {
+		s, err := parseSelection(v)
+		if err != nil {
+			return IngressConfig{}, err
+		}
+		cfg.Selection = s
+	}
 	if v, ok := raw["link_host"]; ok {
 		s, ok := rawString(v)
 		if !ok || !validDNSName(s) {
@@ -308,13 +320,19 @@ func parseIngress(i int, item json.RawMessage) (Ingress, error) {
 			return fail("intermittent must be true or false")
 		}
 	}
+	if v, present := raw["group"]; present {
+		if in.Group, ok = rawString(v); !ok || !ingressNameRe.MatchString(in.Group) {
+			return fail("group must match %s", ingressNamePatt)
+		}
+	}
 	return in, nil
 }
 
 var (
-	newShapeTopKeys = append(newShapeKeysBase, "clients")
-	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url", "token_env", "uuids", "node", "intermittent", "hy2_port", "tailnet_access"}
-	keyNameRe       = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,40}$`)
+	newShapeTopKeys = append(newShapeKeysBase, "clients", "urltest")
+	ingressKeys     = []string{"name", "host", "public_key", "short_id", "sni", "port", "agent_url",
+		"token_env", "uuids", "node", "intermittent", "hy2_port", "tailnet_access", "group"}
+	keyNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,40}$`)
 )
 
 // newShapeKeysBase are the top-level keys of the list shape before the client catalog.

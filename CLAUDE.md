@@ -263,7 +263,7 @@ the tag of step 6.
    | `feat` | feature | the feature milestone |
    | `fix`, `perf`, `revert`, `refactor` with a user-visible effect | patch | the patch milestone |
    | any type with `!`, or `BREAKING CHANGE:` | breaking | the feature milestone before 1.0.0; from 1.0.0 the owner decides |
-   | `docs`, `test`, `ci`, `build`, `chore`, `style` | no release effect | the patch milestone, so that it is not lost |
+   | `docs`, `test`, `ci`, `build`, `chore`, `style` | maintenance | the patch milestone |
 
    Set the same milestone on the issue that the PR closes. Then merge the PR (rules of "Bot and owner"): green CI, the
    head is the approved one, and branch protection is met. If the branch is behind `main`, merge `main` into it, test,
@@ -273,9 +273,10 @@ the tag of step 6.
    its state, and the `UPGRADING.md` steps. After each merge into `main`, rebuild the release branch on `main` and ask
    for review again. Do not merge a release PR while the milestone has open issues: say which ones on the PR.
 
-   A patch milestone needs a release only when it has a merged `fix` or `perf`. A feature release takes the merged
-   patch work too: when the feature release ships first, move the open patch milestone's merged work into it, and the
-   patch milestone moves to the next patch number.
+   A patch milestone needs a release when it has any merged PR, of any type: a patch release can hold only `docs`,
+   `test`, `ci`, `build`, `chore` or `style` changes. A feature release takes the merged patch work too: when the
+   feature release ships first, move the open patch milestone's merged work into it, and the patch milestone moves to
+   the next patch number.
 5. **Merge the release PR** when the owner's last review on its head is **Approve** and CI is green.
 6. **Tag and release** that merge commit, for that version only:
 

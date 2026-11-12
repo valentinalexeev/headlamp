@@ -4,8 +4,11 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.18.0 - 2026-11-12
+
 ### Fixed
 
+- node-control console: the **Invite** button of the "Invite a person" form is aligned with its inputs (#315).
 - node-control: a provider secret that Docker Compose shortened (a `$` in an `env_file` value) was hard to find (#302). At start, node-control now logs a `credential fingerprint` line for each set secret: its name, length and the first 8 hex digits of its SHA-256, never the value. An OpenStack 401 now says to check the value in the container. The compose example says to write secret values in single quotes. `make test-compose-env` checks the rule on docker.
 
 ### Added

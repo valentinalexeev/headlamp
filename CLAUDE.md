@@ -268,7 +268,7 @@ the tag of step 6.
    Set the same milestone on the issue that the PR closes. Then merge the PR (rules of "Bot and owner"): green CI, the
    head is the approved one, and branch protection is met. If the branch is behind `main`, merge `main` into it, test,
    push, and ask for a new review: the approval of the old head does not count.
-4. **Keep one release PR for each milestone that has merged work.** Branch `release/X.Y.Z`, one commit
+4. **Keep one release PR for each open release milestone** (opened by step 8, or now if it is missing). Branch `release/X.Y.Z`, one commit
    `chore(release): vX.Y.Z` (see "Cutting a release"). The PR description lists each issue and PR of the milestone and
    its state, and the `UPGRADING.md` steps. After each merge into `main`, rebuild the release branch on `main` and ask
    for review again. Do not merge a release PR while the milestone has open issues: say which ones on the PR.
@@ -288,7 +288,12 @@ the tag of step 6.
    fix it with a new commit through a PR. Never move, delete or re-push a pushed tag.
 7. **Check the release run** (`images.yml` on the tag, and `wiki`). Report the result on the release PR and on each
    issue of the milestone: version, run link, images. Close the milestone. Open the next milestone of its class (step 2).
-8. **Report.** One short status comment on the release PR when its state changes. No comment when nothing changed.
+8. **Open the next release PR at once.** When the owner approves a release PR, open the release PR of the next
+   milestone of the same class (patch after patch, feature after feature) right after step 6, before any work is
+   merged into it: branch `release/X.Y.Z` from `main`, `VERSION` and the empty `## X.Y.Z` sections, and the PR lists
+   the milestone's open issues. Rebuild it on `main` after each merge (step 4). It is a draft PR while the milestone
+   has no merged work.
+9. **Report.** One short status comment on the release PR when its state changes. No comment when nothing changed.
 
 The loop stops when the bot token fails (401) or the owner says stop. It never acts as the owner, never pushes to
 `main`, and never changes repo settings, secrets or branch protection.

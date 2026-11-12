@@ -13,6 +13,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 ### Changed
 
 - The `ingress-agent` role builds the agent with the repo version of the last commit that changed the agent, not of the release. A release that did not change the agent no longer restarts it.
+- node-control: the self-service pages (`/me`, `/pick`, `/app`) and the enrolment landing page use the console fonts and colours, light and dark (#306). The public listener serves one stylesheet at `/s/style.css` and its fonts at `/s/fonts/`. The pages have no inline style. The edge path lists (`enroll-paths.caddy`) now allow `/s/`.
 
 ## 0.17.0 - 2026-11-11
 

@@ -43,9 +43,11 @@ func isPreview(userAgent string) bool {
 const landingTemplate = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Open in {client}</title>
-<style>body{font:18px system-ui,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center}
-a{display:inline-block;margin-top:1.2em;padding:.9em 1.6em;border-radius:.7em;background:#0a66ff;color:#fff;text-decoration:none;font-weight:600}</style>
-</head><body><main><p>Tap the button to add the profile in {client}.</p><a href="{href}">Open in {client}</a></main></body></html>
+<link rel="stylesheet" href="/s/style.css">
+</head><body><main class="center">` +
+	`<div class="brand"><span class="lamp" aria-hidden="true"></span>headlamp</div>
+<p>Tap the button to add the profile in {client}.</p>` +
+	`<p><a class="btn" href="{href}">Open in {client}</a></p></main></body></html>
 `
 
 // pyEscape is Python's html.escape(s, quote=True).
@@ -85,8 +87,12 @@ func NewPublicFor(store Backend, reg *Registry) *Public {
 func newPublic(store publicStore, cfg IngressConfig) *Public { return &Public{store: store, cfg: cfg} }
 
 // Register routes everything on mux to the handler, which answers an empty 404 to all but the two
-// routes.
-func (p *Public) Register(mux *http.ServeMux) { mux.HandleFunc("/", p.ServeHTTP) }
+// routes, and adds the style of the public pages (/s/style.css, /s/fonts/<file>).
+func (p *Public) Register(mux *http.ServeMux) {
+	mux.HandleFunc("/", p.ServeHTTP)
+	mux.HandleFunc("GET /s/style.css", serveStyle)
+	mux.HandleFunc("GET /s/fonts/{file}", serveFont)
+}
 
 func notFound(w http.ResponseWriter) { w.WriteHeader(http.StatusNotFound) }
 

@@ -1,0 +1,44 @@
+@font-face{font-family:"IBM Plex Sans";font-weight:400;font-display:swap;src:url(/s/fonts/ibm-plex-sans-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Sans";font-weight:500;font-display:swap;src:url(/s/fonts/ibm-plex-sans-latin-500-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Sans";font-weight:600;font-display:swap;src:url(/s/fonts/ibm-plex-sans-latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-weight:400;font-display:swap;src:url(/s/fonts/ibm-plex-mono-latin-400-normal.woff2) format("woff2")}
+/* The public pages of the user (/me, the app picker, the app pages, the landing page). The tokens and the parts are
+   those of the console (ui/static/hl.css): change both together. No theme switch here: the system setting decides. */
+:root{--bg:#0e0f11;--surface:#15171a;--raised:#1d2024;--line:#272a2f;--line2:#3a3e45;--text:#e8eaed;--t2:#a9aeb7;--t3:#8c929c;--act:#e8eaed;--acton:#0e0f11;--warn:#e9a640;--warnbg:rgba(233,166,64,.09);--warnline:rgba(233,166,64,.38);--crit:#f26d62;--critbg:rgba(242,109,98,.09);--critline:rgba(242,109,98,.42);--ok:#62bd8e;--okbg:rgba(98,189,142,.09);--okline:rgba(98,189,142,.4);color-scheme:dark}
+@media (prefers-color-scheme:light){:root{--bg:#f6f6f7;--surface:#fff;--raised:#eff0f2;--line:#e2e4e7;--line2:#c9ccd1;--text:#16181b;--t2:#50565f;--t3:#646a74;--act:#16181b;--acton:#fff;--warn:#8a5600;--warnbg:rgba(180,115,10,.09);--warnline:rgba(150,95,0,.4);--crit:#bd261b;--critbg:rgba(200,40,28,.07);--critline:rgba(189,38,27,.4);--ok:#1b7750;--okbg:rgba(27,119,80,.07);--okline:rgba(27,119,80,.38);color-scheme:light}}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+main{max-width:640px;margin:0 auto;padding:32px 20px;display:flex;flex-direction:column;gap:16px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:-.01em;color:var(--t2)}
+.lamp{width:9px;height:9px;border-radius:50%;background:var(--warn)}
+h1{font-size:22px;line-height:1.25;font-weight:600;letter-spacing:-.015em;margin:0}
+h2{font-size:14px;font-weight:600;margin:0 0 8px}
+p{margin:0 0 8px} p:last-child{margin-bottom:0}
+a{color:inherit;text-underline-offset:2px}
+section{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px 18px}
+section.ok{background:var(--okbg);border-color:var(--okline)}
+section.err{background:var(--critbg);border-color:var(--critline)}
+.muted{color:var(--t2)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{text-align:left;font-weight:500;font-size:12.5px;color:var(--t3);padding:8px 6px;border-bottom:1px solid var(--line)}
+td{padding:8px 6px;border-top:1px solid var(--line)} tr:nth-child(2) td{border-top:0}
+form{margin:0}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:0 13px;border-radius:6px;border:1px solid var(--act);background:var(--act);color:var(--acton);font:inherit;font-weight:500;text-decoration:none;cursor:pointer;white-space:nowrap}
+button:hover,.btn:hover{opacity:.88}
+button.quiet{background:transparent;border-color:var(--line2);color:var(--text)}
+button.quiet:hover{background:var(--raised);opacity:1}
+label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--t2)}
+input{height:38px;padding:0 10px;border:1px solid var(--line2);border-radius:6px;background:var(--bg);color:var(--text);font:inherit;font-size:14px;width:100%}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px 5px;overflow-wrap:anywhere}
+summary{cursor:pointer;font-weight:500}
+details[open] summary{margin-bottom:8px}
+ol{padding-left:20px;margin:0 0 8px}
+ul.apps{list-style:none;margin:0 0 8px;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+ul.apps li{display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px}
+a.app{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;padding:12px 6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);text-decoration:none;font-weight:500}
+a.app:hover,a.app:focus{border-color:var(--line2);background:var(--raised)}
+a.app img,a.app .badge{width:56px;height:56px;border-radius:12px}
+.badge{display:inline-flex;align-items:center;justify-content:center;background:var(--raised);color:var(--text);font-weight:600;font-size:22px}
+.btn img,.btn .badge{width:28px;height:28px;border-radius:7px;font-size:14px}
+.get{font-size:12.5px;color:var(--t2)}
+.center{min-height:100vh;justify-content:center;text-align:center;align-items:center}

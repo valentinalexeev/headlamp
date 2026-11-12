@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/oidc"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/ui"
 )
 
 // SelfWeb is the self-enrolment web surface on the public listener (#102):
@@ -62,6 +63,11 @@ var pickHTML string
 //go:embed static/app.html
 var appHTML string
 
+// selfCSS is the style of the public pages: the console's fonts and colours (ui/static/hl.css).
+//
+//go:embed static/self.css
+var selfCSS []byte
+
 var tmplFuncs = template.FuncMap{
 	"date": func(ts int64) string { return time.Unix(ts, 0).UTC().Format("2006-01-02") },
 }
@@ -86,13 +92,37 @@ func (s *SelfWeb) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /i/{token}", s.invite)
 }
 
+// serveStyle and serveFont serve the style of the public pages.
+// They hold no secret, so a browser may keep them.
+func serveStyle(w http.ResponseWriter, _ *http.Request) {
+	staticHeaders(w, "text/css; charset=utf-8")
+	_, _ = w.Write(selfCSS)
+}
+
+func serveFont(w http.ResponseWriter, r *http.Request) {
+	b := ui.Font(r.PathValue("file"))
+	if b == nil {
+		notFound(w)
+		return
+	}
+	staticHeaders(w, "font/woff2")
+	_, _ = w.Write(b)
+}
+
+func staticHeaders(w http.ResponseWriter, ctype string) {
+	h := w.Header()
+	h.Set("Content-Type", ctype)
+	h.Set("Cache-Control", "public, max-age=86400")
+	h.Set("X-Content-Type-Options", "nosniff")
+}
+
 func secHeaders(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Frame-Options", "DENY")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; "+
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; "+
 		"img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 }
 

@@ -24,7 +24,6 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 - node-control: the self-service pages (`/me`, `/pick`, `/app`) and the enrolment landing page use the console fonts and colours, light and dark (#306). The public listener serves one stylesheet at `/s/style.css` and its fonts at `/s/fonts/`. The pages have no inline style. The edge path lists (`enroll-paths.caddy`) now allow `/s/`.
 - ingress-agent: on a bridge that gets a tailnet resolver, a client without a tailnet grant also resolves the listed names to tailnet addresses, and the block rule stops it (before, it reached the public address of a split-DNS name through the exit node). xray has one resolver for all clients.
 
-
 ## 0.17.0 - 2026-11-11
 
 ### Added

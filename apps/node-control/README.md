@@ -31,6 +31,12 @@ can reach headscale. Use the compose files in `examples/compose/control/` on AWS
 Put secrets in the secret store of your platform (on Fly.io, Fly secrets). Put plain settings in the environment (on
 Fly.io, `fly.toml`).
 
+At start, node-control logs one `credential fingerprint` line for each secret variable that is set (#302). The line
+gives the name, the length and the first 8 hex digits of the SHA-256. It holds no part of the value. Compare it with
+the same fingerprint of the value in your secret store, to see whether the value arrived unchanged. With Docker
+Compose, write secret values in single quotes in an `env_file` (see `examples/compose/control/README.md`). Compose
+expands `$` in a value without quotes.
+
 | variable | purpose |
 |---|---|
 | `HEADSCALE_LOGIN_SERVER` | The headscale URL. It is the control server of the embedded node and the base of the node API. |

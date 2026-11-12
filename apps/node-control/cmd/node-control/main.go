@@ -18,6 +18,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/access"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/credcheck"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/enroll"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/fleet"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/funnel"
@@ -201,6 +202,8 @@ func main() {
 	defer stop()
 
 	env := core.OSEnv()
+	// One line per set secret: name and fingerprint, never the value (#302).
+	credcheck.Log(env, slog.Default())
 	// The admin policy is installed before the modules register, so their start checks and gates see it.
 	pol, err := buildPolicy(env)
 	if err != nil {

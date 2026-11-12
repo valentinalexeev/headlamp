@@ -10,6 +10,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
+- node-control: self-service **Extend** on `/me` (#301), off by default. With `OIDC_EXTEND_WINDOW_DAYS` (and optional `OIDC_EXTEND_GRACE_DAYS`), a person extends an own device in the last days before its expiry, or shortly after it. The device keeps its id, UUIDs and subscription URL, and the new expiry is now plus `OIDC_DEVICE_DAYS`. node-control re-checks the person at the identity provider first: a person out of the allowed groups gets 403 and is locked. Outside the window, 409. The edge path lists allow `/me/devices/<id>/extend`.
 - A compatibility matrix between components (#300). Each interface between node-control and another component has an interface version: `agent-api`, `funnel-api` and `runner-api`, now 1. The ingress agent reports it in `/v1/info` (`api`), the funnel ingress in its state report, the task runner in `/v1/health`. node-control compares it with its embedded matrix (`apps/node-control/internal/compat/compat.json`). An incompatible part is a problem on the Fleet page and an Attention item, and `fleet-check.sh` exits 1. A part that reports no version is a note.
 - `COMPAT_STRICT=true` (default `false`) also makes node-control refuse an incompatible part. The ingress agent gets no credentials, the funnel ingress gets `409`, and the task runner gets no task.
 - CI: `scripts/check-compat.sh` fails a PR that changes an interface without a change of the matrix (or a `compat: unchanged <interface>` line).

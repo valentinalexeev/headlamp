@@ -56,6 +56,11 @@ type SelfConfig struct {
 	// (OIDC_INVITE_REQUIRE_VERIFIED=false). The default needs the claim, and true: some issuers
 	// let a person set the email of their account and do not send the claim.
 	InviteAnyEmail bool
+	// ExtendWindow: a person may extend their own device on /me in the last ExtendWindow before its
+	// expiry (OIDC_EXTEND_WINDOW_DAYS, #301). 0: self-extend is off, as before.
+	ExtendWindow time.Duration
+	// ExtendGrace: and up to ExtendGrace after the expiry (OIDC_EXTEND_GRACE_DAYS). Default 0.
+	ExtendGrace time.Duration
 }
 
 func (c *SelfConfig) defaults() {
@@ -103,6 +108,10 @@ var (
 	ErrLocked      = errors.New("your access is locked; ask an administrator")
 	ErrNotInGroup  = errors.New("you are not in a group that may enrol devices")
 	ErrDeviceLimit = errors.New("you have reached the limit of active devices; revoke one first")
+	// ErrNoExtend: the device is outside the extend window, or revoked, or self-extend is off.
+	ErrNoExtend = errors.New("this device cannot be extended now")
+	// ErrCheckFailed: the identity provider could not be asked, so an extend is refused.
+	ErrCheckFailed = errors.New("your account could not be checked now; try again later")
 )
 
 // Allowed says whether a person with groups may enrol.
@@ -347,6 +356,81 @@ func (s *Self) RevokeOwn(ctx context.Context, sub string, id int64) error {
 	}
 	_ = s.store.Audit(ownerOf(sub), "device.self_revoke", d.Name)
 	s.push(ctx)
+	return nil
+}
+
+// CanExtend says whether the person may extend d now (#301): self-extend is on, d is not revoked,
+// and now is in the last ExtendWindow before its expiry or at most ExtendGrace after it.
+func (s *Self) CanExtend(d Device) bool {
+	if s.cfg.ExtendWindow <= 0 || d.Revoked {
+		return false
+	}
+	now := s.store.Clock()()
+	exp := time.Unix(d.ExpiresAt, 0)
+	return !now.Before(exp.Add(-s.cfg.ExtendWindow)) && !now.After(exp.Add(s.cfg.ExtendGrace))
+}
+
+// ExtendOwn moves the expiry of the person's own device to now + the device lifetime (#301). The
+// device keeps its id, UUIDs and subscription URL. The person must still be allowed: not locked,
+// and in an allowed group at the identity provider now (a refresh, when the person has a refresh
+// token). It returns ErrNotFound for another person's device and ErrNoExtend outside the window.
+func (s *Self) ExtendOwn(ctx context.Context, sub string, id int64) (int64, error) {
+	d, err := s.store.GetDevice(id)
+	if err != nil {
+		return 0, err
+	}
+	if d.Owner != ownerOf(sub) {
+		return 0, ErrNotFound // never tell a person about another person's device
+	}
+	if !s.CanExtend(d) {
+		return 0, ErrNoExtend
+	}
+	if err := s.checkNow(ctx, sub); err != nil {
+		return 0, err
+	}
+	exp := s.store.Clock()().Add(s.cfg.DeviceTTL).Unix()
+	if err := s.store.Extend(id, exp); err != nil {
+		return 0, err
+	}
+	_ = s.store.Audit(ownerOf(sub), "device.self_extend", d.Name+", expires "+expiryText(exp))
+	s.push(ctx)
+	return exp, nil
+}
+
+// checkNow asks the identity provider about the person before a change that keeps access: a person
+// removed from the allowed groups, or disabled, must not extend. A refused check locks the person,
+// as Recheck does. An unreachable issuer refuses the extend, but locks nobody.
+func (s *Self) checkNow(ctx context.Context, sub string) error {
+	u, err := s.users.User(sub)
+	if err != nil {
+		return err
+	}
+	if u.Locked {
+		return ErrLocked
+	}
+	rt, err := s.users.RefreshToken(u)
+	if err != nil {
+		// The stored token cannot be read: refuse, never skip the check.
+		return err
+	}
+	if rt == "" || s.idp == nil {
+		// No refresh token: the session was made by a login that passed the group check, and the
+		// session lifetime limits it. The same rule as Recheck.
+		return nil
+	}
+	id, err := s.idp.Refresh(ctx, rt, u.Subject, s.cfg.GroupsClaim)
+	switch {
+	case errors.Is(err, oidc.ErrDenied), errors.Is(err, oidc.ErrToken):
+		_ = s.Lock(ctx, sub, "oidc", "the identity provider refused the re-check")
+		return ErrLocked
+	case err != nil:
+		_ = s.users.Checked(sub, false, "")
+		return ErrCheckFailed
+	case id.GroupsKnown && !s.Allowed(id.Groups):
+		_ = s.Lock(ctx, sub, "oidc", "no longer in an allowed group")
+		return ErrNotInGroup
+	}
+	_ = s.users.Checked(sub, true, id.RefreshToken)
 	return nil
 }
 

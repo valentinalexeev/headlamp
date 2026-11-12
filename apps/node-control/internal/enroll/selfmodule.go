@@ -52,6 +52,10 @@ func selfConfig(env core.Env) (oidc.Config, SelfConfig, string, error) {
 		{"OIDC_KEY_MINUTES", 5, 1440, func(n int) { sc.KeyTTL = time.Duration(n) * time.Minute }},
 		{"OIDC_RECHECK_MINUTES", 5, 1440, func(n int) { sc.Recheck = time.Duration(n) * time.Minute }},
 		{"OIDC_SESSION_MINUTES", 5, 1440, func(n int) { sc.SessionTTL = time.Duration(n) * time.Minute }},
+		{"OIDC_EXTEND_WINDOW_DAYS", 0, 365, func(n int) {
+			sc.ExtendWindow = time.Duration(n) * day
+		}},
+		{"OIDC_EXTEND_GRACE_DAYS", 0, 365, func(n int) { sc.ExtendGrace = time.Duration(n) * day }},
 	}
 	for _, x := range ints {
 		v := strings.TrimSpace(env.Getenv(x.key))

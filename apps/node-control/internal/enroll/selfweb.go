@@ -87,6 +87,7 @@ func (s *SelfWeb) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /me/devices/{id}", s.pickPage)
 	mux.HandleFunc("GET /me/devices/{id}/app/{app}", s.appPage)
 	mux.HandleFunc("POST /me/devices/{id}/revoke", s.form(s.revoke))
+	mux.HandleFunc("POST /me/devices/{id}/extend", s.form(s.extend))
 	mux.HandleFunc("POST /me/logout", s.form(s.logout))
 	mux.HandleFunc("GET /me/icons/{app}", s.icon)
 	mux.HandleFunc("GET /i/{token}", s.invite)
@@ -142,6 +143,8 @@ type meDevice struct {
 	Client  string
 	Expires int64
 	Active  bool
+	// CanExtend: the Extend button shows (#301).
+	CanExtend bool
 }
 
 func (s *SelfWeb) render(w http.ResponseWriter, status int, v meView) {
@@ -182,7 +185,10 @@ func (s *SelfWeb) view(sub, csrf string) (meView, error) {
 	v := meView{SignedIn: true, Email: u.Email, CSRF: csrf, Max: s.self.cfg.MaxDevices,
 		InviteOnly: s.self.cfg.InviteOnly}
 	for _, d := range devs {
-		v.Devices = append(v.Devices, meDevice{d.ID, d.Name, d.Client, d.ExpiresAt, s.self.active(d)})
+		v.Devices = append(v.Devices, meDevice{
+			ID: d.ID, Name: d.Name, Client: d.Client, Expires: d.ExpiresAt,
+			Active: s.self.active(d), CanExtend: s.self.CanExtend(d),
+		})
 	}
 	return v, nil
 }
@@ -490,6 +496,37 @@ func (s *SelfWeb) revoke(w http.ResponseWriter, r *http.Request, sub, _ string) 
 	}
 	secHeaders(w)
 	http.Redirect(w, r, "/me", http.StatusSeeOther)
+}
+
+func (s *SelfWeb) extend(w http.ResponseWriter, r *http.Request, sub, csrf string) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err == nil {
+		_, err = s.self.ExtendOwn(r.Context(), sub, id)
+	}
+	var status int
+	var msg string
+	switch {
+	case err == nil, errors.Is(err, ErrNotFound):
+		secHeaders(w)
+		http.Redirect(w, r, "/me", http.StatusSeeOther)
+		return
+	case errors.Is(err, ErrNoExtend):
+		status, msg = http.StatusConflict, "This device cannot be extended now. Reload the page."
+	case errors.Is(err, ErrNotInGroup), errors.Is(err, ErrLocked):
+		status, msg = http.StatusForbidden, err.Error()
+	case errors.Is(err, ErrCheckFailed):
+		status = http.StatusServiceUnavailable
+		msg = "Your account could not be checked now. Try again later."
+	default:
+		s.fail(w, err)
+		return
+	}
+	v, verr := s.view(sub, csrf)
+	if verr != nil || errors.Is(err, ErrLocked) || errors.Is(err, ErrNotInGroup) {
+		v = meView{}
+	}
+	v.Error = msg
+	s.render(w, status, v)
 }
 
 func (s *SelfWeb) logout(w http.ResponseWriter, r *http.Request, _, _ string) {

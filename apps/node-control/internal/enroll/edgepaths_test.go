@@ -46,7 +46,8 @@ func TestEdgePathsMatchThePublicRoutes(t *testing.T) {
 	hex := strings.Repeat("ab", 32)
 	// Every route of the public listener, with a valid example path. The edge must proxy each of them.
 	served := []string{"/e/tok_1", "/sub/abc", "/me", "/oidc/login", "/oidc/callback", "/me/devices", "/me/devices/12",
-		"/me/devices/12/revoke", "/me/devices/12/app/sing-box", "/me/logout", "/me/icons/sing-box", "/i/" + hex,
+		"/me/devices/12/revoke", "/me/devices/12/extend", "/me/devices/12/app/sing-box", "/me/logout", "/me/icons/sing-box",
+		"/i/" + hex,
 		"/s/style.css", "/s/fonts/ibm-plex-sans-latin-400-normal.woff2"}
 	for _, format := range []string{FormatSingBox, FormatClash, FormatStash, FormatURIList} {
 		served = append(served, "/sub/abc/"+format)

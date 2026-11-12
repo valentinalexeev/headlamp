@@ -165,6 +165,42 @@ so Let's Encrypt cannot check them. node-control signs their certificates with t
 The edge sends `X-Forwarded-For`. `compose.yaml` thus sets `FUNNEL_CLIENT_IP_HEADER` to `X-Forwarded-For`. It sets
 `FUNNEL_TRUSTED_PROXIES` to the compose network, so only the edge can set the client address.
 
+## Tailnet DNS (optional)
+
+node-control can keep DNS records for the tailnet (#286). It writes the records into a file that headscale reads.
+headscale then sends the records to all tailnet devices, and it needs no restart. See "Tailnet DNS module" in the
+node-control README for the records API, and `docs/dns.md` for all DNS in headlamp.
+
+`compose.yaml` mounts the directory `${DATA_DIR}/dns` into headscale (read only) and into node-control. The mount
+alone changes nothing.
+
+**CAUTION:** headscale does not start when `dns.extra_records_path` names a file that does not exist. Do step 1
+before step 2.
+
+1. Create the file with an empty list:
+
+   ```sh
+   mkdir -p /srv/headlamp/data/dns
+   printf '[]\n' > /srv/headlamp/data/dns/extra-records.json
+   ```
+
+2. In `config/headscale.yaml`, set `dns.extra_records_path: /dns/extra-records.json`.
+3. In `node-control.env`, set `TAILNET_DNS_DB=/var/lib/tailscale/dns.db` and
+   `TAILNET_DNS_EXTRA_RECORDS_FILE=/dns/extra-records.json`.
+4. Grant `dns.admin` to an operator in the admin policy.
+5. Restart headscale and node-control:
+
+   ```sh
+   docker compose up -d headscale node-control
+   ```
+
+6. Make sure that `GET http://node-control/dns/state` shows `extra_records_file` and no `extra_records_file_error`.
+
+Use the directory of `DATA_DIR` if it is not `/srv/headlamp/data`.
+
+**CAUTION:** node-control writes the full file. It removes all other records from it. Put static records in
+`dns.extra_records` of `config/headscale.yaml`.
+
 ## Enrolment (optional)
 
 Set `ENROLL_DOMAIN` in `.env` to serve the public enrolment links (`/e/<token>`, `/sub/<secret>`) and the

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 )
@@ -109,4 +110,25 @@ func (l *Local) WhoIs(ctx context.Context, remoteAddr string) (string, []string,
 // address (#195).
 type PeerVersions interface {
 	PeerVersion(ctx context.Context, ip string) (string, error)
+}
+
+// TailnetDNS is the DNS part of this node's netmap (#286): the MagicDNS suffix (the headscale
+// base_domain), the headscale dns.extra_records, and the node's own tailnet IPv4 address (where its
+// DNS server listens).
+type TailnetDNS struct {
+	Suffix string
+	Extra  []ExtraRecord
+	Self4  netip.Addr
+}
+
+// ExtraRecord is one A or AAAA record of the headscale dns.extra_records.
+type ExtraRecord struct {
+	Name string
+	Addr netip.Addr
+}
+
+// DNSReader is an optional Tailnet capability: read TailnetDNS from the current netmap. A Tailnet
+// without it gives the tailnet DNS module no extra_records and no suffix.
+type DNSReader interface {
+	TailnetDNS(ctx context.Context) (TailnetDNS, error)
 }

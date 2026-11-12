@@ -25,9 +25,11 @@ var ErrApply = errors.New("apply failed")
 // Applier owns the credential set and the live xray config.
 type Applier struct {
 	StatePath, BasePath, ConfigPath string
-	Runner                          *Runner
-	Clock                           func() int64
-	DirectGeoIP, DirectGeoSite      []string
+	// DNSPath holds the tailnet resolver (#286); empty: tailnet-dns.json next to StatePath.
+	DNSPath                    string
+	Runner                     *Runner
+	Clock                      func() int64
+	DirectGeoIP, DirectGeoSite []string
 	// ExitDNS are the resolvers reached through via-exit; empty: DefaultExitDNS.
 	ExitDNS []string
 	Log     *slog.Logger
@@ -48,6 +50,16 @@ func (a *Applier) now() int64 {
 // Current is the persisted set.
 func (a *Applier) Current() ([]Cred, error) { return Load(a.StatePath) }
 
+func (a *Applier) dnsPath() string {
+	if a.DNSPath != "" {
+		return a.DNSPath
+	}
+	return filepath.Join(filepath.Dir(a.StatePath), "tailnet-dns.json")
+}
+
+// CurrentDNS is the persisted tailnet resolver (#286).
+func (a *Applier) CurrentDNS() (*TailnetDNS, error) { return LoadTailnetDNS(a.dnsPath()) }
+
 // baseGroups is the grant group outbounds of the base config, as one string.
 func (a *Applier) baseGroups() string {
 	base, err := os.ReadFile(a.BasePath)
@@ -66,12 +78,12 @@ func hasGroupGrant(creds []Cred) bool {
 	return false
 }
 
-func (a *Applier) render(creds []Cred) ([]byte, error) {
+func (a *Applier) render(creds []Cred, tdns *TailnetDNS) ([]byte, error) {
 	base, err := os.ReadFile(a.BasePath)
 	if err != nil {
 		return nil, err
 	}
-	return Render(base, creds, a.DirectGeoIP, a.DirectGeoSite, a.ExitDNS)
+	return Render(base, creds, a.DirectGeoIP, a.DirectGeoSite, a.ExitDNS, tdns)
 }
 
 // install writes the config next to the live one, has xray validate it, then replaces the live file. The
@@ -103,26 +115,36 @@ func (a *Applier) install(ctx context.Context, cfg []byte) error {
 	return nil
 }
 
-// Apply makes the set desired: it returns true when something changed. The set is saved only after xray restarted.
+// Apply makes the set desired, without a tailnet resolver: it returns true when something changed.
+// The set is saved only after xray restarted.
 func (a *Applier) Apply(ctx context.Context, desired []Cred) (bool, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.applyLocked(ctx, desired)
+	return a.ApplyDNS(ctx, desired, nil)
 }
 
-func (a *Applier) applyLocked(ctx context.Context, desired []Cred) (bool, error) {
+// ApplyDNS is Apply with the tailnet resolver of the bridge (#286); nil: none.
+func (a *Applier) ApplyDNS(ctx context.Context, desired []Cred, tdns *TailnetDNS) (bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.applyLocked(ctx, desired, tdns.normalized())
+}
+
+func (a *Applier) applyLocked(ctx context.Context, desired []Cred, tdns *TailnetDNS) (bool, error) {
 	desired = Sweep(desired, a.now())
 	cur, err := a.Current()
+	if err != nil {
+		return false, fmt.Errorf("%w: state unreadable", ErrApply)
+	}
+	curDNS, err := a.CurrentDNS()
 	if err != nil {
 		return false, fmt.Errorf("%w: state unreadable", ErrApply)
 	}
 	added, removed := Diff(cur, desired)
 	groups := a.baseGroups()
 	sameGroups := !hasGroupGrant(desired) || (a.rendered != nil && *a.rendered == groups)
-	if len(added) == 0 && len(removed) == 0 && sameGroups {
+	if len(added) == 0 && len(removed) == 0 && sameGroups && curDNS.equal(tdns) {
 		return false, nil
 	}
-	cfg, err := a.render(desired)
+	cfg, err := a.render(desired, tdns)
 	if err != nil {
 		return false, fmt.Errorf("%w: render", ErrApply)
 	}
@@ -133,6 +155,9 @@ func (a *Applier) applyLocked(ctx context.Context, desired []Cred) (bool, error)
 		return false, fmt.Errorf("%w: restart", ErrApply)
 	}
 	if err := Save(a.StatePath, desired); err != nil {
+		return false, fmt.Errorf("%w: save", ErrApply)
+	}
+	if err := SaveTailnetDNS(a.dnsPath(), tdns); err != nil {
 		return false, fmt.Errorf("%w: save", ErrApply)
 	}
 	a.rendered = &groups
@@ -152,7 +177,11 @@ func (a *Applier) Expire(ctx context.Context) (bool, error) {
 	if len(alive) == len(cur) {
 		return false, nil
 	}
-	return a.applyLocked(ctx, alive)
+	tdns, err := a.CurrentDNS()
+	if err != nil {
+		return false, err
+	}
+	return a.applyLocked(ctx, alive, tdns)
 }
 
 // Restore re-renders the persisted set after a reboot and restarts xray only if the file on disk differs.
@@ -164,7 +193,11 @@ func (a *Applier) Restore(ctx context.Context) error {
 		return err
 	}
 	creds := Sweep(cur, a.now())
-	cfg, err := a.render(creds)
+	tdns, err := a.CurrentDNS()
+	if err != nil {
+		return err
+	}
+	cfg, err := a.render(creds, tdns)
 	if err != nil {
 		return err
 	}
@@ -334,7 +367,8 @@ func (s *Server) putCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	creds, ok := parseCreds(body)
-	if !ok {
+	tdns, dnsOK := parseTailnetDNS(body)
+	if !ok || !dnsOK {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		return
 	}
@@ -343,7 +377,7 @@ func (s *Server) putCredentials(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		return
 	}
-	if _, err := s.A.Apply(r.Context(), creds); err != nil {
+	if _, err := s.A.ApplyDNS(r.Context(), creds, tdns); err != nil {
 		s.A.Log.Error("apply failed: " + strings.TrimPrefix(err.Error(), ErrApply.Error()+": "))
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return

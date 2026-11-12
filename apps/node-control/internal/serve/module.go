@@ -72,9 +72,19 @@ type config struct {
 	listenDNS bool
 }
 
+// Option configures the serve module.
+type Option func(*Module)
+
+// WithDNS shares a DNS server with the tailnet DNS module (#286): both answer on one listener.
+func WithDNS(s *servedns.Server) Option { return func(m *Module) { m.dns = s } }
+
 // New returns the serve module.
-func New(env core.Env, hs Headscale) core.Module {
-	return &Module{env: env, hs: hs, now: time.Now, dns: &servedns.Server{}}
+func New(env core.Env, hs Headscale, opts ...Option) core.Module {
+	m := &Module{env: env, hs: hs, now: time.Now, dns: &servedns.Server{}}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
 }
 
 func (m *Module) Name() string { return "serve" }
@@ -225,20 +235,9 @@ func (m *Module) Start(ctx context.Context) error {
 		m.log.Warn("serve: this tailnet cannot listen for DNS; names will not resolve")
 		return nil
 	}
-	pc, ln, err := dl.ListenDNS()
-	if err != nil {
+	if err := m.dns.ListenOnce(ctx, dl, m.log); err != nil {
 		return fmt.Errorf("serve: DNS listener: %w", err)
 	}
-	go func() {
-		if err := m.dns.ServeUDP(ctx, pc); err != nil {
-			m.log.Error("serve: DNS over UDP stopped", "error", err)
-		}
-	}()
-	go func() {
-		if err := m.dns.ServeTCP(ctx, ln); err != nil {
-			m.log.Error("serve: DNS over TCP stopped", "error", err)
-		}
-	}()
 	m.log.Info("serve: answering DNS", "zone", m.cfg.zone)
 	return nil
 }

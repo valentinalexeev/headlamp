@@ -53,6 +53,9 @@ dns:
 
   magic_dns: true
   base_domain: tailnet.example.com
+  # Tailnet DNS records from node-control (#286), optional. headscale does not start while the file is missing:
+  # create it with "[]" first. See "Tailnet DNS (optional)" in the README.
+  # extra_records_path: /dns/extra-records.json
 
 logtail:
   enabled: false

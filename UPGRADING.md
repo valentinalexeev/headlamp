@@ -9,10 +9,29 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
-## Unreleased (0.18.0)
+## 0.18.0
+
+### Action required
+
+- **Each front that serves `link_host`** (#306): copy the new `enroll-paths.caddy` (`examples/compose/control`:
+  `caddy/enroll-paths.caddy`, then `docker compose up -d edge`), or run the `reality-ingress` role on each bridge. It
+  allows `/s/`, the stylesheet and fonts of the self-service pages. Until then, these pages show without the console
+  style. They still work.
+
+  Check: open `https://<link_host>/s/style.css`. It must return the stylesheet, not 404.
 
 ### Optional
 
+- **Compatibility matrix** (#300): node-control now shows on the Fleet page, in Attention and in `fleet-check.sh`
+  each component whose interface version it does not accept. A component of an older release reports no version
+  and shows a note, not a problem. To make node-control refuse an incompatible component, set `COMPAT_STRICT=true`.
+  Do this only after every component runs 0.18.0 or newer. See "Compatibility" under "Fleet" in the node-control
+  README.
+- **ingress-agent role** (#300): the role now builds the agent with the version of the last commit that changed the
+  agent. A release that did not change the agent does not restart it.
+- **Secrets in compose env files** (#302): put each secret value with a `$` in single quotes. Compose expands `$` in
+  a value without them. After the upgrade, compare the `credential fingerprint` lines in the node-control start log
+  with your values (see the compose README).
 - **Tailnet names through bridges** (#286): to let bridge clients with a tailnet grant reach tailnet services by name,
   do these steps. See "Tailnet DNS module" in the node-control README.
   1. Set `TAILNET_DNS_DB` on node-control, for example `/var/lib/tailscale/dns.db`. Or set `TAILNET_DNS_REDIS=1`
@@ -33,6 +52,12 @@ says "No action required".
 
   **CAUTION:** headscale does not start when `dns.extra_records_path` names a file that does not exist. Create the
   file with `[]` before you set it.
+- **Self-service Extend** (#301): to let people extend their own devices on `/me`, set `OIDC_EXTEND_WINDOW_DAYS`
+  (and optionally `OIDC_EXTEND_GRACE_DAYS`) on node-control. The new `enroll-paths.caddy` of the action above also
+  allows the Extend button. Without the variable, nothing changes.
+- **Bridge selection** (#313): to tune how device profiles choose between bridges, add the optional `urltest` object
+  and a `group` on bridges to `enroll.json`. See "Bridge selection in device profiles" in the node-control README.
+  Without them, the profiles do not change.
 
 ## 0.17.0
 

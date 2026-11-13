@@ -130,6 +130,19 @@ func (m Matrix) Check(iface string, reported int) Result {
 	return r
 }
 
+// Refused says whether COMPAT_STRICT refuses a part with this result (#322): an incompatible
+// version, or no version at all (a part older than 0.18.0). A part that has not answered yet is
+// not checked, so the caller does not call Refused for it.
+func (r Result) Refused() bool { return r.State == Incompatible || r.State == Unknown }
+
+// Why is the short reason of a refusal, for logs and sync states.
+func (r Result) Why() string {
+	if r.State == Unknown {
+		return r.Interface + " version not reported (older than 0.18.0): upgrade the part"
+	}
+	return fmt.Sprintf("%s %d is %s", r.Interface, r.Reported, r.Hint)
+}
+
 // Names lists the interfaces in a fixed order.
 func (m Matrix) Names() []string {
 	out := make([]string, 0, len(m.Interfaces))

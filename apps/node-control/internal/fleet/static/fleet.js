@@ -31,16 +31,20 @@
   }
 
   // bridgeSync: the word and level of a bridge's sync and reachability.
-  // compatWord (#300): an incompatible part outranks every other state of its row.
-  function compatWord(c) {
+  // compatWord (#300): an incompatible part outranks every other state of its row. Under
+  // COMPAT_STRICT a part that reports no version is refused too (#322), and so outranks it as well.
+  function compatWord(c, strict) {
     c = hl.obj(c);
+    if (strict && c.state === 'unknown') {
+      return ['crit', 'refused: no ' + text(c.interface, 20) + ' version (before 0.18.0)'];
+    }
     if (c.state !== 'incompatible') { return null; }
     return ['crit', 'incompatible: ' + text(c.interface, 20) + ' ' + (Number(c.reported) || 0) + ', ' + text(c.hint, 80)];
   }
 
-  function bridgeSync(b) {
+  function bridgeSync(b, strict) {
     if (!b.active) { return ['off', 'not active']; }
-    var cw = compatWord(b.compat);
+    var cw = compatWord(b.compat, strict);
     if (cw) { return cw; }
     if (b.online === false) { return ['crit', 'offline']; }
     if (b.sync === 'pending') { return ['crit', 'not in sync']; }
@@ -62,7 +66,7 @@
     els.control.appendChild(row(['headscale', text(d.headscale) || '-',
       d.headscale_error ? hl.status('crit', text(d.headscale_error, 120)) : hl.status('ok', 'answers')]));
     if (d.funnel) {
-      var f = hl.obj(d.funnel), fs, fc = compatWord(f.compat);
+      var f = hl.obj(d.funnel), fs, fc = compatWord(f.compat, d.compat_strict);
       if (fc) { fs = hl.status(fc[0], fc[1]); }
       else if (f.stale) { fs = hl.status('crit', 'no report since ' + hl.relTime(f.reported_at, now)); }
       else if (f.errors > 0) { fs = hl.status('warn', f.errors + ' errors in its report'); }
@@ -72,13 +76,14 @@
     // the task runners that answered a health check, with the runner API they report (#300)
     hl.arr(d.runners).forEach(function (r) {
       r = hl.obj(r);
-      var c = hl.obj(r.compat), rc = compatWord(c);
+      var c = hl.obj(r.compat), rc = compatWord(c, d.compat_strict);
       var st = rc ? hl.status(rc[0], rc[1]) : c.state === 'ok' ? hl.status('ok', 'compatible') : hl.status('off', 'API unknown');
       els.control.appendChild(row(['task runner ' + (text(r.node, 63) || text(r.address, 45)),
         c.reported ? 'runner-api ' + (Number(c.reported) || 0) : '-', st]));
     });
     if (els.strict) {
-      els.strict.textContent = d.compat_strict ? 'COMPAT_STRICT is on: node-control refuses an incompatible part.' : '';
+      els.strict.textContent = d.compat_strict ? 'COMPAT_STRICT is on: node-control refuses an incompatible part, ' +
+        'and a part that reports no interface version (older than 0.18.0).' : '';
       els.strict.hidden = !d.compat_strict;
     }
 
@@ -86,7 +91,7 @@
     hl.clear(els.bridges);
     bridges.forEach(function (b) {
       b = hl.obj(b);
-      var s = bridgeSync(b);
+      var s = bridgeSync(b, d.compat_strict);
       els.bridges.appendChild(row([text(b.name, 63), text(b.agent) || 'unknown', text(b.xray) || 'unknown',
         hl.status(s[0], s[1]), b.info_at ? hl.relTime(b.info_at, now) : '-']));
     });

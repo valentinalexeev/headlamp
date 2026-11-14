@@ -21,6 +21,9 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/gateway-controller/internal/translate"
 )
 
+// readyzTimeout limits one read of the sidecar /readyz.
+const readyzTimeout = 5 * time.Second
+
 // GatewayReconciler reconciles the Gateways of the owned GatewayClasses.
 type GatewayReconciler struct {
 	client.Client
@@ -48,13 +51,15 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	var gw gwv1.Gateway
 	if err := r.Get(ctx, req.NamespacedName, &gw); err != nil {
 		if apierrors.IsNotFound(err) {
-			// the Deployment goes with its owner reference; drop route status entries for the Gateway
+			// the Deployment goes with its owner reference; drop route status entries for the
+			// Gateway
 			return ctrl.Result{}, r.clearRoutes(ctx, req.NamespacedName)
 		}
 		return ctrl.Result{}, err
 	}
 	var gc gwv1.GatewayClass
-	if err := r.Get(ctx, types.NamespacedName{Name: string(gw.Spec.GatewayClassName)}, &gc); err != nil {
+	gcKey := types.NamespacedName{Name: string(gw.Spec.GatewayClassName)}
+	if err := r.Get(ctx, gcKey, &gc); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	mode := modeOf(r.Cfg, &gc)
@@ -77,7 +82,11 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // input lists the routes, Services and ReferenceGrants the translation reads.
-func (r *GatewayReconciler) input(ctx context.Context, mode translate.Mode, gw *gwv1.Gateway) (translate.Input, error) {
+func (r *GatewayReconciler) input(
+	ctx context.Context,
+	mode translate.Mode,
+	gw *gwv1.Gateway,
+) (translate.Input, error) {
 	in := translate.Input{Mode: mode, Gateway: gw, Services: map[string]*corev1.Service{}}
 	type aged struct {
 		t  metav1.Time
@@ -89,7 +98,10 @@ func (r *GatewayReconciler) input(ctx context.Context, mode translate.Mode, gw *
 		return in, fmt.Errorf("listing HTTPRoutes: %w", err)
 	}
 	for i := range hr.Items {
-		all = append(all, aged{hr.Items[i].CreationTimestamp, translate.FromHTTPRoute(&hr.Items[i])})
+		all = append(
+			all,
+			aged{hr.Items[i].CreationTimestamp, translate.FromHTTPRoute(&hr.Items[i])},
+		)
 	}
 	if r.Cfg.TCPRoutes {
 		var tr gwv1.TCPRouteList
@@ -97,7 +109,10 @@ func (r *GatewayReconciler) input(ctx context.Context, mode translate.Mode, gw *
 			return in, fmt.Errorf("listing TCPRoutes: %w", err)
 		}
 		for i := range tr.Items {
-			all = append(all, aged{tr.Items[i].CreationTimestamp, translate.FromTCPRoute(&tr.Items[i])})
+			all = append(
+				all,
+				aged{tr.Items[i].CreationTimestamp, translate.FromTCPRoute(&tr.Items[i])},
+			)
 		}
 	}
 	sort.SliceStable(all, func(i, j int) bool {
@@ -126,14 +141,20 @@ func (r *GatewayReconciler) input(ctx context.Context, mode translate.Mode, gw *
 }
 
 // syncDeployment creates or updates the sidecar Deployment and reads the readiness of its pod.
-func (r *GatewayReconciler) syncDeployment(ctx context.Context, mode translate.Mode, gw *gwv1.Gateway,
-	res translate.Result) (Readiness, error) {
+func (r *GatewayReconciler) syncDeployment(
+	ctx context.Context,
+	mode translate.Mode,
+	gw *gwv1.Gateway,
+	res translate.Result,
+) (Readiness, error) {
 	want := buildDeployment(r.Cfg, mode, gw, res)
 	if !res.Accepted {
 		err := r.Delete(ctx, want)
 		return Readiness{}, client.IgnoreNotFound(err)
 	}
-	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: want.Name, Namespace: want.Namespace}}
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: want.Name, Namespace: want.Namespace},
+	}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
 		dep.Labels = want.Labels
 		dep.Spec = want.Spec
@@ -152,23 +173,31 @@ func (r *GatewayReconciler) syncDeployment(ctx context.Context, mode translate.M
 	}
 	for i := range pods.Items {
 		p := &pods.Items[i]
-		if p.Status.Phase != corev1.PodRunning || p.Status.PodIP == "" || p.DeletionTimestamp != nil {
+		if p.Status.Phase != corev1.PodRunning || p.Status.PodIP == "" ||
+			p.DeletionTimestamp != nil {
 			continue
 		}
-		c, cancel := context.WithTimeout(ctx, 5*time.Second)
+		c, cancel := context.WithTimeout(ctx, readyzTimeout)
 		rd, err := r.Ready(c, p.Status.PodIP)
 		cancel()
 		if err == nil {
 			return rd, nil
 		}
-		ctrl.LoggerFrom(ctx).Info("reading the sidecar /readyz failed", "pod", p.Name, "error", err.Error())
+		ctrl.LoggerFrom(ctx).
+			Info("reading the sidecar /readyz failed", "pod", p.Name, "error", err.Error())
 	}
 	return Readiness{}, nil
 }
 
-// writeGatewayStatus sets Accepted and Programmed on the Gateway and its listeners, and the tailnet addresses.
-func (r *GatewayReconciler) writeGatewayStatus(ctx context.Context, gw *gwv1.Gateway, res translate.Result,
-	ready Readiness, depErr error) error {
+// writeGatewayStatus sets Accepted and Programmed on the Gateway and its listeners, and the tailnet
+// addresses.
+func (r *GatewayReconciler) writeGatewayStatus(
+	ctx context.Context,
+	gw *gwv1.Gateway,
+	res translate.Result,
+	ready Readiness,
+	depErr error,
+) error {
 	st := gw.Status.DeepCopy()
 	gen := gw.Generation
 	now := metav1.NewTime(r.Now())
@@ -177,10 +206,19 @@ func (r *GatewayReconciler) writeGatewayStatus(ctx context.Context, gw *gwv1.Gat
 		if ok {
 			s = metav1.ConditionTrue
 		}
-		meta.SetStatusCondition(conds, metav1.Condition{Type: typ, Status: s, Reason: reason, Message: msg,
-			ObservedGeneration: gen, LastTransitionTime: now})
+		meta.SetStatusCondition(
+			conds,
+			metav1.Condition{Type: typ, Status: s, Reason: reason, Message: msg,
+				ObservedGeneration: gen, LastTransitionTime: now},
+		)
 	}
-	set(&st.Conditions, string(gwv1.GatewayConditionAccepted), res.Accepted, res.AcceptReason, res.AcceptMessage)
+	set(
+		&st.Conditions,
+		string(gwv1.GatewayConditionAccepted),
+		res.Accepted,
+		res.AcceptReason,
+		res.AcceptMessage,
+	)
 	prog, pReason, pMsg := programmed(res, ready, depErr)
 	set(&st.Conditions, string(gwv1.GatewayConditionProgrammed), prog, pReason, pMsg)
 	st.Addresses = nil
@@ -201,7 +239,8 @@ func (r *GatewayReconciler) writeGatewayStatus(ctx context.Context, gw *gwv1.Gat
 	return nil
 }
 
-// programmed decides the Programmed condition of the Gateway: the sidecar answers /readyz with ready and
+// programmed decides the Programmed condition of the Gateway: the sidecar answers /readyz with
+// ready and
 // at least one tailnet address.
 func programmed(res translate.Result, ready Readiness, depErr error) (bool, string, string) {
 	switch {
@@ -210,7 +249,9 @@ func programmed(res translate.Result, ready Readiness, depErr error) (bool, stri
 	case depErr != nil:
 		return false, string(gwv1.GatewayReasonInvalid), depErr.Error()
 	case len(res.Services) == 0:
-		return false, string(gwv1.GatewayReasonPending), "no route is attached; the sidecar has 0 replicas"
+		return false, string(
+			gwv1.GatewayReasonPending,
+		), "no route is attached; the sidecar has 0 replicas"
 	case !ready.Ready || len(ready.Addresses) == 0:
 		return false, string(gwv1.GatewayReasonPending), "the funnel-sidecar pod is not ready yet"
 	}
@@ -222,7 +263,11 @@ func listenerStatus(old []gwv1.ListenerStatus, res translate.Result, prog bool,
 	set func(*[]metav1.Condition, string, bool, string, string)) []gwv1.ListenerStatus {
 	out := make([]gwv1.ListenerStatus, 0, len(res.Listeners))
 	for _, l := range res.Listeners {
-		ls := gwv1.ListenerStatus{Name: l.Name, AttachedRoutes: l.AttachedRoutes, SupportedKinds: []gwv1.RouteGroupKind{}}
+		ls := gwv1.ListenerStatus{
+			Name:           l.Name,
+			AttachedRoutes: l.AttachedRoutes,
+			SupportedKinds: []gwv1.RouteGroupKind{},
+		}
 		for _, o := range old {
 			if o.Name == l.Name {
 				ls.Conditions = o.Conditions
@@ -245,7 +290,7 @@ func listenerStatus(old []gwv1.ListenerStatus, res translate.Result, prog bool,
 		set(&ls.Conditions, string(gwv1.ListenerConditionConflicted), l.Conflicted, cReason, msg)
 		set(&ls.Conditions, string(gwv1.ListenerConditionResolvedRefs), ok, resolvedReason(ok), msg)
 		pReason := string(gwv1.ListenerReasonProgrammed)
-		if !(ok && prog) {
+		if !ok || !prog {
 			pReason = string(gwv1.ListenerReasonPending)
 		}
 		set(&ls.Conditions, string(gwv1.ListenerConditionProgrammed), ok && prog, pReason, msg)

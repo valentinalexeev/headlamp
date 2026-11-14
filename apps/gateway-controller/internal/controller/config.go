@@ -1,5 +1,6 @@
-// Package controller runs the reconcilers of the gateway controller: it accepts the GatewayClasses it owns,
-// runs one funnel-sidecar Deployment per Gateway and writes the status of Gateways and routes (#338).
+// Package controller runs the reconcilers of the gateway controller: it accepts the GatewayClasses
+// it owns, runs one funnel-sidecar Deployment per Gateway and writes the status of Gateways and
+// routes (#338).
 package controller
 
 import (
@@ -21,11 +22,12 @@ type Config struct {
 	FunnelClass string // name of the funnel GatewayClass (default headlamp-funnel)
 	Image       string // the funnel-sidecar image
 	ControlURL  string // FUNNEL_CONTROL_URL, optional
-	ServeURL    string // FUNNEL_SERVE_URL: node-control on the tailnet (serve mode without certificateRefs)
-	APIURL      string // FUNNEL_API_URL: the funnel-ingress registration API (funnel mode)
-	CABundle    string // optional ConfigMap (key ca.crt) mounted as SSL_CERT_FILE into the sidecars
-	TCPRoutes   bool   // the TCPRoute CRD is installed
-	Requeue     time.Duration
+	// ServeURL is FUNNEL_SERVE_URL: node-control on the tailnet (serve mode, no certificateRefs).
+	ServeURL  string
+	APIURL    string // FUNNEL_API_URL: the funnel-ingress registration API (funnel mode)
+	CABundle  string // optional ConfigMap (key ca.crt) mounted as SSL_CERT_FILE into the sidecars
+	TCPRoutes bool   // the TCPRoute CRD is installed
+	Requeue   time.Duration
 }
 
 // Readiness is the /readyz body of funnel-sidecar.

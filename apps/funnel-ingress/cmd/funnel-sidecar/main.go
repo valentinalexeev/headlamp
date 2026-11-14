@@ -186,8 +186,10 @@ func (r *readiness) set(at time.Time, ok bool) {
 }
 
 // handler answers 200 while ready and 503 otherwise, with a JSON body:
-// {"ready":bool,"last_registered":RFC 3339 time,"age_seconds":int,"addresses":[string]}; the two times are absent
-// before the first successful round, and addresses is absent before the node has an address. The age lets a probe or an operator see how long registration has been failing.
+// {"ready":bool,"last_registered":RFC 3339 time,"age_seconds":int,"addresses":[string]}.
+// The two times are absent before the first successful round, and addresses is absent before
+// the node has an address. The age lets a probe or an operator see how long registration has
+// been failing.
 func (r *readiness) handler(now func() time.Time) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		r.mu.Lock()

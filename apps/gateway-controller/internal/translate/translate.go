@@ -1,6 +1,7 @@
 // Package translate turns one Gateway and the routes attached to it into the configuration of one
-// funnel-sidecar (FUNNEL_SERVICES) and into the status conditions of the Gateway, its listeners and the
-// routes. It has no Kubernetes client: the controller reads the objects and passes them in, so the rules
+// funnel-sidecar (FUNNEL_SERVICES) and into the status conditions of the Gateway, its listeners and
+// the routes. It has no Kubernetes client: the controller reads the objects and passes them in, so
+// the rules
 // are tested without a cluster (#338).
 package translate
 
@@ -93,7 +94,8 @@ type Result struct {
 	Services      []Service
 	CertSecret    string // serve mode with HTTPS listeners: the Secret with tls.crt and tls.key
 	Listeners     []ListenerResult
-	Parents       map[string][]ParentResult // route key -> one result per parentRef that names this Gateway
+	// Parents maps a route key to one result per parentRef that names this Gateway.
+	Parents map[string][]ParentResult
 }
 
 // FunnelServices is the FUNNEL_SERVICES value, empty when no listener has a route.
@@ -159,14 +161,18 @@ func Translate(in Input) Result {
 			res.Parents[rt.Key()] = append(res.Parents[rt.Key()], pr)
 		}
 	}
-	sort.Slice(res.Services, func(i, j int) bool { return res.Services[i].TailnetPort < res.Services[j].TailnetPort })
+	sort.Slice(
+		res.Services,
+		func(i, j int) bool { return res.Services[i].TailnetPort < res.Services[j].TailnetPort },
+	)
 	return res
 }
 
 // checkParameters checks spec.infrastructure.parametersRef: it must name a Secret (the auth key).
 func checkParameters(gw *gwv1.Gateway) string {
 	if gw.Spec.Infrastructure == nil || gw.Spec.Infrastructure.ParametersRef == nil {
-		return "spec.infrastructure.parametersRef must name the Secret with the auth key (key authkey)"
+		return "spec.infrastructure.parametersRef must name the Secret " +
+			"with the auth key (key authkey)"
 	}
 	p := gw.Spec.Infrastructure.ParametersRef
 	if p.Group != "" || p.Kind != "Secret" {
@@ -175,7 +181,8 @@ func checkParameters(gw *gwv1.Gateway) string {
 	return ""
 }
 
-// ParametersSecret is the name of the Secret with the auth key, or "" when parametersRef is not valid.
+// ParametersSecret is the name of the Secret with the auth key, or "" when parametersRef is not
+// valid.
 func ParametersSecret(gw *gwv1.Gateway) string {
 	if checkParameters(gw) != "" {
 		return ""

@@ -7,8 +7,9 @@ import (
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-// listenerKinds gives the route kind a listener protocol takes in a mode, or "" when the mode does not
-// support the protocol. Serve mode terminates TLS in the sidecar (HTTPS). Funnel mode gets plain HTTP from
+// listenerKinds gives the route kind a listener protocol takes in a mode, or "" when the mode does
+// not support the protocol. Serve mode terminates TLS in the sidecar (HTTPS). Funnel mode gets
+// plain HTTP from
 // funnel-ingress, which terminates the public TLS. TCP forwards bytes in both modes.
 func listenerKinds(mode Mode, p gwv1.ProtocolType) string {
 	switch {
@@ -22,18 +23,21 @@ func listenerKinds(mode Mode, p gwv1.ProtocolType) string {
 	return ""
 }
 
-// serviceName is the FUNNEL_SERVICES name of a listener: the first label of its hostname, or the listener
+// serviceName is the FUNNEL_SERVICES name of a listener: the first label of its hostname, or the
+// listener
 // name when it has no hostname (TCP). Wildcards are not supported: one listener is one name.
 func serviceName(l gwv1.Listener) (string, string) {
 	if l.Hostname == nil || *l.Hostname == "" {
 		if !labelRE.MatchString(string(l.Name)) {
-			return "", "a listener without a hostname uses its name as the service name; it must be a DNS label"
+			return "", "a listener without a hostname uses its name as the service name; " +
+				"it must be a DNS label"
 		}
 		return string(l.Name), ""
 	}
 	h := string(*l.Hostname)
 	if strings.HasPrefix(h, "*") {
-		return "", "wildcard hostnames are not supported: put a Gateway implementation behind a wildcard " +
+		return "", "wildcard hostnames are not supported: " +
+			"put a Gateway implementation behind a wildcard " +
 			"serve service instead"
 	}
 	first, _, _ := strings.Cut(h, ".")
@@ -81,7 +85,8 @@ func checkListeners(mode Mode, gw *gwv1.Gateway) ([]ListenerResult, string) {
 		if out[i].Valid && (names[out[i].service] > 1 || ports[l.Port] > 1) {
 			out[i].Conflicted = true
 			out[i].Reason = string(gwv1.ListenerReasonHostnameConflict)
-			out[i].Message = "two listeners have the same service name or port; the sidecar needs one of each"
+			out[i].Message = "two listeners have the same service name or port; " +
+				"the sidecar needs one of each"
 		}
 	}
 	return out, cert
@@ -104,8 +109,9 @@ func checkAllowed(l gwv1.Listener, kind string) string {
 	return ""
 }
 
-// checkTLS checks the tls block. Serve mode: HTTPS terminates in the sidecar. Without certificateRefs the
-// sidecar gets its certificate from node-control. With them, all HTTPS listeners must name the same one
+// checkTLS checks the tls block. Serve mode: HTTPS terminates in the sidecar. Without
+// certificateRefs the sidecar gets its certificate from node-control. With them, all HTTPS
+// listeners must name the same one
 // Secret in the namespace of the Gateway (the sidecar has one certificate).
 func checkTLS(mode Mode, l gwv1.Listener, cert *string) string {
 	if l.TLS == nil || mode != ModeServe {
@@ -122,7 +128,8 @@ func checkTLS(mode Mode, l gwv1.Listener, cert *string) string {
 		return "tls.certificateRefs: give one Secret"
 	}
 	r := refs[0]
-	if (r.Group != nil && *r.Group != "") || (r.Kind != nil && *r.Kind != "Secret") || r.Namespace != nil {
+	if (r.Group != nil && *r.Group != "") || (r.Kind != nil && *r.Kind != "Secret") ||
+		r.Namespace != nil {
 		return "tls.certificateRefs: give a Secret in the namespace of the Gateway"
 	}
 	if *cert != "" && *cert != string(r.Name) {

@@ -1,5 +1,6 @@
-// Command gateway-controller publishes Services on the tailnet from Gateway API resources. It owns the
-// GatewayClasses headlamp-serve and headlamp-funnel and runs one funnel-sidecar Deployment per Gateway (#338).
+// Command gateway-controller publishes Services on the tailnet from Gateway API resources. It owns
+// the GatewayClasses headlamp-serve and headlamp-funnel and runs one funnel-sidecar Deployment per
+// Gateway (#338).
 package main
 
 import (
@@ -28,6 +29,9 @@ import (
 
 	"github.com/valentinalexeev/headlamp/apps/gateway-controller/internal/controller"
 )
+
+// readyTimeout limits one read of a sidecar /readyz.
+const readyTimeout = 5 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -58,14 +62,20 @@ func loadConfig() (controller.Config, error) {
 		return cfg, errors.New("GATEWAY_SIDECAR_IMAGE is required")
 	}
 	if cfg.ServeURL == "" && cfg.APIURL == "" {
-		return cfg, errors.New("set FUNNEL_SERVE_URL (serve class), FUNNEL_API_URL (funnel class), or both")
+		return cfg, errors.New(
+			"set FUNNEL_SERVE_URL (serve class), FUNNEL_API_URL (funnel class), or both",
+		)
 	}
 	return cfg, nil
 }
 
 func run() error {
 	ctrl.SetLogger(zap.New())
-	probeAddr := flag.String("health-probe-bind-address", ":8080", "address of /healthz and /readyz")
+	probeAddr := flag.String(
+		"health-probe-bind-address",
+		":8080",
+		"address of /healthz and /readyz",
+	)
 	flag.Parse()
 	cfg, err := loadConfig()
 	if err != nil {
@@ -83,7 +93,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("reading the API resources: %w", err)
 	}
-	podSel := labels.SelectorFromSet(labels.Set{controller.LabelManagedBy: "headlamp-gateway-controller"})
+	podSel := labels.SelectorFromSet(
+		labels.Set{controller.LabelManagedBy: "headlamp-gateway-controller"},
+	)
 	mgr, err := ctrl.NewManager(rc, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: "0"},
@@ -103,11 +115,19 @@ func run() error {
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		return err
 	}
-	ready := controller.HTTPReady(&http.Client{Timeout: 5 * time.Second})
+	ready := controller.HTTPReady(&http.Client{Timeout: readyTimeout})
 	if err := controller.Setup(mgr, cfg, ready); err != nil {
 		return err
 	}
-	ctrl.Log.Info("starting", "serveClass", cfg.ServeClass, "funnelClass", cfg.FunnelClass, "tcpRoutes", cfg.TCPRoutes)
+	ctrl.Log.Info(
+		"starting",
+		"serveClass",
+		cfg.ServeClass,
+		"funnelClass",
+		cfg.FunnelClass,
+		"tcpRoutes",
+		cfg.TCPRoutes,
+	)
 	return mgr.Start(ctrl.SetupSignalHandler())
 }
 

@@ -17,8 +17,10 @@ func gateway(mode Mode, listeners ...gwv1.Listener) *gwv1.Gateway {
 		Spec: gwv1.GatewaySpec{
 			GatewayClassName: gwv1.ObjectName("headlamp-" + string(mode)),
 			Listeners:        listeners,
-			Infrastructure: &gwv1.GatewayInfrastructure{ParametersRef: &gwv1.LocalParametersReference{
-				Kind: "Secret", Name: "gw-authkey"}},
+			Infrastructure: &gwv1.GatewayInfrastructure{
+				ParametersRef: &gwv1.LocalParametersReference{
+					Kind: "Secret", Name: "gw-authkey"},
+			},
 		},
 	}
 }
@@ -37,8 +39,10 @@ func service(ns, name, ip string, port int32) *corev1.Service {
 }
 
 func httpRoute(ns, name string, match *gwv1.HTTPRouteMatch, backendNS string) *gwv1.HTTPRoute {
-	b := gwv1.HTTPBackendRef{BackendRef: gwv1.BackendRef{BackendObjectReference: gwv1.BackendObjectReference{
-		Name: "web", Port: ptr(gwv1.PortNumber(80))}}}
+	b := gwv1.HTTPBackendRef{
+		BackendRef: gwv1.BackendRef{BackendObjectReference: gwv1.BackendObjectReference{
+			Name: "web", Port: ptr(gwv1.PortNumber(80))}},
+	}
 	if backendNS != "" {
 		b.Namespace = ptr(gwv1.Namespace(backendNS))
 	}
@@ -57,9 +61,15 @@ func httpRoute(ns, name string, match *gwv1.HTTPRouteMatch, backendNS string) *g
 }
 
 func serveInput(routes ...*gwv1.HTTPRoute) Input {
-	in := Input{Mode: ModeServe, Gateway: gateway(ModeServe, listener("web", gwv1.HTTPSProtocolType, 443, "grafana.example.com")),
+	in := Input{
+		Mode: ModeServe,
+		Gateway: gateway(
+			ModeServe,
+			listener("web", gwv1.HTTPSProtocolType, 443, "grafana.example.com"),
+		),
 		Services: map[string]*corev1.Service{"apps/web": service("apps", "web", "10.96.0.10", 80),
-			"other/web": service("other", "web", "10.96.0.20", 80)}}
+			"other/web": service("other", "web", "10.96.0.20", 80)},
+	}
 	for _, r := range routes {
 		in.Routes = append(in.Routes, FromHTTPRoute(r))
 	}
@@ -84,7 +94,9 @@ func TestTranslateHTTPRouteToFunnelServices(t *testing.T) {
 }
 
 func TestRootPrefixMatchIsAccepted(t *testing.T) {
-	m := &gwv1.HTTPRouteMatch{Path: &gwv1.HTTPPathMatch{Type: ptr(gwv1.PathMatchPathPrefix), Value: ptr("/")}}
+	m := &gwv1.HTTPRouteMatch{
+		Path: &gwv1.HTTPPathMatch{Type: ptr(gwv1.PathMatchPathPrefix), Value: ptr("/")},
+	}
 	res := Translate(serveInput(httpRoute("apps", "r", m, "")))
 	if p := res.Parents["HTTPRoute/apps/r"]; !p[0].Accepted {
 		t.Fatalf("PathPrefix / rejected: %+v", p[0])
@@ -94,16 +106,24 @@ func TestRootPrefixMatchIsAccepted(t *testing.T) {
 func TestUnsupportedMatchesAndFilters(t *testing.T) {
 	cases := map[string]func(*gwv1.HTTPRoute){
 		"path": func(r *gwv1.HTTPRoute) {
-			r.Spec.Rules[0].Matches = []gwv1.HTTPRouteMatch{{Path: &gwv1.HTTPPathMatch{Value: ptr("/api")}}}
+			r.Spec.Rules[0].Matches = []gwv1.HTTPRouteMatch{
+				{Path: &gwv1.HTTPPathMatch{Value: ptr("/api")}},
+			}
 		},
 		"header": func(r *gwv1.HTTPRoute) {
-			r.Spec.Rules[0].Matches = []gwv1.HTTPRouteMatch{{Headers: []gwv1.HTTPHeaderMatch{{Name: "x", Value: "y"}}}}
+			r.Spec.Rules[0].Matches = []gwv1.HTTPRouteMatch{
+				{Headers: []gwv1.HTTPHeaderMatch{{Name: "x", Value: "y"}}},
+			}
 		},
 		"filter": func(r *gwv1.HTTPRoute) {
-			r.Spec.Rules[0].Filters = []gwv1.HTTPRouteFilter{{Type: gwv1.HTTPRouteFilterRequestHeaderModifier}}
+			r.Spec.Rules[0].Filters = []gwv1.HTTPRouteFilter{
+				{Type: gwv1.HTTPRouteFilterRequestHeaderModifier},
+			}
 		},
 		"backend filter": func(r *gwv1.HTTPRoute) {
-			r.Spec.Rules[0].BackendRefs[0].Filters = []gwv1.HTTPRouteFilter{{Type: gwv1.HTTPRouteFilterRequestHeaderModifier}}
+			r.Spec.Rules[0].BackendRefs[0].Filters = []gwv1.HTTPRouteFilter{
+				{Type: gwv1.HTTPRouteFilterRequestHeaderModifier},
+			}
 		},
 		"two rules": func(r *gwv1.HTTPRoute) { r.Spec.Rules = append(r.Spec.Rules, r.Spec.Rules[0]) },
 	}
@@ -113,7 +133,8 @@ func TestUnsupportedMatchesAndFilters(t *testing.T) {
 			mod(r)
 			res := Translate(serveInput(r))
 			p := res.Parents["HTTPRoute/apps/r"]
-			if len(p) != 1 || p[0].Accepted || p[0].AcceptReason != string(gwv1.RouteReasonUnsupportedValue) {
+			if len(p) != 1 || p[0].Accepted ||
+				p[0].AcceptReason != string(gwv1.RouteReasonUnsupportedValue) {
 				t.Fatalf("status = %+v", p)
 			}
 			if res.FunnelServices() != "" {
@@ -136,8 +157,12 @@ func TestCrossNamespaceBackendNeedsReferenceGrant(t *testing.T) {
 	in.Grants = GrantsFrom([]gwv1.ReferenceGrant{{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "other", Name: "g"},
 		Spec: gwv1.ReferenceGrantSpec{
-			From: []gwv1.ReferenceGrantFrom{{Group: gwv1.GroupName, Kind: "HTTPRoute", Namespace: "apps"}},
-			To:   []gwv1.ReferenceGrantTo{{Group: "", Kind: "Service", Name: ptr(gwv1.ObjectName("web"))}},
+			From: []gwv1.ReferenceGrantFrom{
+				{Group: gwv1.GroupName, Kind: "HTTPRoute", Namespace: "apps"},
+			},
+			To: []gwv1.ReferenceGrantTo{
+				{Group: "", Kind: "Service", Name: ptr(gwv1.ObjectName("web"))},
+			},
 		},
 	}})
 	res = Translate(in)
@@ -170,7 +195,8 @@ func TestListenerValidation(t *testing.T) {
 		listener("db", gwv1.TCPProtocolType, 5432, ""),
 	)
 	res := Translate(Input{Mode: ModeServe, Gateway: gw})
-	if res.Listeners[0].Valid || res.Listeners[0].Reason != string(gwv1.ListenerReasonUnsupportedProtocol) {
+	if res.Listeners[0].Valid ||
+		res.Listeners[0].Reason != string(gwv1.ListenerReasonUnsupportedProtocol) {
 		t.Errorf("HTTP in serve mode: %+v", res.Listeners[0])
 	}
 	if res.Listeners[1].Valid || !strings.Contains(res.Listeners[1].Message, "wildcard") {
@@ -182,11 +208,24 @@ func TestListenerValidation(t *testing.T) {
 	if !res.Accepted {
 		t.Error("a Gateway with one valid listener is not accepted")
 	}
-	res = Translate(Input{Mode: ModeFunnel, Gateway: gateway(ModeFunnel, listener("p", gwv1.HTTPProtocolType, 80, "a.example.com"))})
+	res = Translate(
+		Input{
+			Mode:    ModeFunnel,
+			Gateway: gateway(ModeFunnel, listener("p", gwv1.HTTPProtocolType, 80, "a.example.com")),
+		},
+	)
 	if !res.Listeners[0].Valid {
 		t.Errorf("HTTP in funnel mode: %+v", res.Listeners[0])
 	}
-	res = Translate(Input{Mode: ModeFunnel, Gateway: gateway(ModeFunnel, listener("p", gwv1.HTTPSProtocolType, 443, "a.example.com"))})
+	res = Translate(
+		Input{
+			Mode: ModeFunnel,
+			Gateway: gateway(
+				ModeFunnel,
+				listener("p", gwv1.HTTPSProtocolType, 443, "a.example.com"),
+			),
+		},
+	)
 	if res.Accepted || res.AcceptReason != string(gwv1.GatewayReasonListenersNotValid) {
 		t.Errorf("HTTPS only in funnel mode: %+v", res)
 	}
@@ -204,9 +243,17 @@ func TestConflictingListeners(t *testing.T) {
 func TestTCPRoute(t *testing.T) {
 	gw := gateway(ModeServe, listener("db", gwv1.TCPProtocolType, 5432, ""))
 	tr := &gwv1.TCPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "t"},
-		Spec: gwv1.TCPRouteSpec{CommonRouteSpec: gwv1.CommonRouteSpec{ParentRefs: []gwv1.ParentReference{{Name: "gw"}}},
-			Rules: []gwv1.TCPRouteRule{{BackendRefs: []gwv1.BackendRef{{BackendObjectReference: gwv1.BackendObjectReference{
-				Name: "pg", Port: ptr(gwv1.PortNumber(5432))}}}}}}}
+		Spec: gwv1.TCPRouteSpec{
+			CommonRouteSpec: gwv1.CommonRouteSpec{ParentRefs: []gwv1.ParentReference{{Name: "gw"}}},
+			Rules: []gwv1.TCPRouteRule{
+				{
+					BackendRefs: []gwv1.BackendRef{
+						{BackendObjectReference: gwv1.BackendObjectReference{
+							Name: "pg", Port: ptr(gwv1.PortNumber(5432))}},
+					},
+				},
+			},
+		}}
 	in := Input{Mode: ModeServe, Gateway: gw, Routes: []Route{FromTCPRoute(tr)},
 		Services: map[string]*corev1.Service{"apps/pg": service("apps", "pg", "10.96.0.30", 5432)}}
 	res := Translate(in)
@@ -222,7 +269,9 @@ func TestTCPRoute(t *testing.T) {
 }
 
 func TestSecondRouteOnListenerIsRejected(t *testing.T) {
-	res := Translate(serveInput(httpRoute("apps", "first", nil, ""), httpRoute("apps", "second", nil, "")))
+	res := Translate(
+		serveInput(httpRoute("apps", "first", nil, ""), httpRoute("apps", "second", nil, "")),
+	)
 	if !res.Parents["HTTPRoute/apps/first"][0].Accepted {
 		t.Fatal("the first route is not accepted")
 	}
@@ -237,7 +286,8 @@ func TestSecondRouteOnListenerIsRejected(t *testing.T) {
 func TestBackendErrors(t *testing.T) {
 	in := serveInput(httpRoute("apps", "r", nil, ""))
 	delete(in.Services, "apps/web")
-	if p := Translate(in).Parents["HTTPRoute/apps/r"][0]; p.Resolved || p.ResolvedReason != string(gwv1.RouteReasonBackendNotFound) {
+	if p := Translate(in).Parents["HTTPRoute/apps/r"][0]; p.Resolved ||
+		p.ResolvedReason != string(gwv1.RouteReasonBackendNotFound) {
 		t.Fatalf("missing Service: %+v", p)
 	}
 	in.Services["apps/web"] = service("apps", "web", "None", 80)
@@ -256,8 +306,10 @@ func TestRouteFromOtherNamespaceNeedsAllowedRoutes(t *testing.T) {
 	if p := Translate(in).Parents["HTTPRoute/team/r"][0]; p.Accepted {
 		t.Fatalf("route from another namespace accepted with from=Same: %+v", p)
 	}
-	in.Gateway.Spec.Listeners[0].AllowedRoutes = &gwv1.AllowedRoutes{Namespaces: &gwv1.RouteNamespaces{
-		From: ptr(gwv1.NamespacesFromAll)}}
+	in.Gateway.Spec.Listeners[0].AllowedRoutes = &gwv1.AllowedRoutes{
+		Namespaces: &gwv1.RouteNamespaces{
+			From: ptr(gwv1.NamespacesFromAll)},
+	}
 	if got := Translate(in).FunnelServices(); got != "grafana=443@10.96.0.40:80" {
 		t.Fatalf("from=All: %q", got)
 	}

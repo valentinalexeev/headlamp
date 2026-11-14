@@ -4,16 +4,26 @@ import (
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-// FromHTTPRoute reduces an HTTPRoute. A rule may have no matches, or matches that are all the default
+// FromHTTPRoute reduces an HTTPRoute. A rule may have no matches, or matches that are all the
+// default
 // "PathPrefix /" with no headers, query parameters or method. Rule filters are not supported.
 func FromHTTPRoute(r *gwv1.HTTPRoute) Route {
-	out := Route{Kind: KindHTTPRoute, Namespace: r.Namespace, Name: r.Name, Generation: r.Generation,
-		ParentRefs: r.Spec.ParentRefs, Hostnames: r.Spec.Hostnames}
+	out := Route{
+		Kind:       KindHTTPRoute,
+		Namespace:  r.Namespace,
+		Name:       r.Name,
+		Generation: r.Generation,
+		ParentRefs: r.Spec.ParentRefs,
+		Hostnames:  r.Spec.Hostnames,
+	}
 	for _, rule := range r.Spec.Rules {
 		rr := Rule{Unsupported: httpRuleUnsupported(rule)}
 		for _, b := range rule.BackendRefs {
-			rr.BackendRefs = append(rr.BackendRefs, gwv1.BackendRef{BackendObjectReference: b.BackendObjectReference,
-				Weight: b.Weight})
+			rr.BackendRefs = append(
+				rr.BackendRefs,
+				gwv1.BackendRef{BackendObjectReference: b.BackendObjectReference,
+					Weight: b.Weight},
+			)
 			if len(b.Filters) > 0 && rr.Unsupported == "" {
 				rr.Unsupported = "backendRefs[].filters are not supported"
 			}
@@ -23,20 +33,22 @@ func FromHTTPRoute(r *gwv1.HTTPRoute) Route {
 	return out
 }
 
+const oneBackend = "the sidecar forwards the whole name to one backend"
+
 func httpRuleUnsupported(rule gwv1.HTTPRouteRule) string {
 	if len(rule.Filters) > 0 {
-		return "filters are not supported: the sidecar forwards the whole name to one backend"
+		return "filters are not supported: " + oneBackend
 	}
 	for _, m := range rule.Matches {
 		switch {
 		case len(m.Headers) > 0:
-			return "header matches are not supported: the sidecar forwards the whole name to one backend"
+			return "header matches are not supported: " + oneBackend
 		case len(m.QueryParams) > 0:
 			return "query parameter matches are not supported"
 		case m.Method != nil:
 			return "method matches are not supported"
 		case m.Path != nil && !isRootPrefix(m.Path):
-			return "path matches are not supported: the sidecar forwards the whole name to one backend"
+			return "path matches are not supported: " + oneBackend
 		}
 	}
 	return ""
@@ -60,7 +72,8 @@ func FromTCPRoute(r *gwv1.TCPRoute) Route {
 	return out
 }
 
-// GrantsFrom flattens ReferenceGrants into one Grant per from/to pair that permits a route to a Service.
+// GrantsFrom flattens ReferenceGrants into one Grant per from/to pair that permits a route to a
+// Service.
 func GrantsFrom(list []gwv1.ReferenceGrant) []Grant {
 	var out []Grant
 	for _, rg := range list {
@@ -72,7 +85,11 @@ func GrantsFrom(list []gwv1.ReferenceGrant) []Grant {
 				if t.Group != "" || t.Kind != "Service" {
 					continue
 				}
-				g := Grant{Namespace: rg.Namespace, FromKind: string(f.Kind), FromNamespace: string(f.Namespace)}
+				g := Grant{
+					Namespace:     rg.Namespace,
+					FromKind:      string(f.Kind),
+					FromNamespace: string(f.Namespace),
+				}
 				if t.Name != nil {
 					g.ToName = string(*t.Name)
 				}

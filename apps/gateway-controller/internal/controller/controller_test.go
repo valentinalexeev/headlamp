@@ -18,8 +18,12 @@ import (
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-var testCfg = Config{ServeClass: "headlamp-serve", FunnelClass: "headlamp-funnel", Image: "funnel-sidecar:test",
-	ServeURL: "http://100.64.0.1"}
+var testCfg = Config{
+	ServeClass:  "headlamp-serve",
+	FunnelClass: "headlamp-funnel",
+	Image:       "funnel-sidecar:test",
+	ServeURL:    "http://100.64.0.1",
+}
 
 func newScheme(t *testing.T) *runtime.Scheme {
 	s := runtime.NewScheme()
@@ -39,16 +43,25 @@ func fixtures(match *gwv1.HTTPRouteMatch) []client.Object {
 		Spec: gwv1.GatewaySpec{GatewayClassName: "headlamp-serve",
 			Listeners: []gwv1.Listener{{Name: "web", Protocol: gwv1.HTTPSProtocolType, Port: 443,
 				Hostname: ptr(gwv1.Hostname("grafana.example.com"))}},
-			Infrastructure: &gwv1.GatewayInfrastructure{ParametersRef: &gwv1.LocalParametersReference{
-				Kind: "Secret", Name: "gw-authkey"}}}}
+			Infrastructure: &gwv1.GatewayInfrastructure{
+				ParametersRef: &gwv1.LocalParametersReference{
+					Kind: "Secret", Name: "gw-authkey"},
+			}}}
 	rule := gwv1.HTTPRouteRule{BackendRefs: []gwv1.HTTPBackendRef{{BackendRef: gwv1.BackendRef{
-		BackendObjectReference: gwv1.BackendObjectReference{Name: "web", Port: ptr(gwv1.PortNumber(80))}}}}}
+		BackendObjectReference: gwv1.BackendObjectReference{
+			Name: "web",
+			Port: ptr(gwv1.PortNumber(80)),
+		}}}}}
 	if match != nil {
 		rule.Matches = []gwv1.HTTPRouteMatch{*match}
 	}
-	hr := &gwv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "r", Generation: 1},
-		Spec: gwv1.HTTPRouteSpec{CommonRouteSpec: gwv1.CommonRouteSpec{ParentRefs: []gwv1.ParentReference{{Name: "gw"}}},
-			Rules: []gwv1.HTTPRouteRule{rule}}}
+	hr := &gwv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "r", Generation: 1},
+		Spec: gwv1.HTTPRouteSpec{
+			CommonRouteSpec: gwv1.CommonRouteSpec{ParentRefs: []gwv1.ParentReference{{Name: "gw"}}},
+			Rules:           []gwv1.HTTPRouteRule{rule},
+		},
+	}
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "web"},
 		Spec: corev1.ServiceSpec{ClusterIP: "10.96.0.10", Ports: []corev1.ServicePort{{Port: 80}}}}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "gw-funnel-x",
@@ -57,7 +70,11 @@ func fixtures(match *gwv1.HTTPRouteMatch) []client.Object {
 	return []client.Object{gc, gw, hr, svc, pod}
 }
 
-func newReconciler(t *testing.T, objs []client.Object, ready Readiness) (*GatewayReconciler, client.Client) {
+func newReconciler(
+	t *testing.T,
+	objs []client.Object,
+	ready Readiness,
+) (*GatewayReconciler, client.Client) {
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).WithObjects(objs...).
 		WithStatusSubresource(&gwv1.Gateway{}, &gwv1.HTTPRoute{}, &gwv1.GatewayClass{}).Build()
 	r := &GatewayReconciler{Client: c, Cfg: testCfg, Now: time.Now,
@@ -79,7 +96,11 @@ func reconcileGW(t *testing.T, r *GatewayReconciler) {
 }
 
 func TestReconcileProgramsGatewayAndRoute(t *testing.T) {
-	r, c := newReconciler(t, fixtures(nil), Readiness{Ready: true, Addresses: []string{"100.64.0.7", "fd7a:115c:a1e0::7"}})
+	r, c := newReconciler(
+		t,
+		fixtures(nil),
+		Readiness{Ready: true, Addresses: []string{"100.64.0.7", "fd7a:115c:a1e0::7"}},
+	)
 	reconcileGW(t, r)
 
 	var dep appsv1.Deployment
@@ -93,7 +114,8 @@ func TestReconcileProgramsGatewayAndRoute(t *testing.T) {
 	if got := envs["FUNNEL_SERVICES"].Value; got != "grafana=443@10.96.0.10:80" {
 		t.Errorf("FUNNEL_SERVICES = %q", got)
 	}
-	if ref := envs["TS_AUTHKEY"].ValueFrom; ref == nil || ref.SecretKeyRef.Name != "gw-authkey" || ref.SecretKeyRef.Key != "authkey" {
+	if ref := envs["TS_AUTHKEY"].ValueFrom; ref == nil || ref.SecretKeyRef.Name != "gw-authkey" ||
+		ref.SecretKeyRef.Key != "authkey" {
 		t.Errorf("TS_AUTHKEY = %+v", envs["TS_AUTHKEY"])
 	}
 	if envs["FUNNEL_SERVE_URL"].Value != testCfg.ServeURL {
@@ -118,7 +140,10 @@ func TestReconcileProgramsGatewayAndRoute(t *testing.T) {
 	var hr gwv1.HTTPRoute
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "r"}, &hr)
 	if len(hr.Status.Parents) != 1 || hr.Status.Parents[0].ControllerName != ControllerName ||
-		!meta.IsStatusConditionTrue(hr.Status.Parents[0].Conditions, string(gwv1.RouteConditionAccepted)) {
+		!meta.IsStatusConditionTrue(
+			hr.Status.Parents[0].Conditions,
+			string(gwv1.RouteConditionAccepted),
+		) {
 		t.Fatalf("route status = %+v", hr.Status.Parents)
 	}
 
@@ -132,12 +157,17 @@ func TestReconcileProgramsGatewayAndRoute(t *testing.T) {
 }
 
 func TestReconcilePendingUntilSidecarReady(t *testing.T) {
-	r, c := newReconciler(t, fixtures(nil), Readiness{Ready: false, Addresses: []string{"100.64.0.7"}})
+	r, c := newReconciler(
+		t,
+		fixtures(nil),
+		Readiness{Ready: false, Addresses: []string{"100.64.0.7"}},
+	)
 	reconcileGW(t, r)
 	var gw gwv1.Gateway
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "gw"}, &gw)
 	p := meta.FindStatusCondition(gw.Status.Conditions, string(gwv1.GatewayConditionProgrammed))
-	if p == nil || p.Status != metav1.ConditionFalse || p.Reason != string(gwv1.GatewayReasonPending) {
+	if p == nil || p.Status != metav1.ConditionFalse ||
+		p.Reason != string(gwv1.GatewayReasonPending) {
 		t.Fatalf("Programmed = %+v", p)
 	}
 	if len(gw.Status.Addresses) != 0 {
@@ -146,17 +176,27 @@ func TestReconcilePendingUntilSidecarReady(t *testing.T) {
 }
 
 func TestReconcilePathMatchRejected(t *testing.T) {
-	m := &gwv1.HTTPRouteMatch{Path: &gwv1.HTTPPathMatch{Type: ptr(gwv1.PathMatchPathPrefix), Value: ptr("/api")}}
+	m := &gwv1.HTTPRouteMatch{
+		Path: &gwv1.HTTPPathMatch{Type: ptr(gwv1.PathMatchPathPrefix), Value: ptr("/api")},
+	}
 	r, c := newReconciler(t, fixtures(m), Readiness{})
 	reconcileGW(t, r)
 	var hr gwv1.HTTPRoute
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "r"}, &hr)
-	a := meta.FindStatusCondition(hr.Status.Parents[0].Conditions, string(gwv1.RouteConditionAccepted))
-	if a == nil || a.Status != metav1.ConditionFalse || a.Reason != string(gwv1.RouteReasonUnsupportedValue) {
+	a := meta.FindStatusCondition(
+		hr.Status.Parents[0].Conditions,
+		string(gwv1.RouteConditionAccepted),
+	)
+	if a == nil || a.Status != metav1.ConditionFalse ||
+		a.Reason != string(gwv1.RouteReasonUnsupportedValue) {
 		t.Fatalf("Accepted = %+v", a)
 	}
 	var dep appsv1.Deployment
-	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "apps", Name: "gw-funnel"}, &dep)
+	_ = c.Get(
+		context.Background(),
+		types.NamespacedName{Namespace: "apps", Name: "gw-funnel"},
+		&dep,
+	)
 	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 0 {
 		t.Errorf("replicas with no route = %v", dep.Spec.Replicas)
 	}
@@ -175,8 +215,14 @@ func TestReconcileIgnoresOtherClasses(t *testing.T) {
 
 func TestClassReconciler(t *testing.T) {
 	objs := []client.Object{
-		&gwv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "headlamp-serve"}, Spec: gwv1.GatewayClassSpec{ControllerName: ControllerName}},
-		&gwv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "other"}, Spec: gwv1.GatewayClassSpec{ControllerName: ControllerName}},
+		&gwv1.GatewayClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "headlamp-serve"},
+			Spec:       gwv1.GatewayClassSpec{ControllerName: ControllerName},
+		},
+		&gwv1.GatewayClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "other"},
+			Spec:       gwv1.GatewayClassSpec{ControllerName: ControllerName},
+		},
 	}
 	c := fake.NewClientBuilder().WithScheme(newScheme(t)).WithObjects(objs...).
 		WithStatusSubresource(&gwv1.GatewayClass{}).Build()
@@ -188,11 +234,17 @@ func TestClassReconciler(t *testing.T) {
 	}
 	var gc gwv1.GatewayClass
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "headlamp-serve"}, &gc)
-	if !meta.IsStatusConditionTrue(gc.Status.Conditions, string(gwv1.GatewayClassConditionStatusAccepted)) {
+	if !meta.IsStatusConditionTrue(
+		gc.Status.Conditions,
+		string(gwv1.GatewayClassConditionStatusAccepted),
+	) {
 		t.Errorf("headlamp-serve: %+v", gc.Status.Conditions)
 	}
 	_ = c.Get(context.Background(), types.NamespacedName{Name: "other"}, &gc)
-	if meta.IsStatusConditionTrue(gc.Status.Conditions, string(gwv1.GatewayClassConditionStatusAccepted)) {
+	if meta.IsStatusConditionTrue(
+		gc.Status.Conditions,
+		string(gwv1.GatewayClassConditionStatusAccepted),
+	) {
 		t.Errorf("unknown class accepted: %+v", gc.Status.Conditions)
 	}
 }

@@ -8,10 +8,21 @@ import (
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-// attach decides whether rt (through ref) attaches to a listener of the Gateway, and adds its target to
-// FUNNEL_SERVICES. One listener takes one route: the oldest route wins, the others get Accepted=False.
-func attach(in Input, res *Result, rt Route, ref gwv1.ParentReference, taken map[gwv1.SectionName]string) ParentResult {
-	pr := ParentResult{Ref: ref, Resolved: true, ResolvedReason: string(gwv1.RouteReasonResolvedRefs)}
+// attach decides whether rt (through ref) attaches to a listener of the Gateway, and adds its
+// target to FUNNEL_SERVICES. One listener takes one route: the oldest route wins, the others get
+// Accepted=False.
+func attach(
+	in Input,
+	res *Result,
+	rt Route,
+	ref gwv1.ParentReference,
+	taken map[gwv1.SectionName]string,
+) ParentResult {
+	pr := ParentResult{
+		Ref:            ref,
+		Resolved:       true,
+		ResolvedReason: string(gwv1.RouteReasonResolvedRefs),
+	}
 	reject := func(reason, msg string) ParentResult {
 		pr.Accepted, pr.AcceptReason, pr.AcceptMessage = false, reason, msg
 		return pr
@@ -25,8 +36,14 @@ func attach(in Input, res *Result, rt Route, ref gwv1.ParentReference, taken map
 	}
 	l := &res.Listeners[li]
 	if owner, ok := taken[l.Name]; ok && owner != rt.Key() {
-		return reject(string(gwv1.RouteReasonNotAllowedByListeners),
-			fmt.Sprintf("listener %s already has route %s; the sidecar sends one name to one backend", l.Name, owner))
+		return reject(
+			string(gwv1.RouteReasonNotAllowedByListeners),
+			fmt.Sprintf(
+				"listener %s already has route %s; the sidecar sends one name to one backend",
+				l.Name,
+				owner,
+			),
+		)
 	}
 	target, rReason, rMsg := resolveBackend(in, rt)
 	pr.Accepted, pr.AcceptReason = true, string(gwv1.RouteReasonAccepted)
@@ -39,33 +56,46 @@ func attach(in Input, res *Result, rt Route, ref gwv1.ParentReference, taken map
 	}
 	if _, ok := taken[l.Name]; !ok {
 		taken[l.Name] = rt.Key()
-		res.Services = append(res.Services, Service{Name: l.service, TailnetPort: int32(listenerPort(in, l.Name)),
-			Target: target})
+		res.Services = append(
+			res.Services,
+			Service{Name: l.service, TailnetPort: int32(listenerPort(in, l.Name)),
+				Target: target},
+		)
 	}
 	return pr
 }
 
-// unsupportedRule gives the reason the sidecar cannot apply the route, or "". The sidecar forwards a whole
-// name to one backend: it has one rule, no matches other than "everything", no filters, one backendRef.
+// unsupportedRule gives the reason the sidecar cannot apply the route, or "". The sidecar forwards
+// a whole name to one backend: it has one rule, no matches other than "everything", no filters, one
+// backendRef.
 func unsupportedRule(rt Route) string {
 	if len(rt.Rules) != 1 {
-		return fmt.Sprintf("the route has %d rules; the sidecar supports exactly one", len(rt.Rules))
+		return fmt.Sprintf(
+			"the route has %d rules; the sidecar supports exactly one",
+			len(rt.Rules),
+		)
 	}
 	r := rt.Rules[0]
 	if r.Unsupported != "" {
 		return r.Unsupported
 	}
 	if len(r.BackendRefs) != 1 {
-		return fmt.Sprintf("the rule has %d backendRefs; the sidecar supports exactly one", len(r.BackendRefs))
+		return fmt.Sprintf(
+			"the rule has %d backendRefs; the sidecar supports exactly one",
+			len(r.BackendRefs),
+		)
 	}
 	return ""
 }
 
-// pickListener finds the listener ref selects: by sectionName, port and route kind. It returns -1 and the
+// pickListener finds the listener ref selects: by sectionName, port and route kind. It returns -1
+// and the
 // reason when there is none.
 func pickListener(in Input, res *Result, rt Route, ref gwv1.ParentReference) (int, string, string) {
 	found := -1
-	reason, msg := string(gwv1.RouteReasonNoMatchingParent), "no listener of the Gateway matches the parentRef"
+	reason, msg := string(
+		gwv1.RouteReasonNoMatchingParent,
+	), "no listener of the Gateway matches the parentRef"
 	for i, lr := range res.Listeners {
 		l := in.Gateway.Spec.Listeners[i]
 		if ref.SectionName != nil && *ref.SectionName != l.Name {
@@ -78,11 +108,15 @@ func pickListener(in Input, res *Result, rt Route, ref gwv1.ParentReference) (in
 			continue
 		}
 		if len(lr.SupportedKinds) == 0 || lr.SupportedKinds[0] != rt.Kind {
-			reason, msg = string(gwv1.RouteReasonNotAllowedByListeners), "no listener takes "+rt.Kind
+			reason, msg = string(
+				gwv1.RouteReasonNotAllowedByListeners,
+			), "no listener takes "+rt.Kind
 			continue
 		}
 		if !namespaceAllowed(l, in.Gateway.Namespace, rt.Namespace) {
-			reason, msg = string(gwv1.RouteReasonNotAllowedByListeners), "allowedRoutes does not permit this namespace"
+			reason, msg = string(
+				gwv1.RouteReasonNotAllowedByListeners,
+			), "allowedRoutes does not permit this namespace"
 			continue
 		}
 		if !hostnameMatches(l, rt.Hostnames) {
@@ -101,13 +135,15 @@ func pickListener(in Input, res *Result, rt Route, ref gwv1.ParentReference) (in
 
 func namespaceAllowed(l gwv1.Listener, gwNS, routeNS string) bool {
 	from := gwv1.NamespacesFromSame
-	if l.AllowedRoutes != nil && l.AllowedRoutes.Namespaces != nil && l.AllowedRoutes.Namespaces.From != nil {
+	if l.AllowedRoutes != nil && l.AllowedRoutes.Namespaces != nil &&
+		l.AllowedRoutes.Namespaces.From != nil {
 		from = *l.AllowedRoutes.Namespaces.From
 	}
 	return from == gwv1.NamespacesFromAll || gwNS == routeNS
 }
 
-// hostnameMatches: a route without hostnames matches every listener; otherwise one hostname must equal the
+// hostnameMatches: a route without hostnames matches every listener; otherwise one hostname must
+// equal the
 // listener hostname (listener wildcards are rejected earlier).
 func hostnameMatches(l gwv1.Listener, hs []gwv1.Hostname) bool {
 	if len(hs) == 0 || l.Hostname == nil {
@@ -142,14 +178,25 @@ func resolveBackend(in Input, rt Route) (string, string, string) {
 	}
 	if ns != rt.Namespace && !granted(in.Grants, rt, ns, string(b.Name)) {
 		return "", string(gwv1.RouteReasonRefNotPermitted),
-			fmt.Sprintf("no ReferenceGrant in namespace %s permits %s from namespace %s", ns, rt.Kind, rt.Namespace)
+			fmt.Sprintf(
+				"no ReferenceGrant in namespace %s permits %s from namespace %s",
+				ns,
+				rt.Kind,
+				rt.Namespace,
+			)
 	}
 	if b.Port == nil {
 		return "", string(gwv1.RouteReasonUnsupportedValue), "backendRefs[].port is required"
 	}
 	svc, ok := in.Services[ns+"/"+string(b.Name)]
 	if !ok {
-		return "", string(gwv1.RouteReasonBackendNotFound), fmt.Sprintf("Service %s/%s not found", ns, b.Name)
+		return "", string(
+				gwv1.RouteReasonBackendNotFound,
+			), fmt.Sprintf(
+				"Service %s/%s not found",
+				ns,
+				b.Name,
+			)
 	}
 	ip := svc.Spec.ClusterIP
 	if ip == "" || ip == "None" {

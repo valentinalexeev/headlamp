@@ -32,16 +32,25 @@ func (r *ClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if gc.Spec.ControllerName != ControllerName {
 		return ctrl.Result{}, nil
 	}
-	c := metav1.Condition{Type: string(gwv1.GatewayClassConditionStatusAccepted), Status: metav1.ConditionTrue,
-		Reason: string(gwv1.GatewayClassReasonAccepted), ObservedGeneration: gc.Generation,
-		LastTransitionTime: metav1.NewTime(r.Now())}
+	c := metav1.Condition{
+		Type:               string(gwv1.GatewayClassConditionStatusAccepted),
+		Status:             metav1.ConditionTrue,
+		Reason:             string(gwv1.GatewayClassReasonAccepted),
+		ObservedGeneration: gc.Generation,
+		LastTransitionTime: metav1.NewTime(r.Now()),
+	}
 	switch {
 	case modeOf(r.Cfg, &gc) == "":
 		c.Status, c.Reason = metav1.ConditionFalse, string(gwv1.GatewayClassReasonInvalidParameters)
-		c.Message = fmt.Sprintf("the controller serves the classes %s and %s only", r.Cfg.ServeClass, r.Cfg.FunnelClass)
+		c.Message = fmt.Sprintf(
+			"the controller serves the classes %s and %s only",
+			r.Cfg.ServeClass,
+			r.Cfg.FunnelClass,
+		)
 	case gc.Spec.ParametersRef != nil:
 		c.Status, c.Reason = metav1.ConditionFalse, string(gwv1.GatewayClassReasonInvalidParameters)
-		c.Message = "parametersRef is not supported on the class; set spec.infrastructure.parametersRef on each Gateway"
+		c.Message = "parametersRef is not supported on the class; " +
+			"set spec.infrastructure.parametersRef on each Gateway"
 	default:
 		c.Message = "the class is accepted (mode " + string(modeOf(r.Cfg, &gc)) + ")"
 	}
@@ -65,8 +74,9 @@ func equalConds(a, b []metav1.Condition) bool {
 	return true
 }
 
-// Setup registers both reconcilers with the manager. Any change to a route, Service, ReferenceGrant or
-// sidecar pod reconciles every Gateway: there are few Gateways, and a full pass keeps the "one route per
+// Setup registers both reconcilers with the manager. Any change to a route, Service, ReferenceGrant
+// or sidecar pod reconciles every Gateway: there are few Gateways, and a full pass keeps the "one
+// route per
 // listener" choice stable.
 func Setup(mgr ctrl.Manager, cfg Config, ready ReadyFunc) error {
 	now := time.Now
@@ -74,17 +84,19 @@ func Setup(mgr ctrl.Manager, cfg Config, ready ReadyFunc) error {
 		Complete(&ClassReconciler{Client: mgr.GetClient(), Cfg: cfg, Now: now}); err != nil {
 		return err
 	}
-	all := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
-		var gws gwv1.GatewayList
-		if err := mgr.GetClient().List(ctx, &gws); err != nil {
-			return nil
-		}
-		out := make([]reconcile.Request, 0, len(gws.Items))
-		for _, g := range gws.Items {
-			out = append(out, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&g)})
-		}
-		return out
-	})
+	all := handler.EnqueueRequestsFromMapFunc(
+		func(ctx context.Context, _ client.Object) []reconcile.Request {
+			var gws gwv1.GatewayList
+			if err := mgr.GetClient().List(ctx, &gws); err != nil {
+				return nil
+			}
+			out := make([]reconcile.Request, 0, len(gws.Items))
+			for _, g := range gws.Items {
+				out = append(out, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&g)})
+			}
+			return out
+		},
+	)
 	b := ctrl.NewControllerManagedBy(mgr).Named("gateway").For(&gwv1.Gateway{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&gwv1.GatewayClass{}, all).

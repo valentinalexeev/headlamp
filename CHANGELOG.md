@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.19.0 - 2026-11-14
+
 ### Added
 
 - gateway-controller: a new chart `charts/gateway-controller` and image `gateway-controller` publish in-cluster Services on the tailnet from Gateway API resources (#338), off until installed. It owns the GatewayClasses `headlamp-serve` (tailnet-only names) and `headlamp-funnel` (public names through funnel-ingress). For each `Gateway` it runs one `funnel-sidecar` Deployment with the key Secret of `spec.infrastructure.parametersRef`, and builds `FUNNEL_SERVICES` from the listener hostnames and the ClusterIP of each `HTTPRoute` or `TCPRoute` (TCPRoute only when its CRD is installed) `backendRef`. It writes `Accepted` and `Programmed` and the tailnet address into the status of the `Gateway` and its routes, needs a `ReferenceGrant` for a Service in another namespace, and sets `Accepted=False` on a route with a path or header match or a filter. The controller cannot read Secrets. See ADR 0003. `make test-gateway-controller` and `make test-gateway-controller-e2e` test it.
@@ -18,7 +20,16 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Changed
 
+- Go minor and patch updates of node-control (#337); `azure/setup-helm` 5.1.0 in CI (#336). node-control also takes grpc 1.83.2, go-jose 4.1.6 and otel 1.47.0 for open security advisories (#344).
+- CI and images run on maintenance branches `maint/X.Y` too, and a patch release can be tagged there (#348, #350). See "Maintenance branches" in VERSIONING.md.
+
+## 0.18.1 - 2026-11-14
+
+### Changed
+
 - node-control: with `COMPAT_STRICT=true`, a component that reports no interface version (older than 0.18.0) is refused too, not only an incompatible one (#322). An ingress agent gets no credentials, the funnel ingress gets `409`, a task runner gets no task. It shows as "At risk" in Attention, as a problem in `/fleet.json` (`fleet-check.sh` exits 1) and as "refused" on the Fleet page. A component that has not answered yet is not refused. Without `COMPAT_STRICT`, nothing changes.
+- Images: Alpine 3.24 base images for exit-node, funnel-ingress (and its sidecar), node-control and tailnet-connector; Go minor and patch updates of node-control (#335). Dependabot now opens one PR per kind of update (base images, compose images, Terraform providers).
+- Docs: a Gateway API implementation behind one serve proxy (`tailnet-connector` chart README) or behind `funnel-sidecar` (funnel-ingress README) (#338).
 
 ## 0.18.0 - 2026-11-12
 

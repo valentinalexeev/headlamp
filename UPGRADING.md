@@ -9,18 +9,7 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
-## Unreleased (0.19.0)
-
-### Action required
-
-- **Only if you set `COMPAT_STRICT=true`** (#322): node-control now also refuses a component that reports no interface
-  version, that is, a component older than 0.18.0. Before you deploy this node-control, run `scripts/fleet-check.sh`
-  (or open the Fleet page) and upgrade each component that shows "reports no ... version". Else that ingress agent
-  gets no credentials, the funnel ingress gets no routes, and that task runner gets no task.
-
-  Check: after the deploy, `fleet-check.sh` exits 0, and Attention has no "is refused (COMPAT_STRICT)" item.
-
-  Without `COMPAT_STRICT`, no action is required.
+## 0.19.0
 
 ### Optional
 
@@ -38,6 +27,19 @@ says "No action required".
   "Certificates from an ACME CA" in the node-control README, or "Serve certificates" in the tailnet-connector chart
   README. With `SERVE_CERT_SOURCE=acme`, upgrade every `funnel-sidecar` in serve mode to 0.19.0 first: node-control
   answers `426` to an older one.
+
+## 0.18.1
+
+### Action required
+
+- **Only if you set `COMPAT_STRICT=true`** (#322): node-control now also refuses a component that reports no interface
+  version, that is, a component older than 0.18.0. Before you deploy node-control 0.18.1, run `scripts/fleet-check.sh`
+  (or open the Fleet page) and upgrade each component that shows "reports no ... version". Else that ingress agent
+  gets no credentials, the funnel ingress gets no routes, and that task runner gets no task.
+
+  Check: after the deploy, `fleet-check.sh` exits 0, and Attention has no "is refused (COMPAT_STRICT)" item.
+
+  Without `COMPAT_STRICT`, no action is required.
 
 ## 0.18.0
 

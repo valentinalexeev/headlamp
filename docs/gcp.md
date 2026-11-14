@@ -76,8 +76,8 @@ cert-manager`), with a cert-manager Cloud DNS issuer and Workload Identity.
 
 - **Secrets.** node-control reads its secrets from the environment and from files. On GCE, keep them in Secret
   Manager. Write them to the compose `.env` or secret files at boot, as the exit node module does for its auth key.
-- **State.** SQLite on the data disk works. For the modules that use Redis (`REDIS_URL`), Memorystore for Redis works:
-  put it on the VPC of the control host, with in-transit encryption off. node-control encrypts the state itself
+- **State.** SQLite on the data disk works. Memorystore for Redis works for the modules that use `REDIS_URL`. Put it
+  on the VPC of the control host, with in-transit encryption off. node-control encrypts the state itself
   (`NODE_CONTROL_STATE_KEY`). With in-transit encryption on, Memorystore uses a server CA that node-control has no
   setting for yet.
 

@@ -16,10 +16,13 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 - Ansible role `ssh-ca` (#345): sshd accepts user certificates of the listed CAs, maps certificate principals to accounts, and (optional) presents host certificates signed on the controller (with a key file or through ssh-agent). The drop-in is checked with `sshd -t` before it is installed; `authorized_keys` keeps working as the break-glass path. `scripts/ssh-cert-sign.sh` makes a throwaway key and a short-lived certificate (at most 24 hours, no forwarding, optional `source-address`) for one CI job, with the CA key held only in a private ssh-agent. Off until a site applies the role. `make test-ssh-ca` and `make test-ssh-ca-e2e` test them.
 - funnel-ingress: the setting `FUNNEL_HSTS` (off by default) sends `Strict-Transport-Security` on responses for service hosts that the client reached over HTTPS, and replaces a backend's own header. It accepts `max-age=<seconds>` (at most two years) with an optional `; includeSubDomains`, not `preload`. Without the setting, nothing changes. A Kubernetes service published through the funnel, with no TLS proxy of its own, needs it to pass an HSTS check.
 
+## 0.18.1 - 2026-11-14
+
 ### Changed
 
 - node-control: with `COMPAT_STRICT=true`, a component that reports no interface version (older than 0.18.0) is refused too, not only an incompatible one (#322). An ingress agent gets no credentials, the funnel ingress gets `409`, a task runner gets no task. It shows as "At risk" in Attention, as a problem in `/fleet.json` (`fleet-check.sh` exits 1) and as "refused" on the Fleet page. A component that has not answered yet is not refused. Without `COMPAT_STRICT`, nothing changes.
 - Images: Alpine 3.24 base images for exit-node, funnel-ingress (and its sidecar), node-control and tailnet-connector; Go minor and patch updates of node-control (#335). Dependabot now opens one PR per kind of update (base images, compose images, Terraform providers).
+- Docs: a Gateway API implementation behind one serve proxy (`tailnet-connector` chart README) or behind `funnel-sidecar` (funnel-ingress README) (#338).
 
 ## 0.18.0 - 2026-11-12
 

@@ -3,10 +3,10 @@
 name: test-task-runner
 on:
   push:
-    branches: [main]
+    branches: [main, 'maint/**']
     paths: ['apps/task-runner/**', '.github/workflows/test-task-runner.yml']
   pull_request:
-    branches: [main]
+    branches: [main, 'maint/**']
     paths: ['apps/task-runner/**', '.github/workflows/test-task-runner.yml']
 permissions:
   contents: read

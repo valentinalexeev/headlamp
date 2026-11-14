@@ -218,8 +218,9 @@ func (c *runnerClient) Health(ctx context.Context, addr string) (bool, error) {
 	c.api[addr] = RunnerAPI{API: h.API, At: time.Now()}
 	c.apiMu.Unlock()
 	if c.strict {
-		if res := compat.Must().Check(compat.RunnerAPI, h.API); res.State == compat.Incompatible {
-			slog.Warn("task runner refused: runner API is "+res.Hint+" (COMPAT_STRICT)",
+		// #322: a runner that answers without an API version (older than 0.18.0) is refused too.
+		if res := compat.Must().Check(compat.RunnerAPI, h.API); res.Refused() {
+			slog.Warn("task runner refused: "+res.Why()+" (COMPAT_STRICT)",
 				"runner_api", h.API)
 			return false, nil
 		}

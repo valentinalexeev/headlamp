@@ -20,7 +20,7 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/valentinalexeev/headlamp/apps/node-control/internal/core.Version=${VERSION}" -o /out/node-control ./cmd/node-control
 
 # alpine rather than a bare image: `fly ssh console` needs a shell.
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates
 WORKDIR /srv
 COPY --from=build /out/node-control /usr/local/bin/node-control

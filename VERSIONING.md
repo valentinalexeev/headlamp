@@ -51,10 +51,11 @@ Before 1.0.0, a minor release must not change a running site that has no config 
 
 - The tag is `vMAJOR.MINOR.PATCH`, or `vMAJOR.MINOR.PATCH-rc.N` for a release candidate.
 - `VERSION` at that commit matches it.
-- The commit is on `main`.
-- It is the next version after the highest stable tag, with lower numbers reset. There is no skipping, and no fix release
-  to an older line.
-- It bumps at least as much as the commits since the previous release need.
+- The commit is on `main`. A patch release (`X.Y.Z`, Z > 0) can instead be on the maintenance branch `maint/X.Y`.
+- It is the next version after the highest stable tag, with lower numbers reset. There is no skipping. On `maint/X.Y`,
+  it is the next patch after the highest `vX.Y.*` tag.
+- It bumps at least as much as the commits since the previous release need. On `maint/X.Y`, those commits must need
+  only a patch: a feature or a breaking change is refused there.
 - A milestone named after the version, if there is one, has no open issues.
 - [`UPGRADING.md`](UPGRADING.md) at that commit has a section for the version (`## X.Y.Z`). It lists what a site repo
   must change, or says "No action required". Rename the `## Unreleased (X.Y.Z)` section in the release PR.
@@ -70,6 +71,7 @@ CI publishes `ghcr.io/valentinalexeev/headlamp/<image>`. The components are list
 | `src-<hash>` | built from exactly this source | never |
 | `sha-<commit>` | the image set at this commit of `main` | never |
 | `main` | the newest commit of `main` | yes |
+| `maint-X.Y` | the newest commit of the maintenance branch `maint/X.Y` | yes |
 | `X.Y.Z`, `X.Y.Z-rc.N` | a release | never |
 | `X.Y` | the newest release of that minor | yes |
 | `X`, `latest` | the newest release of that major, and overall (from 1.0.0) | yes |
@@ -102,7 +104,8 @@ it. Each component reports its interface version, and node-control compares it w
 - Outside the range: a problem on the Fleet page, an Attention item, and `scripts/fleet-check.sh` exits 1. The message
   names the action: upgrade the component, or upgrade node-control.
 - No version reported (a component before 0.18.0): a note only.
-- With `COMPAT_STRICT=true`, node-control also refuses an incompatible component. The default is `false`: warn only.
+- With `COMPAT_STRICT=true`, node-control also refuses an incompatible component, and a component that reports no
+  version (#322). The default is `false`: warn only.
 
 To change an interface, change it and `compat.json` in the same PR:
 
@@ -151,13 +154,27 @@ helm install tc oci://ghcr.io/valentinalexeev/headlamp/charts/tailnet-connector 
 
 ## Cutting a release
 
-All work merges into `main` through pull requests. There is no other long-lived branch.
+All work merges into `main` through pull requests. A maintenance branch `maint/X.Y` is the only other long-lived
+branch. It gets fixes only, as backports of work that is on `main` already.
 
 1. Make a `release/X.Y.Z` branch from `main`. In one commit `chore(release): vX.Y.Z`, set `VERSION` and move the
    `Unreleased` part of `CHANGELOG.md` under the new version. Merge it into `main` through a PR.
 2. Tag the merge commit on `main` and push the tag: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
 
 A hotfix is a normal fix on a `hotfix/` branch, followed at once by a PATCH release.
+
+### Maintenance branches
+
+Feature work does not wait for a patch release. When `main` gets a feature after `vX.Y.Z` and a patch `X.Y.(Z+1)` is
+still due, the patch comes from a maintenance branch:
+
+1. Make `maint/X.Y` from the highest `vX.Y.*` tag.
+2. Cherry-pick each fix of the patch (`git cherry-pick -x -m 1 <merge commit>`) onto a `backport/X.Y/...` branch. Merge
+   it into `maint/X.Y` through a PR.
+3. Make the `release/X.Y.(Z+1)` branch from `maint/X.Y`, merge it into `maint/X.Y`, and tag that merge commit.
+
+The fixes are on `main` too, so the next feature release also has them. CI publishes `maint/X.Y` images as
+`maint-X.Y`. A tag on `maint/X.Y` moves the `X.Y` image tag only while it is the highest `vX.Y.*` release.
 
 Before you tag, run `make release-preflight` on the release commit. It does these checks:
 

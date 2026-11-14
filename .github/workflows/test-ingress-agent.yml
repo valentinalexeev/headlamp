@@ -3,10 +3,10 @@
 name: test-ingress-agent
 on:
   push:
-    branches: [main]
+    branches: [main, 'maint/**']
     paths: ['apps/ingress-agent/**', 'scripts/test/ingress-agent-budget/**', '.github/workflows/test-ingress-agent.yml']
   pull_request:
-    branches: [main]
+    branches: [main, 'maint/**']
     paths: ['apps/ingress-agent/**', 'scripts/test/ingress-agent-budget/**', '.github/workflows/test-ingress-agent.yml']
 permissions:
   contents: read

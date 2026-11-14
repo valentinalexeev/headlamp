@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// #300: the runner API a runner reports is recorded; COMPAT_STRICT makes an incompatible runner not healthy,
-// so it gets no task. Without strict mode it stays healthy; a runner older than #300 (no api) is never refused.
+// #300, #322: the runner API a runner reports is recorded; COMPAT_STRICT makes an incompatible runner, or one that
+// reports no API version (older than 0.18.0), not healthy, so it gets no task. Without strict mode it stays healthy.
 func TestRunnerAPICompat(t *testing.T) {
 	for _, c := range []struct {
 		body    string
@@ -18,8 +18,9 @@ func TestRunnerAPICompat(t *testing.T) {
 	}{
 		{`{"busy":false,"api":1}`, false, true, 1},
 		{`{"busy":false,"api":7}`, false, true, 7},
+		{`{"busy":false}`, false, true, 0},
 		{`{"busy":false,"api":7}`, true, false, 7},
-		{`{"busy":false}`, true, true, 0},
+		{`{"busy":false}`, true, false, 0},
 		{`{"busy":false,"api":1}`, true, true, 1},
 	} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bridge selection</title>
+</head>
+<body>
+<div class="hl" id="selection">
+  <div class="page narrow">
+    <div>
+      <h1>Bridge selection</h1>
+      <p class="t2" id="sub" aria-live="polite">Loading.</p>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note plain" id="notice" role="status" hidden></div>
+
+    <section class="panel">
+      <h2>Tuning</h2>
+      <p class="t2 small">Each value shows its source: console, enroll.json or the built-in default. Clear a field to use enroll.json again.</p>
+      <div class="stack" id="tuning"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Bridges</h2>
+      <p class="t2 small">Order, group and drain of each bridge. A drained bridge is not in new profiles. Host, keys, SNI, port and tokens come only from enroll.json.</p>
+      <div class="stack" id="bridges"></div>
+    </section>
+
+    <div class="rowbtns start" id="actions"></div>
+
+    <section class="panel" id="preview" hidden>
+      <h2>Preview</h2>
+      <div class="stack" id="previewbody"></div>
+    </section>
+  </div>
+</div>
+<script src="/enroll/static/selection.js" defer></script>
+</body>
+</html>

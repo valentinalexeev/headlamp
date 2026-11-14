@@ -11,7 +11,7 @@ key again. An instance group would delete the VM and its disk at size 0, and a n
 (#213 on AWS).
 
 A Spot VM (the default, `spot = true`) is **stopped, not deleted**, when GCE takes it back. node-control shows it as
-stopped, and you can start it again. Then it is the same node. `spot = false` makes a standard VM that restarts by
+stopped. You can start it again, and then it is the same node. `spot = false` makes a standard VM that restarts by
 itself after a host event.
 
 The external IPv4 address is ephemeral. It can change on a stop and start. The tailnet identity does not change.
@@ -48,8 +48,8 @@ Add the key as a secret version outside Terraform, for example with `gcloud secr
   depends on the secret's value.
 - The node's own service account gets `roles/secretmanager.secretAccessor` on **that secret only**. It has no project
   role.
-- At the first boot, cloud-init reads the latest version with a token from the metadata server, writes it to tmpfs
-  (mode 0600), runs `tailscale up`, and deletes the file. The key is not in the metadata or the startup log.
+- At the first boot, cloud-init reads the latest version with a token from the metadata server. It writes the key to
+  tmpfs (mode 0600), runs `tailscale up`, and deletes the file. The key is not in the metadata or the startup log.
 - The key is needed only for the first registration. Use a reusable key only if you rebuild the VM often.
 
 `tailscale_authkey` still works: it puts the key in the metadata, and so in the state. Set only one of the two.

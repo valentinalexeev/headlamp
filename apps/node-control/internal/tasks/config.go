@@ -21,6 +21,7 @@ const (
 	minEvery        = time.Minute
 	defaultCooldown = 24 * time.Hour
 	maxAttempts     = 10
+	maxStreak       = 100
 )
 
 // Duration is a time.Duration that travels as a Go duration string ("12h").
@@ -59,6 +60,7 @@ type Task struct {
 	Healthcheck string         `json:"healthcheck,omitempty"` // secret name holding the ping URL
 	Alert       *Alert         `json:"alert,omitempty"`
 	OnFailure   *OnFailure     `json:"on_failure,omitempty"`
+	OnRecovery  *OnRecovery    `json:"on_recovery,omitempty"`
 }
 
 // Target is either a named node or a tag selector, never both. Node is the
@@ -109,6 +111,14 @@ type Alert struct {
 type OnFailure struct {
 	Notify   Notify   `json:"notify"`
 	Cooldown Duration `json:"cooldown,omitempty"`
+	// Streak is the number of failed sequences in a row before the message
+	// goes out; default 1.
+	Streak int `json:"streak,omitempty"`
+}
+
+// OnRecovery is sent on the first success after a failure message went out.
+type OnRecovery struct {
+	Notify Notify `json:"notify"`
 }
 
 // shadow is a lenient view of one task's raw JSON. It serves two purposes:
@@ -315,7 +325,18 @@ func ParseConfig(b []byte) (*Config, error) {
 			} else if t.OnFailure.Cooldown <= 0 {
 				bad("on_failure.cooldown", "must be positive")
 			}
+			if t.OnFailure.Streak == 0 {
+				t.OnFailure.Streak = 1
+			} else if t.OnFailure.Streak < 1 || t.OnFailure.Streak > maxStreak {
+				bad("on_failure.streak", "%d is outside 1..%d", t.OnFailure.Streak, maxStreak)
+			}
 			validateNotify("on_failure.notify", t.OnFailure.Notify, bad)
+		}
+		if t.OnRecovery != nil {
+			if t.OnFailure == nil {
+				bad("on_recovery", "needs on_failure: it follows a failure message")
+			}
+			validateNotify("on_recovery.notify", t.OnRecovery.Notify, bad)
 		}
 
 		cfg.Tasks[id] = t

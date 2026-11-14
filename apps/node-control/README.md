@@ -1886,10 +1886,18 @@ A task id matches `^[a-z0-9][a-z0-9._-]{0,63}$`. `config` and `secrets` are rese
       },
       "on_failure": {
         "cooldown": "24h",
+        "streak": 1,
         "notify": {
           "topic": "NTFY_TOPIC",
-          "title": "{task} failed",
-          "message": "{reason}"
+          "title": "{task} failed ({class})",
+          "message": "{reason} {detail}"
+        }
+      },
+      "on_recovery": {
+        "notify": {
+          "topic": "NTFY_TOPIC",
+          "title": "{task} recovered",
+          "message": "{task} succeeded again"
         }
       }
     }
@@ -1913,10 +1921,14 @@ A complete placeholder file is in [`examples/private-repo/fly/node-control/tasks
 | `healthcheck` | no | The NAME of a secret that holds a healthchecks-style ping URL. |
 | `alert.when` | with `alert` | `field` (a numeric result field), `op` (one of `<` `<=` `>` `>=` `==` `!=`) and `value` (number). |
 | `alert.cooldown` | no | `24h`. It must be positive. |
-| `alert.notify`, `on_failure.notify` | with the block | `topic` (a secret NAME: the ntfy topic is never in the config. `ntfy.sh` is a public service where the topic name is the only access control, so keep a long random topic as the secret), `priority` (`min`, `low`, `high`, `max`; any other value is the ntfy default), `title`, `message`. |
+| `alert.notify`, `on_failure.notify`, `on_recovery.notify` | with the block | `topic` (a secret NAME: the ntfy topic is never in the config. `ntfy.sh` is a public service where the topic name is the only access control, so keep a long random topic as the secret), `priority` (`min`, `low`, `high`, `max`; any other value is the ntfy default), `title`, `message`. |
 | `on_failure.cooldown` | no | `24h`. It must be positive. |
+| `on_failure.streak` | no | `1`. From 1 to 100. The module sends the failure message only when the failure streak is this value or more. With `2`, one failed sequence sends nothing, and a second failed sequence in a row sends the message. The failure ping does not wait for the streak. |
+| `on_recovery` | no | Needs `on_failure`. The module sends this message one time, on the first success after a failure message went out. If the send fails, the next success tries again. |
 
-The module replaces `{name}` in a title or message. In an alert, it uses the scalar result field of that name. In a failure message, it uses `task` and `reason`. An unknown name stays as written, so a mistake in the name is visible. `{task}` is also available in alert text. The module refuses a placeholder with a colon.
+The module replaces `{name}` in a title or message. In an alert, it uses the scalar result field of that name. In a failure message, it uses `task`, `reason`, `class` (the failure class, see below) and `detail`. `detail` gives the node counts of `no eligible node`, for example `tagged 2, matching 1, online 0`. It is empty for other reasons. In a recovery message, it uses `task`.
+
+An unknown name stays as written, so a mistake in the name is visible. `{task}` is also available in alert text. The module refuses a placeholder with a colon.
 
 A candidate node for a task has the runner tag and matches `target` (and is online when `online` is set). Its runner must answer its health check as reachable and idle. A candidate node must also have a tailnet IPv4 address. Among the candidates, the module prefers the node that last ran the task successfully, then the least busy node, then the lowest name. If none is eligible, the attempt fails with `no eligible node`. A runner that refuses the token (`401`) counts as unhealthy. node-control logs `runner rejected the token` with the name of the node, one time for each process start.
 
@@ -1983,7 +1995,10 @@ Run view:
 - `duration_ms` (null until the run ended).
 - `result`.
 - `script_sha` (SHA-256 of the script that ran).
-- `notify_outcome` (for example `alert=sent ping=sent`; `suppressed` when a cooldown held the message back).
+- `notify_outcome`, for example `alert=sent ping=sent`. `suppressed`: a cooldown held the message back. `held`: the failure streak is below `on_failure.streak`. `recovery=sent`: the run sent the `on_recovery` message.
+- `class` (`transient`, `structural` or `unknown` for a failed or lost run; empty for other states and for runs from before 0.20.0).
+- `counts` (on a `no eligible node` failure only, else null): `tagged`, `matching`, `online`, `address` and `healthy`. Each is the number of nodes left after that filter (see the list below).
+- `detail` (the counts as text, for example `tagged 0`; empty for other reasons).
 
 The API never exposes the location of a run on its node.
 
@@ -2014,7 +2029,9 @@ History has limits. The module keeps the newest 200 runs for each task. It also 
 
 A *sequence* is the attempts that one scheduled (or manual) run makes. An attempt that fails with attempts left stores the attempt number and its due time, and returns. Nothing sleeps: the scheduler wakes at that time, and a restart continues the backoff.
 
-Only the last failed attempt of a sequence counts. It increments `streak`, and sends the failure message (when `on_failure` is set, at most once per its cooldown) and the failure ping. A success resets `streak` and schedules the next run. A manual run (`POST /tasks/{id}/run`) drops a pending retry and starts at attempt 1. It follows the same retry, alert and failure rules, but does not move a future scheduled time.
+Only the last failed attempt of a sequence counts. It increments `streak` and sends the failure ping. It also sends the failure message when `on_failure` is set and `streak` is `on_failure.streak` or more, at most once per its cooldown. A structural failure (see the class table below) is always the last attempt. The module skips the retries left, because they cannot succeed, and sends the failure message at once.
+
+A success resets `streak` and schedules the next run. A manual run (`POST /tasks/{id}/run`) drops a pending retry and starts at attempt 1. It follows the same retry, alert and failure rules, but does not move a future scheduled time.
 
 Tasks that share one node: use `retry.attempts` of at least 2, with a short backoff. Two tasks due at the same moment can both see the runner of the node as idle before one of them starts. The attempt of the other task then fails with `node busy`. That is a failed attempt by design, so without a retry it would count as a failed sequence.
 
@@ -2023,6 +2040,8 @@ Example with `"attempts": 3` and `"backoff": ["2m", "10m"]`:
 1. Attempt 1 fails. The wait is 2 minutes.
 2. Attempt 2 fails. The wait is 10 minutes.
 3. Attempt 3 fails. The result is one failure message, `streak` + 1, and the next scheduled run at the normal interval.
+
+If attempt 1 fails with `no eligible node` (structural), the module does not retry. It sends the failure message after attempt 1 and schedules the next run at the normal interval.
 
 An attempt fails with a short reason, such as:
 
@@ -2034,6 +2053,24 @@ An attempt fails with a short reason, such as:
 - `timeout`. The runner enforces the timeout. node-control cancels a run that is still reported as running 10 s after it.
 - The error text of the script.
 - `bad result: ...`.
+
+Each failed or lost attempt has a failure class. The class tells if a retry can fix the failure:
+
+| reason | class | what to do |
+|---|---|---|
+| `node busy`, `timeout`, `runner unreachable`, `runner lost the run`, `cannot list nodes`, an error of the start call to the runner | `transient` | Nothing, if it does not repeat. A retry can fix it. |
+| `no eligible node`, `ambiguous target`, `script not found: <name>`, `secret not configured: <names>` | `structural` | Change the setup. A retry cannot fix it, so the module does not retry. |
+| the error text of the script, `bad result: ...` | `unknown` | Read the reason. A script cannot set its own class. |
+
+`no eligible node` is structural also when a node is offline for a short time. The run then gives the node counts, for example `no eligible node (tagged 2, matching 1, online 0)`. The counts stop at the first filter with no node left:
+
+1. `tagged`: the nodes with the runner tag (`TASKS_RUNNER_TAG`). `tagged 0` means that no node has the tag.
+2. `matching`: of those, the nodes that match `target`.
+3. `online`: of those, the nodes that are online. When `target.online` is not set, every matching node counts.
+4. `with address`: of those, the nodes with a tailnet IPv4 address.
+5. `healthy`: of those, the nodes whose runner health probe passed. A runner that is busy or refuses the token is not healthy.
+
+The Tasks page shows the reason, the counts and the class of each failed run. The Attention item of a failing task gives the class and, for a reason that the module wrote, the reason with its counts. It does not show the error text of a script.
 
 When `alert` is set, the module evaluates the condition on every successful run. A result without the field, or with a non-number there, is a failed attempt (`bad result`), not a silent pass.
 
@@ -2052,7 +2089,7 @@ Crash behaviour: the module stores the cooldown only after ntfy accepted the mes
 
 ### Metrics
 
-With `TASKS_METRICS_ADDR` set, a read-only listener answers `GET /metrics` (Prometheus text format 0.0.4). Every other path is `404` and every other method is `405`. It has **no authentication by design** and serves counters and gauges only. Labels are limited to task ids, node names, run states and notification kinds (never a result value, an account, a secret or a URL).
+With `TASKS_METRICS_ADDR` set, a read-only listener answers `GET /metrics` (Prometheus text format 0.0.4). Every other path is `404` and every other method is `405`. It has **no authentication by design** and serves counters and gauges only. Labels are limited to task ids, node names, run states, failure classes and notification kinds. They never hold a result value, an account, a secret or a URL.
 
 > **WARNING:** Bind the metrics listener on a private network only, because it has no authentication. The listener uses the network of the machine, not the tailnet. Publish no port for it. On Fly.io, with no `[[services]]` in `fly.toml`, only the Fly private network can reach it. Thus any app in the same Fly organisation network can read it. The content (ids, counts, states) is of low sensitivity but not secret.
 
@@ -2060,7 +2097,7 @@ The module logs a listen error one time and continues to work. Values are in mem
 
 | metric | type | labels |
 |---|---|---|
-| `task_runs_total` | counter | `task`, `node`, `state` (finished attempts; an attempt that a shutdown cuts short is not counted) |
+| `task_runs_total` | counter | `task`, `node`, `state`, `class` (finished attempts; an attempt that a shutdown cuts short is not counted). `class` is `transient`, `structural` or `unknown` for a failed or lost attempt, and empty for other states. |
 | `task_run_duration_seconds` | summary (`_sum`, `_count`) | `task` |
 | `task_alert_sent_total` | counter | `task`, `kind` (`alert`, `failure`, `ping`), `ok` (`true`, `false`) |
 | `task_notify_failures_total` | counter | `task` |
@@ -2086,6 +2123,7 @@ Useful alerts:
 - `time() - task_last_success_timestamp_seconds > 2 * <every seconds>` (the same rule as `stale`).
 - `task_failure_streak >= 2`.
 - `increase(task_notify_failures_total[1d]) > 0` (a message that did not go out).
+- `increase(task_runs_total{class="structural"}[1h]) > 0` (a failure that a retry cannot fix: change the setup).
 
 ### Heartbeat
 

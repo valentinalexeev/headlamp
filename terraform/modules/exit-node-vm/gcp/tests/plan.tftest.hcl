@@ -140,6 +140,44 @@ run "both_key_sources_are_refused" {
   expect_failures = [check.one_auth_key_source]
 }
 
+run "controller_grant_is_on_this_vm_only" {
+  command = plan
+  variables {
+    authkey_from_secret = true
+    authkey_secret      = "projects/p1/secrets/n1-authkey"
+    controller_member   = "serviceAccount:node-control@p1.iam.gserviceaccount.com"
+    controller_role     = "projects/p1/roles/headlampExitNodeControl"
+  }
+
+  assert {
+    condition     = length(google_compute_instance_iam_member.controller) == 1 && google_compute_instance_iam_member.controller[0].instance_name == "n1" && google_compute_instance_iam_member.controller[0].role == "projects/p1/roles/headlampExitNodeControl"
+    error_message = "node-control must get its role on this VM, not on the project"
+  }
+}
+
+run "no_controller_grant_by_default" {
+  command = plan
+  variables {
+    authkey_from_secret = true
+    authkey_secret      = "projects/p1/secrets/n1-authkey"
+  }
+
+  assert {
+    condition     = length(google_compute_instance_iam_member.controller) == 0
+    error_message = "no grant without controller_member"
+  }
+}
+
+run "member_without_role_is_refused" {
+  command = plan
+  variables {
+    authkey_from_secret = true
+    authkey_secret      = "projects/p1/secrets/n1-authkey"
+    controller_member   = "serviceAccount:node-control@p1.iam.gserviceaccount.com"
+  }
+  expect_failures = [check.controller_role_with_member]
+}
+
 run "switch_without_secret_is_refused" {
   command = plan
   variables {

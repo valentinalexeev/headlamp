@@ -121,3 +121,21 @@ resource "google_compute_instance" "this" {
 
   depends_on = [google_secret_manager_secret_iam_member.authkey]
 }
+
+check "controller_role_with_member" {
+  assert {
+    condition     = (var.controller_member == null) == (var.controller_role == null)
+    error_message = "Set controller_member and controller_role together."
+  }
+}
+
+# node-control may start and stop this VM, and no other: a grant on the instance, not the project. IAM conditions cannot
+# read labels, so the label check in node-control is a second guard, not the boundary.
+resource "google_compute_instance_iam_member" "controller" {
+  count         = var.controller_member != null && var.controller_role != null ? 1 : 0
+  project       = google_compute_instance.this.project
+  zone          = google_compute_instance.this.zone
+  instance_name = google_compute_instance.this.name
+  role          = var.controller_role
+  member        = var.controller_member
+}

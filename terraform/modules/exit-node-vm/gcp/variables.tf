@@ -105,3 +105,15 @@ variable "tailscale_authkey" {
   sensitive   = true
   description = "The tailscale auth key in the metadata. It is then in the Terraform state and the instance metadata. Prefer authkey_from_secret. Set either this or authkey_from_secret."
 }
+
+variable "controller_member" {
+  type        = string
+  default     = null
+  description = "Optional IAM member of node-control, for example \"serviceAccount:node-control@<project>.iam.gserviceaccount.com\". It gets controller_role on this VM only, so it can start and stop this VM and no other. IAM conditions cannot read labels, so this per-VM grant is the way to limit node-control."
+}
+
+variable "controller_role" {
+  type        = string
+  default     = null
+  description = "The role for controller_member on this VM, for example \"projects/<project>/roles/headlampExitNodeControl\" (a custom role with compute.instances.get, start and stop). Needed with controller_member."
+}

@@ -75,7 +75,10 @@ func Select(t Target, nodes []headscale.Node, healthy func(headscale.Node) bool,
 
 // SelectCounts is Select that also returns the nodes left after each filter
 // (see NodeCounts). The counts of an ambiguous target stop at Tagged.
-func SelectCounts(t Target, nodes []headscale.Node, healthy func(headscale.Node) bool, busy map[string]int, lastOK string) (Candidate, NodeCounts, error) {
+func SelectCounts(
+	t Target, nodes []headscale.Node, healthy func(headscale.Node) bool,
+	busy map[string]int, lastOK string,
+) (Candidate, NodeCounts, error) {
 	counts := NodeCounts{Tagged: len(nodes)}
 	if t.Node != "" {
 		same := 0
@@ -85,7 +88,8 @@ func SelectCounts(t Target, nodes []headscale.Node, healthy func(headscale.Node)
 			}
 		}
 		if same > 1 {
-			return Candidate{}, counts, fmt.Errorf("%w: %d nodes have the given name %q", ErrAmbiguousTarget, same, t.Node)
+			return Candidate{}, counts,
+				fmt.Errorf("%w: %d nodes have the given name %q", ErrAmbiguousTarget, same, t.Node)
 		}
 	}
 	var cands []Candidate

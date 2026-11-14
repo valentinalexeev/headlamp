@@ -77,7 +77,8 @@ func (e *Engine) execute(ctx context.Context, task string, t Task, run *Run, val
 	}
 	secrets, err := e.d.Store.Secrets(t.Secrets)
 	if err != nil {
-		return structural("secret not configured: " + strings.Join(e.missingSecrets(t.Secrets), ", "))
+		missing := strings.Join(e.missingSecrets(t.Secrets), ", ")
+		return structural("secret not configured: " + missing)
 	}
 	for _, v := range secrets {
 		*values = append(*values, v)
@@ -98,7 +99,8 @@ func (e *Engine) execute(ctx context.Context, task string, t Task, run *Run, val
 	// Only nodes with the runner tag are ever considered: the probe and the
 	// run itself carry the runner token.
 	nodes = WithTag(nodes, e.d.RunnerTag)
-	cand, counts, err := SelectCounts(t.Target, nodes, e.healthProbe(ctx), e.busySnapshot(), lastOK(e.d.Store.Runs(task)))
+	cand, counts, err := SelectCounts(t.Target, nodes, e.healthProbe(ctx), e.busySnapshot(),
+		lastOK(e.d.Store.Runs(task)))
 	if err != nil {
 		if ctx.Err() != nil {
 			return outcome{shutdown: true}
@@ -280,7 +282,8 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 	}
 	e.setActive(run)
 	e.log.Info("attempt_result", "task", task, "run", run.ID, "node", run.Node, "attempt", run.Attempt,
-		"state", string(run.State), "class", string(run.Class), "dur_ms", now.Sub(run.Started).Milliseconds(), "reason", run.Reason)
+		"state", string(run.State), "class", string(run.Class),
+		"dur_ms", now.Sub(run.Started).Milliseconds(), "reason", run.Reason)
 	if !out.shutdown {
 		// Metrics count real attempts only: a deploy is not a failure.
 		e.d.Metrics.Observe(task, run.Node, run.State, run.Class, now.Sub(run.Started))
@@ -332,7 +335,8 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 			reschedule(s)
 		})
 		e.endSequence(task)
-		info := FailureInfo{Reason: run.Reason, Class: run.Class, Streak: e.d.Store.State(task).Streak}
+		streak := e.d.Store.State(task).Streak
+		info := FailureInfo{Reason: run.Reason, Class: run.Class, Streak: streak}
 		if run.Counts != nil {
 			info.Detail = run.Counts.Detail()
 		}

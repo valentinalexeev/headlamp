@@ -93,7 +93,8 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 			if last.Class == ClassUnknown {
 				it.Detail += fmt.Sprintf(" Last failure: %s.", last.Class)
 			} else {
-				it.Detail += fmt.Sprintf(" Last failure (%s): %s.", last.Class, runReasonText(*last))
+				it.Detail += fmt.Sprintf(" Last failure (%s): %s.",
+					last.Class, runReasonText(*last))
 			}
 		}
 		items = append(items, it)

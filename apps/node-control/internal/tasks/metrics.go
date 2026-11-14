@@ -160,8 +160,9 @@ func (m *Metrics) families() []family {
 	ts := func(t time.Time) string { return formatFloat(float64(t.UnixMilli()) / 1000) }
 	one := func(t string) []string { return []string{t} }
 
-	runs := family{name: "task_runs_total", typ: "counter", labels: []string{"task", "node", "state", "class"},
-		help: "Finished attempts, by task, node, state and failure class."}
+	runs := family{name: "task_runs_total", typ: "counter",
+		labels: []string{"task", "node", "state", "class"},
+		help:   "Finished attempts, by task, node, state and failure class."}
 	dur := family{name: "task_run_duration_seconds", typ: "summary", labels: []string{"task"},
 		help: "Duration of finished attempts."}
 	sent := family{name: "task_alert_sent_total", typ: "counter", labels: []string{"task", "kind", "ok"},
@@ -177,7 +178,8 @@ func (m *Metrics) families() []family {
 
 	m.mu.Lock()
 	for k, v := range m.runs {
-		runs.samples = append(runs.samples, sample{labels: []string{k[0], k[1], k[2], k[3]}, value: u(v)})
+		runs.samples = append(runs.samples,
+			sample{labels: []string{k[0], k[1], k[2], k[3]}, value: u(v)})
 	}
 	for t, c := range m.durCount {
 		dur.samples = append(dur.samples,

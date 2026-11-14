@@ -19,18 +19,16 @@ const (
 	ClassUnknown FailureClass = "unknown"
 )
 
-// failureClasses lists every class, in label order, for metrics and tests.
-var failureClasses = []FailureClass{ClassStructural, ClassTransient, ClassUnknown}
-
 // NodeCounts are the candidate nodes left after each filter of Select, so a
 // "no eligible node" failure says why. Each count is a subset of the one
 // before it.
 type NodeCounts struct {
 	Tagged   int `json:"tagged"`   // carry the runner tag
 	Matching int `json:"matching"` // of those, match the target
-	Online   int `json:"online"`   // of those, online (every matching node when the target does not set online)
-	Address  int `json:"address"`  // of those, have a tailnet IPv4 address
-	Healthy  int `json:"healthy"`  // of those, the runner health probe passed
+	// Online: of those, online (every matching node when target.online is not set).
+	Online  int `json:"online"`
+	Address int `json:"address"` // of those, have a tailnet IPv4 address
+	Healthy int `json:"healthy"` // of those, the runner health probe passed
 }
 
 // Detail is the short text of the counts, up to the first filter that left no
@@ -39,7 +37,10 @@ func (c NodeCounts) Detail() string {
 	steps := []struct {
 		name string
 		n    int
-	}{{"tagged", c.Tagged}, {"matching", c.Matching}, {"online", c.Online}, {"with address", c.Address}, {"healthy", c.Healthy}}
+	}{
+		{"tagged", c.Tagged}, {"matching", c.Matching}, {"online", c.Online},
+		{"with address", c.Address}, {"healthy", c.Healthy},
+	}
 	var parts []string
 	for _, s := range steps {
 		parts = append(parts, fmt.Sprintf("%s %d", s.name, s.n))

@@ -125,7 +125,8 @@ func priorityNumber(name string) int {
 }
 
 // NotifyResult is stored on the run record. "" means not applicable.
-type NotifyResult struct{ Alert, Ping, Recovery string } // "sent", "suppressed", "held", "none" or "failed: <reason>"
+// Each field is "sent", "suppressed", "held", "none" or "failed: <reason>".
+type NotifyResult struct{ Alert, Ping, Recovery string }
 
 type Notifier interface {
 	Success(ctx context.Context, task string, t Task, result map[string]any) NotifyResult
@@ -247,7 +248,9 @@ func (n *HTTPNotifier) alert(ctx context.Context, task string, t Task, result ma
 // Failure pings the healthcheck with /fail on every failed sequence, and
 // sends on_failure once the streak reaches on_failure.streak, at most once per
 // its cooldown. "held" means the streak is still below that value.
-func (n *HTTPNotifier) Failure(ctx context.Context, task string, t Task, f FailureInfo) NotifyResult {
+func (n *HTTPNotifier) Failure(
+	ctx context.Context, task string, t Task, f FailureInfo,
+) NotifyResult {
 	var res NotifyResult
 	now := n.now()
 	if t.Healthcheck != "" {

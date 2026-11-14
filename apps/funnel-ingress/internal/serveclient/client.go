@@ -1,7 +1,8 @@
-// Package serveclient is the sidecar side of headlamp serve (#117): it asks node-control for a certificate for its
-// service, serves TLS with it, and renews it before it expires. The node says nothing about which service it is:
-// node-control knows that from the auth key the node joined the tailnet with, and returns the name. The private key
-// is generated here and never leaves the process: node-control only sees a certificate request.
+// Package serveclient is the sidecar side of headlamp serve (#117): it asks node-control for a
+// certificate for its service, serves TLS with it, and renews it before it expires. The node says
+// nothing about which service it is: node-control knows that from the auth key the node joined the
+// tailnet with, and returns the name. The private key is generated here and never leaves the
+// process: node-control only sees a certificate request.
 package serveclient
 
 import (
@@ -29,9 +30,9 @@ import (
 type Client struct {
 	URL  string       // node-control, reached over the tailnet
 	HTTP *http.Client // dials over the tailnet
-	// CertFile and KeyFile, when set, replace node-control (#334): the certificate comes from files, for example a
-	// cert-manager Secret mounted in the pod. The client reads them again every Poll and serves a changed pair from
-	// the next handshake. URL and HTTP are not used then.
+	// CertFile and KeyFile, when set, replace node-control (#334): the certificate comes from
+	// files, for example a cert-manager Secret mounted in the pod. The client reads them again
+	// every Poll and serves a changed pair from the next handshake. URL and HTTP are not used then.
 	CertFile, KeyFile string
 	Poll              time.Duration
 
@@ -48,17 +49,20 @@ type Response struct {
 	CertPEM  string    `json:"cert_pem"`
 	ChainPEM string    `json:"chain_pem"`
 	NotAfter time.Time `json:"not_after"`
-	// KeyPEM comes with SERVE_CERT_SOURCE=acme (#334): one certificate from a public ACME CA, shared by all
-	// proxies, with its key. Empty when node-control signed this proxy's CSR.
+	// KeyPEM comes with SERVE_CERT_SOURCE=acme (#334): one certificate from a public ACME CA,
+	// shared by all proxies, with its key. Empty when node-control signed this proxy's CSR.
 	KeyPEM string `json:"key_pem,omitempty"`
 }
 
-// API is the serve-api version this client speaks (compat.json in node-control). Version 2 accepts a shared
-// certificate with its key (#334).
+// API is the serve-api version this client speaks (compat.json in node-control). Version 2 accepts
+// a shared certificate with its key (#334).
 const API = 2
 
-// APIError is a refusal from node-control. The message is node-control's reason (for example "this node did not
-// join with the key of a service"), so the operator can fix the key in the secret.
+// DefaultPoll is how often the client reads CertFile and KeyFile again when Poll is 0.
+const DefaultPoll = 30 * time.Second
+
+// APIError is a refusal from node-control. The message is node-control's reason (for example "this
+// node did not join with the key of a service"), so the operator can fix the key in the secret.
 type APIError struct {
 	Status int
 	Msg    string
@@ -76,8 +80,8 @@ func (c *Client) Name() string {
 	return ""
 }
 
-// Register asks node-control for a certificate and installs it. The key is created once per process; a renewal
-// reuses it.
+// Register asks node-control for a certificate and installs it. The key is created once per
+// process; a renewal reuses it.
 func (c *Client) Register(ctx context.Context) error {
 	if c.CertFile != "" {
 		return c.loadFiles()
@@ -116,8 +120,9 @@ func (c *Client) Register(ctx context.Context) error {
 	return c.install(r)
 }
 
-// install checks that the certificate is for this key and covers the name node-control returned, then makes it
-// current. For a wildcard name it checks a host one label under the suffix, which is what the wildcard covers.
+// install checks that the certificate is for this key and covers the name node-control returned,
+// then makes it current. For a wildcard name it checks a host one label under the suffix, which is
+// what the wildcard covers.
 func (c *Client) install(r Response) error {
 	if r.Name == "" {
 		return errors.New("node-control returned no name")
@@ -150,7 +155,8 @@ func (c *Client) install(r Response) error {
 	return nil
 }
 
-// loadFiles installs the pair in CertFile and KeyFile. The name is the first DNS name of the certificate.
+// loadFiles installs the pair in CertFile and KeyFile. The name is the first DNS name of the
+// certificate.
 func (c *Client) loadFiles() error {
 	certPEM, err := os.ReadFile(c.CertFile)
 	if err != nil {
@@ -188,7 +194,8 @@ func pemKey(k *ecdsa.PrivateKey) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
 }
 
-// TLSConfig serves the current certificate; a renewal takes effect on the next handshake, with no restart.
+// TLSConfig serves the current certificate; a renewal takes effect on the next handshake, with no
+// restart.
 func (c *Client) TLSConfig() *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
@@ -201,7 +208,8 @@ func (c *Client) TLSConfig() *tls.Config {
 	}
 }
 
-// RenewAt is when to renew: two thirds into the certificate's life. Zero when there is no certificate.
+// RenewAt is when to renew: two thirds into the certificate's life. Zero when there is no
+// certificate.
 func (c *Client) RenewAt() time.Time {
 	from, exp := c.from.Load(), c.exp.Load()
 	if exp == 0 {
@@ -218,9 +226,9 @@ func (c *Client) Expires() time.Time {
 	return time.Time{}
 }
 
-// Keep registers, then renews at RenewAt until ctx ends. A failure is retried with backoff up to a minute; the
-// current certificate keeps serving meanwhile, so a short outage of node-control does not break TLS. ready reports
-// whether a valid certificate is in place.
+// Keep registers, then renews at RenewAt until ctx ends. A failure is retried with backoff up to a
+// minute; the current certificate keeps serving meanwhile, so a short outage of node-control does
+// not break TLS. ready reports whether a valid certificate is in place.
 func (c *Client) Keep(ctx context.Context, ready func(bool), logf func(string, ...any)) {
 	backoff := time.Second
 	var lastExp time.Time
@@ -249,13 +257,14 @@ func (c *Client) Keep(ctx context.Context, ready func(bool), logf func(string, .
 				// cert-manager renews the Secret; read it again often, log only a change
 				wait = c.Poll
 				if wait <= 0 {
-					wait = 30 * time.Second
+					wait = DefaultPoll
 				}
 				changed = !c.Expires().Equal(lastExp)
 				lastExp = c.Expires()
 			}
 			if changed {
-				logf("serve: certificate for %s until %s; renewing at %s", c.Name(), c.Expires().UTC().Format(time.RFC3339), c.RenewAt().UTC().Format(time.RFC3339))
+				logf("serve: certificate for %s until %s; renewing at %s", c.Name(),
+					c.Expires().UTC().Format(time.RFC3339), c.RenewAt().UTC().Format(time.RFC3339))
 			}
 		}
 		t := time.NewTimer(wait)

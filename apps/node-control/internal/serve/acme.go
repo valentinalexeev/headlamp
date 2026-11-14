@@ -20,18 +20,28 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/statestore"
 )
 
-// Issuer gets a certificate for names from a public CA (#334). The real one is ACME with DNS-01 (lego); the tests
-// use a fake. It returns the leaf followed by its chain, and the private key, both PEM.
+// Issuer gets a certificate for names from a public CA (#334). The real one is ACME with DNS-01
+// (lego); the tests use a fake. It returns the leaf followed by its chain, and the private key,
+// both PEM.
 type Issuer interface {
 	Obtain(ctx context.Context, names []string) (chainPEM, keyPEM []byte, err error)
 }
 
-// The store keys of the ACME certificate. The key is sealed with NODE_CONTROL_STATE_KEY like the CA key.
+// The store keys of the ACME certificate. The key is sealed with NODE_CONTROL_STATE_KEY like the CA
+// key.
 const (
 	acmeCertKey  = "acme-cert"
 	acmeKeyKey   = "acme-key"
 	acmeNamesKey = "acme-names"
 	acmeScope    = "serve-acme"
+)
+
+const (
+	acmeRetry    = 5 * time.Minute // after a failed order
+	maxACMECheck = 24 * time.Hour  // the longest SERVE_ACME_CHECK
+	// renew at renewNum/renewDen of the certificate's life
+	renewNum = 2
+	renewDen = 3
 )
 
 // acmeCert is the current certificate from the ACME CA, shared by every serve proxy.
@@ -43,8 +53,8 @@ type acmeCert struct {
 	until    time.Time
 }
 
-// keeper holds the ACME certificate: it loads it from the store, gets a new one when the names change or the
-// certificate is two thirds through its life, and keeps it sealed in the store.
+// keeper holds the ACME certificate: it loads it from the store, gets a new one when the names
+// change or the certificate is two thirds through its life, and keeps it sealed in the store.
 type keeper struct {
 	iss   Issuer
 	st    Store
@@ -83,9 +93,10 @@ func (a *atomicStr) store(s string) {
 	a.Unlock()
 }
 
-// acmeNames is what the certificate must cover: the wildcard of the zone, and the wildcard of the parent of every
-// service that is deeper than one label under the zone (a "*.apps" service needs "*.apps.<zone>"; "a.b" needs
-// "*.b.<zone>"). A wildcard covers one label, so this is the smallest set that covers every service name.
+// acmeNames is what the certificate must cover: the wildcard of the zone, and the wildcard of the
+// parent of every service that is deeper than one label under the zone (a "*.apps" service needs
+// "*.apps.<zone>"; "a.b" needs "*.b.<zone>"). A wildcard covers one label, so this is the smallest
+// set that covers every service name.
 func acmeNames(zone string, svcs []Service) []string {
 	set := map[string]bool{}
 	for _, s := range svcs {
@@ -114,7 +125,8 @@ func parseACME(chainPEM, keyPEM []byte, names []string) (*acmeCert, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &acmeCert{chainPEM: chainPEM, keyPEM: keyPEM, names: names, from: leaf.NotBefore, until: leaf.NotAfter}, nil
+	return &acmeCert{chainPEM: chainPEM, keyPEM: keyPEM, names: names,
+		from: leaf.NotBefore, until: leaf.NotAfter}, nil
 }
 
 // load reads the certificate kept in the store, if any.
@@ -131,7 +143,8 @@ func (k *keeper) load() error {
 	}
 	key, err := k.ciph.Open(acmeScope, acmeKeyKey, sealed)
 	if err != nil {
-		return fmt.Errorf("serve acme: key does not decrypt (NODE_CONTROL_STATE_KEY changed?): %w", err)
+		return fmt.Errorf("serve acme: key does not decrypt (NODE_CONTROL_STATE_KEY changed?): %w",
+			err)
 	}
 	var names []string
 	if b, err := k.st.GetSecret(acmeNamesKey); err == nil {
@@ -145,13 +158,14 @@ func (k *keeper) load() error {
 	return nil
 }
 
-// due says whether the certificate must be replaced: none yet, other names, or past two thirds of its life.
+// due says whether the certificate must be replaced: none yet, other names, or past two thirds of
+// its life.
 func (k *keeper) due(want []string) bool {
 	c := k.cur.load()
 	if c == nil || !slices.Equal(c.names, want) {
 		return true
 	}
-	return !k.now().Before(c.from.Add(c.until.Sub(c.from) * 2 / 3))
+	return !k.now().Before(c.from.Add(c.until.Sub(c.from) * renewNum / renewDen))
 }
 
 // ensure gets a new certificate when due. A failure keeps the old certificate.
@@ -170,7 +184,8 @@ func (k *keeper) ensure(ctx context.Context, want []string) error {
 			if err == nil {
 				k.cur.store(c)
 				k.lastErr.store("")
-				k.log.Info("serve acme: certificate in place", "names", strings.Join(want, ","), "until", c.until.UTC().Format(time.RFC3339))
+				k.log.Info("serve acme: certificate in place", "names", strings.Join(want, ","),
+					"until", c.until.UTC().Format(time.RFC3339))
 				return nil
 			}
 		}
@@ -195,8 +210,8 @@ func (k *keeper) save(c *acmeCert) error {
 	return k.st.PutSecret(acmeCertKey, c.chainPEM)
 }
 
-// run keeps the certificate current: at start, when kicked (a service was created), and every check period. After
-// a failure it tries again after retry.
+// run keeps the certificate current: at start, when kicked (a service was created), and every check
+// period. After a failure it tries again after retry.
 func (k *keeper) run(ctx context.Context, names func() ([]string, error), check time.Duration) {
 	for ctx.Err() == nil {
 		wait := check
@@ -226,7 +241,8 @@ func (k *keeper) poke() {
 	}
 }
 
-// covers reports whether a certificate for names serves name (exact, or "*.x" for a wildcard service).
+// covers reports whether a certificate for names serves name (exact, or "*.x" for a wildcard
+// service).
 func covers(names []string, name string) bool {
 	probe := name
 	if suf, ok := strings.CutPrefix(name, "*."); ok {
@@ -245,25 +261,28 @@ func covers(names []string, name string) bool {
 	return false
 }
 
-// setupACME makes the keeper. The certificate key is kept sealed, so it needs NODE_CONTROL_STATE_KEY like a
-// self-signed CA.
+// setupACME makes the keeper. The certificate key is kept sealed, so it needs
+// NODE_CONTROL_STATE_KEY like a self-signed CA.
 func (m *Module) setupACME(st Store) error {
 	ciph, err := statestore.NewCipher(m.env.Getenv("NODE_CONTROL_STATE_KEY"))
 	if err == nil && ciph == nil {
 		err = errors.New("NODE_CONTROL_STATE_KEY is not set")
 	}
 	if err != nil {
-		return fmt.Errorf("serve: SERVE_CERT_SOURCE=acme needs NODE_CONTROL_STATE_KEY to keep the certificate key encrypted: %w", err)
+		return fmt.Errorf("serve: SERVE_CERT_SOURCE=acme needs NODE_CONTROL_STATE_KEY "+
+			"to keep the certificate key encrypted: %w", err)
 	}
 	iss := m.iss
 	if iss == nil {
 		iss = newLegoIssuer(m.cfg.acme, st, ciph)
 	}
-	m.acme = &keeper{iss: iss, st: st, ciph: ciph, log: m.log, now: m.now, retry: 5 * time.Minute, kick: make(chan struct{}, 1)}
+	m.acme = &keeper{iss: iss, st: st, ciph: ciph, log: m.log, now: m.now, retry: acmeRetry,
+		kick: make(chan struct{}, 1)}
 	if err := m.acme.load(); err != nil {
 		return err
 	}
-	m.log.Info("serve: certificates from ACME", "directory", m.cfg.acme.directory, "dns", m.cfg.acme.provider)
+	m.log.Info("serve: certificates from ACME", "directory", m.cfg.acme.directory,
+		"dns", m.cfg.acme.provider)
 	return nil
 }
 
@@ -278,18 +297,21 @@ func (m *Module) acmeWant() ([]string, error) {
 // acmeCert hands the shared certificate and its key to a proxy of svc. The CSR is not used.
 func (m *Module) acmeCert(w http.ResponseWriter, req certReq, svc Service) {
 	if req.API < compat.Must().Interfaces[compat.ServeAPI].Current {
-		http.Error(w, "SERVE_CERT_SOURCE=acme needs a newer funnel-sidecar (serve-api 2): upgrade the proxy", http.StatusUpgradeRequired)
+		http.Error(w, "SERVE_CERT_SOURCE=acme needs a newer funnel-sidecar (serve-api 2): "+
+			"upgrade the proxy", http.StatusUpgradeRequired)
 		return
 	}
 	c := m.acme.cur.load()
 	if c == nil || !covers(c.names, svc.Name) || !m.now().Before(c.until) {
 		m.acme.poke()
 		w.Header().Set("Retry-After", "30")
-		http.Error(w, "the ACME certificate for this name is not ready yet", http.StatusServiceUnavailable)
+		http.Error(w, "the ACME certificate for this name is not ready yet",
+			http.StatusServiceUnavailable)
 		return
 	}
 	leaf, chain := splitLeaf(c.chainPEM)
-	writeJSON(w, certResp{Name: svc.Name, CertPEM: string(leaf), ChainPEM: string(chain), NotAfter: c.until, KeyPEM: string(c.keyPEM)})
+	writeJSON(w, certResp{Name: svc.Name, CertPEM: string(leaf), ChainPEM: string(chain),
+		NotAfter: c.until, KeyPEM: string(c.keyPEM)})
 }
 
 // splitLeaf returns the first PEM block and the rest.

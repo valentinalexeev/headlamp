@@ -20,7 +20,8 @@ import (
 // knows it and returns the name, so the sidecar names nothing. Nothing is published outside the tailnet.
 func runServe(ctx context.Context, cfg config.SidecarConfig, svcs []sidecar.Service, listen func(network, addr string) (net.Listener, error),
 	hc *http.Client, ready func(bool)) error {
-	c := &serveclient.Client{URL: cfg.ServeURL, HTTP: hc, CertFile: cfg.ServeCertFile, KeyFile: cfg.ServeKeyFile}
+	c := &serveclient.Client{URL: cfg.ServeURL, HTTP: hc,
+		CertFile: cfg.ServeCertFile, KeyFile: cfg.ServeKeyFile}
 	return serveWith(ctx, svcs, listen, c, ready, (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
 		func(f string, a ...any) { slog.Info(fmt.Sprintf(f, a...)) })
 }

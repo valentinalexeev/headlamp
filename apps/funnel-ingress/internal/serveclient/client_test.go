@@ -257,12 +257,12 @@ func TestSharedCertificateWithKey(t *testing.T) {
 	cert, key, na := shared(t, nc, "*.svc.example.com")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		if req["api"] != float64(API) {
 			http.Error(w, "old proxy", http.StatusUpgradeRequired)
 			return
 		}
-		json.NewEncoder(w).Encode(Response{Name: "grafana.svc.example.com", CertPEM: string(cert), ChainPEM: string(nc.caPEM),
+		_ = json.NewEncoder(w).Encode(Response{Name: "grafana.svc.example.com", CertPEM: string(cert), ChainPEM: string(nc.caPEM),
 			NotAfter: na, KeyPEM: string(key)})
 	}))
 	defer srv.Close()
@@ -316,7 +316,9 @@ func TestCertificateFromFilesReloads(t *testing.T) {
 		t.Fatal("the renewed files were not served")
 	}
 	// a broken pair keeps the old certificate in place
-	os.WriteFile(kf, []byte("junk"), 0o600)
+	if err := os.WriteFile(kf, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.Register(context.Background()); err == nil {
 		t.Fatal("a broken key must be an error")
 	}

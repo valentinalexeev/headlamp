@@ -182,8 +182,8 @@ type SidecarConfig struct {
 	// Serve mode (#117): a tailnet-only name with TLS instead of a public funnel route. ServeURL is node-control on
 	// the tailnet. The name is not configured here: node-control knows it from the auth key the node joined with.
 	ServeURL string
-	// ServeCertFile and ServeKeyFile (#334): in serve mode, take the certificate from these files (a cert-manager
-	// Secret) instead of node-control. ServeURL is then not needed.
+	// ServeCertFile and ServeKeyFile (#334): in serve mode, take the certificate from these
+	// files (a cert-manager Secret) instead of node-control. ServeURL is then not needed.
 	ServeCertFile, ServeKeyFile string
 }
 
@@ -229,7 +229,8 @@ func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
 		}
 	}
 	c.ServeURL = strings.TrimRight(str("FUNNEL_SERVE_URL", ""), "/")
-	c.ServeCertFile, c.ServeKeyFile = str("FUNNEL_SERVE_CERT_FILE", ""), str("FUNNEL_SERVE_KEY_FILE", "")
+	c.ServeCertFile = str("FUNNEL_SERVE_CERT_FILE", "")
+	c.ServeKeyFile = str("FUNNEL_SERVE_KEY_FILE", "")
 	if (c.ServeCertFile == "") != (c.ServeKeyFile == "") {
 		fail("set both FUNNEL_SERVE_CERT_FILE and FUNNEL_SERVE_KEY_FILE, or neither")
 	}
@@ -246,7 +247,8 @@ func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
 			fail("FUNNEL_SERVE_URL must be an http(s) URL")
 		}
 		if c.APIURL != "" {
-			fail("set FUNNEL_SERVE_URL or FUNNEL_SERVE_CERT_FILE (tailnet-only name) or FUNNEL_API_URL (public funnel), not both")
+			fail("set FUNNEL_SERVE_URL or FUNNEL_SERVE_CERT_FILE (tailnet-only name) " +
+				"or FUNNEL_API_URL (public funnel), not both")
 		}
 		if getenv("FUNNEL_SERVE_NAMES") != "" {
 			fail("FUNNEL_SERVE_NAMES is gone: the name comes from the auth key of the service (see Serve mode)")

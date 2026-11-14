@@ -46,7 +46,8 @@ type Module struct {
 	log *slog.Logger
 	st  Store
 	ca  *CA
-	// acme keeps the certificate from the ACME CA when SERVE_CERT_SOURCE=acme (#334); then ca is nil.
+	// acme keeps the certificate from the ACME CA when SERVE_CERT_SOURCE=acme (#334). Then ca
+	// is nil.
 	acme *keeper
 	iss  Issuer // for tests; nil means lego
 	dns  *servedns.Server
@@ -156,9 +157,11 @@ func (m *Module) Register(r *core.Routes) error {
 			return fmt.Errorf("%s: %w", on, err)
 		}
 		if m.env.Getenv("SERVE_CA_CERT") != "" || m.env.Getenv("SERVE_CA_KEY") != "" {
-			return errors.New(on + ": SERVE_CA_CERT and SERVE_CA_KEY are for SERVE_CERT_SOURCE=ca; remove them for acme")
+			return errors.New(on + ": SERVE_CA_CERT and SERVE_CA_KEY are for " +
+				"SERVE_CERT_SOURCE=ca; remove them for acme")
 		}
-		if c.acmeCheck, err = duration(m.env, "SERVE_ACME_CHECK", time.Hour, time.Minute, 24*time.Hour); err != nil {
+		c.acmeCheck, err = duration(m.env, "SERVE_ACME_CHECK", time.Hour, time.Minute, maxACMECheck)
+		if err != nil {
 			return err
 		}
 	default:
@@ -189,14 +192,14 @@ func (m *Module) Register(r *core.Routes) error {
 	}
 	if c.source == "acme" {
 		if err := m.setupACME(st); err != nil {
-			st.Close()
+			_ = st.Close()
 			return err
 		}
 		m.st = st
 	} else {
 		ca, err := m.loadCA(st)
 		if err != nil {
-			st.Close()
+			_ = st.Close()
 			return err
 		}
 		m.st, m.ca = st, ca
@@ -560,7 +563,8 @@ type serviceView struct {
 type stateResp struct {
 	Zone          string `json:"zone"`
 	CAFingerprint string `json:"ca_fingerprint"`
-	// CertSource is "ca" (node-control signs) or "acme" (one certificate from a public ACME CA, #334).
+	// CertSource is "ca" (node-control signs) or "acme" (one certificate from a public ACME
+	// CA, #334).
 	CertSource   string        `json:"cert_source"`
 	ACMENames    []string      `json:"acme_names,omitempty"`
 	ACMEUntil    time.Time     `json:"acme_until,omitzero"`
@@ -616,7 +620,8 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) caCert(w http.ResponseWriter, _ *http.Request) {
 	if m.ca == nil {
-		http.Error(w, "serve uses a public ACME CA (SERVE_CERT_SOURCE=acme): clients need no extra CA", http.StatusNotFound)
+		http.Error(w, "serve uses a public ACME CA (SERVE_CERT_SOURCE=acme): "+
+			"clients need no extra CA", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-pem-file")
@@ -628,8 +633,8 @@ func (m *Module) caCert(w http.ResponseWriter, _ *http.Request) {
 
 type certReq struct {
 	CSR string `json:"csr"`
-	// API is the serve-api version of the proxy (compat.json). 0: older than #334, which can only use a
-	// certificate for its own key.
+	// API is the serve-api version of the proxy (compat.json). 0: older than #334, which can
+	// only use a certificate for its own key.
 	API int `json:"api,omitempty"`
 }
 
@@ -638,8 +643,8 @@ type certResp struct {
 	CertPEM  string    `json:"cert_pem"`
 	ChainPEM string    `json:"chain_pem"`
 	NotAfter time.Time `json:"not_after"`
-	// KeyPEM is set only with SERVE_CERT_SOURCE=acme (#334): the key of the shared certificate. The proxy uses
-	// it instead of its own key.
+	// KeyPEM is set only with SERVE_CERT_SOURCE=acme (#334): the key of the shared
+	// certificate. The proxy uses it instead of its own key.
 	KeyPEM string `json:"key_pem,omitempty"`
 }
 

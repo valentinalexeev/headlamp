@@ -30,11 +30,13 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/statestore"
 )
 
-// DefaultACMEDirectory is the Let's Encrypt production directory. The staging one is lego.LEDirectoryStaging.
+// DefaultACMEDirectory is the Let's Encrypt production directory. The staging one is
+// lego.LEDirectoryStaging.
 const DefaultACMEDirectory = lego.LEDirectoryProduction
 
-// The DNS providers SERVE_ACME_DNS accepts: the same four as the funnel edge. Each reads its own credentials from
-// the environment (lego's names), or uses workload identity where the cloud has it.
+// The DNS providers SERVE_ACME_DNS accepts: the same four as the funnel edge. Each reads its own
+// credentials from the environment (lego's names), or uses workload identity where the cloud has
+// it.
 var acmeProviders = map[string]func() (challenge.Provider, error){
 	"googlecloud": func() (challenge.Provider, error) { return gcloud.NewDNSProvider() },
 	"route53":     func() (challenge.Provider, error) { return route53.NewDNSProvider() },
@@ -71,15 +73,18 @@ func loadACMEConfig(env core.Env) (acmeConfig, error) {
 		return c, errors.New("SERVE_ACME_DIRECTORY must be an https:// URL")
 	}
 	if c.email == "" || !strings.Contains(c.email, "@") {
-		return c, errors.New("SERVE_CERT_SOURCE=acme needs SERVE_ACME_EMAIL (the ACME account contact)")
+		return c, errors.New("SERVE_CERT_SOURCE=acme needs SERVE_ACME_EMAIL " +
+			"(the ACME account contact)")
 	}
 	if _, ok := acmeProviders[c.provider]; !ok {
-		return c, fmt.Errorf("SERVE_CERT_SOURCE=acme needs SERVE_ACME_DNS, one of: %s", providerNames())
+		return c, fmt.Errorf("SERVE_CERT_SOURCE=acme needs SERVE_ACME_DNS, one of: %s",
+			providerNames())
 	}
 	return c, nil
 }
 
-// acmeUser is the ACME account. Its key is kept sealed in the store, so a restart reuses the account.
+// acmeUser is the ACME account. Its key is kept sealed in the store, so a restart reuses the
+// account.
 type acmeUser struct {
 	email string
 	key   crypto.PrivateKey
@@ -89,6 +94,9 @@ type acmeUser struct {
 func (u *acmeUser) GetEmail() string                        { return u.email }
 func (u *acmeUser) GetRegistration() *registration.Resource { return u.reg }
 func (u *acmeUser) GetPrivateKey() crypto.PrivateKey        { return u.key }
+
+// acmeOrderTimeout is how long lego waits for the CA to issue after the challenge.
+const acmeOrderTimeout = 2 * time.Minute
 
 const (
 	acmeAccountKey = "acme-account-key"
@@ -143,7 +151,8 @@ func (l *legoIssuer) account() (*acmeUser, error) {
 		if err != nil {
 			return nil, err
 		}
-		sealed, err := l.ciph.Seal(acmeScope, acmeAccountKey, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}))
+		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
+		sealed, err := l.ciph.Seal(acmeScope, acmeAccountKey, keyPEM)
 		if err != nil {
 			return nil, err
 		}
@@ -169,8 +178,7 @@ func (l *legoIssuer) setup() (*lego.Client, error) {
 	cfg := lego.NewConfig(u)
 	cfg.CADirURL = l.cfg.directory
 	cfg.UserAgent = "headlamp-node-control"
-	cfg.Certificate = lego.CertificateConfig{KeyType: certcrypto.EC256, Timeout: cfg.Certificate.Timeout}
-	cfg.Certificate.Timeout = 2 * time.Minute
+	cfg.Certificate = lego.CertificateConfig{KeyType: certcrypto.EC256, Timeout: acmeOrderTimeout}
 	client, err := lego.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("serve acme: directory %s: %w", l.cfg.directory, err)
@@ -187,7 +195,8 @@ func (l *legoIssuer) setup() (*lego.Client, error) {
 		return nil, err
 	}
 	if u.reg == nil {
-		reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+		opts := registration.RegisterOptions{TermsOfServiceAgreed: true}
+		reg, err := client.Registration.Register(opts)
 		if err != nil {
 			return nil, fmt.Errorf("serve acme: account registration: %w", err)
 		}
@@ -200,7 +209,8 @@ func (l *legoIssuer) setup() (*lego.Client, error) {
 	return client, nil
 }
 
-// Obtain gets one certificate for all names. lego has no context: ctx only stops a call that has not started.
+// Obtain gets one certificate for all names. lego has no context: ctx only stops a call that has
+// not started.
 func (l *legoIssuer) Obtain(ctx context.Context, names []string) ([]byte, []byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err

@@ -62,6 +62,7 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		"selectel":  nodes.NewOpenStack(env, hc),
 		"openstack": nodes.NewOpenStack(env, hc),
 		"aws":       nodes.NewAWS(env, hc),
+		"gcp":       nodes.NewGCP(env, hc),
 		"fly":       nodes.NewFly(env, hc),
 	}
 	// Nodes takes the audit log from enrolment, and enrolment asks Nodes what is stopped: hence nm is declared first.

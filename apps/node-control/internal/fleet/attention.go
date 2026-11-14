@@ -36,15 +36,23 @@ func (m *module) Attention(ctx context.Context, login string) (
 	}
 	var items []core.AttentionItem
 	add := func(id, part string, c compat.Result, action, path string) {
-		if c.State != compat.Incompatible {
+		// Strict mode refuses an unknown part too (#322), so it is an item; without strict mode an
+		// unknown part is only a note on the Fleet page.
+		refused := c.State == compat.Incompatible || (m.d.Strict && c.State == compat.Unknown)
+		if !refused {
 			return
+		}
+		detail := fmt.Sprintf("Its %s version %d is %s. node-control accepts %d to %d. %s",
+			c.Interface, c.Reported, c.Hint, c.Accepted.Min, c.Accepted.Max, action)
+		if c.State == compat.Unknown {
+			detail = fmt.Sprintf("It reports no %s version: it is older than 0.18.0. "+
+				"COMPAT_STRICT refuses it. %s", c.Interface, action)
 		}
 		items = append(items, core.AttentionItem{
 			ID: "compat-" + id, Source: compatSource, Level: level,
-			AckKey: fmt.Sprintf("compat-%s|%s|%d", id, c.Interface, c.Reported),
-			Title:  part + " " + verb,
-			Detail: fmt.Sprintf("Its %s version %d is %s. node-control accepts %d to %d. %s",
-				c.Interface, c.Reported, c.Hint, c.Accepted.Min, c.Accepted.Max, action),
+			AckKey:      fmt.Sprintf("compat-%s|%s|%d", id, c.Interface, c.Reported),
+			Title:       part + " " + verb,
+			Detail:      detail,
 			ActionLabel: "Open Fleet", ActionPath: path,
 		})
 	}
@@ -85,6 +93,10 @@ func (m *module) Attention(ctx context.Context, login string) (
 		}
 		n := len(items)
 		line.Summary = fmt.Sprintf("%d incompatible %s", n, plural(n, "part", "parts"))
+		if m.d.Strict {
+			line.Summary = fmt.Sprintf("%d %s refused (COMPAT_STRICT)",
+				n, plural(n, "part", "parts"))
+		}
 	}
 	return items, []core.SystemLine{line}, nil
 }

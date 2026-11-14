@@ -2,6 +2,7 @@ package enroll
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -13,15 +14,16 @@ type strictCase struct {
 	wantPush bool
 }
 
-// #300: under COMPAT_STRICT a discovered bridge whose agent reports an agent API outside the matrix gets no
-// credentials, and its sync state says "incompatible". Without strict mode, and for an agent that reports no API
-// version (older than #300), the push goes out as before.
+// #300, #322: under COMPAT_STRICT a discovered bridge whose agent reports an agent API outside the matrix, or no
+// API version at all (older than 0.18.0), gets no credentials, and its sync state says "incompatible". Without
+// strict mode the push goes out as before.
 func TestStrictRefusesAnIncompatibleAgent(t *testing.T) {
 	for _, c := range []strictCase{
 		{"warn only: an incompatible agent still gets its set", false, 9, true},
+		{"warn only: an agent older than 0.18.0 still gets its set", false, nil, true},
 		{"strict: an incompatible agent is refused", true, 9, false},
 		{"strict: a compatible agent gets its set", true, 1, true},
-		{"strict: an agent older than #300 is not refused", true, nil, true},
+		{"strict: an agent older than 0.18.0 is refused", true, nil, false},
 	} {
 		checkStrict(t, c)
 	}
@@ -54,5 +56,26 @@ func checkStrict(t *testing.T, c strictCase) {
 	}
 	if c.api == 9 && v.AgentAPI != 9 {
 		t.Errorf("%s: the view must show the reported api: %d", c.name, v.AgentAPI)
+	}
+}
+
+// #322: strict mode refuses an agent only after it answered /v1/info. An agent that has not
+// answered yet (no probe, or a probe without info) is not known yet, and is not refused.
+func TestStrictDoesNotRefuseAnAgentThatHasNotAnswered(t *testing.T) {
+	f := newRegFx(t, func(rc *RegistryConfig) { rc.Strict = true })
+	if why := f.reg.refusal("ingress-3"); why != "" {
+		t.Fatalf("no probe: refused %q", why)
+	}
+	f.reg.mu.Lock()
+	f.reg.probes["ingress-3"] = &probe{state: stUnreachable}
+	f.reg.mu.Unlock()
+	if why := f.reg.refusal("ingress-3"); why != "" {
+		t.Fatalf("probe without info: refused %q", why)
+	}
+	f.reg.mu.Lock()
+	f.reg.probes["ingress-3"] = &probe{info: &infoResult{}}
+	f.reg.mu.Unlock()
+	if why := f.reg.refusal("ingress-3"); why == "" || !strings.Contains(why, "not reported") {
+		t.Fatalf("answered without api: refusal %q", why)
 	}
 }

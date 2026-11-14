@@ -26,15 +26,16 @@ Docker, and so on a GCE VM. What to set:
 - **VM.** `e2-small` or larger, Ubuntu 26.04 LTS, Docker and the compose plugin. Put the data directory on a separate
   persistent disk, with a snapshot schedule: it holds the tailnet.
 - **Network.** Ports 443/tcp, 80/tcp and 3478/udp to the VM. A static external IP on the VM is enough. For a load
-  balancer, use an external **passthrough** network load balancer (TCP and UDP, no TLS), so the edge on the VM keeps
+  balancer, use an external **passthrough** network load balancer (TCP and UDP, no TLS). Then the edge on the VM keeps
   the TLS certificates and the client address.
 - **Admin access.** Use OS Login or IAP TCP forwarding for a shell. Open no SSH port to the internet.
 - **Certificates.** The edge (Caddy) gets them from Let's Encrypt with HTTP-01. For funnel wildcards, use DNS-01 with
   the `googleclouddns` plugin (see "The edge and its certificates" in the compose README). On a GCE VM, the plugin uses
   the VM's service account: give it `roles/dns.admin` on the one managed zone only.
 
-**Gap 1:** there is no `terraform/modules/control-host/gcp`, the twin of `control-host/aws` (VM, data disk with
-snapshots, static IP or load balancer, firewall, service account for Cloud DNS). Today a site writes this itself.
+**Gap 1:** there is no `terraform/modules/control-host/gcp`, the twin of `control-host/aws`. It would make the VM, the
+data disk with snapshots, a static IP or load balancer, the firewall and a service account for Cloud DNS. Today a site
+writes this itself.
 
 ## Exit nodes
 
@@ -74,7 +75,7 @@ cert-manager`), with a cert-manager Cloud DNS issuer and Workload Identity.
 ## Secrets and state
 
 - **Secrets.** node-control reads its secrets from the environment and from files. On GCE, keep them in Secret
-  Manager and write them to the compose `.env` or secret files at boot, as the exit node module does for its auth key.
+  Manager. Write them to the compose `.env` or secret files at boot, as the exit node module does for its auth key.
 - **State.** SQLite on the data disk works. For the modules that use Redis (`REDIS_URL`), Memorystore for Redis works:
   put it on the VPC of the control host, with in-transit encryption off. node-control encrypts the state itself
   (`NODE_CONTROL_STATE_KEY`). With in-transit encryption on, Memorystore uses a server CA that node-control has no

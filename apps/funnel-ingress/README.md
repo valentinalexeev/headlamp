@@ -258,6 +258,23 @@ warnings (`tailnet: node status`).
   headscale config). The default is 30 minutes and the minimum is 65 s. A value of 2 to 5 minutes is good here.
   Services behind a subnet router are not supported.
 
+### A Gateway API implementation behind funnel-sidecar
+
+A public name is always `<service>.<namespace>.<public domain>`: one service name for each route, no wildcard. Apps
+behind one Gateway API implementation (or ingress controller) can share one `funnel-sidecar`. Point each service at the
+Service of the `Gateway`:
+
+```sh
+FUNNEL_NS=pdl
+FUNNEL_SERVICES=wiki=8080@<gateway service>.<gateway namespace>.svc:80,grafana=8081@<gateway service>.<gateway namespace>.svc:80
+```
+
+funnel-ingress keeps the `Host` header of the client (and sets `X-Forwarded-Host`), so the `Gateway` sees
+`wiki.pdl.<public domain>`. Make one `HTTPRoute` for each app with that name in `hostnames`. The `Gateway` gets plain
+HTTP: TLS ends at the edge. A new public app needs a new entry in `FUNNEL_SERVICES` and a new `HTTPRoute`. A controller
+that does this from `Gateway` objects is proposed in #338. For tailnet-only names, use a wildcard serve service instead
+(see "Serve proxies" in the `tailnet-connector` chart README).
+
 ### Serve mode: tailnet-only names (#117)
 
 In serve mode the sidecar publishes nothing on the internet. It serves its ports with TLS on the tailnet, under a

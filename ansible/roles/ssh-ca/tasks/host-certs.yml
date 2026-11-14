@@ -1,0 +1,32 @@
+---
+# Host certificates. The host CA stays on the controller: a host key is copied to the controller, signed there, and
+# the certificate is copied back. A certificate is signed again only when it is missing or due (see host-cert.yml).
+- name: Set the host CA facts
+  ansible.builtin.set_fact:
+    ssh_ca_signer: "{{ (ssh_ca_host_ca_key | length > 0) | ternary('key', (ssh_ca_host_ca_pub | length > 0) | ternary('agent', 'none')) }}"
+    ssh_ca_signer_file: "{{ ((ssh_ca_host_ca_key | length > 0) | ternary(ssh_ca_host_ca_key, ssh_ca_host_ca_pub)) | expanduser }}"
+    ssh_ca_cert_names: "{{ ssh_ca_host_cert_names | unique }}"
+
+- name: Check the host certificate names
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_cert_names | length > 0
+      - ssh_ca_cert_names | select('match', '^[^\s,]+$') | list | length == ssh_ca_cert_names | length
+    fail_msg: ssh_ca_host_cert_names must be a non-empty list of names without spaces or commas.
+    quiet: true
+
+- name: Read the fingerprint of the host CA on the controller
+  ansible.builtin.command:
+    cmd: ssh-keygen -l -f {{ ssh_ca_signer_file | quote }}
+  register: ssh_ca_ca_fp
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  become: false
+  when: ssh_ca_signer != 'none'
+
+- name: Host certificate of each key type
+  ansible.builtin.include_tasks: host-cert.yml
+  loop: "{{ ssh_ca_host_key_types }}"
+  loop_control:
+    loop_var: ssh_ca_key_type

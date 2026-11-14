@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -168,11 +167,9 @@ func (g *ingress) register(mux *core.Mux, gate func(http.Handler) http.Handler) 
 
 func (g *ingress) config(w http.ResponseWriter, r *http.Request) {
 	if g.strict {
-		// COMPAT_STRICT (#300): an ingress whose last report names a funnel API outside the
-		// compatibility
-		// matrix gets 409 and no routes. An ingress that has not reported yet, or reports no API
-		// version
-		// (older than #300), is not refused: only what is known to be incompatible.
+		// COMPAT_STRICT (#300, #322): an ingress whose last report names a funnel API outside the
+		// compatibility matrix, or no funnel API at all, gets 409 and no routes. An ingress that
+		// has not reported yet is not refused.
 		if why := g.refusal(); why != "" {
 			g.log.Warn("funnel ingress refused: " + why + " (COMPAT_STRICT)")
 			w.Header().Set("Content-Type", "application/json")
@@ -245,7 +242,9 @@ func (g *ingress) state(w http.ResponseWriter, r *http.Request) {
 }
 
 // refusal is why the funnel ingress is refused under COMPAT_STRICT, from its last state report; ""
-// when it is not.
+// when it is not. A report without an API version (an ingress older than 0.18.0) is refused too
+// (#322). An ingress that has not reported yet is not refused: it fetches its config first, then
+// reports, so the next fetch after its first report decides.
 func (g *ingress) refusal() string {
 	body, _, ok, err := g.st.LatestState()
 	if err != nil || !ok {
@@ -257,8 +256,8 @@ func (g *ingress) refusal() string {
 	if json.Unmarshal(body, &rep) != nil {
 		return ""
 	}
-	if c := compat.Must().Check(compat.FunnelAPI, rep.API); c.State == compat.Incompatible {
-		return fmt.Sprintf("funnel API %d is %s", rep.API, c.Hint)
+	if c := compat.Must().Check(compat.FunnelAPI, rep.API); c.Refused() {
+		return c.Why()
 	}
 	return ""
 }

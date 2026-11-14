@@ -981,21 +981,23 @@ func (r *Registry) discoveredTarget(name string, nodeID uint64, machineKey strin
 	return t
 }
 
-// refusal is why a discovered bridge gets no credentials under COMPAT_STRICT (#300): its agent
-// reported an agent
-// API outside the compatibility matrix. An agent that has not answered yet, or that reports no API
-// version (older
-// than #300), is not refused: strict mode refuses only what is known to be incompatible.
+// refusal is why a discovered bridge gets no credentials under COMPAT_STRICT (#300, #322): its
+// agent reported an agent API outside the compatibility matrix, or no API version at all (older
+// than 0.18.0). An agent that has not answered yet is not refused.
 func (r *Registry) refusal(name string) string {
 	r.mu.Lock()
 	p := r.probes[name]
-	api := 0
+	answered, api := false, 0
 	if p != nil && p.info != nil {
-		api = p.info.api
+		answered, api = true, p.info.api
 	}
 	r.mu.Unlock()
-	if c := compat.Must().Check(compat.AgentAPI, api); c.State == compat.Incompatible {
-		return fmt.Sprintf("agent API %d is %s", api, c.Hint)
+	// An agent that has not answered /v1/info yet is not known yet: it is not refused (#322).
+	if !answered {
+		return ""
+	}
+	if c := compat.Must().Check(compat.AgentAPI, api); c.Refused() {
+		return c.Why()
 	}
 	return ""
 }

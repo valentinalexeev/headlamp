@@ -243,7 +243,9 @@ func (m *module) report(w http.ResponseWriter, req *http.Request) {
 					b.Sync = "pending"
 				}
 			}
-			if b.Active && b.Source == "discovered" {
+			// A bridge whose agent has not answered /v1/info yet is not checked: it is not known
+			// yet, so strict mode does not refuse it either (#322).
+			if b.Active && b.Source == "discovered" && (v.AgentVersion != "" || v.AgentAPI != 0) {
 				c := matrix.Check(compat.AgentAPI, v.AgentAPI)
 				b.Compat = &c
 			}
@@ -287,14 +289,19 @@ func (m *module) report(w http.ResponseWriter, req *http.Request) {
 }
 
 // compat adds the result of a compatibility check (#300): incompatible is a problem, with what to
-// do;
-// unknown (a part older than #300) is a note.
+// do; unknown (a part older than 0.18.0) is a note, or a problem under COMPAT_STRICT, which
+// refuses it (#322).
 func (r *Report) compat(part string, c compat.Result) {
 	switch c.State {
 	case compat.Incompatible:
 		r.problem(fmt.Sprintf("%s: %s version %d is %s (node-control accepts %d to %d)",
 			part, c.Interface, c.Reported, c.Hint, c.Accepted.Min, c.Accepted.Max))
 	case compat.Unknown:
+		if r.Strict {
+			r.problem(part + ": reports no " + c.Interface + " version (before 0.18.0), " +
+				"refused by COMPAT_STRICT: upgrade it")
+			return
+		}
 		r.Notes = append(r.Notes, part+": reports no "+c.Interface+" version (before 0.18.0)")
 	}
 }

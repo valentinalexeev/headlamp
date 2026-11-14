@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control: the tailnet DNS module has zones, more record types, rules per user or tag, and a console page (#285). A record has a `type`: `A` (the default; `AAAA` is the same type; `addresses`, `node` or `tag` as before), `CNAME`, `TXT` or `SRV`. A CNAME is followed inside the tables. A record can have `rules`: the first rule whose `users` (tailnet logins) or `tags` match the client (WhoIs on the query source) gives the answer; other clients get the data of the record. Zones (`POST /dns/zones`, `DELETE /dns/zones/{name}`) are kept in SQLite or Redis (`<prefix>:zones`): a name in a zone without a record is `NXDOMAIN`, and one split line covers the zone. The headscale extra-records file keeps only `A` records without rules; the others need a split line, and `GET /dns/state` lists it (`in_file`, `zone`, and a `split` line per zone and per record that the file does not hold). The console has a **DNS** page (`dns.view`, changes with `dns.admin`). The serve zone does not change. Records of 0.18 read as `A` records with no change. `make test-tailnet-dns-e2e` checks two clients with different tags against a real headscale.
+
 ### Changed
 
 - node-control: with `COMPAT_STRICT=true`, a component that reports no interface version (older than 0.18.0) is refused too, not only an incompatible one (#322). An ingress agent gets no credentials, the funnel ingress gets `409`, a task runner gets no task. It shows as "At risk" in Attention, as a problem in `/fleet.json` (`fleet-check.sh` exits 1) and as "refused" on the Fleet page. A component that has not answered yet is not refused. Without `COMPAT_STRICT`, nothing changes.

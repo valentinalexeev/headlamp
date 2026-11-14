@@ -69,7 +69,10 @@ address of a public proxy. An extra record gives the same name a tailnet address
 tailnet address. Other computers get the public address.
 
 The split applies to all tailnet devices. headscale sends the same extra records to all nodes. Thus two tailnet users
-cannot get different answers. The policy decides who can connect.
+cannot get different answers from extra records. The policy decides who can connect.
+
+For answers per user or tag, use the rules of the tailnet DNS module (#285, see "Tailnet DNS module"). Then
+node-control answers the name. A device needs a `nameservers.split` line for it.
 
 A device gets the public address in these conditions:
 
@@ -226,29 +229,42 @@ The tailnet DNS module (#286) makes node-control the resolver of the tailnet nam
 that an operator adds with the API. Set `TAILNET_DNS_DB` (SQLite), or `TAILNET_DNS_REDIS=1` with `REDIS_URL`, to turn
 it on.
 
-A record points to one target:
+A record has one type (#285):
 
-- `addresses`: one to 8 fixed tailnet addresses.
-- `node`: the given name of one headscale node.
-- `tag`: a tag. The answer gives the addresses of the online nodes with the tag.
+- `A`: one target. `addresses` is one to 8 fixed tailnet addresses. `node` is the given name of one headscale node.
+  `tag` is a tag: the answer gives the addresses of the online nodes with the tag. The record answers A and AAAA
+  queries.
+- `CNAME`: a target name. node-control adds the records of the target when it has them.
+- `TXT`: one to 8 strings.
+- `SRV`: a target name, a port, a priority and a weight.
 
-The answers contain only tailnet addresses (`100.64.0.0/10` and `fd7a:115c:a1e0::/48`). A record name must not be
-under `base_domain` or in the serve zone.
+An address in an answer is always a tailnet address (`100.64.0.0/10` and `fd7a:115c:a1e0::/48`). A record name must
+not be under `base_domain` or in the serve zone.
 
-The API is `GET /dns/state`, `POST /dns/records`, `PUT /dns/records/{name}` and `DELETE /dns/records/{name}`. See the
-node-control README for the procedure and the permissions.
+A record can have rules. A rule names tailnet logins (`users`) and tags (`tags`). It has its own data.
+node-control finds the client with WhoIs on the source address of the query. The first rule that matches gives the
+answer. A client that no rule matches gets the data of the record. A record without rules answers all clients the
+same.
+
+A zone makes node-control answer all names under it. A name in the zone without a record does not exist. One split
+line sends the full zone to node-control.
+
+The API is `GET /dns/state`, `POST /dns/records`, `PUT /dns/records/{name}`, `DELETE /dns/records/{name}`,
+`POST /dns/zones` and `DELETE /dns/zones/{name}`. The console has a **DNS** page (permission `dns.view`, changes with
+`dns.admin`). See the node-control README for the procedure and the permissions.
 
 headscale has no API for DNS. node-control gives its records to tailnet devices in one of two ways:
 
 | Way | Where | What the device does |
 |---|---|---|
 | The records file (`TAILNET_DNS_EXTRA_RECORDS_FILE`) | node-control and headscale share a directory, for example the compose stack | Resolves the names itself, from the netmap |
-| A `nameservers.split` line for each name | node-control and headscale are on different hosts, for example Fly.io | Sends the names to node-control |
+| A `nameservers.split` line for each name or zone | node-control and headscale are on different hosts, for example Fly.io. Also each zone, each `CNAME`, `TXT` or `SRV` record, and each record with rules | Sends the names to node-control |
 
 With the records file, node-control writes its records into the file of `dns.extra_records_path`. When the file
 changes, headscale reads it again, with no restart. The file changes only when the records change. Each write
-replaces the file by rename. Thus mount the directory, not the file. The file contains only the records of
-node-control.
+replaces the file by rename. Thus mount the directory, not the file.
+
+The file contains only the `A` records of node-control without rules. headscale cannot keep other types. It sends the same records to all devices.
 
 **CAUTION:** headscale does not start when the file of `dns.extra_records_path` does not exist. Create it with `[]`
 first.
@@ -338,6 +354,7 @@ The table uses the default settings of each component.
 | MagicDNS name | Tailnet address | Tailnet address | Tailnet address, then blocked | No tailnet answer | No tailnet answer |
 | Extra record with a public twin | Tailnet address | Tailnet address | Tailnet address, then blocked | Public address | Public address |
 | Record of the tailnet DNS module | Tailnet address, with the records file or a split line | Tailnet address | Tailnet address, then blocked | Public address, if one exists | Public address, if one exists |
+| Record with rules | The answer of the first rule that matches the device, with a split line | The answer for the exit node of the bridge | The same, then blocked | Public address, if one exists | Public address, if one exists |
 | Serve name | Proxy addresses, with the split line | Proxy addresses | Proxy addresses, then blocked | No tailnet answer | No tailnet answer |
 | Funnel name | Public address of the edge | Public address of the edge | Public address of the edge | Public address of the edge | Public address of the edge |
 | Public name | Global nameservers, or the exit node | Exit DNS, or the system resolver for direct lists | The same | The same | Public DNS |
@@ -352,5 +369,7 @@ The tailnet DNS module must be on for the bridge columns with tailnet answers.
   nodes of a tag.
 - An extra record is for one exact name. headscale and tailscale do not accept a wildcard.
 - The xray resolver of a bridge is the same for all its clients. Thus the bridge cannot give a different answer to a
-  client with no grant.
+  client with no grant. The rules of a record do not see the bridge client.
+- A record with rules, and a `CNAME`, `TXT` or `SRV` record, depend on node-control. When node-control stops, these
+  names do not resolve.
 - Bridge clients cannot reach the subnet routes of the tailnet, for example a Kubernetes connector.

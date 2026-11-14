@@ -9,7 +9,7 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
-## Unreleased (0.18.1)
+## Unreleased (0.19.0)
 
 ### Action required
 
@@ -21,6 +21,14 @@ says "No action required".
   Check: after the deploy, `fleet-check.sh` exits 0, and Attention has no "is refused (COMPAT_STRICT)" item.
 
   Without `COMPAT_STRICT`, no action is required.
+
+### Optional
+
+- **Tailnet DNS** (#285): the module now has zones, `CNAME`, `TXT` and `SRV` records, and rules per user or tag.
+  The records of 0.18 stay `A` records and keep their answers, and the extra-records file does not change. No action
+  is required. The extra-records file does not contain a zone, a record with rules, or a record of another type. When
+  you add one of them, add its new line of `GET /dns/state` `split` (or of the DNS page) to
+  `dns.nameservers.split` in `headscale.yaml`. Then restart headscale.
 
 ## 0.18.0
 

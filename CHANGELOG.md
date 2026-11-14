@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control: a **Bridge selection** console page (#314), off by default (`ENROLL_SELECTION_UI=1` turns it on). An admin (`enroll.admin`) can change the `urltest` values (tolerance, interval, URL, strategy), the group and order of each bridge, and drain a bridge from new profiles, without an edit of `enroll.json` or a redeploy. It cannot change the host, keys, short ID, SNI, port or tokens. Precedence: console, then `enroll.json`, then the built-in default; the page shows the source of each value. A change is validated (and checked with `sing-box check` when the binary is on the `PATH`) and previewed before it applies; a one-step revert is available. The audit log records each preview, apply and revert with the old and new values. The values are in the new table `selection_doc` (SQLite) or `<prefix>:selection` (Redis). With no console value, each profile is byte for byte the same as before. `scripts/bridge-selection.sh diff|pull` writes the console values back to `enroll.json`, like the ACL pull command (`make test-bridge-selection`).
+
 ## 0.19.0 - 2026-11-14
 
 ### Added

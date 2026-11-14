@@ -9,6 +9,14 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## Unreleased (0.20.0)
+
+### Optional
+
+- **Bridge selection console** (#314): no action required. The console is off by default, and the profiles do not
+  change. To opt in, set `ENROLL_SELECTION_UI=1` on node-control. See "Bridge selection console" in the node-control
+  README. Use `scripts/bridge-selection.sh pull` to write the console values to `enroll.json` in the site repo.
+
 ## 0.19.0
 
 ### Optional

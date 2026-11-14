@@ -32,6 +32,11 @@ assert.deepStrictEqual(f.bridgeSync({ active: false }), ['off', 'not active']);
 assert.strictEqual(f.bridgeSync({ active: true, online: false, compat: { state: 'incompatible', interface: 'agent-api', reported: 2, hint: 'newer than node-control accepts: upgrade node-control' } })[0], 'crit');
 assert.ok(/incompatible: agent-api 2/.test(f.bridgeSync({ active: true, online: true, sync: 'ok', compat: { state: 'incompatible', interface: 'agent-api', reported: 2, hint: 'x' } })[1]));
 assert.deepStrictEqual(f.bridgeSync({ active: true, online: true, sync: 'ok', compat: { state: 'unknown' } }), ['ok', 'in sync']);
+// #322: under COMPAT_STRICT an unknown part is refused, and that outranks the other states.
+assert.deepStrictEqual(f.bridgeSync({ active: true, online: true, sync: 'ok', compat: { state: 'unknown', interface: 'agent-api' } }, true),
+  ['crit', 'refused: no agent-api version (before 0.18.0)']);
+assert.strictEqual(f.compatWord({ state: 'unknown', interface: 'runner-api' }, false), null);
+assert.strictEqual(f.compatWord({ state: 'ok' }, true), null);
 assert.strictEqual(f.compatWord({ state: 'ok' }), null);
 
 (async () => {

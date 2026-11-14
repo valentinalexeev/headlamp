@@ -8,7 +8,7 @@ import (
 
 func TestEmbeddedMatrix(t *testing.T) {
 	m := Must()
-	for _, n := range []string{AgentAPI, FunnelAPI, RunnerAPI} {
+	for _, n := range []string{AgentAPI, FunnelAPI, RunnerAPI, ServeAPI} {
 		i, ok := m.Interfaces[n]
 		if !ok {
 			t.Fatalf("%s missing", n)

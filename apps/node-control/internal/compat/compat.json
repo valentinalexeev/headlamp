@@ -13,6 +13,12 @@
       "accepted": {"min": 1, "max": 1},
       "covers": ["apps/funnel-ingress/internal/controlsync/report.go", "apps/funnel-ingress/internal/controlsync/source.go"]
     },
+    "serve-api": {
+      "between": ["node-control", "funnel-sidecar"],
+      "current": 2,
+      "accepted": {"min": 1, "max": 2},
+      "covers": ["apps/node-control/internal/serve/module.go", "apps/node-control/internal/serve/acme.go", "apps/funnel-ingress/internal/serveclient/client.go"]
+    },
     "runner-api": {
       "between": ["node-control", "task-runner"],
       "current": 1,

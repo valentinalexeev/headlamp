@@ -30,6 +30,23 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "url": {"type": "string"},
+        "certificate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {"type": "string", "enum": ["node-control", "cert-manager"]},
+            "zone": {"type": "string", "pattern": "^$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"},
+            "issuerRef": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": ["Issuer", "ClusterIssuer"]},
+                "group": {"type": "string"}
+              }
+            }
+          }
+        },
         "services": {
           "type": "array",
           "items": {
@@ -39,7 +56,8 @@
               "name": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"},
               "authKeySecret": {"type": "string"},
               "services": {"type": "string", "minLength": 1},
-              "replicas": {"type": "integer", "minimum": 1}
+              "replicas": {"type": "integer", "minimum": 1},
+              "dnsNames": {"type": "array", "items": {"type": "string", "pattern": "^(\\*\\.)?[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"}}
             }
           }
         }

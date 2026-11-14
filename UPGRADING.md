@@ -13,6 +13,19 @@ says "No action required".
 
 No action required.
 
+## 0.18.1
+
+### Action required
+
+- **Only if you set `COMPAT_STRICT=true`** (#322): node-control now also refuses a component that reports no interface
+  version, that is, a component older than 0.18.0. Before you deploy node-control 0.18.1, run `scripts/fleet-check.sh`
+  (or open the Fleet page) and upgrade each component that shows "reports no ... version". Else that ingress agent
+  gets no credentials, the funnel ingress gets no routes, and that task runner gets no task.
+
+  Check: after the deploy, `fleet-check.sh` exits 0, and Attention has no "is refused (COMPAT_STRICT)" item.
+
+  Without `COMPAT_STRICT`, no action is required.
+
 ## 0.18.0
 
 ### Action required

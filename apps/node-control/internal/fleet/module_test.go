@@ -167,9 +167,9 @@ func TestProblems(t *testing.T) {
 	if !slices.Equal(r.Problems, want) {
 		t.Errorf("problems\n got %q\nwant %q", r.Problems, want)
 	}
+	// "old" has not answered /v1/info yet (no agent version): it is not checked (#322).
 	if !slices.Equal(r.Notes, []string{"bridge down: reports no agent-api version (before 0.18.0)",
 		"bridge behind: reports no agent-api version (before 0.18.0)",
-		"bridge old: reports no agent-api version (before 0.18.0)",
 		"funnel ingress: reports no funnel-api version (before 0.18.0)"}) {
 		t.Errorf("notes %q", r.Notes)
 	}

@@ -6,6 +6,12 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## 0.19.0 - (not released)
 
+## 0.18.1 - (not released)
+
+### Changed
+
+- node-control: with `COMPAT_STRICT=true`, a component that reports no interface version (older than 0.18.0) is refused too, not only an incompatible one (#322). An ingress agent gets no credentials, the funnel ingress gets `409`, a task runner gets no task. It shows as "At risk" in Attention, as a problem in `/fleet.json` (`fleet-check.sh` exits 1) and as "refused" on the Fleet page. A component that has not answered yet is not refused. Without `COMPAT_STRICT`, nothing changes.
+
 ## 0.18.0 - 2026-11-12
 
 ### Fixed

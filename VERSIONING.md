@@ -102,7 +102,8 @@ it. Each component reports its interface version, and node-control compares it w
 - Outside the range: a problem on the Fleet page, an Attention item, and `scripts/fleet-check.sh` exits 1. The message
   names the action: upgrade the component, or upgrade node-control.
 - No version reported (a component before 0.18.0): a note only.
-- With `COMPAT_STRICT=true`, node-control also refuses an incompatible component. The default is `false`: warn only.
+- With `COMPAT_STRICT=true`, node-control also refuses an incompatible component, and a component that reports no
+  version (#322). The default is `false`: warn only.
 
 To change an interface, change it and `compat.json` in the same PR:
 

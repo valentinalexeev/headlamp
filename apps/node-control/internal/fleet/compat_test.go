@@ -77,7 +77,8 @@ func TestFleetCompat(t *testing.T) {
 	}
 }
 
-// The Overview items: waiting by default, critical under COMPAT_STRICT; a part that reports nothing is not an item.
+// The Overview items: waiting by default, critical under COMPAT_STRICT. A part that reports no version (older
+// than 0.18.0) is an item only under COMPAT_STRICT, which refuses it (#322).
 func TestFleetCompatAttention(t *testing.T) {
 	for _, strict := range []bool{false, true} {
 		m := New(compatDeps(strict)).(core.AttentionSource)
@@ -96,7 +97,14 @@ func TestFleetCompatAttention(t *testing.T) {
 				t.Errorf("strict=%v: %+v", strict, it)
 			}
 		}
-		if !slices.Equal(ids, []string{"compat-bridge-ahead", "compat-funnel", "compat-runner-100.64.0.8"}) {
+		wantIDs := []string{"compat-bridge-ahead", "compat-funnel", "compat-runner-100.64.0.8"}
+		wantN := "3 incompatible parts"
+		if strict {
+			wantIDs = []string{"compat-bridge-ahead", "compat-bridge-old", "compat-funnel",
+				"compat-runner-100.64.0.8"}
+			wantN = "4 parts refused (COMPAT_STRICT)"
+		}
+		if !slices.Equal(ids, wantIDs) {
 			t.Errorf("strict=%v: ids %v", strict, ids)
 		}
 		if !strings.Contains(items[0].Detail, "Run the ingress-agent role on ahead") {
@@ -108,8 +116,12 @@ func TestFleetCompatAttention(t *testing.T) {
 			if !strings.Contains(items[0].Title, "refused") {
 				t.Errorf("title %q", items[0].Title)
 			}
+			if !strings.Contains(items[1].Detail, "reports no agent-api version") ||
+				!strings.Contains(items[1].Detail, "COMPAT_STRICT refuses it") {
+				t.Errorf("unknown detail %q", items[1].Detail)
+			}
 		}
-		if len(lines) != 1 || lines[0].State != wantLine || lines[0].Summary != "3 incompatible parts" {
+		if len(lines) != 1 || lines[0].State != wantLine || lines[0].Summary != wantN {
 			t.Errorf("strict=%v: line %+v", strict, lines)
 		}
 	}
@@ -117,5 +129,27 @@ func TestFleetCompatAttention(t *testing.T) {
 	items, lines, _ := ok.Attention(context.Background(), "admin@")
 	if len(items) != 0 || lines[0].State != "ok" {
 		t.Errorf("all compatible: %+v %+v", items, lines)
+	}
+}
+
+// #322: under COMPAT_STRICT the Fleet report lists a part that reports no version as a problem
+// (fleet-check.sh then exits 1), not as a note. A bridge that has not answered yet is not listed.
+func TestFleetCompatStrictUnknownIsAProblem(t *testing.T) {
+	r := fleetJSON(t, New(compatDeps(true)))
+	if !r.Strict {
+		t.Fatal("strict not reported")
+	}
+	if len(r.Notes) != 0 {
+		t.Errorf("notes %q", r.Notes)
+	}
+	found := false
+	for _, p := range r.Problems {
+		if strings.HasPrefix(p, "bridge old: reports no agent-api version") &&
+			strings.Contains(p, "refused by COMPAT_STRICT") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("problems %q", r.Problems)
 	}
 }

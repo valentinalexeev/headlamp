@@ -3,14 +3,14 @@
 #   docker build --build-arg TSVERSION=$(cat ../../TAILSCALE_VERSION) -t tailnet-connector .
 ARG TSVERSION=1.104.5
 
-FROM alpine:3.22 AS tailscale
+FROM alpine:3.24 AS tailscale
 ARG TSVERSION
 ARG TARGETARCH
 WORKDIR /app
 RUN wget -q "https://pkgs.tailscale.com/stable/tailscale_${TSVERSION}_${TARGETARCH}.tgz" \
   && tar xzf "tailscale_${TSVERSION}_${TARGETARCH}.tgz" --strip-components=1
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates
 COPY --from=tailscale /app/tailscaled /app/tailscale /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

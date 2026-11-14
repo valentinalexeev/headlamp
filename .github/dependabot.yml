@@ -37,6 +37,10 @@ updates:
       - /scripts/test/hysteria
     schedule:
       interval: weekly
+    # One PR for all updates of this kind: each PR needs an owner approval on a head that is up to date with main.
+    groups:
+      base-images:
+        patterns: ["*"]
     ignore:
       - dependency-name: ghcr.io/juanfont/headscale
       - dependency-name: tailscale/tailscale
@@ -50,6 +54,10 @@ updates:
       - /examples/compose/control
     schedule:
       interval: weekly
+    # One PR for all updates of this kind: each PR needs an owner approval on a head that is up to date with main.
+    groups:
+      compose-images:
+        patterns: ["*"]
     ignore:
       - dependency-name: ghcr.io/juanfont/headscale
       - dependency-name: tailscale/tailscale
@@ -64,6 +72,10 @@ updates:
       - /examples/private-repo/terraform
     schedule:
       interval: weekly
+    # One PR for all updates of this kind: each PR needs an owner approval on a head that is up to date with main.
+    groups:
+      terraform-providers:
+        patterns: ["*"]
     commit-message:
       prefix: "chore(deps)"
 

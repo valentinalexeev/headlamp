@@ -311,6 +311,9 @@ func secretRefs(t Task) []string {
 	if t.OnFailure != nil && t.OnFailure.Notify.Topic != "" {
 		out = append(out, t.OnFailure.Notify.Topic)
 	}
+	if t.OnRecovery != nil && t.OnRecovery.Notify.Topic != "" {
+		out = append(out, t.OnRecovery.Notify.Topic)
+	}
 	return out
 }
 

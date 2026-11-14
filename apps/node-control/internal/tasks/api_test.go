@@ -753,7 +753,7 @@ func TestRunsViewHasNoRunnerFields(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &runs); err != nil || len(runs) != 2 {
 		t.Fatalf("%s: %v", rec.Body, err)
 	}
-	want := []string{"attempt", "duration_ms", "ended", "id", "node", "notify_outcome", "reason", "result", "script_sha", "started", "state", "task"}
+	want := []string{"attempt", "class", "counts", "detail", "duration_ms", "ended", "id", "node", "notify_outcome", "reason", "result", "script_sha", "started", "state", "task"}
 	var keys []string
 	for k := range runs[1] {
 		keys = append(keys, k)

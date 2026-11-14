@@ -20,6 +20,11 @@ type runView struct {
 	Result        map[string]any `json:"result"`
 	ScriptSHA     string         `json:"script_sha"`
 	NotifyOutcome string         `json:"notify_outcome"`
+	// Class is the failure class (transient, structural, unknown) of a failed
+	// or lost run, else "". Counts and Detail explain a "no eligible node".
+	Class  FailureClass `json:"class"`
+	Counts *NodeCounts  `json:"counts"`
+	Detail string       `json:"detail"`
 }
 
 type taskView struct {
@@ -50,7 +55,10 @@ func toRunView(r Run) runView {
 	v := runView{
 		ID: r.ID, Task: r.Task, Node: r.Node, Attempt: r.Attempt, State: r.State, Reason: r.Reason,
 		Started: timeJSON(r.Started), Ended: timeJSON(r.Ended), Result: r.Result,
-		ScriptSHA: r.ScriptSHA, NotifyOutcome: r.NotifyOutcome,
+		ScriptSHA: r.ScriptSHA, NotifyOutcome: r.NotifyOutcome, Class: r.Class, Counts: r.Counts,
+	}
+	if r.Counts != nil {
+		v.Detail = r.Counts.Detail()
 	}
 	if !r.Started.IsZero() && !r.Ended.IsZero() {
 		d := r.Ended.Sub(r.Started).Milliseconds()

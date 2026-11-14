@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,28 @@ func taskJSON(mod func(t map[string]any)) string {
 	mod(t)
 	b, _ := json.Marshal(map[string]any{"tasks": map[string]any{"a": t}})
 	return string(b)
+}
+
+func TestParseConfigFailureStreakAndRecovery(t *testing.T) {
+	base := `{"tasks":{"a":{"script":"a.js","target":{"node":"n1"},"schedule":{"every":"1h"},%s}}}`
+	cfg, err := ParseConfig([]byte(fmt.Sprintf(base, `"on_failure":{"notify":{"topic":"T"}}`)))
+	if err != nil || cfg.Tasks["a"].OnFailure.Streak != 1 {
+		t.Fatalf("default streak: %+v %v", cfg, err)
+	}
+	cfg, err = ParseConfig([]byte(fmt.Sprintf(base, `"on_failure":{"streak":2,"notify":{"topic":"T"}},"on_recovery":{"notify":{"topic":"T","message":"{task} ok"}}`)))
+	if err != nil || cfg.Tasks["a"].OnFailure.Streak != 2 || cfg.Tasks["a"].OnRecovery == nil {
+		t.Fatalf("%+v %v", cfg, err)
+	}
+	for _, c := range []struct{ body, want string }{
+		{`"on_failure":{"streak":-1,"notify":{"topic":"T"}}`, "on_failure.streak"},
+		{`"on_failure":{"streak":101,"notify":{"topic":"T"}}`, "on_failure.streak"},
+		{`"on_recovery":{"notify":{"topic":"T"}}`, "on_recovery: needs on_failure"},
+		{`"on_failure":{"notify":{"topic":"T"}},"on_recovery":{"notify":{"topic":"T","message":"{secret:X}"}}`, "on_recovery.notify.message"},
+	} {
+		if _, err := ParseConfig([]byte(fmt.Sprintf(base, c.body))); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", c.body, err, c.want)
+		}
+	}
 }
 
 func TestParseConfigRejects(t *testing.T) {

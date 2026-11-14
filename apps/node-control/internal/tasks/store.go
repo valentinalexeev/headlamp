@@ -72,6 +72,12 @@ type Run struct {
 	// run its predecessor left behind.
 	RunnerID   string `json:"runner_id,omitempty"`
 	RunnerAddr string `json:"runner_addr,omitempty"`
+	// Class is the failure class of a failed or lost attempt (#323); "" on
+	// other states and on runs stored before the class existed.
+	Class FailureClass `json:"class,omitempty"`
+	// Counts are the candidate nodes after each filter, on a "no eligible
+	// node" failure only.
+	Counts *NodeCounts `json:"counts,omitempty"`
 }
 
 type TaskState struct {
@@ -80,6 +86,9 @@ type TaskState struct {
 	AttemptAt            time.Time // when the next attempt is due
 	AlertUntil           time.Time // cooldown expiry timestamps
 	FailNotifyUntil      time.Time
+	// FailNotified: a failure message went out and no success followed yet;
+	// the next success sends on_recovery (#323).
+	FailNotified bool `json:",omitempty"`
 }
 
 // Store is safe for concurrent use. A write that fails keeps the in-memory

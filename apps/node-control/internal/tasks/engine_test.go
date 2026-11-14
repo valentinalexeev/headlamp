@@ -142,10 +142,12 @@ type notifyCall struct {
 }
 
 type fakeNotifier struct {
-	mu        sync.Mutex
-	successes []notifyCall
-	failures  []notifyCall
-	ret       NotifyResult
+	mu         sync.Mutex
+	successes  []notifyCall
+	failures   []notifyCall
+	ret        NotifyResult
+	infos      []FailureInfo
+	recoveries int
 }
 
 func (n *fakeNotifier) Success(ctx context.Context, task string, _ Task, result map[string]any) NotifyResult {
@@ -156,9 +158,11 @@ func (n *fakeNotifier) Success(ctx context.Context, task string, _ Task, result 
 	return n.ret
 }
 
-func (n *fakeNotifier) Failure(ctx context.Context, task string, _ Task, reason string) NotifyResult {
+func (n *fakeNotifier) Failure(ctx context.Context, task string, _ Task, f FailureInfo) NotifyResult {
+	reason := f.Reason
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	n.infos = append(n.infos, f)
 	_, dl := ctx.Deadline()
 	n.failures = append(n.failures, notifyCall{task: task, reason: reason, ctxErr: ctx.Err(), deadline: dl})
 	return n.ret
@@ -431,11 +435,7 @@ func TestEngineNoEligibleNodeCountsAsFailedAttempt(t *testing.T) {
 	if f.runner.startCount() != 0 {
 		t.Fatal("started without an eligible node")
 	}
-	if st := f.store.State("job"); st.Attempt != 1 {
-		t.Fatalf("state = %+v", st)
-	}
-	f.clock.Set(t0.Add(time.Minute))
-	f.step()
+	// Structural: the retry left is skipped and the message goes out at once.
 	if st := f.store.State("job"); st.Streak != 1 || st.Attempt != 0 {
 		t.Fatalf("state = %+v", st)
 	}
@@ -1349,4 +1349,11 @@ func TestEngineMarksAManualRunAsManual(t *testing.T) {
 	if len(rs) != 1 || rs[0].ID != id || !rs[0].Manual {
 		t.Fatalf("runs = %+v", rs)
 	}
+}
+
+func (n *fakeNotifier) Recovery(context.Context, string, Task) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.recoveries++
+	return ""
 }

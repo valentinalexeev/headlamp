@@ -109,7 +109,7 @@ const list = () => [
 const run = (id, state, secAgo, extra) => Object.assign({ id, task: 'login-check', node: 'runner-1', attempt: 1, state, reason: '', started: iso(secAgo), ended: iso(secAgo - 30),
   duration_ms: 30000, result: {}, script_sha: 'abcdef0123456789', notify_outcome: '' }, extra);
 const runsFor = () => [
-  run('r3', 'failed', 660, { reason: 'Timeout waiting for the sign-in form after 30 s' }),
+  run('r3', 'failed', 660, { reason: 'Timeout waiting for the sign-in form after 30 s', class: 'transient' }),
   run('r2', 'failed', 1860, { reason: 'Timeout waiting for the sign-in form after 30 s' }),
   run('r1', 'succeeded', 4200, { duration_ms: 8200, notify_outcome: 'alert=sent' }),
 ];
@@ -195,6 +195,8 @@ const setSearch = (s) => { global.window.location.search = s; global.window.loca
     assert.strictEqual(await lastAlert(runsFor()), 'Sent, 1 h 9 min ago');
     assert.strictEqual(await lastAlert([run('a', 'succeeded', 660, { notify_outcome: 'alert=sent ping=sent' })]), 'Sent, 10 min ago');
     assert.strictEqual(await lastAlert([run('a', 'succeeded', 660, { notify_outcome: 'alert=suppressed' })]), 'Held back by the cooldown, 10 min ago');
+    assert.strictEqual(await lastAlert([run('a', 'failed', 660, { notify_outcome: 'alert=held ping=sent' })]), 'Held until on_failure.streak, 10 min ago');
+    assert.strictEqual(await lastAlert([run('a', 'succeeded', 660, { notify_outcome: 'alert=sent recovery=sent' })]), 'Sent, 10 min ago');
     assert.strictEqual(await lastAlert([run('a', 'failed', 660, { notify_outcome: 'alert=failed: secret not configured ping=sent' })]), 'Failed: secret not configured, 10 min ago');
     assert.strictEqual(await lastAlert([run('a', 'succeeded', 60, { notify_outcome: 'alert=none ping=sent' }), run('b', 'succeeded', 660, { notify_outcome: 'ping=sent' }), run('c', 'succeeded', 1260, { notify_outcome: 'alert=sent' })]),
       'Sent, 20 min ago', 'runs where no alert was due are passed over');
@@ -211,6 +213,7 @@ const setSearch = (s) => { global.window.location.search = s; global.window.loca
     await flush();
     const text = els.panel.textContent;
     assert.ok(text.includes('Timeout waiting for the sign-in form after 30 s'), 'the last failure reason is shown');
+    assert.ok(text.includes('[transient]'), 'the failure class is shown');
     const note = findAll(els.panel, (n) => hasClass(n, 'note'))[0];
     assert.ok(note && note.textContent.includes('10 min ago'), note && note.textContent);
     const trs = findAll(els.panel, (n) => n.tag === 'tr' && n.parentNode && n.parentNode.tag === 'tbody');

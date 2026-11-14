@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.20.0 - (not released)
+
 ### Added
 
 - node-control tasks: failure classes (#323). Each failed or lost attempt has a class, `transient`, `structural` or `unknown`, on the run (`GET /runs/{id}` field `class`), on the Tasks page and as the new `class` label of `task_runs_total`. A `no eligible node` failure stores the nodes left after each filter (`counts` and `detail`: tagged, matching, online, with address, healthy), shown on the Tasks page and in the Attention item, for example `no eligible node (tagged 0)`. New `on_failure.streak` (default `1`, no change) holds the failure message until that many failed sequences in a row. New optional `on_recovery` block sends one message on the first success after a failure message. Failure messages get the variables `{class}` and `{detail}`. The README has the class table and the alert `increase(task_runs_total{class="structural"}[1h]) > 0`.

@@ -9,7 +9,7 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
-## Unreleased (0.20.0)
+## 0.20.0
 
 No action required.
 

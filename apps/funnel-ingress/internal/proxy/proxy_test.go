@@ -473,3 +473,93 @@ func TestTrustedProxyForwardedFor(t *testing.T) {
 		}
 	}
 }
+
+func TestHSTSOnServiceHostsOverHTTPS(t *testing.T) {
+	const want = "max-age=31536000; includeSubDomains"
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=1") // the configured value replaces this one
+	})
+	cfg := testCfg()
+	cfg.HSTS = want
+	srv, _, _ := rig(t, b.srv.Listener.Addr().String(), cfg, route("admin", "pdl", "100.64.0.5", 9000))
+	get := func(host string) http.Header {
+		req, _ := http.NewRequest("GET", srv.URL+"/", nil)
+		req.Host = host
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.Header
+	}
+	if got := get("admin.pdl.example.com").Values("Strict-Transport-Security"); len(got) != 1 || got[0] != want {
+		t.Errorf("routed host: %q", got)
+	}
+	if got := get("nope.pdl.example.com").Values("Strict-Transport-Security"); len(got) != 1 || got[0] != want {
+		t.Errorf("service host without a route (404): %q", got)
+	}
+	if got := get("example.org").Values("Strict-Transport-Security"); len(got) != 0 {
+		t.Errorf("foreign host must get no header: %q", got)
+	}
+}
+
+// A backend that breaks the protocol gives 502 from the ErrorHandler; the header is on it too (RFC 6797
+// allows HSTS on any response over a secure transport).
+func TestHSTSOnBadGateway(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = c.Write([]byte("not http at all\r\n\r\n"))
+			c.Close()
+		}
+	}()
+	cfg := testCfg()
+	cfg.HSTS = "max-age=300"
+	srv, _, _ := rig(t, ln.Addr().String(), cfg, route("admin", "pdl", "100.64.0.5", 9000))
+	resp, _ := get(t, srv, "admin.pdl.example.com", "/", nil)
+	if resp.StatusCode != 502 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if got := resp.Header.Values("Strict-Transport-Security"); len(got) != 1 || got[0] != "max-age=300" {
+		t.Errorf("502: %q", got)
+	}
+}
+
+func TestHSTSOffByDefaultAndNotOverPlainHTTP(t *testing.T) {
+	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { w.Header().Set("Strict-Transport-Security", "max-age=1") })
+	srv, _, _ := rig(t, b.srv.Listener.Addr().String(), testCfg(), route("admin", "pdl", "100.64.0.5", 9000))
+	req, _ := http.NewRequest("GET", srv.URL+"/", nil)
+	req.Host = "admin.pdl.example.com"
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Values("Strict-Transport-Security"); len(got) != 1 || got[0] != "max-age=1" {
+		t.Errorf("off: the backend's own header must pass through unchanged: %q", got)
+	}
+
+	// Configured, but the client came over plain HTTP: the proxy adds nothing (the backend's own header is replaced).
+	table, _ := routes.NewTable(nopPersister{}, 10)
+	table.SetStatic([]routes.Route{route("admin", "pdl", "100.64.0.5", 9000)})
+	d := &dialRecorder{to: b.srv.Listener.Addr().String()}
+	cfg := testCfg()
+	cfg.HSTS = "max-age=300"
+	plain := httptest.NewServer(NewHandler(table, d.dial, func() string { return domain }, cfg))
+	t.Cleanup(plain.Close)
+	req, _ = http.NewRequest("GET", plain.URL+"/", nil)
+	req.Host = "admin.pdl.example.com"
+	resp, err = plain.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Values("Strict-Transport-Security"); len(got) != 0 {
+		t.Errorf("plain HTTP: no header expected, got %q", got)
+	}
+}

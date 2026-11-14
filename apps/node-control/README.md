@@ -1323,8 +1323,12 @@ resolve and reach them. It is the headlamp equivalent of `tailscale serve`.
   proxy can get a certificate and a DNS name only for its own service.
 - **DNS:** headscale sends the serve zone to node-control (`dns.nameservers.split`). node-control answers on port 53
   of its tailnet address. A name answers the addresses of the online nodes of its service, so it follows the replicas.
-- **HTTPS:** node-control signs a certificate for the name of the service. It uses your CA, or a self-signed CA. The
-  proxy makes its own key, and the key never leaves the proxy.
+- **HTTPS:** `SERVE_CERT_SOURCE` sets where the certificates come from (#334):
+  - `ca` (the default): node-control signs a certificate for the name of the service. It uses your CA, or a
+    self-signed CA. The proxy makes its own key, and the key never leaves the proxy. Each device must trust the CA.
+  - `acme`: node-control gets one wildcard certificate, `*.<zone>`, from a public ACME CA (for example Let's
+    Encrypt) with the DNS-01 challenge. It gives this certificate and its key to each proxy of a service. Devices
+    trust the certificate with no change. See "Certificates from an ACME CA".
 
 ### Environment
 
@@ -1341,9 +1345,67 @@ resolve and reach them. It is the headlamp equivalent of `tailscale serve`.
 | `SERVE_CA_CERT`, `SERVE_CA_KEY` | Optional: your CA or intermediate, in PEM. Without them, serve makes a self-signed CA. |
 | `NODE_CONTROL_STATE_KEY` | Required for a self-signed CA. It encrypts the CA key in the database. |
 | `SERVE_DNS` | `off` turns off the DNS listener (for tests). |
+| `SERVE_CERT_SOURCE` | `ca` (the default) or `acme`. See "Certificates from an ACME CA". |
 
 **WARNING:** Without `SERVE_CA_*` and without `NODE_CONTROL_STATE_KEY`, serve does not start. It never keeps a CA key
 in clear.
+
+### Certificates from an ACME CA
+
+With `SERVE_CERT_SOURCE=acme`, node-control gets the serve certificate from an ACME CA with the DNS-01 challenge. The
+ACME CA cannot connect to a tailnet-only name, thus HTTP-01 is not possible. DNS-01 needs one thing: the serve zone
+must be a zone in public DNS that you control. node-control writes only the `_acme-challenge` TXT records there. The
+names of the services stay private, because node-control answers them on the tailnet only.
+
+- node-control orders one certificate for `*.<zone>`. A wildcard covers one label only. Thus for a deeper service,
+  for example `*.apps.<zone>` or `a.b.<zone>`, it adds the wildcard of the parent (`*.apps.<zone>`, `*.b.<zone>`). Only these wildcards go to the Certificate Transparency logs, not the names of the
+  services.
+- When you add a service that needs a new wildcard, node-control orders a new certificate at once.
+- node-control renews the certificate at two thirds of its life (for Let's Encrypt, about 30 days before it expires).
+  It checks every `SERVE_ACME_CHECK`. If an order fails, the old certificate stays in use, the Serve page shows the
+  error, and node-control tries again after 5 minutes.
+- node-control keeps the ACME account key and the certificate key in the serve database, encrypted with
+  `NODE_CONTROL_STATE_KEY`. A restart does not make a new order.
+- Each proxy gets the certificate and its key through `POST /serve/v1/cert`, as before. Only a node that joined with
+  the key of a service gets them.
+
+| Variable | Meaning |
+|---|---|
+| `SERVE_ACME_EMAIL` | The contact address of the ACME account (required). |
+| `SERVE_ACME_DNS` | The DNS provider for DNS-01 (required): `googlecloud`, `route53`, `cloudflare` or `rfc2136`. |
+| `SERVE_ACME_DIRECTORY` | The ACME directory URL. The default is Let's Encrypt production, `https://acme-v02.api.letsencrypt.org/directory`. For tests, use Let's Encrypt staging, `https://acme-staging-v02.api.letsencrypt.org/directory`. |
+| `SERVE_ACME_CHECK` | How often node-control checks the certificate. The default is `1h`. The range is `1m` to `24h`. |
+| `SERVE_ACME_RESOLVERS` | Optional: the DNS resolvers, `host:port` separated by commas, that node-control uses to check that the TXT record is visible. The default is the resolvers of the host. |
+| `LEGO_CA_CERTIFICATES` | Optional: a PEM file of extra roots to trust for the ACME directory (for a private ACME CA). |
+
+The credentials of the DNS provider are environment variables with the names of the [lego](https://go-acme.github.io/lego/dns/) library:
+
+| `SERVE_ACME_DNS` | Credentials |
+|---|---|
+| `googlecloud` | Workload identity or application default credentials (no variable), or `GCE_SERVICE_ACCOUNT_FILE`. `GCE_PROJECT` if the project is not found by itself. |
+| `route53` | The AWS SDK chain: an instance or task role, EKS workload identity (IRSA), or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Optional `AWS_HOSTED_ZONE_ID`, `AWS_ASSUME_ROLE_ARN`. |
+| `cloudflare` | `CF_DNS_API_TOKEN` (a token with `Zone:DNS:Edit` on the zone). |
+| `rfc2136` | `RFC2136_NAMESERVER` (`host:port` of the primary), `RFC2136_TSIG_KEY`, `RFC2136_TSIG_SECRET`, `RFC2136_TSIG_ALGORITHM` (for example `hmac-sha256.`). |
+
+Give these credentials the smallest scope: write access to the serve zone only.
+
+**CAUTION:** Do a first test with Let's Encrypt staging. Production has rate limits, and a wrong DNS setup can use
+them up. A staging certificate is not trusted by devices.
+
+To change a site from `ca` to `acme`:
+
+1. Put the serve zone in public DNS, or delegate it to a provider in the list. Do not add records for the services.
+2. Upgrade each serve proxy (`funnel-sidecar`) to 0.19.0 or later. An older proxy gets `426` and keeps its old
+   certificate until that certificate expires.
+3. Set `SERVE_CERT_SOURCE=acme`, `SERVE_ACME_EMAIL`, `SERVE_ACME_DNS` and the credentials. Remove `SERVE_CA_CERT`
+   and `SERVE_CA_KEY`: serve does not start with them and `acme`.
+4. Restart node-control. Look for the log line `serve acme: certificate in place`, or open the Serve page.
+5. The proxies take the new certificate at their next renewal. To use it at once, restart them.
+
+`GET /serve/ca.crt` gives `404` with `acme`: devices need no extra CA.
+
+On Kubernetes you can also let cert-manager make the certificates of the serve proxies. See `serve.certificate` in
+the tailnet-connector chart README.
 
 ### The zone
 
@@ -1417,7 +1479,8 @@ running keeps its tailnet identity until it stops, because the key is ephemeral.
 ### Trust the CA
 
 Give users `http://node-control/serve/ca.crt`. Each device must trust it once (the system store, or the browser).
-`GET /serve/state` shows the fingerprint of the CA, so a user can check the file.
+`GET /serve/state` shows the fingerprint of the CA, so a user can check the file. With `SERVE_CERT_SOURCE=acme`, this
+step is not necessary.
 
 ### API
 
@@ -1429,7 +1492,7 @@ Give users `http://node-control/serve/ca.crt`. Each device must trust it once (t
 | `DELETE /serve/services/{id}` | `serve.admin` | Remove a service and expire its keys |
 | `POST /serve/services/{id}/keys` | `serve.admin` | Add a key (rotation) |
 | `DELETE /serve/services/{id}/keys/{key}` | `serve.admin` | Retire a key |
-| `GET /serve/ca.crt` | none | The CA certificate |
+| `GET /serve/ca.crt` | none | The CA certificate (`404` with `SERVE_CERT_SOURCE=acme`) |
 | `POST /serve/v1/cert` | a node with `tag:serve` | Sign the node's CSR for the name of its service |
 
 ## Tailnet DNS module (optional)

@@ -262,10 +262,17 @@ func TestLoadSidecarServeMode(t *testing.T) {
 		"old names":   {"FUNNEL_SERVE_NAMES": "a.svc.example.com"},
 		"bad url":     {"FUNNEL_SERVE_URL": "node-control"},
 		"no services": {"FUNNEL_SERVICES": ""},
+		"cert only":   {"FUNNEL_SERVE_CERT_FILE": "/tls/tls.crt"},
+		"key only":    {"FUNNEL_SERVE_KEY_FILE": "/tls/tls.key"},
 	} {
 		if _, err := serve(mod); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	// cert-manager source (#334): the files alone are serve mode, with no node-control URL
+	c, err = serve(map[string]string{"FUNNEL_SERVE_URL": "", "FUNNEL_SERVE_CERT_FILE": "/tls/tls.crt", "FUNNEL_SERVE_KEY_FILE": "/tls/tls.key"})
+	if err != nil || !c.Serve() || c.ServeURL != "" || c.ServeCertFile != "/tls/tls.crt" || c.ServeKeyFile != "/tls/tls.key" {
+		t.Fatalf("serve mode from files: %+v %v", c, err)
 	}
 	// funnel mode still needs FUNNEL_NS
 	m := sidecarBase()

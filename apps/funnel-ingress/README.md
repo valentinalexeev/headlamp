@@ -269,15 +269,19 @@ node-control README). Then give the sidecar the key of the service.
 | `FUNNEL_SERVE_URL` | node-control on the tailnet, for example `http://100.64.0.1`. It turns on serve mode. |
 | `TS_AUTHKEY` | the auth key of the service (node-control shows it when you add the service) |
 | `FUNNEL_SERVICES` | as above. Each port listens with TLS. Use port 443 for HTTPS clients: `web=443@grafana.monitoring.svc:3000`. |
+| `FUNNEL_SERVE_CERT_FILE`, `FUNNEL_SERVE_KEY_FILE` | Optional (#334): read the certificate and key from these PEM files, for example a cert-manager Secret, and not from node-control. They also turn on serve mode, and then `FUNNEL_SERVE_URL` is not necessary. The sidecar reads the files every 30 seconds and serves a changed pair from the next connection, with no restart. A bad pair does not replace the pair in use. |
 
 - The sidecar sends no name. node-control knows the service from the key that the node joined with, and returns the
   name with the certificate. `FUNNEL_NS` is not used, and the sidecar refuses `FUNNEL_SERVE_NAMES`.
 - The sidecar makes its own key. The key never leaves the pod. It renews the certificate at two thirds of its life.
+  When node-control has `SERVE_CERT_SOURCE=acme`, node-control sends one shared certificate and its key, and the
+  sidecar uses that key. This needs funnel-sidecar 0.19.0 or later (serve-api 2). node-control gives `426` to an
+  older sidecar.
 - Several replicas can use the same key. The name answers all the replicas that are online.
 - For an ingress controller, add a wildcard service, for example `*.apps`. Put one sidecar in front of the
   controller, with the key of that service. Each new Ingress host under `apps` then needs no change in headlamp.
 - A wildcard certificate covers one label. `grafana.apps.<zone>` works. `a.b.apps.<zone>` does not.
-- Set `FUNNEL_SERVE_URL` or `FUNNEL_API_URL`, not both.
+- Set `FUNNEL_SERVE_URL` (or the certificate files) or `FUNNEL_API_URL`, not both.
 
 ## Security notes
 

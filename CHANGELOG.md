@@ -4,6 +4,13 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control: serve certificates from a public ACME CA (#334), off by default. With `SERVE_CERT_SOURCE=acme` (default `ca`, no change), node-control gets one wildcard certificate (`*.<SERVE_ZONE>`, plus the parent wildcard of each deeper service) with DNS-01 through `SERVE_ACME_DNS` (`googlecloud`, `route53`, `cloudflare` or `rfc2136`; credentials from the lego environment variables or workload identity). `SERVE_ACME_EMAIL` is required; `SERVE_ACME_DIRECTORY` defaults to Let's Encrypt production (use staging first). The account and certificate keys are sealed with `NODE_CONTROL_STATE_KEY`; the certificate renews at two thirds of its life, and a failed order keeps the old one. Proxies get it through `POST /serve/v1/cert`. Devices need no serve CA (`/serve/ca.crt` is 404 in this mode). The serve zone must be a public DNS zone you control. `make test-serve-acme-e2e` checks it with Pebble and an RFC 2136 DNS server.
+- funnel-sidecar: serve mode accepts a shared certificate with its key from node-control (serve-api 2), and can read the pair from `FUNNEL_SERVE_CERT_FILE` and `FUNNEL_SERVE_KEY_FILE` (reloaded on change) instead of node-control.
+- tailnet-connector chart: `serve.certificate.source: node-control|cert-manager` (default `node-control`, no change). With `cert-manager`, the chart makes a cert-manager `Certificate` for each serve proxy with `serve.certificate.issuerRef`, and the proxy reads its Secret.
+- Compatibility matrix: new interface `serve-api` (node-control and funnel-sidecar), now 2. node-control still accepts 1 with `SERVE_CERT_SOURCE=ca`; with `acme` it answers `426` to a sidecar older than 0.19.0.
+
 ### Changed
 
 - node-control: with `COMPAT_STRICT=true`, a component that reports no interface version (older than 0.18.0) is refused too, not only an incompatible one (#322). An ingress agent gets no credentials, the funnel ingress gets `409`, a task runner gets no task. It shows as "At risk" in Attention, as a problem in `/fleet.json` (`fleet-check.sh` exits 1) and as "refused" on the Fleet page. A component that has not answered yet is not refused. Without `COMPAT_STRICT`, nothing changes.

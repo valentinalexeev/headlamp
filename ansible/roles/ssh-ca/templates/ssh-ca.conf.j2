@@ -1,0 +1,8 @@
+# Managed by Ansible (headlamp role ssh-ca). Local changes are lost on the next run.
+# Certificates of these CAs log in when one of their principals is in auth_principals/<account>.
+# authorized_keys keep working; they are the break-glass path.
+TrustedUserCAKeys {{ ssh_ca_sshd_dir }}/ssh_ca_user_keys.pub
+AuthorizedPrincipalsFile {{ ssh_ca_sshd_dir }}/auth_principals/%u
+{% for t in ssh_ca_cert_types %}
+HostCertificate {{ ssh_ca_sshd_dir }}/ssh_host_{{ t }}_key-cert.pub
+{% endfor %}

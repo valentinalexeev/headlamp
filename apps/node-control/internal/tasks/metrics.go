@@ -22,7 +22,7 @@ import (
 type Metrics struct {
 	mu sync.Mutex
 
-	runs       map[[3]string]uint64 // task, node, state
+	runs       map[[4]string]uint64 // task, node, state, class
 	durSum     map[string]float64   // task -> seconds
 	durCount   map[string]uint64
 	sent       map[[3]string]uint64 // task, kind, ok
@@ -36,20 +36,21 @@ type Metrics struct {
 
 func NewMetrics() *Metrics {
 	return &Metrics{
-		runs: map[[3]string]uint64{}, durSum: map[string]float64{}, durCount: map[string]uint64{},
+		runs: map[[4]string]uint64{}, durSum: map[string]float64{}, durCount: map[string]uint64{},
 		sent: map[[3]string]uint64{}, notifyFail: map[string]uint64{},
 		streak: map[string]int{}, lastSuccess: map[string]time.Time{}, nextRun: map[string]time.Time{},
 	}
 }
 
-// Observe counts one finished attempt.
-func (m *Metrics) Observe(task, node string, state RunState, d time.Duration) {
+// Observe counts one finished attempt. class is the failure class of a
+// failed or lost attempt and "" otherwise, so the label has three values.
+func (m *Metrics) Observe(task, node string, state RunState, class FailureClass, d time.Duration) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.runs[[3]string{task, node, string(state)}]++
+	m.runs[[4]string{task, node, string(state), string(class)}]++
 	m.durSum[task] += max(d, 0).Seconds()
 	m.durCount[task]++
 }
@@ -159,8 +160,9 @@ func (m *Metrics) families() []family {
 	ts := func(t time.Time) string { return formatFloat(float64(t.UnixMilli()) / 1000) }
 	one := func(t string) []string { return []string{t} }
 
-	runs := family{name: "task_runs_total", typ: "counter", labels: []string{"task", "node", "state"},
-		help: "Finished attempts, by task, node and state."}
+	runs := family{name: "task_runs_total", typ: "counter",
+		labels: []string{"task", "node", "state", "class"},
+		help:   "Finished attempts, by task, node, state and failure class."}
 	dur := family{name: "task_run_duration_seconds", typ: "summary", labels: []string{"task"},
 		help: "Duration of finished attempts."}
 	sent := family{name: "task_alert_sent_total", typ: "counter", labels: []string{"task", "kind", "ok"},
@@ -176,7 +178,8 @@ func (m *Metrics) families() []family {
 
 	m.mu.Lock()
 	for k, v := range m.runs {
-		runs.samples = append(runs.samples, sample{labels: []string{k[0], k[1], k[2]}, value: u(v)})
+		runs.samples = append(runs.samples,
+			sample{labels: []string{k[0], k[1], k[2], k[3]}, value: u(v)})
 	}
 	for t, c := range m.durCount {
 		dur.samples = append(dur.samples,

@@ -128,7 +128,7 @@ func (sc *obsScenario) forbidden() []string {
 func TestMetricsContainNoSecretOrResultValues(t *testing.T) {
 	sc := runObsScenario(t)
 	out := metricsText(sc.m)
-	if !strings.Contains(out, `task_runs_total{task="job",node="n1",state="failed"} 3`) ||
+	if !strings.Contains(out, `task_runs_total{task="job",node="n1",state="failed",class="unknown"} 3`) ||
 		!strings.Contains(out, `task_alert_sent_total{task="job",kind="alert",ok="true"} 1`) {
 		t.Fatalf("scenario not reflected in metrics:\n%s", out)
 	}

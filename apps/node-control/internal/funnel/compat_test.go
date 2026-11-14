@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// #300: under COMPAT_STRICT, GET /ingress/v1/config answers 409 when the last state report names a funnel API
-// outside the matrix. No report yet, a report without "api" (older than #300), a compatible one, and warn-only
-// mode all get the configuration as before.
+// #300, #322: under COMPAT_STRICT, GET /ingress/v1/config answers 409 when the last state report names a funnel
+// API outside the matrix, or no funnel API at all (older than 0.18.0). No report yet, a compatible one, and
+// warn-only mode get the configuration as before.
 func TestStrictRefusesAnIncompatibleIngress(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -16,9 +16,10 @@ func TestStrictRefusesAnIncompatibleIngress(t *testing.T) {
 		want   int
 	}{
 		{"warn only", false, `{"api":9,"errors":[]}`, 200},
+		{"warn only, older than 0.18.0", false, `{"errors":[]}`, 200},
 		{"strict, incompatible", true, `{"api":9,"errors":[]}`, 409},
 		{"strict, compatible", true, `{"api":1,"errors":[]}`, 200},
-		{"strict, older than #300", true, `{"errors":[]}`, 200},
+		{"strict, older than 0.18.0", true, `{"errors":[]}`, 409},
 		{"strict, no report yet", true, "", 200},
 	} {
 		t.Run(c.name, func(t *testing.T) {

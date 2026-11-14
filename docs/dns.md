@@ -220,6 +220,12 @@ dns:
 The Serve page shows this line with the address of node-control. node-control keeps its address while its state
 volume stays. Serve does not start when the zone is under `base_domain`, or contains it.
 
+With `SERVE_CERT_SOURCE=acme` (#334), the serve zone must also be a zone in public DNS. You must control it.
+node-control writes the `_acme-challenge` TXT records of the DNS-01 challenge there, through `SERVE_ACME_DNS` (`googlecloud`,
+`route53`, `cloudflare` or `rfc2136`). Do not add A records for the services to public DNS: tailnet devices get them
+from node-control through the split. The public zone has only the SOA, the NS records and, during an order, the TXT
+records. See "Certificates from an ACME CA" in the node-control README.
+
 ### Tailnet DNS module
 
 The tailnet DNS module (#286) makes node-control the resolver of the tailnet names for bridges. It also keeps records

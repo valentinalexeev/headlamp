@@ -50,6 +50,20 @@ serve:
     repository: ghcr.io/valentinalexeev/headlamp/funnel-sidecar
     tag: ""          # empty: the chart version
     digest: ""
+  # Where the proxies get their TLS certificate (#334).
+  #   node-control  (default) from node-control over the tailnet (POST /serve/v1/cert): its CA, or a public ACME
+  #                 certificate when node-control has SERVE_CERT_SOURCE=acme.
+  #   cert-manager  the chart makes one cert-manager Certificate for each proxy with your Issuer or ClusterIssuer.
+  #                 The proxy reads the Secret and reloads it on renewal. cert-manager must be installed.
+  certificate:
+    source: node-control
+    # cert-manager only: the default name of a proxy is <name>.<zone>; set dnsNames on a service to change it
+    # (a wildcard service needs ["*.apps.<zone>"]).
+    zone: ""
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer   # or Issuer (in the release namespace)
+      group: cert-manager.io
   services: []
   # - name: grafana                       # the node-control service name; also the Deployment name suffix
   #   # the key Secret; the default is "<release>-serve-<name>", key "authkey"
@@ -57,6 +71,8 @@ serve:
   #   # FUNNEL_SERVICES: <port name>=<tailnet port>@<upstream>
   #   services: "web=443@grafana.monitoring.svc:3000"
   #   replicas: 1
+  #   # cert-manager only: the names on the certificate; the default is ["<name>.<certificate.zone>"]
+  #   dnsNames: []
   # - name: apps                          # a wildcard service (*.apps) in front of an ingress controller
   #   services: "web=443@ingress-nginx-controller.ingress-nginx.svc:80"
 

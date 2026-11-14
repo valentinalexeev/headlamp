@@ -111,7 +111,7 @@ func (s set) pick(w *Who) ([]netip.Addr, []RR) {
 // the zones node-control is authoritative for (NewZones).
 type Table struct {
 	zone  string           // normalised, no trailing dot; "" for a set of names
-	zones []string         // NewZones: names under these zones do not exist unless another table has them
+	zones []string         // NewZones: names in these zones that no other table has do not exist
 	exact map[string][]set // normalised name -> data
 	wild  []wildEntry      // longest suffix first
 }
@@ -138,7 +138,8 @@ func NewTable(zone string, recs []Record) *Table {
 		n := Normalize(r.Name)
 		if suf, ok := strings.CutPrefix(n, "*."); ok {
 			if t.inZone(suf) || suf == t.zone {
-				t.wild = append(t.wild, wildEntry{suffix: suf, addrs: append([]netip.Addr(nil), r.Addrs...)})
+				addrs := append([]netip.Addr(nil), r.Addrs...)
+				t.wild = append(t.wild, wildEntry{suffix: suf, addrs: addrs})
 			}
 			continue
 		}
@@ -189,6 +190,9 @@ func (t *Table) Names() []string {
 	return out
 }
 
+// Zones gives the zones of a NewZones table.
+func (t *Table) Zones() []string { return append([]string(nil), t.zones...) }
+
 // Zone returns the normalised zone.
 func (t *Table) Zone() string { return t.zone }
 
@@ -233,7 +237,7 @@ func (t *Table) lookup(name string) (sets []set, found, inZone bool) {
 const (
 	SlotRecords = "records" // records managed in node-control
 	SlotExtra   = "extra"   // the headscale dns.extra_records, from the netmap
-	SlotZones   = "zones"   // the zones managed in node-control (#285): other names in them do not exist
+	SlotZones   = "zones"   // the zones managed in node-control (#285): NXDOMAIN for others
 	SlotServe   = "serve"   // the serve zone (#117)
 	SlotMagic   = "magic"   // the MagicDNS names of the nodes
 )
@@ -483,8 +487,8 @@ func reply(h dnsmessage.Header, q *dnsmessage.Question, rc dnsmessage.RCode, ans
 		case dnsmessage.TypeSRV:
 			var n dnsmessage.Name
 			if n, err = dnsmessage.NewName(a.rr.Target + "."); err == nil {
-				err = b.SRVResource(rh, dnsmessage.SRVResource{Priority: a.rr.Priority, Weight: a.rr.Weight,
-					Port: a.rr.Port, Target: n})
+				err = b.SRVResource(rh, dnsmessage.SRVResource{Priority: a.rr.Priority,
+					Weight: a.rr.Weight, Port: a.rr.Port, Target: n})
 			}
 		}
 		if err != nil {

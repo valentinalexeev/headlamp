@@ -36,8 +36,13 @@ no forwarder Deployment.
 
 ### What the sidecar cannot do
 
-The sidecar forwards a whole name to one backend. A route with a path, header, query or method match, a filter,
-more than one rule or more than one `backendRef` gets `Accepted=False` with reason `UnsupportedValue` and a message.
+The sidecar forwards a whole name to one backend. These routes get `Accepted=False` with reason `UnsupportedValue`
+and a message:
+
+- a route with a path, header, query or method match,
+- a route with a filter,
+- a route with more than one rule or `backendRef`.
+
 `PathPrefix /` is the same as no match, and is accepted. For L7 rules, the operator puts a Gateway API
 implementation behind a wildcard serve service (phase 1).
 

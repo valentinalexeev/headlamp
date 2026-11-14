@@ -139,8 +139,8 @@ The ClusterRole of the controller gives:
 The controller cannot read Secrets. The sidecar pod reads its key Secret itself, through `secretKeyRef`. The
 controller caches only the pods and Deployments that it made.
 
-**WARNING:** A person who can make a `Gateway` of a headlamp class in a namespace can run a sidecar with any key
-Secret of that namespace. Give the permission to make `Gateway` objects only to persons who can read the Secrets of
+**WARNING:** A person who can make a headlamp `Gateway` in a namespace can run a sidecar with any key Secret
+there. Give the permission to make `Gateway` objects only to persons who can read the Secrets of
 that namespace.
 
 ## Tests
@@ -148,6 +148,8 @@ that namespace.
 - `cd apps/gateway-controller && go test ./...`: the translation, the conditions, `ReferenceGrant` and the
   unsupported matches, with a fake client.
 - `make test-gateway-controller`: `helm lint`, `helm template`, kubeconform and the RBAC checks.
-- `make test-gateway-controller-e2e`: the chart in kind against the pinned headscale. A `Gateway` and an
-  `HTTPRoute` publish a ClusterIP Service on the tailnet, the `Gateway` gets `Programmed=True` and the address, a
-  tailnet peer reaches the Service, and a route with a path match gets `Accepted=False`.
+- `make test-gateway-controller-e2e`: the chart in kind against the pinned headscale. These checks are in it:
+  - A `Gateway` and an `HTTPRoute` publish a ClusterIP Service on the tailnet.
+  - The `Gateway` gets `Programmed=True` and the tailnet address.
+  - A tailnet peer reaches the Service.
+  - A route with a path match gets `Accepted=False`.

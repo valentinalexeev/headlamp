@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -28,6 +29,11 @@ import (
 type Client struct {
 	URL  string       // node-control, reached over the tailnet
 	HTTP *http.Client // dials over the tailnet
+	// CertFile and KeyFile, when set, replace node-control (#334): the certificate comes from files, for example a
+	// cert-manager Secret mounted in the pod. The client reads them again every Poll and serves a changed pair from
+	// the next handshake. URL and HTTP are not used then.
+	CertFile, KeyFile string
+	Poll              time.Duration
 
 	name atomic.Pointer[string] // the service name node-control returned, exact or "*.<suffix>"
 	key  *ecdsa.PrivateKey
@@ -42,7 +48,14 @@ type Response struct {
 	CertPEM  string    `json:"cert_pem"`
 	ChainPEM string    `json:"chain_pem"`
 	NotAfter time.Time `json:"not_after"`
+	// KeyPEM comes with SERVE_CERT_SOURCE=acme (#334): one certificate from a public ACME CA, shared by all
+	// proxies, with its key. Empty when node-control signed this proxy's CSR.
+	KeyPEM string `json:"key_pem,omitempty"`
 }
+
+// API is the serve-api version this client speaks (compat.json in node-control). Version 2 accepts a shared
+// certificate with its key (#334).
+const API = 2
 
 // APIError is a refusal from node-control. The message is node-control's reason (for example "this node did not
 // join with the key of a service"), so the operator can fix the key in the secret.
@@ -66,6 +79,9 @@ func (c *Client) Name() string {
 // Register asks node-control for a certificate and installs it. The key is created once per process; a renewal
 // reuses it.
 func (c *Client) Register(ctx context.Context) error {
+	if c.CertFile != "" {
+		return c.loadFiles()
+	}
 	if c.key == nil {
 		k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
@@ -80,6 +96,7 @@ func (c *Client) Register(ctx context.Context) error {
 	}
 	body, _ := json.Marshal(map[string]any{
 		"csr": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})),
+		"api": API,
 	})
 	req, _ := http.NewRequestWithContext(ctx, "POST", c.URL+"/serve/v1/cert", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -105,7 +122,11 @@ func (c *Client) install(r Response) error {
 	if r.Name == "" {
 		return errors.New("node-control returned no name")
 	}
-	pair, err := tls.X509KeyPair([]byte(r.CertPEM+r.ChainPEM), pemKey(c.key))
+	key := pemKey(c.key)
+	if r.KeyPEM != "" {
+		key = []byte(r.KeyPEM)
+	}
+	pair, err := tls.X509KeyPair([]byte(r.CertPEM+r.ChainPEM), key)
 	if err != nil {
 		return fmt.Errorf("certificate does not match the key: %w", err)
 	}
@@ -122,6 +143,39 @@ func (c *Client) install(r Response) error {
 	}
 	pair.Leaf = leaf
 	name := r.Name
+	c.name.Store(&name)
+	c.cert.Store(&pair)
+	c.exp.Store(leaf.NotAfter.Unix())
+	c.from.Store(leaf.NotBefore.Unix())
+	return nil
+}
+
+// loadFiles installs the pair in CertFile and KeyFile. The name is the first DNS name of the certificate.
+func (c *Client) loadFiles() error {
+	certPEM, err := os.ReadFile(c.CertFile)
+	if err != nil {
+		return err
+	}
+	keyPEM, err := os.ReadFile(c.KeyFile)
+	if err != nil {
+		return err
+	}
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return fmt.Errorf("certificate files: %w", err)
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return err
+	}
+	if len(leaf.DNSNames) == 0 {
+		return errors.New("certificate files: the certificate has no DNS name")
+	}
+	if old := c.cert.Load(); old != nil && old.Leaf != nil && bytes.Equal(old.Leaf.Raw, leaf.Raw) {
+		return nil
+	}
+	pair.Leaf = leaf
+	name := leaf.DNSNames[0]
 	c.name.Store(&name)
 	c.cert.Store(&pair)
 	c.exp.Store(leaf.NotAfter.Unix())
@@ -169,6 +223,7 @@ func (c *Client) Expires() time.Time {
 // whether a valid certificate is in place.
 func (c *Client) Keep(ctx context.Context, ready func(bool), logf func(string, ...any)) {
 	backoff := time.Second
+	var lastExp time.Time
 	for ctx.Err() == nil {
 		err := c.Register(ctx)
 		now := time.Now()
@@ -189,7 +244,19 @@ func (c *Client) Keep(ctx context.Context, ready func(bool), logf func(string, .
 			if wait < time.Minute {
 				wait = time.Minute
 			}
-			logf("serve: certificate for %s until %s; renewing at %s", c.Name(), c.Expires().UTC().Format(time.RFC3339), c.RenewAt().UTC().Format(time.RFC3339))
+			changed := true
+			if c.CertFile != "" {
+				// cert-manager renews the Secret; read it again often, log only a change
+				wait = c.Poll
+				if wait <= 0 {
+					wait = 30 * time.Second
+				}
+				changed = !c.Expires().Equal(lastExp)
+				lastExp = c.Expires()
+			}
+			if changed {
+				logf("serve: certificate for %s until %s; renewing at %s", c.Name(), c.Expires().UTC().Format(time.RFC3339), c.RenewAt().UTC().Format(time.RFC3339))
+			}
 		}
 		t := time.NewTimer(wait)
 		select {

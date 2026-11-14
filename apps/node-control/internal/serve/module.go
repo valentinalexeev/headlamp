@@ -46,10 +46,13 @@ type Module struct {
 	log *slog.Logger
 	st  Store
 	ca  *CA
-	dns *servedns.Server
-	tn  core.Tailnet
-	now func() time.Time
-	cfg config
+	// acme keeps the certificate from the ACME CA when SERVE_CERT_SOURCE=acme (#334); then ca is nil.
+	acme *keeper
+	iss  Issuer // for tests; nil means lego
+	dns  *servedns.Server
+	tn   core.Tailnet
+	now  func() time.Time
+	cfg  config
 	// selfName is this node's tailnet name, to find its address for the split line the page shows.
 	selfName string
 	mu       sync.Mutex // serialises service changes against headscale and the store
@@ -70,10 +73,16 @@ type config struct {
 	certTTL   time.Duration
 	refresh   time.Duration
 	listenDNS bool
+	source    string // "ca" or "acme"
+	acme      acmeConfig
+	acmeCheck time.Duration
 }
 
 // Option configures the serve module.
 type Option func(*Module)
+
+// WithIssuer replaces the ACME client, for tests.
+func WithIssuer(i Issuer) Option { return func(m *Module) { m.iss = i } }
 
 // WithDNS shares a DNS server with the tailnet DNS module (#286): both answer on one listener.
 func WithDNS(s *servedns.Server) Option { return func(m *Module) { m.dns = s } }
@@ -140,6 +149,21 @@ func (m *Module) Register(r *core.Routes) error {
 	if c.refresh, err = duration(m.env, "SERVE_DNS_REFRESH", 15*time.Second, 2*time.Second, 10*time.Minute); err != nil {
 		return err
 	}
+	switch c.source = m.env.Default("SERVE_CERT_SOURCE", "ca"); c.source {
+	case "ca":
+	case "acme":
+		if c.acme, err = loadACMEConfig(m.env); err != nil {
+			return fmt.Errorf("%s: %w", on, err)
+		}
+		if m.env.Getenv("SERVE_CA_CERT") != "" || m.env.Getenv("SERVE_CA_KEY") != "" {
+			return errors.New(on + ": SERVE_CA_CERT and SERVE_CA_KEY are for SERVE_CERT_SOURCE=ca; remove them for acme")
+		}
+		if c.acmeCheck, err = duration(m.env, "SERVE_ACME_CHECK", time.Hour, time.Minute, 24*time.Hour); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("SERVE_CERT_SOURCE must be ca or acme, not %q", c.source)
+	}
 	if err := checkZone(c.zone, c.base); err != nil {
 		return fmt.Errorf("%s: %w", on, err)
 	}
@@ -163,12 +187,20 @@ func (m *Module) Register(r *core.Routes) error {
 	if err != nil {
 		return err
 	}
-	ca, err := m.loadCA(st)
-	if err != nil {
-		st.Close()
-		return err
+	if c.source == "acme" {
+		if err := m.setupACME(st); err != nil {
+			st.Close()
+			return err
+		}
+		m.st = st
+	} else {
+		ca, err := m.loadCA(st)
+		if err != nil {
+			st.Close()
+			return err
+		}
+		m.st, m.ca = st, ca
 	}
-	m.st, m.ca = st, ca
 
 	view := authz.Gate(r.Tailnet, authz.P(authz.FeatureServe, authz.LevelView), authz.Allowed{}, m.log)
 	admin := authz.Gate(r.Tailnet, authz.P(authz.FeatureServe, authz.LevelAdmin), authz.Allowed{}, m.log)
@@ -215,6 +247,9 @@ func (m *Module) Start(ctx context.Context) error {
 		return nil
 	}
 	m.refreshDNS(ctx)
+	if m.acme != nil {
+		go m.acme.run(ctx, m.acmeWant, m.cfg.acmeCheck)
+	}
 	go func() {
 		t := time.NewTicker(m.cfg.refresh)
 		defer t.Stop()
@@ -425,6 +460,9 @@ func (m *Module) createService(w http.ResponseWriter, r *http.Request) {
 	m.log.Info("serve: service created", "id", svc.ID, "name", name, "namespace", ns, "by", authz.LoginFrom(r.Context()))
 	m.audit(r, "service.create", name+" in "+ns)
 	m.refreshDNS(r.Context())
+	if m.acme != nil {
+		m.acme.poke() // a deeper name may need another wildcard on the certificate
+	}
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, keyResp{Service: svc, AuthKey: key.Key})
 }
@@ -520,11 +558,16 @@ type serviceView struct {
 }
 
 type stateResp struct {
-	Zone          string        `json:"zone"`
-	CAFingerprint string        `json:"ca_fingerprint"`
-	Services      []serviceView `json:"services"`
-	DNSRefreshed  time.Time     `json:"dns_refreshed,omitzero"`
-	DNSError      string        `json:"dns_error,omitempty"`
+	Zone          string `json:"zone"`
+	CAFingerprint string `json:"ca_fingerprint"`
+	// CertSource is "ca" (node-control signs) or "acme" (one certificate from a public ACME CA, #334).
+	CertSource   string        `json:"cert_source"`
+	ACMENames    []string      `json:"acme_names,omitempty"`
+	ACMEUntil    time.Time     `json:"acme_until,omitzero"`
+	ACMEError    string        `json:"acme_error,omitempty"`
+	Services     []serviceView `json:"services"`
+	DNSRefreshed time.Time     `json:"dns_refreshed,omitzero"`
+	DNSError     string        `json:"dns_error,omitempty"`
 	// DNSServer is the tailnet address of node-control that headscale's split must name (#129), when headscale
 	// reports it: the node with the node-control tag, else the given name of this node.
 	DNSServer string `json:"dns_server,omitempty"`
@@ -541,7 +584,7 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nodes, nerr := m.hs.ListNodes(r.Context())
-	out := stateResp{Zone: m.cfg.zone, CAFingerprint: m.ca.Fingerprint(), Services: []serviceView{},
+	out := stateResp{Zone: m.cfg.zone, CertSource: m.cfg.source, Services: []serviceView{},
 		CanAdmin:    authz.Can(authz.LoginFrom(r.Context()), authz.P(authz.FeatureServe, authz.LevelAdmin), authz.Allowed{}),
 		KeyTTLHours: int(m.cfg.keyTTL / time.Hour), DNSServer: selfAddr(nodes, m.selfName)}
 	for _, s := range svcs {
@@ -553,6 +596,15 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Services = append(out.Services, v)
 	}
+	if m.ca != nil {
+		out.CAFingerprint = m.ca.Fingerprint()
+	}
+	if m.acme != nil {
+		if c := m.acme.cur.load(); c != nil {
+			out.ACMENames, out.ACMEUntil = c.names, c.until
+		}
+		out.ACMEError = m.acme.lastErr.load()
+	}
 	m.last.Lock()
 	out.DNSRefreshed, out.DNSError = m.last.at, m.last.err
 	m.last.Unlock()
@@ -563,6 +615,10 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) caCert(w http.ResponseWriter, _ *http.Request) {
+	if m.ca == nil {
+		http.Error(w, "serve uses a public ACME CA (SERVE_CERT_SOURCE=acme): clients need no extra CA", http.StatusNotFound)
+		return
+	}
 	w.Header().Set("Content-Type", "application/x-pem-file")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(m.ca.CertPEM())
@@ -572,6 +628,9 @@ func (m *Module) caCert(w http.ResponseWriter, _ *http.Request) {
 
 type certReq struct {
 	CSR string `json:"csr"`
+	// API is the serve-api version of the proxy (compat.json). 0: older than #334, which can only use a
+	// certificate for its own key.
+	API int `json:"api,omitempty"`
 }
 
 type certResp struct {
@@ -579,6 +638,9 @@ type certResp struct {
 	CertPEM  string    `json:"cert_pem"`
 	ChainPEM string    `json:"chain_pem"`
 	NotAfter time.Time `json:"not_after"`
+	// KeyPEM is set only with SERVE_CERT_SOURCE=acme (#334): the key of the shared certificate. The proxy uses
+	// it instead of its own key.
+	KeyPEM string `json:"key_pem,omitempty"`
 }
 
 // cert signs the caller's CSR for the name of its service. The service comes from the pre-auth key the calling node
@@ -614,6 +676,10 @@ func (m *Module) cert(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		http.Error(w, "this node did not join with the key of a service", http.StatusForbidden)
+		return
+	}
+	if m.acme != nil {
+		m.acmeCert(w, req, svc)
 		return
 	}
 	certPEM, notAfter, err := m.ca.SignCSR([]byte(req.CSR), []string{svc.Name}, m.cfg.certTTL)

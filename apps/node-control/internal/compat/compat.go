@@ -23,6 +23,7 @@ const (
 	AgentAPI  = "agent-api"  // node-control <-> ingress-agent
 	FunnelAPI = "funnel-api" // node-control <-> funnel-ingress
 	RunnerAPI = "runner-api" // node-control <-> task-runner
+	ServeAPI  = "serve-api"  // node-control <-> funnel-sidecar in serve mode (#334)
 )
 
 // Range is the interface versions node-control accepts, both ends included.

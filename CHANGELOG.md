@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- funnel-ingress: the setting `FUNNEL_HSTS` (off by default) sends `Strict-Transport-Security` on responses for service hosts that the client reached over HTTPS, and replaces a backend's own header. It accepts `max-age=<seconds>` with an optional `; includeSubDomains`, not `preload`. Without the setting, nothing changes. A funnel that publishes a Kubernetes service through its own proxy (agentdev `ingress.mode: external`) needs it for the HSTS check of its end-to-end security checklist.
+
 ### Changed
 
 - node-control: with `COMPAT_STRICT=true`, a component that reports no interface version (older than 0.18.0) is refused too, not only an incompatible one (#322). An ingress agent gets no credentials, the funnel ingress gets `409`, a task runner gets no task. It shows as "At risk" in Attention, as a problem in `/fleet.json` (`fleet-check.sh` exits 1) and as "refused" on the Fleet page. A component that has not answered yet is not refused. Without `COMPAT_STRICT`, nothing changes.

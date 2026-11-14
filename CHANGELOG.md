@@ -4,7 +4,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
-## 0.19.0 - (not released)
+## 0.19.0 - 2026-11-14
 
 ### Added
 
@@ -17,6 +17,11 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 - Compatibility matrix: new interface `serve-api` (node-control and funnel-sidecar), now 2. node-control still accepts 1 with `SERVE_CERT_SOURCE=ca`; with `acme` it answers `426` to a sidecar older than 0.19.0.
 - Ansible role `ssh-ca` (#345): sshd accepts user certificates of the listed CAs, maps certificate principals to accounts, and (optional) presents host certificates signed on the controller (with a key file or through ssh-agent). The drop-in is checked with `sshd -t` before it is installed; `authorized_keys` keeps working as the break-glass path. `scripts/ssh-cert-sign.sh` makes a throwaway key and a short-lived certificate (at most 24 hours, no forwarding, optional `source-address`) for one CI job, with the CA key held only in a private ssh-agent. Off until a site applies the role. `make test-ssh-ca` and `make test-ssh-ca-e2e` test them.
 - funnel-ingress: the setting `FUNNEL_HSTS` (off by default) sends `Strict-Transport-Security` on responses for service hosts that the client reached over HTTPS, and replaces a backend's own header. It accepts `max-age=<seconds>` (at most two years) with an optional `; includeSubDomains`, not `preload`. Without the setting, nothing changes. A Kubernetes service published through the funnel, with no TLS proxy of its own, needs it to pass an HSTS check.
+
+### Changed
+
+- Go minor and patch updates of node-control (#337); `azure/setup-helm` 5.1.0 in CI (#336). node-control also takes grpc 1.83.2, go-jose 4.1.6 and otel 1.47.0 for open security advisories (#344).
+- CI and images run on maintenance branches `maint/X.Y` too, and a patch release can be tagged there (#348, #350). See "Maintenance branches" in VERSIONING.md.
 
 ## 0.18.1 - 2026-11-14
 

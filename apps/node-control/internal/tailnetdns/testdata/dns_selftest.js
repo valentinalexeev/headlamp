@@ -126,7 +126,8 @@ const rowFor = (body, name) => body.children.find((tr) => tr.children[0] && tr.c
     const cfg = textOf(e.config);
     assert.ok(cfg.includes('/dns/extra-records.json, written 1 min') || cfg.includes('/dns/extra-records.json, written'), cfg);
     assert.ok(cfg.includes('ruled.example.com:'), 'the split block');
-    assert.ok(textOf(e.server).includes('other.example.com'));
+    const serverDD = e.server.children.filter((n) => n.tag === 'dd').map((n) => n.textContent);
+    assert.strictEqual(serverDD[serverDD.length - 1], 'other.example.com', 'the other extra records row');
     assert.ok(textOf(e.sub).startsWith('4 records, 1 zone.'));
     assert.ok(e.health.hidden);
     ctrl.update(state({ extra_records_file_error: 'extra records file: permission denied' }));

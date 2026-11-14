@@ -103,7 +103,16 @@
       }
       var zone = label(s.zone, 253);
       row('Zone', zone, true);
-      row('CA fingerprint', label(s.ca_fingerprint, 128) || 'unknown', true);
+      if (s.cert_source === 'acme') {
+        var names = Array.isArray(s.acme_names) ? s.acme_names.map(function (n) { return label(n, 253); }).join(', ') : '';
+        row('Certificate', 'public ACME CA: ' + (names || 'not issued yet'), true);
+        if (s.acme_until) { row('Valid until', label(s.acme_until, 40), true); }
+        if (s.acme_error) { row('Last ACME error', label(s.acme_error, 300)); }
+        var dl = document.querySelector('a[href="/serve/ca.crt"]');
+        if (dl) { dl.hidden = true; }
+      } else {
+        row('CA fingerprint', label(s.ca_fingerprint, 128) || 'unknown', true);
+      }
       var server = label(s.dns_server, 45);
       var split = hl.el('pre', 'code');
       split.textContent = 'dns:\n  nameservers:\n    split:\n      ' + zone + ':\n        - ' + (server || '<node-control tailnet IPv4>');

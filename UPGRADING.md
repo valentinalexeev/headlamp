@@ -14,7 +14,7 @@ says "No action required".
 ### Action required
 
 - **Only if you set `COMPAT_STRICT=true`** (#322): node-control now also refuses a component that reports no interface
-  version, that is, a component older than 0.18.0. Before you deploy node-control 0.18.1, run `scripts/fleet-check.sh`
+  version, that is, a component older than 0.18.0. Before you deploy this node-control, run `scripts/fleet-check.sh`
   (or open the Fleet page) and upgrade each component that shows "reports no ... version". Else that ingress agent
   gets no credentials, the funnel ingress gets no routes, and that task runner gets no task.
 
@@ -29,6 +29,12 @@ says "No action required".
   is required. The extra-records file does not contain a zone, a record with rules, or a record of another type. When
   you add one of them, add its new line of `GET /dns/state` `split` (or of the DNS page) to
   `dns.nameservers.split` in `headscale.yaml`. Then restart headscale.
+
+- **Serve certificates from an ACME CA** (#334): no action required. `SERVE_CERT_SOURCE` defaults to `ca`, and the
+  chart value `serve.certificate.source` defaults to `node-control`, so serve works as before. To opt in, see
+  "Certificates from an ACME CA" in the node-control README, or "Serve certificates" in the tailnet-connector chart
+  README. With `SERVE_CERT_SOURCE=acme`, upgrade every `funnel-sidecar` in serve mode to 0.19.0 first: node-control
+  answers `426` to an older one.
 
 ## 0.18.0
 

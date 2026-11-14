@@ -15,6 +15,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,8 +57,8 @@ func (f *fakeNC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var req map[string]any
 	json.NewDecoder(r.Body).Decode(&req)
-	if len(req) != 1 {
-		http.Error(w, "the sidecar must send only a csr", 400)
+	if len(req) != 2 || req["api"] != float64(API) {
+		http.Error(w, "the sidecar must send only a csr and its api version", 400)
 		return
 	}
 	csrText, _ := req["csr"].(string)
@@ -231,5 +233,96 @@ func TestWildcardService(t *testing.T) {
 	c2 := client(srv)
 	if err := c2.Register(context.Background()); err == nil {
 		t.Fatal("a certificate that does not cover the wildcard must be refused")
+	}
+}
+
+// shared is a certificate and key as SERVE_CERT_SOURCE=acme hands out (#334): not for the client's own key.
+func shared(t *testing.T, f *fakeNC, names ...string) (certPEM, keyPEM []byte, notAfter time.Time) {
+	t.Helper()
+	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	now := time.Now()
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(now.UnixNano()), Subject: pkix.Name{CommonName: names[0]}, DNSNames: names,
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(f.ttl), ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, f.caCert, &k.PublicKey, f.caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kd, _ := x509.MarshalECPrivateKey(k)
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kd}), tmpl.NotAfter
+}
+
+// With key_pem in the answer the client serves the shared certificate with that key, not its own.
+func TestSharedCertificateWithKey(t *testing.T) {
+	nc := newFakeNC(t)
+	cert, key, na := shared(t, nc, "*.svc.example.com")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req["api"] != float64(API) {
+			http.Error(w, "old proxy", http.StatusUpgradeRequired)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(Response{Name: "grafana.svc.example.com", CertPEM: string(cert), ChainPEM: string(nc.caPEM),
+			NotAfter: na, KeyPEM: string(key)})
+	}))
+	defer srv.Close()
+	c := client(srv)
+	if err := c.Register(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.cert.Load().Leaf.VerifyHostname("grafana.svc.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if c.cert.Load().PrivateKey.(*ecdsa.PrivateKey).Equal(c.key) {
+		t.Fatal("the client must use the key node-control sent")
+	}
+}
+
+// From files (a cert-manager Secret): the client serves the pair and takes a new pair at the next read.
+func TestCertificateFromFilesReloads(t *testing.T) {
+	nc := newFakeNC(t)
+	dir := t.TempDir()
+	cf, kf := filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")
+	write := func(names ...string) {
+		cert, key, _ := shared(t, nc, names...)
+		if err := os.WriteFile(cf, cert, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(kf, key, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := &Client{CertFile: cf, KeyFile: kf}
+	if err := c.Register(context.Background()); err == nil {
+		t.Fatal("no files: must fail")
+	}
+	write("grafana.svc.example.com")
+	if err := c.Register(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := c.cert.Load()
+	if c.Name() != "grafana.svc.example.com" {
+		t.Fatalf("name %q", c.Name())
+	}
+	if err := c.Register(context.Background()); err != nil || c.cert.Load() != first {
+		t.Fatal("the same files must keep the same certificate")
+	}
+	write("grafana.svc.example.com", "other.svc.example.com")
+	if err := c.Register(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := c.TLSConfig().GetCertificate(nil)
+	if got == first || got.Leaf.VerifyHostname("other.svc.example.com") != nil {
+		t.Fatal("the renewed files were not served")
+	}
+	// a broken pair keeps the old certificate in place
+	if err := os.WriteFile(kf, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Register(context.Background()); err == nil {
+		t.Fatal("a broken key must be an error")
+	}
+	if c2, _ := c.TLSConfig().GetCertificate(nil); c2 != got {
+		t.Fatal("a broken pair must not replace the served certificate")
 	}
 }

@@ -57,5 +57,14 @@
     "args_from_files": {"TSVERSION": "TAILSCALE_VERSION"},
     "platforms": "linux/amd64,linux/arm64",
     "test": "make test-k8s-connector"
+  },
+  {
+    "image": "gateway-controller",
+    "context": "apps/gateway-controller",
+    "dockerfile": "Dockerfile",
+    "paths": ["apps/gateway-controller", "charts/gateway-controller"],
+    "platforms": "linux/amd64,linux/arm64",
+    "go": true,
+    "test": "cd apps/gateway-controller && go vet ./... && go test -count=1 ./... && cd ../.. && make test-gateway-controller"
   }
 ]

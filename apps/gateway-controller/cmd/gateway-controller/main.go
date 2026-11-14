@@ -90,7 +90,7 @@ func run() error {
 		HealthProbeBindAddress: *probeAddr,
 		// only the sidecar pods and Deployments go into the cache, not every pod of the cluster
 		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
-			&corev1.Pod{}:         {Label: podSel},
+			&corev1.Pod{}:        {Label: podSel},
 			&appsv1.Deployment{}: {Label: podSel},
 		}},
 	})

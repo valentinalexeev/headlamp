@@ -52,6 +52,7 @@ Every node, image or not, joins the tailnet through headscale. `exit-node`, `nod
 | `funnel-sidecar` | Registers one service with `funnel-ingress` from Kubernetes, with no special privileges. Published for `linux/amd64` and `linux/arm64` | Beside your workload | Only for Kubernetes services |
 | `task-runner-browser` | The Chromium and Playwright container each scheduled browser check runs in | On a VM, started by task-runner under rootless podman | Only for tasks and browser sessions |
 | `tailnet-connector` | tailscale at the repo pin, for the Helm chart `charts/tailnet-connector`: a subnet router for a Kubernetes cluster. Published for `linux/amd64` and `linux/arm64` | A Deployment in the cluster, in userspace mode, with no special privileges | Only for Kubernetes clusters that the tailnet must reach |
+| `gateway-controller` | A Kubernetes controller for the Helm chart `charts/gateway-controller`. It reads Gateway API resources and runs one `funnel-sidecar` for each `Gateway`. Published for `linux/amd64` and `linux/arm64` | A Deployment in the cluster, with no special privileges | Only to publish Kubernetes Services from Gateway API resources |
 
 ### What each one needs
 
@@ -66,6 +67,7 @@ The images are generic. Where a site's settings belong they hold placeholders, o
 | `funnel-sidecar` | Environment settings naming the namespace and service | None: its node is ephemeral |
 | `task-runner-browser` | Nothing: the caller sends each script | None: each container is thrown away |
 | `tailnet-connector` | A tagged ephemeral pre-auth key in a Secret, and the routes in the chart values | Its tailscale identity, in a Kubernetes Secret |
+| `gateway-controller` | The chart values. Each `Gateway` names a Secret with a key that you make in node-control | None: the state is in the Kubernetes objects |
 
 Each app's README has the full settings.
 

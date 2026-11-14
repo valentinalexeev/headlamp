@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gc.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "gc.labels" . | nindent 4 }}
+spec:
+  # one replica: the controller has no leader election
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: gateway-controller, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: {{- include "gc.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "gc.name" . }}
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: controller
+          image: {{ include "gc.image" (list $ .Values.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: GATEWAY_SIDECAR_IMAGE, value: {{ include "gc.image" (list $ .Values.sidecarImage) | quote }} }
+            - { name: GATEWAY_SERVE_CLASS, value: {{ .Values.gatewayClasses.serve | quote }} }
+            - { name: GATEWAY_FUNNEL_CLASS, value: {{ .Values.gatewayClasses.funnel | quote }} }
+            {{- with .Values.controlURL }}
+            - { name: FUNNEL_CONTROL_URL, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .Values.serveURL }}
+            - { name: FUNNEL_SERVE_URL, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .Values.funnelAPIURL }}
+            - { name: FUNNEL_API_URL, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .Values.caBundle.configMap }}
+            - { name: GATEWAY_CA_CONFIGMAP, value: {{ . | quote }} }
+            {{- end }}
+          ports:
+            - { name: health, containerPort: 8080 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
+          readinessProbe:
+            httpGet: { path: /readyz, port: health }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

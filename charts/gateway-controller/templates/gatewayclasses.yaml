@@ -1,0 +1,13 @@
+{{- if .Values.gatewayClasses.create }}
+{{- range $mode := list "serve" "funnel" }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: {{ index $.Values.gatewayClasses $mode }}
+  labels: {{- include "gc.labels" $ | nindent 4 }}
+spec:
+  controllerName: github.com/valentinalexeev/headlamp/gateway-controller
+  description: {{ if eq $mode "serve" }}"headlamp: tailnet-only names with TLS (funnel-sidecar serve mode)"{{ else }}"headlamp: public names through funnel-ingress"{{ end }}
+{{- end }}
+{{- end }}

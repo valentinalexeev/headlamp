@@ -24,6 +24,12 @@ says "No action required".
 
 ### Optional
 
+- **Tailnet DNS** (#285): the module now has zones, `CNAME`, `TXT` and `SRV` records, and rules per user or tag.
+  The records of 0.18 stay `A` records and keep their answers, and the extra-records file does not change. No action
+  is required. The extra-records file does not contain a zone, a record with rules, or a record of another type. When
+  you add one of them, add its new line of `GET /dns/state` `split` (or of the DNS page) to
+  `dns.nameservers.split` in `headscale.yaml`. Then restart headscale.
+
 - **Serve certificates from an ACME CA** (#334): no action required. `SERVE_CERT_SOURCE` defaults to `ca`, and the
   chart value `serve.certificate.source` defaults to `node-control`, so serve works as before. To opt in, see
   "Certificates from an ACME CA" in the node-control README, or "Serve certificates" in the tailnet-connector chart

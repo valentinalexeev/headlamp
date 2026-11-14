@@ -30,6 +30,9 @@ const (
 	ipOwner  = "100.64.0.1"
 	ipViewer = "100.64.0.2"
 	ipSelf   = "100.64.0.9"
+	ipDevA   = "100.64.0.71"
+	ipDevB   = "100.64.0.72"
+	ipAlice  = "100.64.0.73"
 )
 
 type fakeHS struct {
@@ -91,6 +94,9 @@ func newRigWith(t *testing.T, be backend) *rig {
 	t.Cleanup(func() { authz.SetDefault(old) })
 	tn := &tailnet{FakeTailnet: authz.NewFakeTailnet(map[string]authz.Who{
 		ipOwner: {Login: "owner@"}, ipViewer: {Login: "viewer@"},
+		ipDevA:  {Login: "tagged-devices", Tags: []string{"tag:dev-a"}},
+		ipDevB:  {Login: "tagged-devices", Tags: []string{"tag:dev-b"}},
+		ipAlice: {Login: "alice@example.com"},
 	}), info: core.TailnetDNS{Suffix: base, Self4: netip.MustParseAddr(ipSelf), Extra: []core.ExtraRecord{
 		{Name: "llm-proxy.example.com", Addr: netip.MustParseAddr("100.64.0.20")},
 		{Name: "public.example.com", Addr: netip.MustParseAddr("192.0.2.1")}, // not a tailnet address: skipped

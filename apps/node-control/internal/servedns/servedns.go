@@ -33,17 +33,87 @@ import (
 // TTL is short: replicas come and go, and the answer follows the online nodes of a service.
 const TTL = 30
 
-// Record maps a name in the zone to the addresses that answer it.
+// Record maps a name in the zone to the data that answers it. Addrs answer A and AAAA queries;
+// RRs hold the other types (#285). Rules, when set, give other data to some clients: the first rule
+// that matches the client answers, and a client that no rule matches gets Addrs and RRs.
 type Record struct {
 	Name  string // exact, or "*.<suffix>"
 	Addrs []netip.Addr
+	RRs   []RR
+	Rules []Rule
 }
 
-// Table is an immutable lookup table for one zone, or for a set of exact names (NewNames).
+// RR is one record of another type than A or AAAA (#285): CNAME (Target), TXT (Text) or SRV
+// (Priority, Weight, Port, Target).
+type RR struct {
+	Type     dnsmessage.Type
+	Target   string // CNAME and SRV: a normalised name
+	Text     []string
+	Priority uint16
+	Weight   uint16
+	Port     uint16
+	addr     netip.Addr // A and AAAA answers, inside this package
+}
+
+// Rule gives Addrs and RRs to the clients it matches: a tailnet login in Users, or a node with a
+// tag in Tags (#285). The data of a rule may be empty: the matched clients then get no answer of
+// the type (NODATA).
+type Rule struct {
+	Users []string
+	Tags  []string
+	Addrs []netip.Addr
+	RRs   []RR
+}
+
+// Who identifies a client: its tailnet login and the tags of its node.
+type Who struct {
+	Login string
+	Tags  []string
+}
+
+func (r Rule) matches(w *Who) bool {
+	if w == nil {
+		return false
+	}
+	for _, u := range r.Users {
+		if w.Login != "" && strings.EqualFold(u, w.Login) {
+			return true
+		}
+	}
+	for _, t := range r.Tags {
+		for _, x := range w.Tags {
+			if t == x {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// set is the data of one Record: a name can hold several (one per record type).
+type set struct {
+	addrs []netip.Addr
+	rrs   []RR
+	rules []Rule
+}
+
+// pick gives the data for the client w: the first rule that matches, else the default.
+func (s set) pick(w *Who) ([]netip.Addr, []RR) {
+	for _, r := range s.rules {
+		if r.matches(w) {
+			return r.Addrs, r.RRs
+		}
+	}
+	return s.addrs, s.rrs
+}
+
+// Table is an immutable lookup table for one zone, or for a set of exact names (NewNames), or for
+// the zones node-control is authoritative for (NewZones).
 type Table struct {
-	zone  string                  // normalised, no trailing dot; "" for a set of names
-	exact map[string][]netip.Addr // normalised name -> addrs
-	wild  []wildEntry             // longest suffix first
+	zone  string           // normalised, no trailing dot; "" for a set of names
+	zones []string         // NewZones: names in these zones that no other table has do not exist
+	exact map[string][]set // normalised name -> data
+	wild  []wildEntry      // longest suffix first
 }
 
 type wildEntry struct {
@@ -56,20 +126,25 @@ func Normalize(s string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s)), ".")
 }
 
+func toSet(r Record) set {
+	return set{addrs: append([]netip.Addr(nil), r.Addrs...), rrs: append([]RR(nil), r.RRs...),
+		rules: append([]Rule(nil), r.Rules...)}
+}
+
 // NewTable builds a table for zone. Records outside the zone are dropped; so is the zone apex as a name.
 func NewTable(zone string, recs []Record) *Table {
-	t := &Table{zone: Normalize(zone), exact: map[string][]netip.Addr{}}
+	t := &Table{zone: Normalize(zone), exact: map[string][]set{}}
 	for _, r := range recs {
 		n := Normalize(r.Name)
-		addrs := append([]netip.Addr(nil), r.Addrs...)
 		if suf, ok := strings.CutPrefix(n, "*."); ok {
 			if t.inZone(suf) || suf == t.zone {
+				addrs := append([]netip.Addr(nil), r.Addrs...)
 				t.wild = append(t.wild, wildEntry{suffix: suf, addrs: addrs})
 			}
 			continue
 		}
 		if t.inZone(n) {
-			t.exact[n] = append(t.exact[n], addrs...)
+			t.exact[n] = append(t.exact[n], toSet(r))
 		}
 	}
 	sort.SliceStable(t.wild, func(i, j int) bool { return len(t.wild[i].suffix) > len(t.wild[j].suffix) })
@@ -82,13 +157,25 @@ func (t *Table) inZone(n string) bool { return t.zone != "" && strings.HasSuffix
 // extra_records. It holds only the names it has: any other name is outside it. Wildcards are
 // dropped.
 func NewNames(recs []Record) *Table {
-	t := &Table{exact: map[string][]netip.Addr{}}
+	t := &Table{exact: map[string][]set{}}
 	for _, r := range recs {
 		n := Normalize(r.Name)
 		if n == "" || strings.HasPrefix(n, "*.") {
 			continue
 		}
-		t.exact[n] = append(t.exact[n], r.Addrs...)
+		t.exact[n] = append(t.exact[n], toSet(r))
+	}
+	return t
+}
+
+// NewZones builds a table that holds no names but claims the zones (#285): a name under a zone
+// that no earlier table has does not exist (NXDOMAIN), instead of being refused.
+func NewZones(zones []string) *Table {
+	t := &Table{exact: map[string][]set{}}
+	for _, z := range zones {
+		if z = Normalize(z); z != "" {
+			t.zones = append(t.zones, z)
+		}
 	}
 	return t
 }
@@ -103,25 +190,44 @@ func (t *Table) Names() []string {
 	return out
 }
 
+// Zones gives the zones of a NewZones table.
+func (t *Table) Zones() []string { return append([]string(nil), t.zones...) }
+
 // Zone returns the normalised zone.
 func (t *Table) Zone() string { return t.zone }
 
-// Lookup returns the addresses for name and whether the name exists. inZone is false for a name outside the zone.
+// Lookup returns the default addresses for name (rules are not applied) and whether the name
+// exists. inZone is false for a name outside the zone.
 func (t *Table) Lookup(name string) (addrs []netip.Addr, found, inZone bool) {
+	sets, found, inZone := t.lookup(name)
+	for _, s := range sets {
+		addrs = append(addrs, s.addrs...)
+	}
+	return addrs, found, inZone
+}
+
+func (t *Table) lookup(name string) (sets []set, found, inZone bool) {
 	n := Normalize(name)
 	if t.zone == "" {
-		a, ok := t.exact[n]
-		return a, ok, ok
+		if s, ok := t.exact[n]; ok {
+			return s, true, true
+		}
+		for _, z := range t.zones {
+			if n == z || strings.HasSuffix(n, "."+z) {
+				return nil, false, true
+			}
+		}
+		return nil, false, false
 	}
 	if n != t.zone && !t.inZone(n) {
 		return nil, false, false
 	}
-	if a, ok := t.exact[n]; ok {
-		return a, true, true
+	if s, ok := t.exact[n]; ok {
+		return s, true, true
 	}
 	for _, w := range t.wild {
 		if strings.HasSuffix(n, "."+w.suffix) {
-			return w.addrs, true, true
+			return []set{{addrs: w.addrs}}, true, true
 		}
 	}
 	return nil, false, true
@@ -131,12 +237,13 @@ func (t *Table) Lookup(name string) (addrs []netip.Addr, found, inZone bool) {
 const (
 	SlotRecords = "records" // records managed in node-control
 	SlotExtra   = "extra"   // the headscale dns.extra_records, from the netmap
+	SlotZones   = "zones"   // the zones managed in node-control (#285): NXDOMAIN for others
 	SlotServe   = "serve"   // the serve zone (#117)
 	SlotMagic   = "magic"   // the MagicDNS names of the nodes
 )
 
 // Slots is the order in which a query checks the tables.
-var Slots = []string{SlotRecords, SlotExtra, SlotServe, SlotMagic}
+var Slots = []string{SlotRecords, SlotExtra, SlotZones, SlotServe, SlotMagic}
 
 // Server answers queries from its tables. The serve module and the tailnet DNS module share one
 // Server and one listener.
@@ -146,6 +253,34 @@ type Server struct {
 	tables atomic.Pointer[[]*Table] // the non-nil slots, in Slots order
 	listen sync.Once
 	Log    *slog.Logger
+	// identify, when set, names the client of a query from its source address (#285): the rules
+	// of a record use it. It is called only for a name that has rules.
+	identify atomic.Pointer[func(netip.Addr) *Who]
+}
+
+// SetIdentify sets how the server names a client from its source address. A nil function turns
+// the rules off: every client then gets the default data.
+func (s *Server) SetIdentify(f func(netip.Addr) *Who) {
+	if f == nil {
+		s.identify.Store(nil)
+		return
+	}
+	s.identify.Store(&f)
+}
+
+func (s *Server) who(src netip.Addr) func() *Who {
+	var done bool
+	var w *Who
+	return func() *Who {
+		if done {
+			return w
+		}
+		done = true
+		if f := s.identify.Load(); f != nil && src.IsValid() {
+			w = (*f)(src.Unmap())
+		}
+		return w
+	}
 }
 
 // SetTable replaces the answers of the serve zone atomically.
@@ -180,14 +315,14 @@ func (s *Server) Slot(slot string) *Table {
 }
 
 // lookup asks the tables in order; the first that holds the name or its zone decides.
-func (s *Server) lookup(name string) (addrs []netip.Addr, found, known, ready bool) {
+func (s *Server) lookup(name string) (sets []set, found, known, ready bool) {
 	p := s.tables.Load()
 	if p == nil || len(*p) == 0 {
 		return nil, false, false, false
 	}
 	for _, t := range *p {
-		if a, f, in := t.Lookup(name); in {
-			return a, f, true, true
+		if d, f, in := t.lookup(name); in {
+			return d, f, true, true
 		}
 	}
 	return nil, false, false, true
@@ -223,8 +358,16 @@ func (s *Server) ListenOnce(ctx context.Context, l Listener, log *slog.Logger) e
 	return err
 }
 
-// Answer builds the response to one query message. It returns nil for a message it cannot parse.
-func (s *Server) Answer(msg []byte) []byte {
+// Answer builds the response to one query message from an unknown client: rules never match it.
+// It returns nil for a message it cannot parse.
+func (s *Server) Answer(msg []byte) []byte { return s.AnswerFrom(msg, netip.Addr{}) }
+
+// maxChase is how many CNAME links an answer follows inside the tables.
+const maxChase = 8
+
+// AnswerFrom builds the response to one query message from the client at src. A name with rules
+// gives the data of the first rule that matches the client (#285).
+func (s *Server) AnswerFrom(msg []byte, src netip.Addr) []byte {
 	var p dnsmessage.Parser
 	h, err := p.Start(msg)
 	if err != nil || h.Response {
@@ -237,7 +380,8 @@ func (s *Server) Answer(msg []byte) []byte {
 	if h.OpCode != 0 {
 		return reply(h, &q, dnsmessage.RCodeNotImplemented, nil)
 	}
-	addrs, found, inZone, ready := s.lookup(q.Name.String())
+	who := s.who(src)
+	sets, found, inZone, ready := s.lookup(q.Name.String())
 	switch {
 	case !ready:
 		return reply(h, &q, dnsmessage.RCodeServerFailure, nil)
@@ -247,17 +391,72 @@ func (s *Server) Answer(msg []byte) []byte {
 	case !found:
 		return reply(h, &q, dnsmessage.RCodeNameError, nil)
 	}
-	var ans []netip.Addr
-	for _, a := range addrs {
-		if (q.Type == dnsmessage.TypeA && a.Is4()) || (q.Type == dnsmessage.TypeAAAA && a.Is6() && !a.Is4In6()) {
-			ans = append(ans, a)
+	var ans []answer
+	name := q.Name
+	seen := map[string]bool{}
+	for hop := 0; ; hop++ {
+		seen[Normalize(name.String())] = true
+		got, cname := pickAll(sets, q.Type, who)
+		for _, g := range got {
+			ans = append(ans, answer{name: name, rr: g})
 		}
+		// A CNAME answers every type except CNAME itself; follow it while the target is ours.
+		if cname == nil || q.Type == dnsmessage.TypeCNAME || hop >= maxChase {
+			break
+		}
+		ans = append(ans, answer{name: name, rr: *cname})
+		tn, err := dnsmessage.NewName(cname.Target + ".")
+		if err != nil || seen[cname.Target] {
+			break
+		}
+		next, f, _, _ := s.lookup(cname.Target)
+		if !f {
+			break
+		}
+		name, sets = tn, next
 	}
 	// a name that exists with no record of this type is NOERROR with no answers (NODATA)
 	return reply(h, &q, dnsmessage.RCodeSuccess, ans)
 }
 
-func reply(h dnsmessage.Header, q *dnsmessage.Question, rc dnsmessage.RCode, addrs []netip.Addr) []byte {
+// pickAll gives the records of type typ in the data the client gets, and the CNAME of the name
+// if it has one (then it has no other data).
+func pickAll(sets []set, typ dnsmessage.Type, who func() *Who) (out []RR, cname *RR) {
+	for _, st := range sets {
+		addrs, rrs := st.addrs, st.rrs
+		if len(st.rules) > 0 {
+			addrs, rrs = st.pick(who())
+		}
+		for _, a := range addrs {
+			switch {
+			case typ == dnsmessage.TypeA && a.Is4():
+				out = append(out, RR{Type: dnsmessage.TypeA, addr: a})
+			case typ == dnsmessage.TypeAAAA && a.Is6() && !a.Is4In6():
+				out = append(out, RR{Type: dnsmessage.TypeAAAA, addr: a})
+			}
+		}
+		for i, r := range rrs {
+			switch {
+			case r.Type == dnsmessage.TypeCNAME && typ != dnsmessage.TypeCNAME:
+				c := rrs[i]
+				cname = &c
+			case r.Type == typ:
+				out = append(out, r)
+			}
+		}
+	}
+	if cname != nil && typ != dnsmessage.TypeCNAME {
+		out = nil
+	}
+	return out, cname
+}
+
+type answer struct {
+	name dnsmessage.Name
+	rr   RR
+}
+
+func reply(h dnsmessage.Header, q *dnsmessage.Question, rc dnsmessage.RCode, ans []answer) []byte {
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{
 		ID: h.ID, Response: true, Authoritative: rc == dnsmessage.RCodeSuccess || rc == dnsmessage.RCodeNameError,
 		RecursionDesired: h.RecursionDesired, RCode: rc,
@@ -270,12 +469,30 @@ func reply(h dnsmessage.Header, q *dnsmessage.Question, rc dnsmessage.RCode, add
 	_ = b.StartQuestions()
 	_ = b.Question(*q)
 	_ = b.StartAnswers()
-	for _, a := range addrs {
-		rh := dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: TTL}
-		if a.Is4() {
-			_ = b.AResource(rh, dnsmessage.AResource{A: a.As4()})
-		} else {
-			_ = b.AAAAResource(rh, dnsmessage.AAAAResource{AAAA: a.As16()})
+	for _, a := range ans {
+		rh := dnsmessage.ResourceHeader{Name: a.name, Class: dnsmessage.ClassINET, TTL: TTL}
+		var err error
+		switch a.rr.Type {
+		case dnsmessage.TypeA:
+			err = b.AResource(rh, dnsmessage.AResource{A: a.rr.addr.As4()})
+		case dnsmessage.TypeAAAA:
+			err = b.AAAAResource(rh, dnsmessage.AAAAResource{AAAA: a.rr.addr.As16()})
+		case dnsmessage.TypeCNAME:
+			var n dnsmessage.Name
+			if n, err = dnsmessage.NewName(a.rr.Target + "."); err == nil {
+				err = b.CNAMEResource(rh, dnsmessage.CNAMEResource{CNAME: n})
+			}
+		case dnsmessage.TypeTXT:
+			err = b.TXTResource(rh, dnsmessage.TXTResource{TXT: a.rr.Text})
+		case dnsmessage.TypeSRV:
+			var n dnsmessage.Name
+			if n, err = dnsmessage.NewName(a.rr.Target + "."); err == nil {
+				err = b.SRVResource(rh, dnsmessage.SRVResource{Priority: a.rr.Priority,
+					Weight: a.rr.Weight, Port: a.rr.Port, Target: n})
+			}
+		}
+		if err != nil {
+			return nil
 		}
 	}
 	out, err := b.Finish()
@@ -297,7 +514,7 @@ func (s *Server) ServeUDP(ctx context.Context, pc net.PacketConn) error {
 			}
 			return err
 		}
-		if out := s.Answer(buf[:n]); out != nil {
+		if out := s.AnswerFrom(buf[:n], addrOf(addr)); out != nil {
 			if len(out) > 512 {
 				out = truncated(buf[:n])
 			}
@@ -346,12 +563,23 @@ func (s *Server) ServeTCP(ctx context.Context, ln net.Listener) error {
 		go func() {
 			defer wg.Done()
 			defer c.Close()
-			s.serveConn(c)
+			s.serveConn(c, addrOf(c.RemoteAddr()))
 		}()
 	}
 }
 
-func (s *Server) serveConn(c net.Conn) {
+// addrOf is the IP of a network address, or the zero Addr.
+func addrOf(a net.Addr) netip.Addr {
+	if a == nil {
+		return netip.Addr{}
+	}
+	if ap, err := netip.ParseAddrPort(a.String()); err == nil {
+		return ap.Addr().Unmap()
+	}
+	return netip.Addr{}
+}
+
+func (s *Server) serveConn(c net.Conn, src netip.Addr) {
 	for {
 		_ = c.SetDeadline(time.Now().Add(10 * time.Second))
 		var l [2]byte
@@ -362,7 +590,7 @@ func (s *Server) serveConn(c net.Conn) {
 		if _, err := io.ReadFull(c, msg); err != nil {
 			return
 		}
-		out := s.Answer(msg)
+		out := s.AnswerFrom(msg, src)
 		if out == nil {
 			return
 		}

@@ -12,7 +12,8 @@ Infrastructure code for a self-hosted, Tailscale-compatible network:
   services leave from a chosen country (`ansible/roles/route-provisioner`)
 - **node-control** (`apps/node-control`): a small web UI, only on the tailnet, to start and stop the VM nodes.
   It can also schedule browser-script checks. These run on a node through **task-runner** (`apps/task-runner`,
-  `ansible/roles/task-runner`).
+  `ansible/roles/task-runner`). Its optional tailnet DNS module answers tailnet names: zones, A, AAAA, CNAME, TXT
+  and SRV records, and answers per user or tag. See [`docs/dns.md`](docs/dns.md).
 - **funnel-ingress**: publishes tailnet services under stable public names, Funnel-style (`apps/funnel-ingress`)
 - **tailguard** (`apps/tailguard`): a WireGuard server that sends its traffic out through a tailnet exit node.
   A plain-WireGuard device, for example a home router, can then use your exit nodes.

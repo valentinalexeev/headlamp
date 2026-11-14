@@ -1,0 +1,125 @@
+---
+# sshd trusts certificates of the user CAs in ssh_ca_user_ca_keys, maps certificate principals to accounts, and
+# (optional) presents host certificates. See README.md. Order matters: every file the drop-in names is written before
+# the drop-in, and the drop-in is checked with the full sshd configuration before it replaces the old one.
+- name: Check the role variables
+  ansible.builtin.assert:
+    that:
+      - ssh_ca_user_ca_keys | length > 0
+      - ssh_ca_user_ca_keys | select('match', '^(ssh-|ecdsa-|sk-)\S+ \S+') | list | length == ssh_ca_user_ca_keys | length
+      - ssh_ca_principals | selectattr('user', 'undefined') | list | length == 0
+      - ssh_ca_principals | map(attribute='user') | select('match', '^[a-z_][a-z0-9_.-]*$') | list | length == ssh_ca_principals | length
+      - ssh_ca_principals | map(attribute='principals') | map('length') | select('equalto', 0) | list | length == 0
+      - ssh_ca_all_principals | select('match', '^[^\s,]+$') | list | length == ssh_ca_all_principals | length
+      - not (ssh_ca_host_ca_key | length > 0 and ssh_ca_host_ca_pub | length > 0)
+    fail_msg: >-
+      ssh_ca_user_ca_keys must hold at least one OpenSSH public key line; every ssh_ca_principals entry needs a valid
+      `user` and a non-empty `principals` list without spaces or commas; set ssh_ca_host_ca_key OR ssh_ca_host_ca_pub,
+      not both.
+    quiet: true
+  vars:
+    ssh_ca_all_principals: "{{ ssh_ca_principals | map(attribute='principals') | flatten }}"
+
+- name: Check that sshd reads the drop-in directory
+  ansible.builtin.command:
+    cmd: grep -Eq '^[[:space:]]*Include[[:space:]]+{{ ssh_ca_sshd_dir }}/sshd_config\.d/\*\.conf' {{ ssh_ca_sshd_dir }}/sshd_config
+  register: ssh_ca_include
+  changed_when: false
+  failed_when: ssh_ca_include.rc not in [0, 1]
+  check_mode: false
+  become: "{{ ssh_ca_become }}"
+
+- name: Fail when sshd_config has no Include of sshd_config.d
+  ansible.builtin.fail:
+    msg: "{{ ssh_ca_sshd_dir }}/sshd_config does not include {{ ssh_ca_sshd_dir }}/sshd_config.d/*.conf; this role needs it."
+  when: ssh_ca_include.rc != 0
+
+- name: Create the drop-in and principals directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ ssh_ca_sshd_dir }}/sshd_config.d"
+    - "{{ ssh_ca_sshd_dir }}/auth_principals"
+  become: "{{ ssh_ca_become }}"
+
+- name: Write the trusted user CA keys
+  ansible.builtin.copy:
+    dest: "{{ ssh_ca_sshd_dir }}/ssh_ca_user_keys.pub"
+    content: "{{ ssh_ca_user_ca_keys | join('\n') }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload sshd for ssh-ca
+  become: "{{ ssh_ca_become }}"
+
+- name: Write the principals file of each account
+  ansible.builtin.copy:
+    dest: "{{ ssh_ca_sshd_dir }}/auth_principals/{{ item.user }}"
+    content: "{{ item.principals | join('\n') }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ ssh_ca_principals }}"
+  loop_control:
+    label: "{{ item.user }}"
+  become: "{{ ssh_ca_become }}"
+
+- name: Find principals files
+  ansible.builtin.find:
+    paths: "{{ ssh_ca_sshd_dir }}/auth_principals"
+    file_type: file
+  register: ssh_ca_principal_files
+  when: ssh_ca_principals_exclusive | bool
+  become: "{{ ssh_ca_become }}"
+
+- name: Remove principals files of accounts that are not listed
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ ssh_ca_principal_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when:
+    - ssh_ca_principals_exclusive | bool
+    - item.path | basename not in (ssh_ca_principals | map(attribute='user') | list)
+  become: "{{ ssh_ca_become }}"
+
+- name: Host certificates
+  ansible.builtin.include_tasks: host-certs.yml
+  when: ssh_ca_host_certs | bool
+
+- name: Find the host certificates to present
+  ansible.builtin.stat:
+    path: "{{ ssh_ca_sshd_dir }}/ssh_host_{{ item }}_key-cert.pub"
+  loop: "{{ ssh_ca_host_key_types if ssh_ca_host_certs | bool else [] }}"
+  register: ssh_ca_cert_stat
+  become: "{{ ssh_ca_become }}"
+
+- name: Write the sshd drop-in
+  ansible.builtin.template:
+    src: ssh-ca.conf.j2
+    dest: "{{ ssh_ca_sshd_dir }}/sshd_config.d/{{ ssh_ca_dropin }}"
+    owner: root
+    group: root
+    mode: "0644"
+    # The candidate drop-in is put in front of the full configuration (where the Include puts it) and checked with it.
+    validate: "{{ (ssh_ca_validate | bool) | ternary(ssh_ca_validate_cmd, omit) }}"
+  vars:
+    ssh_ca_cert_types: "{{ ssh_ca_cert_stat.results | selectattr('stat', 'defined') | selectattr('stat.exists') | map(attribute='item') | list }}"
+    ssh_ca_validate_cmd: >-
+      /bin/sh -c 'f=$(mktemp) || exit 1; cat "$1" {{ ssh_ca_sshd_dir }}/sshd_config > "$f";
+      {{ ssh_ca_sshd_binary }} -t -f "$f"; rc=$?; rm -f "$f"; exit $rc' ssh-ca-validate %s
+  notify: reload sshd for ssh-ca
+  become: "{{ ssh_ca_become }}"
+
+- name: Check the full sshd configuration
+  ansible.builtin.command:
+    cmd: "{{ ssh_ca_sshd_binary }} -t -f {{ ssh_ca_sshd_dir }}/sshd_config"
+  changed_when: false
+  check_mode: false
+  when: ssh_ca_validate | bool
+  become: "{{ ssh_ca_become }}"

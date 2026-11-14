@@ -1,0 +1,13 @@
+---
+# try-reload-or-restart touches sshd only if it runs: with socket activation (ssh.socket) an idle ssh.service stays
+# down and the next connection reads the new configuration. Starting ssh.service here would fight ssh.socket for the port.
+# Existing sessions (this Ansible connection too) stay open over a reload.
+- name: reload sshd for ssh-ca  # noqa: name[casing] -- handler names are lower case in every role here
+  # noqa: command-instead-of-module -- the systemd module has no try-reload-or-restart
+  ansible.builtin.command:
+    cmd: systemctl try-reload-or-restart {{ ssh_ca_service }}
+  changed_when: true
+  become: "{{ ssh_ca_become }}"
+  when:
+    - ssh_ca_manage_service | bool
+    - not ansible_check_mode

@@ -1,0 +1,43 @@
+---
+# Public keys of the user certificate authorities that sshd trusts, one OpenSSH public key line each. A certificate
+# signed by one of them logs in when one of its principals is listed for the target account (ssh_ca_principals).
+# Give each signer its own CA (for example one for the operator and one for CI), so that one can be removed alone.
+# Required: the role fails when the list is empty.
+ssh_ca_user_ca_keys: []
+
+# Which certificate principals may log in as which local account. Accounts that are not listed accept no certificate
+# (their authorized_keys still work: keep one static key as the break-glass path).
+ssh_ca_principals:
+  - user: "{{ ansible_user | default('root') }}"
+    principals: [deploy]
+# Remove principals files of accounts that are no longer in ssh_ca_principals.
+ssh_ca_principals_exclusive: true
+
+# Host certificates. When on, the role signs each host key with the host CA, so that clients trust every host through
+# one "@cert-authority" line instead of one known_hosts line per host. Signing runs on the controller with the host CA:
+#   ssh_ca_host_ca_key   path (on the controller) to the host CA private key, without a passphrase, or
+#   ssh_ca_host_ca_pub   path (on the controller) to the host CA public key, with its private key loaded in the
+#                        ssh-agent of the controller (SSH_AUTH_SOCK), for example a password manager agent.
+# When neither is set, the role does not sign: it keeps a valid certificate and warns when one is missing or due.
+ssh_ca_host_certs: false
+ssh_ca_host_ca_key: ""
+ssh_ca_host_ca_pub: ""
+# Host names in the certificate. Clients check the name they connect to against this list.
+ssh_ca_host_cert_names:
+  - "{{ inventory_hostname }}"
+  - "{{ ansible_host | default(inventory_hostname) }}"
+ssh_ca_host_cert_validity: "+52w"
+# Sign again when the certificate expires in fewer days than this, or when its names, host key or CA changed.
+ssh_ca_host_cert_renew_days: 30
+ssh_ca_host_key_types: [ed25519, ecdsa, rsa]
+
+# Paths and service. The defaults fit Debian and Ubuntu.
+ssh_ca_sshd_dir: /etc/ssh
+ssh_ca_sshd_binary: /usr/sbin/sshd
+ssh_ca_dropin: 40-ssh-ca.conf
+ssh_ca_service: ssh
+# Reload sshd after a change (only if it runs). Off: the change applies on the next start of sshd.
+ssh_ca_manage_service: true
+# Check the full sshd configuration with `sshd -t` before the drop-in replaces the old one.
+ssh_ca_validate: true
+ssh_ca_become: true

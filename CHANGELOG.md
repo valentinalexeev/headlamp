@@ -12,6 +12,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 - funnel-sidecar: serve mode accepts a shared certificate with its key from node-control (serve-api 2), and can read the pair from `FUNNEL_SERVE_CERT_FILE` and `FUNNEL_SERVE_KEY_FILE` (reloaded on change) instead of node-control.
 - tailnet-connector chart: `serve.certificate.source: node-control|cert-manager` (default `node-control`, no change). With `cert-manager`, the chart makes a cert-manager `Certificate` for each serve proxy with `serve.certificate.issuerRef`, and the proxy reads its Secret.
 - Compatibility matrix: new interface `serve-api` (node-control and funnel-sidecar), now 2. node-control still accepts 1 with `SERVE_CERT_SOURCE=ca`; with `acme` it answers `426` to a sidecar older than 0.19.0.
+- Ansible role `ssh-ca` (#345): sshd accepts user certificates of the listed CAs, maps certificate principals to accounts, and (optional) presents host certificates signed on the controller (with a key file or through ssh-agent). The drop-in is checked with `sshd -t` before it is installed; `authorized_keys` keeps working as the break-glass path. `scripts/ssh-cert-sign.sh` makes a throwaway key and a short-lived certificate (at most 24 hours, no forwarding, optional `source-address`) for one CI job, with the CA key held only in a private ssh-agent. Off until a site applies the role. `make test-ssh-ca` and `make test-ssh-ca-e2e` test them.
 
 ### Changed
 

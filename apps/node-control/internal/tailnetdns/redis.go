@@ -33,6 +33,7 @@ func NewRedisStore(rdb *redis.Client, prefix string) (Store, error) {
 
 func (r *redisStore) recKey() string   { return r.prefix + ":records" }
 func (r *redisStore) auditKey() string { return r.prefix + ":audit" }
+func (r *redisStore) zoneKey() string  { return r.prefix + ":zones" }
 
 func opCtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), opTimeout)
@@ -52,6 +53,7 @@ func (r *redisStore) Records() ([]Record, error) {
 			return nil, fmt.Errorf("tailnet DNS store: record %s: %w", name, err)
 		}
 		rec.Name = name
+		fixType(&rec)
 		out = append(out, rec)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -110,6 +112,53 @@ func (r *redisStore) Delete(name string) error {
 	c, cancel := opCtx()
 	defer cancel()
 	n, err := r.rdb.HDel(c, r.recKey(), name).Result()
+	if err != nil {
+		return fmt.Errorf("tailnet DNS store: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *redisStore) Zones() ([]Zone, error) {
+	c, cancel := opCtx()
+	defer cancel()
+	m, err := r.rdb.HGetAll(c, r.zoneKey()).Result()
+	if err != nil {
+		return nil, fmt.Errorf("tailnet DNS store: %w", err)
+	}
+	out := make([]Zone, 0, len(m))
+	for name, v := range m {
+		var z Zone
+		if err := json.Unmarshal([]byte(v), &z); err != nil {
+			return nil, fmt.Errorf("tailnet DNS store: zone %s: %w", name, err)
+		}
+		z.Name = name
+		out = append(out, z)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (r *redisStore) CreateZone(z Zone) error {
+	b, _ := json.Marshal(z)
+	c, cancel := opCtx()
+	defer cancel()
+	ok, err := r.rdb.HSetNX(c, r.zoneKey(), z.Name, string(b)).Result()
+	if err != nil {
+		return fmt.Errorf("tailnet DNS store: %w", err)
+	}
+	if !ok {
+		return ErrExists
+	}
+	return nil
+}
+
+func (r *redisStore) DeleteZone(name string) error {
+	c, cancel := opCtx()
+	defer cancel()
+	n, err := r.rdb.HDel(c, r.zoneKey(), name).Result()
 	if err != nil {
 		return fmt.Errorf("tailnet DNS store: %w", err)
 	}

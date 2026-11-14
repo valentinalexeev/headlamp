@@ -77,6 +77,11 @@ func TestLoadRejects(t *testing.T) {
 	}{
 		{"neither source", with("FUNNEL_CONFIG_URL", "-")},
 		{"both sources", with("FUNNEL_CONFIG_FILE", "/x.json")},
+		{"hsts preload", with("FUNNEL_HSTS", "max-age=31536000; includeSubDomains; preload")},
+		{"hsts no max-age", with("FUNNEL_HSTS", "includeSubDomains")},
+		{"hsts junk", with("FUNNEL_HSTS", "max-age=abc")},
+		{"hsts over two years", with("FUNNEL_HSTS", "max-age=63072001")},
+		{"hsts ten digits", with("FUNNEL_HSTS", "max-age=9999999999")},
 		{"config url not http", with("FUNNEL_CONFIG_URL", "ftp://x")},
 		{"config url no host", with("FUNNEL_CONFIG_URL", "http://")},
 		{"control url not http", with("FUNNEL_CONTROL_URL", "headscale")},
@@ -262,15 +267,36 @@ func TestLoadSidecarServeMode(t *testing.T) {
 		"old names":   {"FUNNEL_SERVE_NAMES": "a.svc.example.com"},
 		"bad url":     {"FUNNEL_SERVE_URL": "node-control"},
 		"no services": {"FUNNEL_SERVICES": ""},
+		"cert only":   {"FUNNEL_SERVE_CERT_FILE": "/tls/tls.crt"},
+		"key only":    {"FUNNEL_SERVE_KEY_FILE": "/tls/tls.key"},
 	} {
 		if _, err := serve(mod); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	// cert-manager source (#334): the files alone are serve mode, with no node-control URL
+	c, err = serve(map[string]string{"FUNNEL_SERVE_URL": "", "FUNNEL_SERVE_CERT_FILE": "/tls/tls.crt", "FUNNEL_SERVE_KEY_FILE": "/tls/tls.key"})
+	if err != nil || !c.Serve() || c.ServeURL != "" || c.ServeCertFile != "/tls/tls.crt" || c.ServeKeyFile != "/tls/tls.key" {
+		t.Fatalf("serve mode from files: %+v %v", c, err)
 	}
 	// funnel mode still needs FUNNEL_NS
 	m := sidecarBase()
 	delete(m, "FUNNEL_NS")
 	if _, err := LoadSidecar(env(m)); err == nil || !strings.Contains(err.Error(), "FUNNEL_NS") {
 		t.Fatalf("funnel mode without FUNNEL_NS: %v", err)
+	}
+}
+
+func TestHSTS(t *testing.T) {
+	c, err := Load(env(base()))
+	if err != nil || c.HSTS != "" {
+		t.Fatalf("default: %q, %v", c.HSTS, err)
+	}
+	for _, v := range []string{"max-age=300", "max-age=31536000; includeSubDomains",
+		"max-age=31536000;includeSubDomains", "max-age=63072000", "max-age=0"} {
+		c, err := Load(env(with("FUNNEL_HSTS", v)))
+		if err != nil || c.HSTS != v {
+			t.Errorf("FUNNEL_HSTS=%q: got %q, %v", v, c.HSTS, err)
+		}
 	}
 }

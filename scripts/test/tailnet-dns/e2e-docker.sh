@@ -8,6 +8,9 @@
 # sends them to the client in the netmap (the client resolves the name itself), that node-control answers all
 # addresses of a name (the bridge path), that the file follows a node that goes offline, and that a delete removes the
 # name from the client.
+# #285: two more clients join with tag:dev-a and tag:dev-b. The test adds a zone, a record with rules per tag, and
+# CNAME, TXT and SRV records, then checks that each client gets the answer of its own rule from node-control (WhoIs on
+# the query source), that a record with rules stays out of the file, and that an unknown name in the zone is NXDOMAIN.
 #   E2E_HEADSCALE_IMAGE     default ghcr.io/juanfont/headscale:v0.29.7
 #   E2E_TAILSCALE_IMAGE     default tailscale/tailscale:v1.104.4 (the client; needs curl, or apk to install it)
 #   E2E_NODE_CONTROL_IMAGE  a prebuilt node-control image; default: build one from apps/node-control
@@ -30,10 +33,11 @@ dk() { tmo 120 docker "$@"; }
 sfx=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
 net="tdns-e2e-$sfx"
 hs="tdns-e2e-hs-$sfx"; nc="tdns-e2e-nc-$sfx"; cl="tdns-e2e-cl-$sfx"; t1="tdns-e2e-t1-$sfx"; t2="tdns-e2e-t2-$sfx"
+ca="tdns-e2e-ca-$sfx"; cb="tdns-e2e-cb-$sfx"
 T=$(mktemp -d)
 cleanup() {
   if [ "${E2E_KEEP:-}" = 1 ]; then echo "kept: network $net, containers tdns-e2e-*-$sfx, files $T"; return; fi
-  for c in "$cl" "$t1" "$t2" "$nc" "$hs"; do dk rm -f "$c" >/dev/null 2>&1; done
+  for c in "$cl" "$ca" "$cb" "$t1" "$t2" "$nc" "$hs"; do dk rm -f "$c" >/dev/null 2>&1; done
   dk network rm "$net" >/dev/null 2>&1; rm -rf "$T"
 }
 trap cleanup EXIT
@@ -99,7 +103,7 @@ log:
 YAML
 cat > "$T/etc/acl.json" <<'JSON'
 {
-  "tagOwners": {"tag:node-control": ["e2e@"], "tag:llm-proxy": ["e2e@"]},
+  "tagOwners": {"tag:node-control": ["e2e@"], "tag:llm-proxy": ["e2e@"], "tag:dev-a": ["e2e@"], "tag:dev-b": ["e2e@"]},
   "acls": [{"action": "accept", "src": ["*"], "dst": ["*:*"]}]
 }
 JSON
@@ -116,8 +120,9 @@ hsx users create e2e --email e2e@example.test >/dev/null || die "user"
 uid=$(hsx users list -o json | sed -n 's/.*"id": *\([0-9]*\).*/\1/p' | head -1)
 key() { hsx preauthkeys create -u "$uid" -e 1h ${1:+--tags "$1"} -o json | sed -n 's/.*"key": *"\([^"]*\)".*/\1/p' | head -1; }
 k_nc=$(key tag:node-control); k_cl=$(key ""); k_t=$(key tag:llm-proxy); k_t2=$(key tag:llm-proxy)
+k_a=$(key tag:dev-a); k_b=$(key tag:dev-b)
 api=$(hsx apikeys create -e 1h 2>/dev/null | tail -1)
-[ -n "$k_nc" ] && [ -n "$k_cl" ] && [ -n "$k_t" ] && [ -n "$k_t2" ] && [ -n "$api" ] || die "keys"
+[ -n "$k_nc" ] && [ -n "$k_cl" ] && [ -n "$k_t" ] && [ -n "$k_t2" ] && [ -n "$k_a" ] && [ -n "$k_b" ] && [ -n "$api" ] || die "keys"
 
 echo "# node-control (tailnet DNS on; it owns the extra records file)"
 dk run -d --name "$nc" --network "$net" -v "$T/dns:/dns" \
@@ -183,6 +188,44 @@ api DELETE "/dns/records/$name" >/dev/null && ok "the admin deleted $name" || no
 wait_for 30 sh -c "! grep -q '$name' $T/dns/extra-records.json" && ok "$name leaves the file" || nok "file after delete: $(cat "$T/dns/extra-records.json")"
 wait_for 30 sh -c "[ -z \"\$(docker exec $cl nslookup -type=a $name 100.100.100.100 2>/dev/null | awk '/^Name:/{n=1;next} n&&/^Address/{print \$NF}')\" ]" \
   && ok "the client no longer resolves $name" || nok "client after delete ($(own "$name"))"
+
+echo "# #285: two clients with different tags get different answers"
+# A client in kernel mode, so its queries to node-control leave from its own tailnet address.
+tun_client() { dk run -d --name "$1" --network "$net" --cap-add NET_ADMIN --device /dev/net/tun \
+  -e TS_AUTHKEY="$2" -e TS_EXTRA_ARGS="--login-server=http://$hs:8080 --accept-dns=false" -e TS_HOSTNAME="$3" \
+  -e TS_USERSPACE=false "$ts_image" >/dev/null || die "start $1"; }
+tun_client "$ca" "$k_a" dev-a; tun_client "$cb" "$k_b" dev-b
+wait_for 60 sh -c "docker exec $ca tailscale ip -4 && docker exec $cb tailscale ip -4" || die "tagged clients did not join"
+wait_for 60 sh -c "docker exec $ca tailscale ping -c 1 $NC && docker exec $cb tailscale ping -c 1 $NC" || nok "tagged clients reach node-control"
+# q <container> <type> <name>: the answers of node-control, sorted, on one line
+q() { docker exec "$1" nslookup -type="$2" "$3" "$NC" 2>&1 | awk -v t="$2" '
+  /^Name:/{n=1;next} n&&/^Address/{print $NF;next}
+  t=="txt"&&/text =/{sub(/.*text = /,"");print;next}
+  t=="srv"&&/service =/{print $(NF);next}
+  t=="cname"&&/canonical name =/{print $NF;next}
+  /NXDOMAIN/{print "NXDOMAIN"}' | sort | tr '\n' ' ' | sed 's/ $//'; }
+api POST /dns/zones '{"name":"corp.e2e.example"}' >/dev/null && ok "the admin added the zone corp.e2e.example" || nok "create zone"
+api POST /dns/records "{\"name\":\"svc.corp.e2e.example\",\"addresses\":[\"100.64.0.99\"],\"rules\":[{\"tags\":[\"tag:dev-a\"],\"addresses\":[\"100.64.0.11\"]},{\"tags\":[\"tag:dev-b\"],\"node\":\"llm-a\"}]}" >/dev/null \
+  && ok "the admin added svc.corp.e2e.example with a rule per tag" || nok "create record with rules"
+# q_is <tries> <container> <name> <want>: wait until node-control answers want (the first path to it can take a moment)
+q_is() { i=0; while [ $i -lt "$1" ]; do [ "$(q "$2" a "$3")" = "$4" ] && return 0; i=$((i + 1)); sleep 1; done; return 1; }
+q_is 30 "$ca" svc.corp.e2e.example 100.64.0.11; q_is 30 "$cb" svc.corp.e2e.example "$A1"
+got_a=$(q "$ca" a svc.corp.e2e.example); got_b=$(q "$cb" a svc.corp.e2e.example); got_c=$(q "$cl" a svc.corp.e2e.example)
+[ "$got_a" = 100.64.0.11 ] && ok "the tag:dev-a client gets its rule ($got_a)" || nok "tag:dev-a answer ($got_a)"
+[ "$got_b" = "$A1" ] && ok "the tag:dev-b client gets the node of its rule ($got_b)" || nok "tag:dev-b answer ($got_b, want $A1)"
+[ "$got_c" = 100.64.0.99 ] && ok "a client that no rule matches gets the default ($got_c)" || nok "default answer ($got_c)"
+[ "$got_a" != "$got_b" ] && ok "the two tagged clients get different answers" || nok "same answer for both tags"
+[ "$(q "$ca" a nothing.corp.e2e.example)" = NXDOMAIN ] && ok "an unknown name in the zone is NXDOMAIN" || nok "unknown name in zone ($(q "$ca" a nothing.corp.e2e.example))"
+! grep -q svc.corp.e2e.example "$T/dns/extra-records.json" && ok "a record with rules stays out of the extra records file" || nok "rules record in the file"
+api POST /dns/records '{"name":"alias.corp.e2e.example","type":"CNAME","target":"svc.corp.e2e.example"}' >/dev/null || nok "create CNAME"
+api POST /dns/records '{"name":"info.corp.e2e.example","type":"TXT","text":["v=e2e"]}' >/dev/null || nok "create TXT"
+api POST /dns/records '{"name":"_http._tcp.corp.e2e.example","type":"SRV","target":"svc.corp.e2e.example","port":8080}' >/dev/null || nok "create SRV"
+case "$(q "$cb" a alias.corp.e2e.example)" in *"$A1"*) ok "a CNAME follows to the rule of the client";; *) nok "CNAME ($(q "$cb" a alias.corp.e2e.example))";; esac
+case "$(q "$ca" txt info.corp.e2e.example)" in *v=e2e*) ok "a TXT record answers";; *) nok "TXT ($(q "$ca" txt info.corp.e2e.example))";; esac
+case "$(q "$ca" srv _http._tcp.corp.e2e.example)" in *svc.corp.e2e.example*) ok "an SRV record answers";; *) nok "SRV ($(q "$ca" srv _http._tcp.corp.e2e.example))";; esac
+state=$(api GET /dns/state)
+echo "$state" | grep -q '"corp.e2e.example":\["' && ok "/dns/state gives the split line of the zone" || nok "zone split ($state)"
+docker exec "$cl" curl -fsS --max-time 10 "http://$NC/dns" | grep -q '<title>DNS</title>' && ok "the console serves the DNS page" || nok "DNS page"
 
 echo "# $pass passed, $fails failed"
 [ "$fails" = 0 ] || die "failures"

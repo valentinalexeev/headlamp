@@ -123,6 +123,7 @@ process settings. They arrive through the configuration source.
 | `FUNNEL_RECONCILE_INTERVAL`, `FUNNEL_MISSING_CHECKS` | see Lifecycle |
 | `FUNNEL_MAX_ROUTES_PER_NODE`, `FUNNEL_MAX_BODY_BYTES` | defaults `20`, `33554432` |
 | `FUNNEL_CONNECT_TIMEOUT`, `FUNNEL_IDLE_TIMEOUT`, `FUNNEL_REQUEST_TIMEOUT` | defaults `10s`, `120s`, `300s` |
+| `FUNNEL_HSTS` | value of `Strict-Transport-Security` for service hosts reached over HTTPS, for example `max-age=31536000; includeSubDomains`. Empty (default): no header. Replaces a backend's own header. Accepts only `max-age` (at most `63072000`, two years) and `includeSubDomains`, not `preload`. Browsers keep the policy for the whole max-age, so start with a short value if you are unsure |
 | `FUNNEL_CLIENT_IP_HEADER` | header with the client address, default `Fly-Client-IP`. `X-Forwarded-For` is read as a chain. `none` uses the peer address only |
 | `FUNNEL_TRUSTED_PROXIES` | comma-separated CIDRs or addresses of the load balancer. Only these peers can set the client header and `X-Forwarded-Proto`. Empty: all peers (see the warning above) |
 | `REDIS_URL`, `REDIS_KEY`, `FUNNEL_STATE_KEY`, `STATE_ALLOW_PLAINTEXT`, `STATE_IMPORT_FROM` | state store, see below |
@@ -258,6 +259,23 @@ warnings (`tailnet: node status`).
   headscale config). The default is 30 minutes and the minimum is 65 s. A value of 2 to 5 minutes is good here.
   Services behind a subnet router are not supported.
 
+### A Gateway API implementation behind funnel-sidecar
+
+A public name is always `<service>.<namespace>.<public domain>`: one service name for each route, no wildcard. Apps
+behind one Gateway API implementation (or ingress controller) can share one `funnel-sidecar`. Point each service at the
+Service of the `Gateway`:
+
+```sh
+FUNNEL_NS=pdl
+FUNNEL_SERVICES=wiki=8080@<gateway service>.<gateway namespace>.svc:80,grafana=8081@<gateway service>.<gateway namespace>.svc:80
+```
+
+funnel-ingress keeps the `Host` header of the client (and sets `X-Forwarded-Host`), so the `Gateway` sees
+`wiki.pdl.<public domain>`. Make one `HTTPRoute` for each app with that name in `hostnames`. The `Gateway` gets plain
+HTTP: TLS ends at the edge. A new public app needs a new entry in `FUNNEL_SERVICES` and a new `HTTPRoute`. A controller
+that does this from `Gateway` objects is proposed in #338. For tailnet-only names, use a wildcard serve service instead
+(see "Serve proxies" in the `tailnet-connector` chart README).
+
 ### Serve mode: tailnet-only names (#117)
 
 In serve mode the sidecar publishes nothing on the internet. It serves its ports with TLS on the tailnet, under a
@@ -269,15 +287,19 @@ node-control README). Then give the sidecar the key of the service.
 | `FUNNEL_SERVE_URL` | node-control on the tailnet, for example `http://100.64.0.1`. It turns on serve mode. |
 | `TS_AUTHKEY` | the auth key of the service (node-control shows it when you add the service) |
 | `FUNNEL_SERVICES` | as above. Each port listens with TLS. Use port 443 for HTTPS clients: `web=443@grafana.monitoring.svc:3000`. |
+| `FUNNEL_SERVE_CERT_FILE`, `FUNNEL_SERVE_KEY_FILE` | Optional (#334): read the certificate and key from these PEM files, for example a cert-manager Secret, and not from node-control. They also turn on serve mode, and then `FUNNEL_SERVE_URL` is not necessary. The sidecar reads the files every 30 seconds and serves a changed pair from the next connection, with no restart. A bad pair does not replace the pair in use. |
 
 - The sidecar sends no name. node-control knows the service from the key that the node joined with, and returns the
   name with the certificate. `FUNNEL_NS` is not used, and the sidecar refuses `FUNNEL_SERVE_NAMES`.
 - The sidecar makes its own key. The key never leaves the pod. It renews the certificate at two thirds of its life.
+  When node-control has `SERVE_CERT_SOURCE=acme`, node-control sends one shared certificate and its key, and the
+  sidecar uses that key. This needs funnel-sidecar 0.19.0 or later (serve-api 2). node-control gives `426` to an
+  older sidecar.
 - Several replicas can use the same key. The name answers all the replicas that are online.
 - For an ingress controller, add a wildcard service, for example `*.apps`. Put one sidecar in front of the
   controller, with the key of that service. Each new Ingress host under `apps` then needs no change in headlamp.
 - A wildcard certificate covers one label. `grafana.apps.<zone>` works. `a.b.apps.<zone>` does not.
-- Set `FUNNEL_SERVE_URL` or `FUNNEL_API_URL`, not both.
+- Set `FUNNEL_SERVE_URL` (or the certificate files) or `FUNNEL_API_URL`, not both.
 
 ## Security notes
 

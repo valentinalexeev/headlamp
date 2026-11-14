@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -106,6 +107,63 @@ type rig struct {
 
 func newRig(t *testing.T, extra map[string]string) *rig {
 	t.Helper()
+	return newRigOpts(t, extra)
+}
+
+func mergeEnv(ms ...map[string]string) map[string]string {
+	out := map[string]string{}
+	for _, m := range ms {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// tryRig registers a module with extra and returns the error, for refusal tests.
+func tryRig(t *testing.T, extra map[string]string) error { return tryRigOpts(t, extra) }
+
+func tryRigOpts(t *testing.T, extra map[string]string, opts ...Option) (err error) {
+	t.Helper()
+	ft := &failT{T: t}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if e, ok := r.(rigErr); ok {
+					err = e.error
+					return
+				}
+				panic(r)
+			}
+		}()
+		newRigOpts(ft, extra, opts...)
+	}()
+	return err
+}
+
+type rigErr struct{ error }
+
+// failT turns the rig's Fatal into a recoverable error.
+type failT struct{ *testing.T }
+
+func (f *failT) Fatal(a ...any) { panic(rigErr{fmt.Errorf("%v", a...)}) }
+
+type tb interface {
+	Helper()
+	Fatal(...any)
+	TempDir() string
+	Cleanup(func())
+}
+
+func newRigOpts(tt tb, extra map[string]string, opts ...Option) *rig {
+	tt.Helper()
+	var t *testing.T
+	switch v := tt.(type) {
+	case *testing.T:
+		t = v
+	case *failT:
+		t = v.T
+	}
 	p, _ := authz.NewPolicy(authz.Config{
 		Grants: []authz.Grant{{Subject: "owner@", Roles: []string{"owner"}}, {Subject: "viewer@", Roles: []string{"viewer"}}},
 	})
@@ -127,10 +185,10 @@ func newRig(t *testing.T, extra map[string]string) *rig {
 		env[k] = v
 	}
 	hs := newFakeHS()
-	m := New(core.MapEnv(env), hs).(*Module)
+	m := New(core.MapEnv(env), hs, opts...).(*Module)
 	mux := core.NewMux()
 	if err := m.Register(&core.Routes{Admin: mux, Env: core.MapEnv(env), Tailnet: tn, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}); err != nil {
-		t.Fatal(err)
+		tt.Fatal(err)
 	}
 	t.Cleanup(func() { m.Stop(context.Background()) })
 	return &rig{t: t, mux: mux, mod: m, hs: hs}

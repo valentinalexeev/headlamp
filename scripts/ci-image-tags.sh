@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prints the image tags a ref should carry, one per line.
 #
-#   ci-image-tags.sh branch SHA    main, sha-<12 characters>
+#   ci-image-tags.sh branch SHA [BRANCH]   main (or maint-X.Y for BRANCH maint/X.Y), sha-<12 characters>
 #   ci-image-tags.sh tag vX.Y.Z    X.Y.Z, and the floating tags it is now the highest of
 #
 # A prerelease gets only its own tag. Floating tags (X.Y, X, latest) move only to the highest stable version, so a fix
@@ -15,7 +15,11 @@ highest() { grep -E "$stable" | sort -V | tail -1; }
 case "${1:-}" in
 branch)
 	sha=${2:?commit}
-	echo main
+	case "${3:-main}" in
+	main) echo main ;;
+	maint/*) echo "maint-${3#maint/}" ;;
+	*) echo "unknown branch: $3" >&2; exit 2 ;;
+	esac
 	echo "sha-${sha:0:12}"
 	;;
 tag)
@@ -33,7 +37,7 @@ tag)
 	fi
 	;;
 *)
-	echo "usage: $0 branch SHA | tag vX.Y.Z" >&2
+	echo "usage: $0 branch SHA [BRANCH] | tag vX.Y.Z" >&2
 	exit 2
 	;;
 esac

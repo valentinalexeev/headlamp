@@ -142,6 +142,38 @@ Each entry in `serve.services` is one Deployment of `funnel-sidecar` in serve mo
 
 All replicas of a service use the same key. The name of the service answers with all replicas that are online. To rotate the key, add a new key in node-control and replace it in the Secret. Then restart the Deployment, and retire the old key in node-control.
 
+### A Gateway API implementation behind one serve proxy
+
+One serve proxy can publish many in-cluster services. Put a wildcard serve service in front of the Service of a
+Gateway API implementation (or of an ingress controller). The implementation then routes by host name and path. The
+proxy forwards TCP only.
+
+1. Install a Gateway API implementation, for example Envoy Gateway, Istio, Cilium or NGINX Gateway Fabric. Make a
+   `Gateway` with a listener `protocol: HTTP` on port 80 and `hostname: "*.apps.<serve zone>"`. Note the Service that
+   the implementation makes for this `Gateway`.
+2. In node-control, add the wildcard serve service `*.apps`. Copy its key into a Secret, as in steps 2 and 3 above.
+3. Add the service to the values, with the Service of the `Gateway` as the target:
+
+   ```yaml
+   serve:
+     enabled: true
+     services:
+       - name: apps            # the serve service *.apps, without "*."
+         services: "web=443@<gateway service>.<gateway namespace>.svc:80"
+   ```
+
+4. Make one `HTTPRoute` for each app, with `hostnames: ["<app>.apps.<serve zone>"]` and `parentRefs` to the `Gateway`.
+
+A tailnet client then opens `https://<app>.apps.<serve zone>/`. The serve proxy gets one certificate for
+`*.apps.<serve zone>` from node-control and terminates TLS. It sends plain HTTP to the `Gateway`, which routes by the
+`Host` header and the path.
+
+- A wildcard covers one label: `grafana.apps.<serve zone>` works, `a.b.apps.<serve zone>` does not.
+- A new app needs only a new `HTTPRoute`. It needs no new serve service, no key and no `helm upgrade`.
+- Access control is the headscale policy for the whole wildcard name. Per-app access rules go into the `Gateway`
+  implementation.
+- A controller that makes serve proxies from `Gateway` objects is proposed in #338.
+
 ## Test
 
 ```sh

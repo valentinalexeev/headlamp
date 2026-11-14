@@ -22,7 +22,7 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/funnel-ingress ./cmd/funnel-ingress
 
 # alpine rather than a bare image: `fly ssh console` needs a shell.
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates \
   && adduser -D -u 10001 funnel \
   && mkdir -p /var/lib/tailscale && chown funnel:funnel /var/lib/tailscale

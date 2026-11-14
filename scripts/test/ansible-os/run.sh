@@ -101,6 +101,7 @@ for _ in $(seq 60); do
 done
 
 # reality-ingress uses its default pins: the official xray and caddy images by digest, with the sha256 of each file.
+ssh-keygen -q -t ed25519 -N '' -C "matrix-user-ca" -f "$T/user_ca"
 cat > "$T/vars.yml" <<YAML
 tailscale_version: "$(tr -d '[:space:]' < "$root/TAILSCALE_VERSION")"
 headscale_login_server: "http://$hs:8080"
@@ -127,6 +128,8 @@ task_runner_image_archive: "$T/run-image.tar"
 task_runner_guard_resolvers: ["127.0.0.11", "100.100.100.100", "fd7a:115c:a1e0::53"]
 task_runner_min_free_mb: 64
 task_runner_min_free_disk_mb: 64
+# ssh-ca (#345): a throwaway user CA made for this run; its private key is deleted with the run directory.
+ssh_ca_user_ca_keys: ["$(cat "$T/user_ca.pub")"]
 YAML
 # BRIDGE=1 (#235): the host is a bridge, as in the exit-node-vm/openstack README "Bridge node". It joins with no exit
 # routes, and the run checks that headscale shows none for it. The matrix has no second exit node, and the socks role

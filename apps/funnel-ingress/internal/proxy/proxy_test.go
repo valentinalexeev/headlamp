@@ -503,6 +503,33 @@ func TestHSTSOnServiceHostsOverHTTPS(t *testing.T) {
 	}
 }
 
+// A backend that breaks the protocol gives 502 from the ErrorHandler; the header is on it too (RFC 6797
+// allows HSTS on any response over a secure transport).
+func TestHSTSOnBadGateway(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = c.Write([]byte("not http at all\r\n\r\n"))
+			c.Close()
+		}
+	}()
+	cfg := testCfg()
+	cfg.HSTS = "max-age=300"
+	srv, _, _ := rig(t, ln.Addr().String(), cfg, route("admin", "pdl", "100.64.0.5", 9000))
+	resp, _ := get(t, srv, "admin.pdl.example.com", "/", nil)
+	if resp.StatusCode != 502 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if got := resp.Header.Values("Strict-Transport-Security"); len(got) != 1 || got[0] != "max-age=300" {
+		t.Errorf("502: %q", got)
+	}
+}
+
 func TestHSTSOffByDefaultAndNotOverPlainHTTP(t *testing.T) {
 	b := newBackend(t, func(w http.ResponseWriter, r *http.Request) { w.Header().Set("Strict-Transport-Security", "max-age=1") })
 	srv, _, _ := rig(t, b.srv.Listener.Addr().String(), testCfg(), route("admin", "pdl", "100.64.0.5", 9000))

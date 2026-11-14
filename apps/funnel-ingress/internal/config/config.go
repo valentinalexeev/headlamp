@@ -52,8 +52,9 @@ type Config struct {
 
 	ClientIP *clientip.Resolver // where the client address comes from (FUNNEL_CLIENT_IP_HEADER, FUNNEL_TRUSTED_PROXIES)
 
-	// HSTS is the Strict-Transport-Security value sent on responses for routed hosts that the client reached over
-	// HTTPS (FUNNEL_HSTS). Empty (the default) sends nothing and leaves a backend's own header alone.
+	// HSTS is the Strict-Transport-Security value sent on responses for routed hosts that
+	// the client reached over HTTPS (FUNNEL_HSTS). Empty (the default) sends nothing and
+	// leaves a backend's own header alone.
 	HSTS string
 }
 
@@ -164,9 +165,14 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 
 	if v := strings.TrimSpace(getenv("FUNNEL_HSTS")); v != "" {
-		if !hstsValue.MatchString(v) {
-			fail(`FUNNEL_HSTS must be "max-age=<seconds>", optionally followed by "; includeSubDomains"`)
-		} else {
+		m := hstsValue.FindStringSubmatch(v)
+		switch {
+		case m == nil:
+			fail(`FUNNEL_HSTS must be "max-age=<seconds>", ` +
+				`optionally followed by "; includeSubDomains"`)
+		case len(m[1]) > 9 || mustAtoi(m[1]) > hstsMaxAge:
+			fail("FUNNEL_HSTS max-age must be at most %d (two years)", hstsMaxAge)
+		default:
 			c.HSTS = v
 		}
 	}
@@ -177,9 +183,19 @@ func Load(getenv func(string) string) (Config, error) {
 	return c, nil
 }
 
-// hstsValue accepts only max-age and includeSubDomains. preload is refused on purpose: it is a commitment that
-// cannot be taken back quickly, and it must not be switched on by a typo in an environment variable.
-var hstsValue = regexp.MustCompile(`^max-age=[0-9]{1,10}(; ?includeSubDomains)?$`)
+// hstsValue accepts only max-age and includeSubDomains. preload is refused on purpose: it
+// is a commitment that cannot be taken back quickly, and it must not be switched on by a
+// typo in an environment variable. max-age is capped at two years (hstsMaxAge): a browser
+// keeps the policy that long, so a larger value is almost certainly a typo.
+var hstsValue = regexp.MustCompile(`^max-age=([0-9]{1,10})(; ?includeSubDomains)?$`)
+
+const hstsMaxAge = 63072000
+
+// mustAtoi parses digits that a regexp already checked; at most 9 digits fit in an int.
+func mustAtoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
 
 // httpURL reports whether s parses as an absolute http or https URL with a host. It never returns the
 // parser's error, which would echo the input.
@@ -199,10 +215,13 @@ type SidecarConfig struct {
 	// Serve mode (#117): a tailnet-only name with TLS instead of a public funnel route. ServeURL is node-control on
 	// the tailnet. The name is not configured here: node-control knows it from the auth key the node joined with.
 	ServeURL string
+	// ServeCertFile and ServeKeyFile (#334): in serve mode, take the certificate from these
+	// files (a cert-manager Secret) instead of node-control. ServeURL is then not needed.
+	ServeCertFile, ServeKeyFile string
 }
 
 // Serve reports whether the sidecar runs in serve mode.
-func (c SidecarConfig) Serve() bool { return c.ServeURL != "" }
+func (c SidecarConfig) Serve() bool { return c.ServeURL != "" || c.ServeCertFile != "" }
 
 // LoadSidecar builds a SidecarConfig from getenv. Like Load, errors name settings, never values.
 func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
@@ -243,6 +262,11 @@ func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
 		}
 	}
 	c.ServeURL = strings.TrimRight(str("FUNNEL_SERVE_URL", ""), "/")
+	c.ServeCertFile = str("FUNNEL_SERVE_CERT_FILE", "")
+	c.ServeKeyFile = str("FUNNEL_SERVE_KEY_FILE", "")
+	if (c.ServeCertFile == "") != (c.ServeKeyFile == "") {
+		fail("set both FUNNEL_SERVE_CERT_FILE and FUNNEL_SERVE_KEY_FILE, or neither")
+	}
 	if c.Services == "" {
 		fail("FUNNEL_SERVICES is required")
 	}
@@ -250,13 +274,14 @@ func LoadSidecar(getenv func(string) string) (SidecarConfig, error) {
 		fail("TS_AUTHKEY is required")
 	}
 	switch {
-	case c.ServeURL != "":
+	case c.Serve():
 		// The service and its namespace come from the auth key, so FUNNEL_NS is not needed.
-		if !httpURL(c.ServeURL) {
+		if c.ServeURL != "" && !httpURL(c.ServeURL) {
 			fail("FUNNEL_SERVE_URL must be an http(s) URL")
 		}
 		if c.APIURL != "" {
-			fail("set FUNNEL_SERVE_URL (tailnet-only name) or FUNNEL_API_URL (public funnel), not both")
+			fail("set FUNNEL_SERVE_URL or FUNNEL_SERVE_CERT_FILE (tailnet-only name) " +
+				"or FUNNEL_API_URL (public funnel), not both")
 		}
 		if getenv("FUNNEL_SERVE_NAMES") != "" {
 			fail("FUNNEL_SERVE_NAMES is gone: the name comes from the auth key of the service (see Serve mode)")

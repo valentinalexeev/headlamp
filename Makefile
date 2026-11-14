@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
+.PHONY: test-ssh-ca test-ssh-ca-e2e test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-serve-acme-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
   test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -108,6 +108,11 @@ test-headscale-policy-e2e:
 test-serve-e2e:
 	sh scripts/test/serve/e2e-docker.sh
 
+# On demand (#334): serve certificates from an ACME CA. Pebble checks DNS-01 that node-control writes into a test DNS
+# server over RFC 2136; a tailnet client sees a chain to the Pebble root on the serve names.
+test-serve-acme-e2e:
+	sh scripts/test/serve/e2e-acme-docker.sh
+
 # On demand (#286): node-control writes its DNS records into the headscale extra_records_path file; a real headscale
 # sends them to a tailscale client. Needs docker.
 test-tailnet-dns-e2e:
@@ -168,7 +173,8 @@ lint:
 	  .githooks/pre-commit .githooks/commit-msg \
 	  apps/tailguard/*.sh apps/headscale/*.sh scripts/test/feature-defaults/run.sh scripts/check-enroll-paths.sh scripts/smoke-test.sh scripts/test/exit-node-health/run_tests.sh \
 	  scripts/fleet-check.sh scripts/test/fleet-check/run_tests.sh \
-	  scripts/check-compat.sh scripts/test/check-compat/run_tests.sh
+	  scripts/check-compat.sh scripts/test/check-compat/run_tests.sh \
+	  scripts/ssh-cert-sign.sh scripts/test/ssh-ca/run_tests.sh scripts/test/ssh-ca/e2e-docker.sh ansible/roles/ssh-ca/tests/render.sh
 	./scripts/check-feature-defaults.sh
 	./scripts/check-enroll-paths.sh
 	-./scripts/check-statestore-port.sh
@@ -200,6 +206,12 @@ test-fleet-run:
 # #213: tailscaled state in SSM keeps the node across a new instance (headscale + LocalStack).
 test-ssm-state-e2e:
 	bash scripts/test/ssm-state/e2e-docker.sh
+
+# ssh-ca role: the CI signing script (fast, no hosts) and the role against a real sshd in a container.
+test-ssh-ca:
+	bash scripts/test/ssh-ca/run_tests.sh
+test-ssh-ca-e2e:
+	@set -e; for b in $(or $(BASE_IMAGE),ubuntu:26.04 debian:13); do echo "== $$b"; bash scripts/test/ssh-ca/e2e-docker.sh $$b; done
 
 # #213: the exit-node-vm/aws user data on systemd hosts: drop-in, pinned install, same node after a new host.
 test-ssm-state-vm-e2e:

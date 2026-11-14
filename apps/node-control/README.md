@@ -1323,8 +1323,12 @@ resolve and reach them. It is the headlamp equivalent of `tailscale serve`.
   proxy can get a certificate and a DNS name only for its own service.
 - **DNS:** headscale sends the serve zone to node-control (`dns.nameservers.split`). node-control answers on port 53
   of its tailnet address. A name answers the addresses of the online nodes of its service, so it follows the replicas.
-- **HTTPS:** node-control signs a certificate for the name of the service. It uses your CA, or a self-signed CA. The
-  proxy makes its own key, and the key never leaves the proxy.
+- **HTTPS:** `SERVE_CERT_SOURCE` sets where the certificates come from (#334):
+  - `ca` (the default): node-control signs a certificate for the name of the service. It uses your CA, or a
+    self-signed CA. The proxy makes its own key, and the key never leaves the proxy. Each device must trust the CA.
+  - `acme`: node-control gets one wildcard certificate, `*.<zone>`, from a public ACME CA (for example Let's
+    Encrypt) with the DNS-01 challenge. It gives this certificate and its key to each proxy of a service. Devices
+    trust the certificate with no change. See "Certificates from an ACME CA".
 
 ### Environment
 
@@ -1341,9 +1345,67 @@ resolve and reach them. It is the headlamp equivalent of `tailscale serve`.
 | `SERVE_CA_CERT`, `SERVE_CA_KEY` | Optional: your CA or intermediate, in PEM. Without them, serve makes a self-signed CA. |
 | `NODE_CONTROL_STATE_KEY` | Required for a self-signed CA. It encrypts the CA key in the database. |
 | `SERVE_DNS` | `off` turns off the DNS listener (for tests). |
+| `SERVE_CERT_SOURCE` | `ca` (the default) or `acme`. See "Certificates from an ACME CA". |
 
 **WARNING:** Without `SERVE_CA_*` and without `NODE_CONTROL_STATE_KEY`, serve does not start. It never keeps a CA key
 in clear.
+
+### Certificates from an ACME CA
+
+With `SERVE_CERT_SOURCE=acme`, node-control gets the serve certificate from an ACME CA with the DNS-01 challenge. The
+ACME CA cannot connect to a tailnet-only name, thus HTTP-01 is not possible. DNS-01 needs one thing: the serve zone
+must be a zone in public DNS that you control. node-control writes only the `_acme-challenge` TXT records there. The
+names of the services stay private, because node-control answers them on the tailnet only.
+
+- node-control orders one certificate for `*.<zone>`. A wildcard covers one label only. Thus for a deeper service,
+  for example `*.apps.<zone>` or `a.b.<zone>`, it adds the wildcard of the parent (`*.apps.<zone>`, `*.b.<zone>`). Only these wildcards go to the Certificate Transparency logs, not the names of the
+  services.
+- When you add a service that needs a new wildcard, node-control orders a new certificate at once.
+- node-control renews the certificate at two thirds of its life (for Let's Encrypt, about 30 days before it expires).
+  It checks every `SERVE_ACME_CHECK`. If an order fails, the old certificate stays in use, the Serve page shows the
+  error, and node-control tries again after 5 minutes.
+- node-control keeps the ACME account key and the certificate key in the serve database, encrypted with
+  `NODE_CONTROL_STATE_KEY`. A restart does not make a new order.
+- Each proxy gets the certificate and its key through `POST /serve/v1/cert`, as before. Only a node that joined with
+  the key of a service gets them.
+
+| Variable | Meaning |
+|---|---|
+| `SERVE_ACME_EMAIL` | The contact address of the ACME account (required). |
+| `SERVE_ACME_DNS` | The DNS provider for DNS-01 (required): `googlecloud`, `route53`, `cloudflare` or `rfc2136`. |
+| `SERVE_ACME_DIRECTORY` | The ACME directory URL. The default is Let's Encrypt production, `https://acme-v02.api.letsencrypt.org/directory`. For tests, use Let's Encrypt staging, `https://acme-staging-v02.api.letsencrypt.org/directory`. |
+| `SERVE_ACME_CHECK` | How often node-control checks the certificate. The default is `1h`. The range is `1m` to `24h`. |
+| `SERVE_ACME_RESOLVERS` | Optional: the DNS resolvers, `host:port` separated by commas, that node-control uses to check that the TXT record is visible. The default is the resolvers of the host. |
+| `LEGO_CA_CERTIFICATES` | Optional: a PEM file of extra roots to trust for the ACME directory (for a private ACME CA). |
+
+The credentials of the DNS provider are environment variables with the names of the [lego](https://go-acme.github.io/lego/dns/) library:
+
+| `SERVE_ACME_DNS` | Credentials |
+|---|---|
+| `googlecloud` | Workload identity or application default credentials (no variable), or `GCE_SERVICE_ACCOUNT_FILE`. `GCE_PROJECT` if the project is not found by itself. |
+| `route53` | The AWS SDK chain: an instance or task role, EKS workload identity (IRSA), or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Optional `AWS_HOSTED_ZONE_ID`, `AWS_ASSUME_ROLE_ARN`. |
+| `cloudflare` | `CF_DNS_API_TOKEN` (a token with `Zone:DNS:Edit` on the zone). |
+| `rfc2136` | `RFC2136_NAMESERVER` (`host:port` of the primary), `RFC2136_TSIG_KEY`, `RFC2136_TSIG_SECRET`, `RFC2136_TSIG_ALGORITHM` (for example `hmac-sha256.`). |
+
+Give these credentials the smallest scope: write access to the serve zone only.
+
+**CAUTION:** Do a first test with Let's Encrypt staging. Production has rate limits, and a wrong DNS setup can use
+them up. A staging certificate is not trusted by devices.
+
+To change a site from `ca` to `acme`:
+
+1. Put the serve zone in public DNS, or delegate it to a provider in the list. Do not add records for the services.
+2. Upgrade each serve proxy (`funnel-sidecar`) to 0.19.0 or later. An older proxy gets `426` and keeps its old
+   certificate until that certificate expires.
+3. Set `SERVE_CERT_SOURCE=acme`, `SERVE_ACME_EMAIL`, `SERVE_ACME_DNS` and the credentials. Remove `SERVE_CA_CERT`
+   and `SERVE_CA_KEY`: serve does not start with them and `acme`.
+4. Restart node-control. Look for the log line `serve acme: certificate in place`, or open the Serve page.
+5. The proxies take the new certificate at their next renewal. To use it at once, restart them.
+
+`GET /serve/ca.crt` gives `404` with `acme`: devices need no extra CA.
+
+On Kubernetes you can also let cert-manager make the certificates of the serve proxies. See `serve.certificate` in
+the tailnet-connector chart README.
 
 ### The zone
 
@@ -1417,7 +1479,8 @@ running keeps its tailnet identity until it stops, because the key is ephemeral.
 ### Trust the CA
 
 Give users `http://node-control/serve/ca.crt`. Each device must trust it once (the system store, or the browser).
-`GET /serve/state` shows the fingerprint of the CA, so a user can check the file.
+`GET /serve/state` shows the fingerprint of the CA, so a user can check the file. With `SERVE_CERT_SOURCE=acme`, this
+step is not necessary.
 
 ### API
 
@@ -1429,7 +1492,7 @@ Give users `http://node-control/serve/ca.crt`. Each device must trust it once (t
 | `DELETE /serve/services/{id}` | `serve.admin` | Remove a service and expire its keys |
 | `POST /serve/services/{id}/keys` | `serve.admin` | Add a key (rotation) |
 | `DELETE /serve/services/{id}/keys/{key}` | `serve.admin` | Retire a key |
-| `GET /serve/ca.crt` | none | The CA certificate |
+| `GET /serve/ca.crt` | none | The CA certificate (`404` with `SERVE_CERT_SOURCE=acme`) |
 | `POST /serve/v1/cert` | a node with `tag:serve` | Sign the node's CSR for the name of its service |
 
 ## Tailnet DNS module (optional)
@@ -1452,27 +1515,61 @@ this order. The first source that has the name, or the zone of the name, gives t
 
 1. The records that you add with the API below.
 2. The headscale `dns.extra_records`. node-control reads them from its own netmap.
-3. The serve zone (see "Serve module").
-4. The MagicDNS names of the nodes, `<given name>.<base_domain>`. node-control reads the nodes from the headscale API.
+3. The zones that you add with the API below (#285). A name in a zone that has no record does not exist
+   (`NXDOMAIN`).
+4. The serve zone (see "Serve module").
+5. The MagicDNS names of the nodes, `<given name>.<base_domain>`. node-control reads the nodes from the headscale API.
 
-An answer contains only tailnet addresses (`100.64.0.0/10` and `fd7a:115c:a1e0::/48`). node-control refuses each other
-name. It never sends a query to another resolver.
+An address in an answer is always a tailnet address (`100.64.0.0/10` and `fd7a:115c:a1e0::/48`). node-control
+refuses each other name. It never sends a query to another resolver.
 
-A record points to one of these targets:
+#### Record types
 
-- `addresses`: one to 8 fixed tailnet addresses.
-- `node`: the given name of one headscale node. The answer follows the addresses of that node.
-- `tag`: a tag, for example `tag:llm-proxy`. The answer gives the addresses of the online nodes with that tag.
+A record has one type (#285). The default type is `A`.
+
+| `type` | Data | Answer |
+|---|---|---|
+| `A` (or `AAAA`) | One of `addresses` (one to 8 fixed tailnet addresses), `node` (the given name of one headscale node) or `tag` (for example `tag:llm-proxy`: the online nodes with that tag) | The A and AAAA records of the addresses. A `node` or `tag` target follows the nodes. |
+| `CNAME` | `target`: a DNS name | The CNAME. When node-control has the target name, the answer also contains its records. |
+| `TXT` | `text`: one to 8 strings of printable ASCII, each 255 bytes or less | The TXT record |
+| `SRV` | `target`, `port` (1 to 65535), `priority` and `weight` | The SRV record |
 
 A record name must have two labels or more. It must not be under the MagicDNS `base_domain`, and it must not be in the
-serve zone. A wildcard is not possible. The module keeps 256 records or fewer.
+serve zone. A wildcard is not possible. Only a `CNAME`, `TXT` or `SRV` name can have labels that start with `_`, for
+example `_http._tcp.example.com`. The module keeps 256 records or fewer.
+
+#### Rules: answers per user or tag
+
+A record can have rules (#285). A rule gives other data to some clients:
+
+- `users`: tailnet logins, for example `alice@example.com`. The match ignores the case.
+- `tags`: tags, for example `tag:dev`. A client matches when its node has one of the tags.
+
+node-control finds the client with WhoIs on the source address of the query. The first rule that matches the client
+gives the answer. A client that no rule matches gets the data of the record. A record without rules answers all
+clients the same.
+
+The data of a rule has the type of its record. A rule without data hides the name from its clients: they get no
+record of that type. A record with rules can have no data of its own: then only the clients of a rule get an answer.
+A record has 16 rules or fewer, and a rule has 16 users and tags or fewer.
+
+NOTE: Rules apply only to queries that come to node-control from a tailnet address. A bridge sends its queries from
+the address of its exit node, thus all clients of a bridge get the answer for that node.
+
+#### Zones
+
+A zone (#285) makes node-control answer all names under it. A name in the zone that has no record does not exist. One
+split line in headscale then sends the full zone to node-control, and a record in the zone needs no split line of its
+own. A zone must not be under, or contain, the MagicDNS `base_domain` or the serve zone. The module keeps 32 zones or
+fewer. A zone holds no records: when you delete it, its records stay.
 
 ### How a bridge uses it
 
 node-control sends the resolver to each bridge with `tailnet_access` `all` or `grants`, with the credentials. The
-resolver is the address of node-control and the list of names: each record name, each `extra_records` name, the serve
-zone and the MagicDNS `base_domain`. The agent adds node-control as the first DNS server of xray, for these names only.
-xray then gets a tailnet address. The tailnet rule of a granted client sends the connection to the tailnet. See
+resolver is the address of node-control and a list of names. The list has each record name, each `extra_records`
+name, each zone, the serve zone and the MagicDNS `base_domain`.
+
+The agent adds node-control as the first DNS server of xray, for these names only. xray then gets a tailnet address. The tailnet rule of a granted client sends the connection to the tailnet. See
 "What it writes into the xray config" in the ingress-agent README. A bridge with `tailnet_access` `off` gets no
 resolver.
 
@@ -1487,7 +1584,7 @@ address of the name.
 | `TAILNET_DNS_DB` | The path of the SQLite database. It turns the module on. Put it on the state volume. |
 | `TAILNET_DNS_REDIS` | `1` keeps the records in the shared Redis of `REDIS_URL` and turns the module on. No volume is necessary. Do not set it together with `TAILNET_DNS_DB`. `REDIS_URL` alone does not turn the module on. |
 | `TAILNET_DNS_EXTRA_RECORDS_FILE` | Optional. The absolute path of the headscale `dns.extra_records_path` file. node-control writes its records into it (see "Give tailnet devices the records"). The name must end in `.json`, and its directory must exist. |
-| `TAILNET_DNS_REDIS_KEY` | The key prefix in Redis. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:dns`. The records are in the hash `<prefix>:records`, and the audit log is in the list `<prefix>:audit`. |
+| `TAILNET_DNS_REDIS_KEY` | The key prefix in Redis. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:dns`. The records are in the hash `<prefix>:records`, the zones are in the hash `<prefix>:zones`, and the audit log is in the list `<prefix>:audit`. |
 | `TAILNET_DNS_REFRESH` | How often the answers follow the nodes and the netmap. The default is `15s`. The range is `2s` to `10m`. |
 | `TAILNET_DNS_LISTEN` | `off` turns off the DNS listener (for tests). |
 | `SERVE_ZONE` | Optional. The module adds the serve zone to the names of a bridge, and refuses a record in it. |
@@ -1533,6 +1630,11 @@ keeps the old file, and headscale does not see the change.
 **CAUTION:** node-control writes the full file. It removes all other records from it. Put static records in
 `dns.extra_records` of `headscale.yaml`.
 
+The file contains only the `A` records without rules. headscale keeps only A and AAAA records. It sends the same
+records to all devices. A `CNAME`, `TXT` or `SRV` record, and a record with rules, are not in the file. Only
+node-control answers them, thus tailnet devices need a split line for them (see "Split DNS"). The DNS page shows
+where each record is served.
+
 node-control writes one record for each name and address, with the type `A` or `AAAA`. It writes the file only when
 the records change. A failed refresh does not change the file. `GET /dns/state` shows `extra_records_file`, the time
 of the last write and the last error.
@@ -1544,8 +1646,9 @@ there is one.
 
 #### Split DNS
 
-Use it when node-control and headscale do not share a directory, for example on Fly.io. Then
-`GET /dns/state` shows a `split` line for each record. Add the lines to `headscale.yaml`, and restart headscale:
+Use it when node-control and headscale do not share a directory, for example on Fly.io. Also use it for the records
+that the file does not contain, and for zones. `GET /dns/state` shows a `split` line for each zone, and for each
+record that is not in the file and not in a zone. Add the lines to `headscale.yaml`, and restart headscale:
 
 ```yaml
 dns:
@@ -1561,19 +1664,52 @@ With split DNS, devices send these names to node-control. When node-control stop
 
 | Route | Permission | What it does |
 |---|---|---|
-| `GET /dns/state` | `dns.view` | The server, the base domain, the serve zone, each record with its current answer, the `extra_records` names, the records file and its last write, the `split` lines (without the records file), the resolver for bridges and the last error |
-| `POST /dns/records` | `dns.admin` | Add a record. The body is `{"name", "addresses" or "node" or "tag", "note"}`. |
-| `PUT /dns/records/{name}` | `dns.admin` | Change the target or the note of a record. A record has no rename. |
+| `GET /dns/state` | `dns.view` | The server, the base domain, the serve zone, the zones, each record with its current answer, the answer of each rule, `in_file` and its zone, the `extra_records` names, the records file and its last write, the `split` lines, the resolver for bridges and the last error |
+| `POST /dns/records` | `dns.admin` | Add a record. The body is `{"name", "type", the data of the type, "rules", "note"}`. |
+| `PUT /dns/records/{name}` | `dns.admin` | Change the type, the data, the rules or the note of a record. A record has no rename. |
 | `DELETE /dns/records/{name}` | `dns.admin` | Remove a record |
+| `POST /dns/zones` | `dns.admin` | Add a zone. The body is `{"name", "note"}`. |
+| `DELETE /dns/zones/{name}` | `dns.admin` | Remove a zone. Its records stay. |
+| `GET /dns` | `dns.view` | The DNS page of the console |
 
 Example:
 
 ```sh
 curl -X POST http://node-control/dns/records -H 'Content-Type: application/json' \
   -d '{"name": "llm-proxy.example.com", "tag": "tag:llm-proxy"}'
+curl -X POST http://node-control/dns/zones -H 'Content-Type: application/json' \
+  -d '{"name": "corp.example.com"}'
+curl -X POST http://node-control/dns/records -H 'Content-Type: application/json' \
+  -d '{"name": "app.corp.example.com", "addresses": ["100.64.0.10"],
+       "rules": [{"tags": ["tag:dev"], "addresses": ["100.64.0.20"]}, {"users": ["alice@example.com"], "node": "lab"}]}'
+curl -X POST http://node-control/dns/records -H 'Content-Type: application/json' \
+  -d '{"name": "_http._tcp.corp.example.com", "type": "SRV", "target": "app.corp.example.com", "port": 8080}'
 ```
 
 The Activity page records each change.
+
+### The DNS page
+
+The console has a **DNS** page in the configure group, for users with `dns.view`. It shows:
+
+- the server, the listener and the MagicDNS domain,
+- the zones, with the number of records in each,
+- the records, with the type, the data, the current answer and the rules with their answers,
+- where each record is served: the headscale file, or node-control only,
+- the extra-records file, its last write and its last error,
+- the `nameservers.split` lines to add to `headscale.yaml`.
+
+A user with `dns.admin` adds, changes and deletes zones and records on the page. In the form, write the data of a
+record on one line:
+
+| Type | Data |
+|---|---|
+| `A` | Addresses separated by commas, `node:<name>` or `tag:<name>` |
+| `CNAME` | A name |
+| `TXT` | The text |
+| `SRV` | `priority weight port target` |
+
+Write one rule on each line: `<logins and tags> = <data>`.
 
 ## Tasks module (optional)
 

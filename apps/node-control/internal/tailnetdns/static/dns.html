@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DNS</title>
+</head>
+<body>
+<div class="hl" id="dns">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>DNS</h1>
+        <p class="t2" id="sub" aria-live="polite">Names that node-control answers on the tailnet.</p>
+      </div>
+      <div class="rowbtns">
+        <span id="addslot"></span>
+      </div>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note plain" id="notice" role="status" hidden></div>
+    <section class="note" id="health" role="status" hidden></section>
+
+    <section class="panel" aria-label="Server">
+      <dl class="kv" id="server"></dl>
+    </section>
+
+    <div id="panel"></div>
+
+    <section aria-label="Zones">
+      <h2>Zones</h2>
+      <p class="t2 small">node-control answers every name in a zone. A name without a record does not exist.</p>
+      <div class="note plain" id="zonesempty" hidden><p class="t2">No zones.</p></div>
+      <div class="tw" id="zoneswrap" hidden>
+        <table>
+          <thead><tr><th>Zone</th><th>Records</th><th>Note</th><th><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="zones"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-label="Records">
+      <h2>Records</h2>
+      <div class="note plain" id="empty" hidden>
+        <p class="t2" id="emptytext"></p>
+      </div>
+      <div class="tw" id="tablewrap" hidden>
+        <table>
+          <thead><tr><th>Name</th><th>Type</th><th>Target</th><th>Answer</th><th>Rules</th><th>Served by</th><th><span class="sr">Actions</span></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="headscale configuration">
+      <h2>headscale configuration</h2>
+      <dl class="kv" id="config"></dl>
+    </section>
+  </div>
+</div>
+<script src="/dns/static/dns.js" defer></script>
+</body>
+</html>

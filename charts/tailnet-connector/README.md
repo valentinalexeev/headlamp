@@ -31,7 +31,10 @@ The image is `ghcr.io/valentinalexeev/headlamp/tailnet-connector`. It contains `
 | `caBundle.configMap`, `.key` | empty, `ca.crt` | A ConfigMap with the CA of headscale, if headscale uses a private CA |
 | `serve.enabled` | `false` | Install the serve proxies |
 | `serve.url` | `http://100.64.0.1` | node-control on the tailnet (`FUNNEL_SERVE_URL`) |
-| `serve.services[]` | empty | One entry for each node-control service: `name`, `services` (`FUNNEL_SERVICES`), `replicas`, `authKeySecret` |
+| `serve.services[]` | empty | One entry for each node-control service: `name`, `services` (`FUNNEL_SERVICES`), `replicas`, `authKeySecret`, `dnsNames` (cert-manager only) |
+| `serve.certificate.source` | `node-control` | Where the proxies get their certificate: `node-control` or `cert-manager`. See "Serve certificates" |
+| `serve.certificate.zone` | empty | cert-manager only: the serve zone. The default name of a proxy is `<name>.<zone>` |
+| `serve.certificate.issuerRef` | `name: ""`, `kind: ClusterIssuer`, `group: cert-manager.io` | cert-manager only: your Issuer or ClusterIssuer |
 
 `values.schema.json` checks the values. A route must be a CIDR. The URL must start with `http://` or `https://`.
 
@@ -142,10 +145,79 @@ Each entry in `serve.services` is one Deployment of `funnel-sidecar` in serve mo
 
 All replicas of a service use the same key. The name of the service answers with all replicas that are online. To rotate the key, add a new key in node-control and replace it in the Secret. Then restart the Deployment, and retire the old key in node-control.
 
+### A Gateway API implementation behind one serve proxy
+
+One serve proxy can publish many in-cluster services. Put a wildcard serve service in front of the Service of a
+Gateway API implementation (or of an ingress controller). The implementation then routes by host name and path. The
+proxy forwards TCP only.
+
+1. Install a Gateway API implementation, for example Envoy Gateway, Istio, Cilium or NGINX Gateway Fabric. Make a
+   `Gateway` with a listener `protocol: HTTP` on port 80 and `hostname: "*.apps.<serve zone>"`. Note the Service that
+   the implementation makes for this `Gateway`.
+2. In node-control, add the wildcard serve service `*.apps`. Copy its key into a Secret, as in steps 2 and 3 above.
+3. Add the service to the values, with the Service of the `Gateway` as the target:
+
+   ```yaml
+   serve:
+     enabled: true
+     services:
+       - name: apps            # the serve service *.apps, without "*."
+         services: "web=443@<gateway service>.<gateway namespace>.svc:80"
+   ```
+
+4. Make one `HTTPRoute` for each app, with `hostnames: ["<app>.apps.<serve zone>"]` and `parentRefs` to the `Gateway`.
+
+A tailnet client then opens `https://<app>.apps.<serve zone>/`. The serve proxy gets one certificate for
+`*.apps.<serve zone>` (see "Serve certificates") and terminates TLS. It sends plain HTTP to the `Gateway`, which
+routes by the `Host` header and the path.
+
+- A wildcard covers one label: `grafana.apps.<serve zone>` works, `a.b.apps.<serve zone>` does not.
+- A new app needs only a new `HTTPRoute`. It needs no new serve service, no key and no `helm upgrade`.
+- Access control is the headscale policy for the whole wildcard name. Per-app access rules go into the `Gateway`
+  implementation.
+- A controller that makes serve proxies from `Gateway` objects is proposed in #338.
+
+### Serve certificates
+
+`serve.certificate.source` sets where the proxies get their TLS certificate (#334):
+
+| Source | What it does |
+|---|---|
+| `node-control` (default) | The proxy asks node-control for its certificate over the tailnet (`serve.url`). node-control signs it with its CA, or gives a public ACME certificate when it has `SERVE_CERT_SOURCE=acme`. This works on each cluster and on compose. |
+| `cert-manager` | The chart makes one cert-manager `Certificate` for each proxy, with your `Issuer` or `ClusterIssuer`. The proxy reads the Secret of the Certificate and serves a renewed certificate with no restart. node-control is not used for certificates, and needs no DNS credentials. |
+
+To use cert-manager:
+
+1. Install cert-manager in the cluster. Make an `Issuer` or `ClusterIssuer` for the serve zone. An example is ACME with a DNS-01 solver and workload identity.
+2. Set the values:
+
+   ```yaml
+   serve:
+     certificate:
+       source: cert-manager
+       zone: svc.example.com
+       issuerRef:
+         name: <your-cluster-issuer>
+         kind: ClusterIssuer
+     services:
+       - name: grafana                 # certificate for grafana.svc.example.com
+         services: "web=443@grafana.monitoring.svc:3000"
+       - name: apps                    # a wildcard service needs its own names
+         services: "web=443@ingress-nginx-controller.ingress-nginx.svc:80"
+         dnsNames: ["*.apps.svc.example.com"]
+   ```
+
+3. Run `helm upgrade`.
+4. Check that each Certificate is ready: `kubectl -n tailnet get certificate`.
+
+The names on the certificate must be the name of the service in node-control. The chart cannot check this. A wrong name gives a certificate error on the devices.
+
+**NOTE:** The `Certificate` is a cert-manager resource. `helm install` fails if cert-manager is not installed in the cluster.
+
 ## Test
 
 ```sh
-make test-k8s-connector      # helm lint, helm template and kubeconform, with the default and the example values
+make test-k8s-connector      # helm lint, helm template and kubeconform, with the default and the example values, and both serve certificate sources
 make test-k8s-connector-e2e  # kind and headscale (HEADSCALE_VERSION): join, route approval, a ClusterIP from the tailnet
 ```
 

@@ -111,7 +111,8 @@ func (h *handler) newProxy(v variant, dial func(ctx context.Context, network, ad
 		},
 		ModifyResponse: func(res *http.Response) error {
 			if h.cfg.HSTS != "" {
-				res.Header.Del("Strict-Transport-Security") // the configured value wins over a backend's own
+				// the configured value wins over a backend's own
+				res.Header.Del("Strict-Transport-Security")
 			}
 			return nil
 		},
@@ -183,7 +184,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.cfg.HSTS != "" && forwardedProto(r, h.cfg.ClientIP.TrustedPeer(r)) == "https" {
-		w.Header().Set("Strict-Transport-Security", h.cfg.HSTS) // service hosts only, never over plain HTTP (RFC 6797)
+		// service hosts only, never over plain HTTP (RFC 6797)
+		w.Header().Set("Strict-Transport-Security", h.cfg.HSTS)
 	}
 	rt, found := h.table.Lookup(routes.Key{NS: ns, Service: service})
 	if !found {

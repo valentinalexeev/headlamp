@@ -1,6 +1,40 @@
 {{- if .Values.serve.enabled }}
 {{- range .Values.serve.services }}
 {{- $name := printf "%s-serve-%s" (include "tc.name" $) .name | trunc 63 | trimSuffix "-" }}
+{{- $cm := eq $.Values.serve.certificate.source "cert-manager" }}
+{{- $tls := printf "%s-tls" $name | trunc 63 | trimSuffix "-" }}
+{{- if $cm }}
+{{- $names := .dnsNames }}
+{{- if not $names }}
+{{- if not $.Values.serve.certificate.zone }}
+{{- fail (printf "serve.certificate.source=cert-manager: set serve.certificate.zone or serve.services[].dnsNames for %s" .name) }}
+{{- end }}
+{{- $names = list (printf "%s.%s" .name $.Values.serve.certificate.zone) }}
+{{- end }}
+{{- if not $.Values.serve.certificate.issuerRef.name }}
+{{- fail "serve.certificate.source=cert-manager: set serve.certificate.issuerRef.name (your Issuer or ClusterIssuer)" }}
+{{- end }}
+---
+# The certificate of the serve proxy "{{ .name }}" from cert-manager (#334). The proxy reads the Secret and serves a
+# renewed certificate without a restart.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}
+  labels: {{- include "tc.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: serve
+spec:
+  secretName: {{ $tls }}
+  dnsNames: {{- toYaml $names | nindent 4 }}
+  issuerRef:
+    name: {{ $.Values.serve.certificate.issuerRef.name | quote }}
+    kind: {{ $.Values.serve.certificate.issuerRef.kind | quote }}
+    group: {{ $.Values.serve.certificate.issuerRef.group | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+{{- end }}
 ---
 # Serve proxy for the node-control service "{{ .name }}" (#117). Its key is the reusable, ephemeral key of that
 # service; all replicas share it, and the service name answers every online replica.
@@ -30,7 +64,12 @@ spec:
         - name: funnel-sidecar
           image: {{ include "tc.image" (list $ $.Values.serve.image) | quote }}
           env:
+            {{- if $cm }}
+            - { name: FUNNEL_SERVE_CERT_FILE, value: /etc/serve-tls/tls.crt }
+            - { name: FUNNEL_SERVE_KEY_FILE, value: /etc/serve-tls/tls.key }
+            {{- else }}
             - { name: FUNNEL_SERVE_URL, value: {{ $.Values.serve.url | quote }} }
+            {{- end }}
             - { name: FUNNEL_CONTROL_URL, value: {{ $.Values.controlURL | quote }} }
             - { name: FUNNEL_SERVICES, value: {{ .services | quote }} }
             - name: TS_AUTHKEY
@@ -44,11 +83,19 @@ spec:
           securityContext: {{- include "tc.containerSecurity" $ | nindent 12 }}
           volumeMounts:
             - { name: state, mountPath: /tmp/funnel-sidecar }
+            {{- if $cm }}
+            # mount the whole Secret, no single-file mount: the kubelet updates it when cert-manager renews
+            - { name: tls, mountPath: /etc/serve-tls, readOnly: true }
+            {{- end }}
             {{- if $.Values.caBundle.configMap }}
             - { name: ca, mountPath: /etc/tailnet-ca, readOnly: true }
             {{- end }}
       volumes:
         - { name: state, emptyDir: {} }
+        {{- if $cm }}
+        - name: tls
+          secret: { secretName: {{ $tls }}, defaultMode: 0440 }
+        {{- end }}
         {{- if $.Values.caBundle.configMap }}
         - name: ca
           configMap:

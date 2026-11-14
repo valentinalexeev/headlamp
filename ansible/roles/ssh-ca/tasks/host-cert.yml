@@ -1,0 +1,109 @@
+---
+# One host key type (ssh_ca_key_type). Skipped when the host has no key of this type.
+- name: Find the host key of type {{ ssh_ca_key_type }}
+  ansible.builtin.stat:
+    path: "{{ ssh_ca_sshd_dir }}/ssh_host_{{ ssh_ca_key_type }}_key.pub"
+  register: ssh_ca_hostkey
+  become: "{{ ssh_ca_become }}"
+
+- name: Sign or keep the host certificate of type {{ ssh_ca_key_type }}
+  when: ssh_ca_hostkey.stat.exists
+  vars:
+    ssh_ca_pub: "{{ ssh_ca_sshd_dir }}/ssh_host_{{ ssh_ca_key_type }}_key.pub"
+    ssh_ca_cert: "{{ ssh_ca_sshd_dir }}/ssh_host_{{ ssh_ca_key_type }}_key-cert.pub"
+  block:
+    - name: Read the host key and certificate of type {{ ssh_ca_key_type }}
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          ssh-keygen -l -f {{ ssh_ca_pub | quote }} | awk '{print "KEYFP " $2}'
+          ssh-keygen -L -f {{ ssh_ca_cert | quote }} 2>/dev/null || true
+      register: ssh_ca_current
+      changed_when: false
+      check_mode: false
+      become: "{{ ssh_ca_become }}"
+
+    - name: Decide if the host certificate is due, type {{ ssh_ca_key_type }}
+      ansible.builtin.set_fact:
+        ssh_ca_due_reasons: "{{ ssh_ca_reasons | select | list }}"
+      vars:
+        out: "{{ ssh_ca_current.stdout }}"
+        key_fp: "{{ out | regex_search('KEYFP (\\S+)', '\\1') | first }}"
+        cert_key_fp: "{{ out | regex_search('Public key: \\S+ (\\S+)', '\\1') | default([''], true) | first }}"
+        cert_ca_fp: "{{ out | regex_search('Signing CA: \\S+ (\\S+)', '\\1') | default([''], true) | first }}"
+        cert_to: "{{ out | regex_search('Valid: from \\S+ to (\\S+)', '\\1') | default([''], true) | first }}"
+        cert_names: "{{ (out | regex_search('Principals:[ \\t]*\\n((?:[ \\t]{9,}\\S+\\n?)+)', '\\1') | default([''], true) | first).split() | sort }}"
+        want_ca_fp: "{{ (ssh_ca_ca_fp.stdout | default('')).split()[1] | default('') }}"
+        days_left: >-
+          {{ ((cert_to | to_datetime('%Y-%m-%dT%H:%M:%S')) - now()).days
+             if cert_to is match('^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$') else (99999 if cert_to == 'forever' else -1) }}
+        ssh_ca_reasons:
+          - "{{ 'no certificate' if 'host certificate' not in out else '' }}"
+          - "{{ 'other host key' if cert_key_fp != key_fp else '' }}"
+          - "{{ 'other CA' if want_ca_fp | length > 0 and cert_ca_fp != want_ca_fp else '' }}"
+          - "{{ 'other names' if cert_names != (ssh_ca_cert_names | sort) else '' }}"
+          - "{{ ('expires in ' ~ days_left ~ ' days') if (days_left | int) < (ssh_ca_host_cert_renew_days | int) else '' }}"
+
+    - name: Warn that a certificate is due and no host CA is set, type {{ ssh_ca_key_type }}
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ ssh_ca_cert }} needs signing ({{ ssh_ca_due_reasons | join(', ') }}), but neither
+          ssh_ca_host_ca_key nor ssh_ca_host_ca_pub is set. Run the role from a controller that has the host CA.
+      when:
+        - ssh_ca_due_reasons | length > 0
+        - ssh_ca_signer == 'none'
+
+    - name: Sign the host key, type {{ ssh_ca_key_type }}
+      when:
+        - ssh_ca_due_reasons | length > 0
+        - ssh_ca_signer != 'none'
+        - not ansible_check_mode
+      block:
+        - name: Show why the host key is signed, type {{ ssh_ca_key_type }}
+          ansible.builtin.debug:
+            msg: "{{ ssh_ca_cert }}: {{ ssh_ca_due_reasons | join(', ') }}"
+
+        - name: Read the host public key, type {{ ssh_ca_key_type }}
+          ansible.builtin.slurp:
+            src: "{{ ssh_ca_pub }}"
+          register: ssh_ca_pub_content
+          become: "{{ ssh_ca_become }}"
+
+        - name: Make a temporary directory on the controller
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: .ssh-ca
+          register: ssh_ca_tmp
+          delegate_to: localhost
+          become: false
+
+        - name: Sign on the controller
+          ansible.builtin.shell:
+            cmd: >-
+              printf '%s' {{ (ssh_ca_pub_content.content | b64decode) | quote }} > host.pub &&
+              ssh-keygen -q {{ '-U' if ssh_ca_signer == 'agent' else '' }} -s {{ ssh_ca_signer_file | quote }} -h
+              -I {{ ('host:' ~ inventory_hostname) | quote }} -n {{ ssh_ca_cert_names | join(',') | quote }}
+              -V {{ ssh_ca_host_cert_validity | quote }} -z "$(date +%s)" host.pub
+            chdir: "{{ ssh_ca_tmp.path }}"
+          changed_when: true
+          delegate_to: localhost
+          become: false
+
+        - name: Install the host certificate, type {{ ssh_ca_key_type }}
+          ansible.builtin.copy:
+            src: "{{ ssh_ca_tmp.path }}/host-cert.pub"
+            dest: "{{ ssh_ca_cert }}"
+            owner: root
+            group: root
+            mode: "0644"
+          notify: reload sshd for ssh-ca
+          become: "{{ ssh_ca_become }}"
+      always:
+        - name: Remove the temporary directory on the controller
+          ansible.builtin.file:
+            path: "{{ ssh_ca_tmp.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          when: ssh_ca_tmp.path is defined

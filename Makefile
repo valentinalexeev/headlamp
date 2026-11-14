@@ -1,7 +1,7 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
 .PHONY: test-gateway-controller test-gateway-controller-e2e test-ssh-ca test-ssh-ca-e2e test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-serve-acme-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
-  test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
+  test-tasks-cli test-bridge-selection test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
 	@git config core.hooksPath .githooks
@@ -36,8 +36,13 @@ test-exit-node-health:
 test-runtime-config:
 	./scripts/test/runtime-config/run_tests.sh $(or $(IMAGE),all)
 
-test-headscale-policy:
+# The console CLI clients: the policy client, and the bridge selection pull command (#314), which CI runs through this
+# target.
+test-headscale-policy: test-bridge-selection
 	sh scripts/test/headscale-policy/run.sh
+
+test-bridge-selection:
+	sh scripts/test/bridge-selection/run.sh
 
 test-headscale-tag-node:
 	sh scripts/test/headscale-tag-node/run.sh
@@ -169,7 +174,7 @@ lint:
 	shellcheck -S warning -x scripts/*.sh scripts/test/tf-run/run_tests.sh scripts/test/check-denylist/run_tests.sh \
 	  scripts/test/exit-node-state/run_tests.sh scripts/test/runtime-config/run_tests.sh scripts/test/headscale-policy/run.sh scripts/test/headscale-policy/e2e-docker.sh scripts/test/bridge-policy/e2e-docker.sh scripts/test/policy-apply/e2e-docker.sh examples/compose/control/scripts/policy-apply.sh apps/exit-node/*.sh \
 	  scripts/tasks.sh scripts/test/tasks/run.sh scripts/release-preflight.sh scripts/deploy-fly.sh scripts/fly-snapshot.sh scripts/fleet-run.sh scripts/test/fleet-run/run_tests.sh scripts/test/fly-snapshot/run_tests.sh scripts/test/site-mk/run_tests.sh examples/private-repo/fly/deploy.sh scripts/test/ansible-os/run.sh scripts/test/ssm-state/e2e-docker.sh scripts/test/ssm-state/vm-e2e.sh \
-	  scripts/headscale-tag-node.sh scripts/test/headscale-tag-node/run.sh \
+	  scripts/headscale-tag-node.sh scripts/test/headscale-tag-node/run.sh scripts/test/bridge-selection/run.sh \
 	  .githooks/pre-commit .githooks/commit-msg \
 	  apps/tailguard/*.sh apps/headscale/*.sh scripts/test/feature-defaults/run.sh scripts/check-enroll-paths.sh scripts/smoke-test.sh scripts/test/exit-node-health/run_tests.sh \
 	  scripts/fleet-check.sh scripts/test/fleet-check/run_tests.sh \

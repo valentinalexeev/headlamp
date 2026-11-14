@@ -139,8 +139,74 @@ OPEN_ISSUES=0 RELEASE_REPO=o/r PATH="$PWD/bin:$PATH" ok "$check" v2.0.1 main
 OPEN_ISSUES='' RELEASE_REPO=o/r PATH="$PWD/bin:$PATH" ok "$check" v2.0.1 main
 rm -rf bin
 
+# a patch of an older line comes from its maintenance branch maint/X.Y, while main has moved on
+git tag -d v2.0.1 >/dev/null
+git checkout -q main
+git tag v2.0.1
+git branch -q maint/2.0 v2.0.1
+commit 'feat(api): next minor on main' 2.1.0
+git tag v2.1.0
+git checkout -q maint/2.0
+commit 'fix: backport a thing' 2.0.2
+printf '# Upgrading\n\n## 2.0.2\n\nNo action required.\n' >UPGRADING.md
+commit 'docs: upgrading 2.0.2'
+git tag v2.0.2
+# shellcheck disable=SC2329 # called through ok and no
+maint() { MAINT_REMOTE="$1" "$check" "$2" main; }
+git update-ref refs/remotes/origin/maint/2.0 maint/2.0
+ok maint origin v2.0.2
+no maint nowhere v2.0.2
+# the next patch only, after the highest tag of the line
+git tag -d v2.0.2 >/dev/null
+printf '# Upgrading\n\n## 2.0.3\n\nNo action required.\n' >UPGRADING.md
+commit 'chore: skip' 2.0.3
+git update-ref refs/remotes/origin/maint/2.0 maint/2.0
+git tag v2.0.3
+no maint origin v2.0.3
+git tag -d v2.0.3 >/dev/null
+git reset -q --hard HEAD~1
+# a feature on a maintenance branch is refused, also when the version would be a minor
+commit 'feat(api): not a fix' 2.0.2
+printf '# Upgrading\n\n## 2.0.2\n\nNo action required.\n' >UPGRADING.md
+commit 'docs: upgrading 2.0.2'
+git update-ref refs/remotes/origin/maint/2.0 maint/2.0
+git tag v2.0.2
+no maint origin v2.0.2
+git tag -d v2.0.2 >/dev/null
+git reset -q --hard HEAD~2
+# a .0 release never comes from a maintenance branch
+git checkout -q maint/2.0
+commit 'chore: not a line start' 2.2.0
+printf '# Upgrading\n\n## 2.2.0\n\nNo action required.\n' >UPGRADING.md
+commit 'docs: upgrading 2.2.0'
+git update-ref refs/remotes/origin/maint/2.2 maint/2.0
+git tag v2.2.0
+no maint origin v2.2.0
+git tag -d v2.2.0 >/dev/null
+git update-ref -d refs/remotes/origin/maint/2.2
+git reset -q --hard HEAD~2
+git checkout -q main
+# a tag on another branch is refused
+git checkout -qb side2
+commit 'fix: side' 2.0.2
+printf '# Upgrading\n\n## 2.0.2\n\nNo action required.\n' >UPGRADING.md
+commit 'docs: upgrading 2.0.2'
+git tag v2.0.2
+no maint origin v2.0.2
+git tag -d v2.0.2 >/dev/null
+git checkout -q main
+git update-ref -d refs/remotes/origin/maint/2.0
+# main still releases the next minor, ignoring the maintenance line
+commit 'fix: on main' 2.1.1
+printf '# Upgrading\n\n## 2.1.1\n\nNo action required.\n' >UPGRADING.md
+commit 'docs: upgrading 2.1.1'
+ok try v2.1.1
+
 # image tags
 same 'branch tags' "$("$tags" branch 0123456789abcdef)" $'main\nsha-0123456789ab'
+same 'main branch tags' "$("$tags" branch 0123456789abcdef main)" $'main\nsha-0123456789ab'
+same 'maintenance branch tags do not move main' "$("$tags" branch 0123456789abcdef maint/0.18)" $'maint-0.18\nsha-0123456789ab'
+no "$tags" branch 0123456789abcdef feat/x
 same 'prerelease' "$("$tags" tag v3.0.0-rc.1)" '3.0.0-rc.1'
 same 'before 1.0.0 nothing but the minor floats' "$(git tag v0.9.9; "$tags" tag v0.12.0)" $'0.12.0\n0.12'
 same 'the newest stable floats' "$("$tags" tag v3.0.0)" $'3.0.0\n3.0\n3\nlatest'

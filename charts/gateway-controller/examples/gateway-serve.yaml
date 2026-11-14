@@ -1,0 +1,37 @@
+# Example (#338): publish the Service "grafana" (port 80) in namespace "monitoring" under the tailnet-only name
+# grafana.<your serve zone>. Make the service and its key in node-control first, then put the key in the Secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-authkey
+  namespace: monitoring
+stringData:
+  authkey: <your-reusable-ephemeral-key>
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  gatewayClassName: headlamp-serve
+  infrastructure:
+    parametersRef: { group: "", kind: Secret, name: grafana-authkey }
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      # no tls block: the sidecar gets its certificate from node-control. With cert-manager, add
+      # tls: { mode: Terminate, certificateRefs: [{ name: <your-certificate-secret> }] }
+      hostname: grafana.ts.example.com
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  parentRefs: [{ name: grafana }]
+  hostnames: [grafana.ts.example.com]
+  rules:
+    - backendRefs: [{ name: grafana, port: 80 }]

@@ -1,0 +1,43 @@
+# gateway-controller (#338). The chart does nothing until you make a Gateway of one of its classes.
+# The Gateway API CRDs (standard channel) must be installed before this chart. TCPRoute is used only when its CRD
+# is installed when the controller starts.
+
+image:
+  repository: ghcr.io/valentinalexeev/headlamp/gateway-controller
+  tag: ""          # empty: the chart version
+  digest: ""       # pin a digest in production
+  pullPolicy: IfNotPresent
+
+# The funnel-sidecar image that the controller runs for each Gateway.
+sidecarImage:
+  repository: ghcr.io/valentinalexeev/headlamp/funnel-sidecar
+  tag: ""          # empty: the chart version
+  digest: ""
+
+# The GatewayClasses. The chart makes them; set create: false if you manage them yourself.
+gatewayClasses:
+  create: true
+  serve: headlamp-serve     # tailnet-only names with TLS (serve mode)
+  funnel: headlamp-funnel   # public names through funnel-ingress
+
+# headscale (FUNNEL_CONTROL_URL). Empty: the tailscale default.
+controlURL: ""
+# Serve class: node-control on the tailnet (FUNNEL_SERVE_URL). Not used by a Gateway whose HTTPS listeners name a
+# certificate Secret in tls.certificateRefs.
+serveURL: http://100.64.0.1
+# Funnel class: the funnel-ingress registration API (FUNNEL_API_URL), for example http://funnel-ingress:9100.
+# Empty: Gateways of the funnel class get a sidecar that fails its configuration check.
+funnelAPIURL: ""
+
+# Optional: a ConfigMap with a CA bundle (key "ca.crt"), in the namespace of each Gateway, for a headscale or
+# node-control with a private CA. Empty: the system roots.
+caBundle:
+  configMap: ""
+
+resources:
+  requests: { cpu: 10m, memory: 64Mi }
+  limits: { memory: 256Mi }
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

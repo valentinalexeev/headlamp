@@ -175,7 +175,8 @@ routes by the `Host` header and the path.
 - A new app needs only a new `HTTPRoute`. It needs no new serve service, no key and no `helm upgrade`.
 - Access control is the headscale policy for the whole wildcard name. Per-app access rules go into the `Gateway`
   implementation.
-- A controller that makes serve proxies from `Gateway` objects is proposed in #338.
+- To make serve proxies from `Gateway` objects, use the chart `charts/gateway-controller` (class `headlamp-serve`,
+  see its README).
 
 ### Serve certificates
 

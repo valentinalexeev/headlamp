@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "gc.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "gc.labels" . | nindent 4 }}
+---
+# Least privilege: read the Gateway API objects, Services and the sidecar pods; write status; manage the sidecar
+# Deployments. No access to Secrets: the sidecar pod reads its key Secret itself (secretKeyRef).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "gc.name" . }}
+  labels: {{- include "gc.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses, gateways, httproutes, tcproutes, referencegrants]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses/status, gateways/status, httproutes/status, tcproutes/status]
+    verbs: [update]
+  # the owner reference of a sidecar Deployment blocks the deletion of its Gateway
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways/finalizers]
+    verbs: [update]
+  - apiGroups: [""]
+    resources: [services, pods]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gc.name" . }}
+  labels: {{- include "gc.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "gc.name" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gc.name" . }}
+    namespace: {{ .Release.Namespace }}

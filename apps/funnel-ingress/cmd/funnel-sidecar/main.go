@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"slices"
@@ -71,6 +72,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 	// /readyz answers 200 only while every service is registered; the body also gives the age of the last
 	// successful registration round.
 	var ready readiness
+	ip4, ip6 := srv.TailscaleIPs()
+	ready.setAddresses(ip4, ip6)
 	mux := http.NewServeMux()
 	mux.Handle("/readyz", ready.handler(time.Now))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) })
@@ -158,6 +161,19 @@ type readiness struct {
 	mu     sync.Mutex
 	ready  bool
 	lastOK time.Time
+	addrs  []string // the tailnet addresses of the node (#338: the gateway controller reports them)
+}
+
+// setAddresses keeps the valid tailnet addresses of the node for the /readyz body.
+func (r *readiness) setAddresses(ips ...netip.Addr) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.addrs = nil
+	for _, ip := range ips {
+		if ip.IsValid() {
+			r.addrs = append(r.addrs, ip.String())
+		}
+	}
 }
 
 func (r *readiness) set(at time.Time, ok bool) {
@@ -170,18 +186,21 @@ func (r *readiness) set(at time.Time, ok bool) {
 }
 
 // handler answers 200 while ready and 503 otherwise, with a JSON body:
-// {"ready":bool,"last_registered":RFC 3339 time,"age_seconds":int}; the last two are absent before the first
-// successful round. The age lets a probe or an operator see how long registration has been failing.
+// {"ready":bool,"last_registered":RFC 3339 time,"age_seconds":int,"addresses":[string]}.
+// The two times are absent before the first successful round, and addresses is absent before
+// the node has an address. The age lets a probe or an operator see how long registration has
+// been failing.
 func (r *readiness) handler(now func() time.Time) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		r.mu.Lock()
-		ready, lastOK := r.ready, r.lastOK
+		ready, lastOK, addrs := r.ready, r.lastOK, r.addrs
 		r.mu.Unlock()
 		body := struct {
-			Ready          bool    `json:"ready"`
-			LastRegistered *string `json:"last_registered,omitempty"`
-			AgeSeconds     *int64  `json:"age_seconds,omitempty"`
-		}{Ready: ready}
+			Ready          bool     `json:"ready"`
+			LastRegistered *string  `json:"last_registered,omitempty"`
+			AgeSeconds     *int64   `json:"age_seconds,omitempty"`
+			Addresses      []string `json:"addresses,omitempty"`
+		}{Ready: ready, Addresses: addrs}
 		if !lastOK.IsZero() {
 			ts := lastOK.UTC().Format(time.RFC3339)
 			age := int64(now().Sub(lastOK) / time.Second)

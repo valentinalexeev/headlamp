@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: test-ssh-ca test-ssh-ca-e2e test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-serve-acme-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
+.PHONY: test-gateway-controller test-gateway-controller-e2e test-ssh-ca test-ssh-ca-e2e test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-serve-acme-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
   test-tasks-cli test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -186,6 +186,12 @@ test-k8s-connector:
 # The chart in kind against the pinned headscale: join, route approval by policy, a ClusterIP from the tailnet.
 test-k8s-connector-e2e:
 	sh scripts/test/k8s-connector/e2e-kind.sh
+
+# #338: charts/gateway-controller static checks, and the controller in kind against the pinned headscale.
+test-gateway-controller:
+	bash scripts/test/gateway-controller/validate.sh
+test-gateway-controller-e2e:
+	sh scripts/test/gateway-controller/e2e-kind.sh
 
 # On demand (#123): the Access page (roles and grants) against a real headscale, two tailnet users.
 test-access-e2e:

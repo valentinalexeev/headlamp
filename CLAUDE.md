@@ -185,10 +185,11 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
 
 ### Branches and pull requests
 
-- `main` is the only long-lived branch. Branches start from `main` and PRs target `main`; there is no `develop`.
+- `main` and the maintenance branches `maint/X.Y` are the only long-lived branches. Branches start from `main` and PRs
+  target `main`, except a backport (see "Maintenance branches" below); there is no `develop`.
   Names: `<prefix>/<issue>-<slug>`, lower-case, prefixes `feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `ci/`,
-  `chore/`, `hotfix/` (incidents), `release/X.Y.Z`. Example: `fix/97-sidecar-retry`. Keep branches short-lived and
-  `main` releasable at every merge.
+  `chore/`, `hotfix/` (incidents), `backport/X.Y/<issue>-<slug>`, `release/X.Y.Z`. Example: `fix/97-sidecar-retry`.
+  Keep branches short-lived and `main` releasable at every merge.
 - Commits, PR titles and issue titles: Conventional Commits (section 1; `pr-title` checks PRs only), footers `Refs #NN` / `Closes #NN`. An issue title names the change that closes it, for example `fix(funnel-sidecar): recover the route registration`.
   Commit and push as you go.
 - PR description (template in `.github/pull_request_template.md`): `🤖 AI agent:`, issue link, what was done,
@@ -209,8 +210,10 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
 
 The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the agent's view of them.
 
-- **Branches.** Trunk-based: every PR merges into `main`, and a release is a tag on a commit of `main`. Images publish
-  from `main` and tags only, never from other branches (PRs build and test, no push).
+- **Branches.** Trunk-based: every change merges into `main` first, and a feature release (`X.Y.0`) is a tag on a
+  commit of `main`. A patch release of the current line is a tag on `main` while `main` holds no `feat` since the
+  line's last tag; after that, it is a tag on `maint/X.Y` (see "Maintenance branches"). Images publish from `main`,
+  `maint/X.Y` and tags only (PRs build and test, no push). A `maint/X.Y` push tags `maint-X.Y`, never `main`.
 - **Version.** Strict SemVer, one version for the whole repo in `VERSION`. Before 1.0.0 a breaking change moves MINOR.
   The bump is derived from commit subjects since the last stable tag: `feat` → at least MINOR, `!` or
   `BREAKING CHANGE:` → MAJOR (MINOR before 1.0.0), the rest PATCH. So a wrong commit type is a release bug: pick it
@@ -226,11 +229,30 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
      version):
      `git tag vX.Y.Z <commit> && scripts/check-release.sh vX.Y.Z && git push origin vX.Y.Z`.
      Release candidates use `vX.Y.Z-rc.N`.
-  3. CI (`images.yml`) runs `check-release.sh` as a gate: tag format, `VERSION` match, commit on `main`, next version
+  3. CI (`images.yml`) runs `check-release.sh` as a gate: tag format, `VERSION` match, commit on `main` (or, for a
+     patch, on `maint/X.Y`), next version
      with no skipping, bump at least what the commits need, milestone `X.Y.Z` (if any) has no open issues, `UPGRADING.md` has `## X.Y.Z`. Then it
      tags the already-built images and creates the GitHub release. Check the run and report its result on the issue.
-- **Hotfix.** `hotfix/NN-…` from `main`, PR into `main`, then a PATCH release as above. There is no fix release to an
-  older line.
+- **Hotfix.** `hotfix/NN-…` from `main`, PR into `main`, then a PATCH release as above (backported to `maint/X.Y` when
+  `main` already holds a feature).
+- **Maintenance branches.** Feature work keeps merging into `main` while a patch release of the current line is
+  prepared. When the first `feat` (or breaking change) merges into `main` after a `vX.Y.Z` tag, and a patch milestone
+  `X.Y.(Z+1)` is open:
+  1. Create `maint/X.Y` from the highest `vX.Y.*` tag (the bot may push this new branch; never force-push it).
+  2. Backport each patch-class PR that merged into `main` since that tag: branch `backport/X.Y/<issue>-<slug>` from
+     `maint/X.Y`, `git cherry-pick -x <merge commit> -m 1`, PR into `maint/X.Y` titled like the original with the same
+     type, `Refs` the original PR. Only patch-class types (fix, docs, test, ci, build, chore, style, perf, refactor);
+     never a `feat` or a breaking change: `check-release.sh` refuses those on a maintenance branch.
+  3. The patch release PR (`release/X.Y.Z`) branches from `maint/X.Y` and targets `maint/X.Y`. Its tag goes on the
+     merge commit on `maint/X.Y`; `check-release.sh` accepts it there and checks it follows the highest `vX.Y.*` tag.
+  4. From then on, each patch-class PR into `main` that belongs in the patch milestone gets a backport PR too, opened
+     right after its merge into `main`. The release PR description lists both.
+  5. The patch milestone's work is also on `main`, so the next feature release ships it too: its `CHANGELOG.md` keeps
+     the patch section, and `UPGRADING.md` keeps the patch's `## X.Y.Z` section before its own.
+  A maintenance branch stays until the next feature release ships; then the next patch line starts from `main` again.
+  The rules of `main` hold on `maint/X.Y` too: changes only through PRs, merge only on the owner's **Approve** of the
+  head, merge commits only. The repository ruleset must include `maint/**` (an owner setting); until it does, the
+  bot keeps these rules by itself.
 - **Tags are immutable.** Never move or delete a release tag or re-publish a version; fix a bad release with a new one.
 - **Images.** `ghcr.io/valentinalexeev/headlamp/<image>`, one per entry in `.github/components.json` (new or renamed
   image: add it there and to `docs/images.md`). Only a component whose source changed is rebuilt (`src-<hash>`); a
@@ -270,13 +292,14 @@ the tag of step 6.
    push, and ask for a new review: the approval of the old head does not count.
 4. **Keep one release PR for each open release milestone** (opened by step 8, or now if it is missing). Branch `release/X.Y.Z`, one commit
    `chore(release): vX.Y.Z` (see "Cutting a release"). The PR description lists each issue and PR of the milestone and
-   its state, and the `UPGRADING.md` steps. After each merge into `main`, rebuild the release branch on `main` and ask
+   its state, and the `UPGRADING.md` steps. After each merge into its base (`main`, or `maint/X.Y` for a patch from a
+   maintenance branch), rebuild the release branch on that base and ask
    for review again. Do not merge a release PR while the milestone has open issues: say which ones on the PR.
 
    A patch milestone needs a release when it has any merged PR, of any type: a patch release can hold only `docs`,
-   `test`, `ci`, `build`, `chore` or `style` changes. A feature release takes the merged patch work too: when the
-   feature release ships first, move the open patch milestone's merged work into it, and the patch milestone moves to
-   the next patch number.
+   `test`, `ci`, `build`, `chore` or `style` changes. A feature merging into `main` does not hold the patch release
+   back: from that merge on, the patch release comes from `maint/X.Y` ("Maintenance branches" under "Releases, tags
+   and images"), and the owner decides the order of the two releases.
 5. **Merge the release PR** when the owner's last review on its head is **Approve** and CI is green.
 6. **Tag and release** that merge commit, for that version only:
 

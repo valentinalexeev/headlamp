@@ -4,10 +4,10 @@
 name: images
 on:
   push:
-    branches: [main]
+    branches: [main, 'maint/**']
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, 'maint/**']
   workflow_dispatch:
     inputs:
       rebuild_all:
@@ -100,6 +100,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
+        # A patch tag of an older line may be on origin/maint/X.Y instead (VERSIONING.md, "Maintenance branches").
         run: scripts/check-release.sh "$TAG" origin/main
 
   detect:
@@ -254,7 +255,7 @@ jobs:
           if [ "$REF_TYPE" = tag ]; then
             mapfile -t tags < <(scripts/ci-image-tags.sh tag "$REF_NAME")
           else
-            mapfile -t tags < <(scripts/ci-image-tags.sh branch "$GITHUB_SHA")
+            mapfile -t tags < <(scripts/ci-image-tags.sh branch "$GITHUB_SHA" "$REF_NAME")
           fi
           prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
           while IFS= read -r c; do
@@ -263,7 +264,7 @@ jobs:
             for t in "${tags[@]}"; do args+=(-t "$name:$t"); done
             docker buildx imagetools create "${args[@]}" "$name:src-$(jq -r .hash <<<"$c")"
           done < <(jq -c '.[]' <<<"$ALL")
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         if: github.ref_type == 'tag'
       - name: Publish the Helm charts (#158)
         # Each chart under charts/ is published as an OCI artifact with the release version, so a chart version

@@ -65,6 +65,12 @@ var approveJS []byte
 //go:embed static/tailnet.js
 var tailnetJS []byte
 
+//go:embed static/selection.html
+var selectionHTML []byte
+
+//go:embed static/selection.js
+var selectionJS []byte
+
 const maxBodyBytes = 1 << 20
 
 // syncWait bounds how long a change waits for the ingresses before answering.
@@ -78,6 +84,7 @@ type Admin struct {
 	tn       core.Tailnet // names the caller for the audit log; nil records "unknown"
 	tacl     *tailnetACL  // the generated bridge-to-tailnet ACL entry (#132); nil: none
 	self     *Self        // OIDC self-enrolment (#102); nil: off
+	sel      *Selector    // the bridge selection console (#314); nil: off
 }
 
 // NewAdmin returns the operator API over store and one agent that serves every configured
@@ -131,6 +138,9 @@ func (a *Admin) Register(mux *core.Mux) {
 	mux.HandleFunc("DELETE /enroll/tailnet-grants/targets/{name}", a.jsonOnly(a.deleteTarget))
 	mux.HandleFunc("POST /enroll/tailnet-grants/subject", a.jsonOnly(a.setGrants))
 	mux.HandleFunc("POST /enroll/tailnet-grants/convert", a.jsonOnly(a.convertToGrants))
+	if a.sel != nil {
+		a.registerSelection(mux)
+	}
 }
 
 // actor names the caller for the audit log. A failed WhoIs gives "unknown"; the action still goes ahead.

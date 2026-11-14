@@ -103,6 +103,14 @@ var Routes = map[string]Rule{
 	"DELETE /enroll/tailnet-grants/targets/{name}": need(FeatureEnroll, LevelAdmin),
 	"POST /enroll/tailnet-grants/subject":          need(FeatureEnroll, LevelAdmin),
 	"POST /enroll/tailnet-grants/convert":          need(FeatureEnroll, LevelAdmin),
+	// bridge selection console (#314), only with ENROLL_SELECTION_UI=1
+	"GET /enroll/selection":           need(FeatureEnroll, LevelView),
+	"GET /enroll/static/selection.js": open,
+	"GET /enroll/selection/state":     need(FeatureEnroll, LevelView),
+	"GET /enroll/selection/export":    need(FeatureEnroll, LevelView),
+	"POST /enroll/selection/preview":  need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/selection/apply":    need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/selection/revert":   need(FeatureEnroll, LevelAdmin),
 
 	// tasks
 	"GET /tasks":                       need(FeatureTasks, LevelView),

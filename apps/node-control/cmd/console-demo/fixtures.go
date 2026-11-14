@@ -183,6 +183,7 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 			"ENROLL_DB":              filepath.Join(w.dir, "enroll.db"),
 			"ENROLL_CONFIG":          cfgFile,
 			"ENROLL_SECRET_KEY":      "demo-enrol-key-0123456789",
+			"ENROLL_SELECTION_UI":    "1",
 			"AGENT_TOKEN_BRIDGE_1":   "demo-agent-token",
 			"AGENT_TOKEN_BRIDGE_2":   "demo-agent-token",
 			"AGENT_TOKEN_BRIDGE_3":   "demo-agent-token",

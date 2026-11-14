@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,11 @@ func TestReadyzReportsRegistrationAge(t *testing.T) {
 	code, body = get()
 	if code != 200 || body["ready"] != true || body["last_registered"] != "2026-01-01T11:58:30Z" || body["age_seconds"] != float64(90) {
 		t.Fatalf("registered: %d %v", code, body)
+	}
+
+	st.setAddresses(netip.MustParseAddr("100.64.0.7"), netip.Addr{})
+	if _, body = get(); fmt.Sprint(body["addresses"]) != "[100.64.0.7]" {
+		t.Fatalf("addresses: %v", body)
 	}
 
 	st.set(now, false) // a failed round keeps the time of the last success

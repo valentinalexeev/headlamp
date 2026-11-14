@@ -13,6 +13,9 @@ says "No action required".
 
 ### Optional
 
+- **Gateway API controller** (#338): no action required. The new chart `charts/gateway-controller` does nothing
+  until you install it and make a `Gateway` of class `headlamp-serve` or `headlamp-funnel`. To opt in, see its
+  README.
 - **Tailnet DNS** (#285): the module now has zones, `CNAME`, `TXT` and `SRV` records, and rules per user or tag.
   The records of 0.18 stay `A` records and keep their answers, and the extra-records file does not change. No action
   is required. The extra-records file does not contain a zone, a record with rules, or a record of another type. When

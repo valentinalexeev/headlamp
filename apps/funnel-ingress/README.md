@@ -272,8 +272,8 @@ FUNNEL_SERVICES=wiki=8080@<gateway service>.<gateway namespace>.svc:80,grafana=8
 
 funnel-ingress keeps the `Host` header of the client (and sets `X-Forwarded-Host`), so the `Gateway` sees
 `wiki.pdl.<public domain>`. Make one `HTTPRoute` for each app with that name in `hostnames`. The `Gateway` gets plain
-HTTP: TLS ends at the edge. A new public app needs a new entry in `FUNNEL_SERVICES` and a new `HTTPRoute`. A controller
-that does this from `Gateway` objects is proposed in #338. For tailnet-only names, use a wildcard serve service instead
+HTTP: TLS ends at the edge. A new public app needs a new entry in `FUNNEL_SERVICES` and a new `HTTPRoute`. To make the
+sidecar from `Gateway` objects, use the chart `charts/gateway-controller` (class `headlamp-funnel`, see its README). For tailnet-only names, use a wildcard serve service instead
 (see "Serve proxies" in the `tailnet-connector` chart README).
 
 ### Serve mode: tailnet-only names (#117)

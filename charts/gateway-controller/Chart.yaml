@@ -1,0 +1,10 @@
+apiVersion: v2
+name: gateway-controller
+description: Publishes Kubernetes Services on a headscale tailnet from Gateway API resources (funnel-sidecar per Gateway)
+type: application
+# The chart version follows the repo VERSION. The image tag defaults to the chart version.
+version: 0.19.0
+appVersion: "0.19.0"
+home: https://github.com/valentinalexeev/headlamp
+sources:
+  - https://github.com/valentinalexeev/headlamp

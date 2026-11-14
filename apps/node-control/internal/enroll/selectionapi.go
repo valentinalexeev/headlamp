@@ -71,6 +71,14 @@ func previewDevice() Device {
 	}}
 }
 
+// Limits of the sing-box check: the mode of the temporary profile, the time it may take and the
+// length of its error in an answer.
+const (
+	checkFileMode = 0o600
+	checkTimeout  = 10 * time.Second
+	checkErrMax   = 200
+)
+
 // check runs `sing-box check` on the profile of cfg. "skipped" when there is no binary.
 func (s *Selector) check(ctx context.Context, cfg IngressConfig) (string, error) {
 	if s == nil || s.singBox == "" {
@@ -86,14 +94,17 @@ func (s *Selector) check(ctx context.Context, cfg IngressConfig) (string, error)
 	}
 	defer os.RemoveAll(dir)
 	p := filepath.Join(dir, "profile.json")
-	if err := os.WriteFile(p, body, 0o600); err != nil {
+	if err := os.WriteFile(p, body, checkFileMode); err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, s.singBox, "check", "-c", p).CombinedOutput(); err != nil {
+	// The binary is from exec.LookPath at start, the argument a file of our own temp directory.
+	cmd := exec.CommandContext(ctx, s.singBox, "check", "-c", p) //nolint:gosec // see above
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
-		return "", fmt.Errorf("sing-box check failed: %s", cleanAudit(first, 200))
+		return "", fmt.Errorf("sing-box check failed: %s", cleanAudit(first, checkErrMax))
 	}
 	return "ok", nil
 }
@@ -119,7 +130,10 @@ type selectionPreview struct {
 
 func (a *Admin) registerSelection(mux *core.Mux) {
 	mux.HandleFunc("GET /enroll/selection", asset("text/html; charset=utf-8", selectionHTML))
-	mux.HandleFunc("GET /enroll/static/selection.js", asset("text/javascript; charset=utf-8", selectionJS))
+	mux.HandleFunc(
+		"GET /enroll/static/selection.js",
+		asset("text/javascript; charset=utf-8", selectionJS),
+	)
 	mux.HandleFunc("GET /enroll/selection/state", a.getSelection)
 	mux.HandleFunc("GET /enroll/selection/export", a.exportSelection)
 	mux.HandleFunc("POST /enroll/selection/preview", a.jsonOnly(a.previewSelection))
@@ -129,12 +143,22 @@ func (a *Admin) registerSelection(mux *core.Mux) {
 
 // selectionNav is the console entry of the top bar.
 func selectionNav() core.NavItem {
-	return core.NavItem{Label: "Bridge selection", Path: "/enroll/selection", Order: 22, Group: "configure",
-		Icon: "nodes", Allow: authz.NavAllow(authz.P(authz.FeatureEnroll, authz.LevelView))}
+	return core.NavItem{
+		Label: "Bridge selection",
+		Path:  "/enroll/selection",
+		Order: navOrderSelection,
+		Group: "configure",
+		Icon:  "nodes",
+		Allow: authz.NavAllow(authz.P(authz.FeatureEnroll, authz.LevelView)),
+	}
 }
 
 // fileCfg is the configuration of the moment without the override.
-func (a *Admin) fileCfg(r *http.Request) IngressConfig { return a.reg.Current(r.Context(), false).Cfg }
+func (a *Admin) fileCfg(
+	r *http.Request,
+) IngressConfig {
+	return a.reg.Current(r.Context(), false).Cfg
+}
 
 func (a *Admin) getSelection(w http.ResponseWriter, r *http.Request) {
 	d, err := a.store.SelectionDoc()
@@ -142,8 +166,12 @@ func (a *Admin) getSelection(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, selectionView{Effective: Effective(a.fileCfg(r), d.Current), Override: d.Current,
-		CanRevert: d.Previous != nil, By: d.By, At: d.At})
+	writeJSON(
+		w,
+		http.StatusOK,
+		selectionView{Effective: Effective(a.fileCfg(r), d.Current), Override: d.Current,
+			CanRevert: d.Previous != nil, By: d.By, At: d.At},
+	)
 }
 
 func (a *Admin) exportSelection(w http.ResponseWriter, r *http.Request) {
@@ -163,21 +191,40 @@ func readOverride(w http.ResponseWriter, r *http.Request) (SelectionOverride, bo
 	}
 	raw, present := obj["override"]
 	if !present || len(obj) != 1 {
-		invalid(w, fieldError{"missing", []any{"body", "override"}, "the body must be {\"override\": {...}}"})
+		invalid(
+			w,
+			fieldError{
+				"missing",
+				[]any{"body", "override"},
+				"the body must be {\"override\": {...}}",
+			},
+		)
 		return SelectionOverride{}, false
 	}
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	var o SelectionOverride
 	if err := dec.Decode(&o); err != nil {
-		invalid(w, fieldError{"value_error", []any{"body", "override"}, "unknown key or wrong type in override"})
+		invalid(
+			w,
+			fieldError{
+				"value_error",
+				[]any{"body", "override"},
+				"unknown key or wrong type in override",
+			},
+		)
 		return SelectionOverride{}, false
 	}
 	return o, true
 }
 
 // validated checks o and runs sing-box check. ok=false means a response was written.
-func (a *Admin) validated(w http.ResponseWriter, r *http.Request, file IngressConfig, o SelectionOverride) (string, bool) {
+func (a *Admin) validated(
+	w http.ResponseWriter,
+	r *http.Request,
+	file IngressConfig,
+	o SelectionOverride,
+) (string, bool) {
 	if err := o.Validate(file); err != nil {
 		invalid(w, fieldError{"value_error", []any{"body", "override"}, err.Error()})
 		return "", false
@@ -209,11 +256,14 @@ func (a *Admin) previewSelection(w http.ResponseWriter, r *http.Request) {
 	a.audit(r, ActionSelectionPreview, auditChanges(changes))
 	eff := ApplySelection(file, o)
 	writeJSON(w, http.StatusOK, selectionPreview{Effective: Effective(file, o), Changes: changes,
-		SingBox: previewGroups(eff, singBoxGroups), Clash: previewGroups(eff, clashGroups), Check: res})
+		SingBox: previewGroups(
+			eff,
+			singBoxGroups,
+		), Clash: previewGroups(eff, clashGroups), Check: res})
 }
 
-// previewGroups are the selection groups of the profile. A profile with one bridge and no Hysteria 2
-// has none: the app uses the one bridge.
+// previewGroups are the selection groups of the profile. A profile with one bridge and no
+// Hysteria 2 has none: the app uses the one bridge.
 func previewGroups(cfg IngressConfig, f func(IngressConfig) []any) []any {
 	if !cfg.grouped() {
 		return []any{}
@@ -280,7 +330,10 @@ func selectionChanges(old, cur SelectionEffective) []string {
 	var out []string
 	val := func(name string, o, n SelectionValue) {
 		if fmt.Sprint(o.Value) != fmt.Sprint(n.Value) || o.Source != n.Source {
-			out = append(out, fmt.Sprintf("%s: %v (%s) -> %v (%s)", name, o.Value, o.Source, n.Value, n.Source))
+			out = append(
+				out,
+				fmt.Sprintf("%s: %v (%s) -> %v (%s)", name, o.Value, o.Source, n.Value, n.Source),
+			)
 		}
 	}
 	val("tolerance", old.Tolerance, cur.Tolerance)
@@ -295,7 +348,10 @@ func selectionChanges(old, cur SelectionEffective) []string {
 		return n
 	}
 	if on, nn := names(old), names(cur); !slices.Equal(on, nn) {
-		out = append(out, fmt.Sprintf("order: %s -> %s", strings.Join(on, ","), strings.Join(nn, ",")))
+		out = append(
+			out,
+			fmt.Sprintf("order: %s -> %s", strings.Join(on, ","), strings.Join(nn, ",")),
+		)
 	}
 	ob := map[string]SelectionBridge{}
 	for _, b := range old.Bridges {
@@ -304,7 +360,17 @@ func selectionChanges(old, cur SelectionEffective) []string {
 	for _, b := range cur.Bridges {
 		p := ob[b.Name]
 		if p.Group != b.Group || p.GroupSource != b.GroupSource {
-			out = append(out, fmt.Sprintf("group %s: %q (%s) -> %q (%s)", b.Name, p.Group, p.GroupSource, b.Group, b.GroupSource))
+			out = append(
+				out,
+				fmt.Sprintf(
+					"group %s: %q (%s) -> %q (%s)",
+					b.Name,
+					p.Group,
+					p.GroupSource,
+					b.Group,
+					b.GroupSource,
+				),
+			)
 		}
 		if p.Drained != b.Drained {
 			out = append(out, fmt.Sprintf("drain %s: %t -> %t", b.Name, p.Drained, b.Drained))

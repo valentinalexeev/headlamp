@@ -262,12 +262,21 @@ func (m *Module) Bridges(ctx context.Context) []IngressView {
 	return m.reg.Current(ctx, false).Views
 }
 
+// Places of the enrolment pages in the top bar.
+const (
+	navOrderDevices   = 20
+	navOrderSelection = 22
+)
+
 // Nav puts the enrolment page in the top bar, but only when the module registered (enrolment enabled).
 func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {
 		return nil
 	}
-	items := []core.NavItem{{Label: "Devices", Path: "/enroll", Order: 20, Group: "operate", Icon: "devices", Source: "enroll", Allow: authz.NavAllow(authz.P(authz.FeatureEnroll, authz.LevelView))}}
+	items := []core.NavItem{{Label: "Devices", Path: "/enroll", Order: navOrderDevices,
+		Group: "operate",
+		Icon:  "devices", Source: "enroll",
+		Allow: authz.NavAllow(authz.P(authz.FeatureEnroll, authz.LevelView))}}
 	if m.admin != nil && m.admin.sel != nil {
 		items = append(items, selectionNav())
 	}

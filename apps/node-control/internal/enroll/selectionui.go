@@ -309,7 +309,7 @@ func Export(cfg IngressConfig, o SelectionOverride) SelectionExport {
 		Drained: []string{}}
 	for k, v := range map[string]SelectionValue{"tolerance": e.Tolerance, "interval": e.Interval,
 		"url": e.URL, "strategy": e.Strategy} {
-		if v.Source != SourceDefault && !(k == "strategy" && v.Value == strategyURLTest) {
+		if v.Source != SourceDefault && (k != "strategy" || v.Value != strategyURLTest) {
 			ex.URLTest[k] = v.Value
 		}
 	}

@@ -69,6 +69,14 @@ type Candidate struct {
 // already warmed), then the least busy, then name and given name, independent
 // of input order.
 func Select(t Target, nodes []headscale.Node, healthy func(headscale.Node) bool, busy map[string]int, lastOK string) (Candidate, error) {
+	c, _, err := SelectCounts(t, nodes, healthy, busy, lastOK)
+	return c, err
+}
+
+// SelectCounts is Select that also returns the nodes left after each filter
+// (see NodeCounts). The counts of an ambiguous target stop at Tagged.
+func SelectCounts(t Target, nodes []headscale.Node, healthy func(headscale.Node) bool, busy map[string]int, lastOK string) (Candidate, NodeCounts, error) {
+	counts := NodeCounts{Tagged: len(nodes)}
 	if t.Node != "" {
 		same := 0
 		for _, n := range nodes {
@@ -77,27 +85,34 @@ func Select(t Target, nodes []headscale.Node, healthy func(headscale.Node) bool,
 			}
 		}
 		if same > 1 {
-			return Candidate{}, fmt.Errorf("%w: %d nodes have the given name %q", ErrAmbiguousTarget, same, t.Node)
+			return Candidate{}, counts, fmt.Errorf("%w: %d nodes have the given name %q", ErrAmbiguousTarget, same, t.Node)
 		}
 	}
 	var cands []Candidate
 	for _, n := range nodes {
-		if !matches(t, n) || (t.Online && !n.Online) {
+		if !matches(t, n) {
 			continue
 		}
+		counts.Matching++
+		if t.Online && !n.Online {
+			continue
+		}
+		counts.Online++
 		addr, ok := firstIPv4(n)
 		if !ok {
 			continue
 		}
+		counts.Address++
 		// Last: the probe may be a network call, so only survivors of the
 		// cheap filters are asked, once each.
 		if !healthy(n) {
 			continue
 		}
+		counts.Healthy++
 		cands = append(cands, Candidate{Node: n, Addr: addr})
 	}
 	if len(cands) == 0 {
-		return Candidate{}, ErrNoEligibleNode
+		return Candidate{}, counts, ErrNoEligibleNode
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		a, b := cands[i].Node, cands[j].Node
@@ -112,7 +127,7 @@ func Select(t Target, nodes []headscale.Node, healthy func(headscale.Node) bool,
 		}
 		return a.GivenName < b.GivenName
 	})
-	return cands[0], nil
+	return cands[0], counts, nil
 }
 
 func matches(t Target, n headscale.Node) bool {

@@ -60,9 +60,10 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 			continue
 		}
 		it := core.AttentionItem{ID: "task-" + id, Source: "tasks", Level: core.LevelWaiting, ActionLabel: "Open task", ActionPath: taskPath(id)}
-		for _, r := range runs { // newest first
+		var last *Run
+		for i, r := range runs { // newest first
 			if realFailure(r) {
-				it.Since = r.Ended
+				it.Since, last = r.Ended, &runs[i]
 				break
 			}
 		}
@@ -85,6 +86,15 @@ func (m *Module) taskAttention() ([]core.AttentionItem, []core.SystemLine) {
 			it.Detail = "The check is not passing."
 		default:
 			it.Detail = "It has not succeeded within twice its interval."
+		}
+		if v.Streak > 0 && last != nil && last.Class != "" {
+			// Only reasons the module wrote itself go here; a script error
+			// (class unknown) stays on the Tasks page.
+			if last.Class == ClassUnknown {
+				it.Detail += fmt.Sprintf(" Last failure: %s.", last.Class)
+			} else {
+				it.Detail += fmt.Sprintf(" Last failure (%s): %s.", last.Class, runReasonText(*last))
+			}
 		}
 		items = append(items, it)
 	}

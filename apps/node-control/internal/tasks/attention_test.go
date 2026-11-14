@@ -66,6 +66,27 @@ func TestTasksAttention(t *testing.T) {
 		}
 	})
 
+	t.Run("a structural failure names its class and node counts", func(t *testing.T) {
+		h, s := attentionHarness(t)
+		s.SaveState("job", TaskState{LastSuccess: now.Add(-time.Minute), Streak: 1, NextRun: now.Add(time.Hour)})
+		s.AppendRun(Run{ID: "r1", Task: "job", State: RunFailed, Reason: "no eligible node", Class: ClassStructural,
+			Counts: &NodeCounts{}, Started: now, Ended: now})
+		items, _, err := h.m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 1 || !strings.Contains(items[0].Detail, "Last failure (structural): no eligible node (tagged 0).") {
+			t.Fatalf("%+v %v", items, err)
+		}
+	})
+
+	t.Run("a script error shows only its class", func(t *testing.T) {
+		h, s := attentionHarness(t)
+		s.SaveState("job", TaskState{LastSuccess: now.Add(-time.Minute), Streak: 1, NextRun: now.Add(time.Hour)})
+		s.AppendRun(Run{ID: "r1", Task: "job", State: RunFailed, Reason: "script text", Class: ClassUnknown, Started: now, Ended: now})
+		items, _, err := h.m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 1 || !strings.HasSuffix(items[0].Detail, "Last failure: unknown.") || strings.Contains(items[0].Detail, "script text") {
+			t.Fatalf("%+v %v", items, err)
+		}
+	})
+
 	t.Run("a single failure still states the streak", func(t *testing.T) {
 		h, s := attentionHarness(t)
 		s.SaveState("job", TaskState{LastSuccess: now.Add(-time.Minute), Streak: 1, NextRun: now.Add(time.Hour)})

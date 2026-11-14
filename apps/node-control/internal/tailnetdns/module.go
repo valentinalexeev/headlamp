@@ -100,6 +100,7 @@ type Module struct {
 		self4     netip.Addr
 		listening bool
 		extra     []string // the extra_records names answered
+		nodes     []headscale.Node
 		at        time.Time
 		err       string
 	}
@@ -195,6 +196,7 @@ func (m *Module) Register(r *core.Routes) error {
 		m.dns = &servedns.Server{}
 	}
 	m.tn = r.Tailnet
+	m.dns.SetIdentify(m.identify)
 	st, err := openStore(m.env)
 	if err != nil || st == nil {
 		return err
@@ -209,7 +211,29 @@ func (m *Module) Register(r *core.Routes) error {
 	r.Admin.Handle("POST /dns/records", admin(js(m.create)))
 	r.Admin.Handle("PUT /dns/records/{name}", admin(js(m.replace)))
 	r.Admin.Handle("DELETE /dns/records/{name}", admin(http.HandlerFunc(m.remove)))
+	r.Admin.Handle("POST /dns/zones", admin(js(m.createZone)))
+	r.Admin.Handle("DELETE /dns/zones/{name}", admin(http.HandlerFunc(m.removeZone)))
+	r.Admin.Handle("GET /dns", view(asset("text/html; charset=utf-8", pageHTML)))
+	r.Admin.Handle("GET /dns/static/dns.js", view(asset("text/javascript; charset=utf-8", pageJS)))
 	return nil
+}
+
+// whoTimeout bounds the WhoIs of one DNS query with rules.
+const whoTimeout = 2 * time.Second
+
+// identify names the client of a DNS query from its tailnet address (#285), for the rules of a
+// record. A client that WhoIs does not know gets the default data.
+func (m *Module) identify(a netip.Addr) *servedns.Who {
+	if !InTailnet(a) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), whoTimeout)
+	defer cancel()
+	login, tags, err := m.tn.WhoIs(ctx, netip.AddrPortFrom(a, 1).String())
+	if err != nil {
+		return nil
+	}
+	return &servedns.Who{Login: login, Tags: tags}
 }
 
 // Start fills the tables, keeps them in step, and opens the shared listener.
@@ -298,19 +322,35 @@ func (m *Module) Refresh(ctx context.Context) {
 	if err != nil {
 		errs = append(errs, "headscale: "+err.Error())
 	} else {
+		m.cur.Lock()
+		m.cur.nodes = nodes
+		m.cur.Unlock()
 		if suffix != "" {
 			magic := servedns.NewTable(suffix, magicRecords(nodes, suffix))
 			m.dns.SetSlot(servedns.SlotMagic, magic)
 		}
 		recs, rerr := m.st.Records()
+		zones, zerr := m.st.Zones()
+		if rerr == nil && zerr != nil {
+			rerr = zerr
+		}
 		if rerr != nil {
 			errs = append(errs, "store: "+rerr.Error())
 		} else {
 			t := servedns.NewNames(answers(recs, nodes))
 			m.dns.SetSlot(servedns.SlotRecords, t)
-			// Only after a full rebuild: a failed source never empties the file.
+			names := make([]string, 0, len(zones))
+			for _, z := range zones {
+				names = append(names, z.Name)
+			}
+			m.dns.SetSlot(servedns.SlotZones, servedns.NewZones(names))
+			// Only after a full rebuild: a failed source never empties the file. The file holds
+			// the address records without rules (#285): headscale cannot hold the others.
 			if m.extra != nil {
-				if werr := m.extra.write(extraContent(t), m.now()); werr != nil {
+				notInFile := func(r Record) bool { return !r.InFile() }
+				file := slices.DeleteFunc(slices.Clone(recs), notInFile)
+				ft := servedns.NewNames(answers(file, nodes))
+				if werr := m.extra.write(extraContent(ft), m.now()); werr != nil {
 					errs = append(errs, werr.Error())
 				}
 			}
@@ -354,39 +394,6 @@ func magicRecords(nodes []headscale.Node, suffix string) []servedns.Record {
 	return out
 }
 
-// answers resolves the targets of the managed records. A node target gives the node's addresses; a
-// tag target the addresses of the online nodes with the tag. A target with no match is a name
-// without addresses (NODATA).
-func answers(recs []Record, nodes []headscale.Node) []servedns.Record {
-	out := make([]servedns.Record, 0, len(recs))
-	for _, r := range recs {
-		var addrs []netip.Addr
-		switch {
-		case r.Node != "":
-			for _, n := range nodes {
-				if strings.EqualFold(n.GivenName, r.Node) {
-					addrs = append(addrs, nodeAddrs(n)...)
-				}
-			}
-		case r.Tag != "":
-			for _, n := range nodes {
-				if n.Online && slices.Contains(n.Tags, r.Tag) {
-					addrs = append(addrs, nodeAddrs(n)...)
-				}
-			}
-		default:
-			for _, a := range r.Addresses {
-				if ip, err := netip.ParseAddr(a); err == nil && InTailnet(ip) {
-					addrs = append(addrs, ip.Unmap())
-				}
-			}
-		}
-		slices.SortFunc(addrs, func(a, b netip.Addr) int { return a.Compare(b) })
-		out = append(out, servedns.Record{Name: r.Name, Addrs: slices.Compact(addrs)})
-	}
-	return out
-}
-
 // --- bridges ---
 
 // Bridge is what a bridge needs to resolve the tailnet names (#286): the server and the names, as
@@ -418,7 +425,11 @@ func (m *Module) BridgeDNS() (Bridge, bool) {
 	for _, n := range extra {
 		d = append(d, "full:"+n)
 	}
-	for _, z := range []string{m.zone, suffix} {
+	zs := []string{m.zone, suffix}
+	if zt := m.dns.Slot(servedns.SlotZones); zt != nil {
+		zs = append(zs, zt.Zones()...)
+	}
+	for _, z := range zs {
 		if z != "" {
 			d = append(d, "domain:"+z)
 		}
@@ -450,6 +461,16 @@ func validName(n string) error {
 	return nil
 }
 
+// validRecordName is validName, but a label may start with one underscore (SRV names such as
+// _http._tcp.example.com).
+func validRecordName(n string) error {
+	parts := strings.Split(n, ".")
+	for i, l := range parts {
+		parts[i] = strings.TrimPrefix(l, "_")
+	}
+	return validName(strings.Join(parts, "."))
+}
+
 func under(n, zone string) bool {
 	return zone != "" && (n == zone || strings.HasSuffix(n, "."+zone))
 }
@@ -457,7 +478,7 @@ func under(n, zone string) bool {
 // check normalises and validates a record. The error is for the caller and quotes nothing secret.
 func (m *Module) check(r *Record) error {
 	r.Name = servedns.Normalize(r.Name)
-	if err := validName(r.Name); err != nil {
+	if err := validRecordName(r.Name); err != nil {
 		return err
 	}
 	m.cur.Lock()
@@ -473,39 +494,24 @@ func (m *Module) check(r *Record) error {
 	if under(r.Name, m.zone) {
 		return errors.New("name is in the serve zone: use a serve service")
 	}
-	set := 0
-	if len(r.Addresses) > 0 {
-		set++
+	typ, err := normType(r.Type)
+	if err != nil {
+		return err
 	}
-	if r.Node != "" {
-		set++
+	// A record with rules may have no default data: then only the clients of a rule get an answer.
+	if err := checkTarget(&r.Target, typ, len(r.Rules) > 0); err != nil {
+		return err
 	}
-	if r.Tag != "" {
-		set++
+	if typ == TypeCNAME && r.Target.Target == r.Name {
+		return errors.New("a CNAME record must not point at its own name")
 	}
-	if set != 1 {
-		return errors.New("give exactly one of addresses, node or tag")
+	if err := checkRules(r.Rules, typ); err != nil {
+		return err
 	}
-	if len(r.Addresses) > maxAddresses {
-		return fmt.Errorf("at most %d addresses", maxAddresses)
-	}
-	for i, a := range r.Addresses {
-		ip, err := netip.ParseAddr(strings.TrimSpace(a))
-		if err != nil || !InTailnet(ip) {
-			return errors.New("an address is not a tailnet address " +
-				"(100.64.0.0/10 or fd7a:115c:a1e0::/48)")
-		}
-		r.Addresses[i] = ip.Unmap().String()
-	}
-	slices.Sort(r.Addresses)
-	r.Addresses = slices.Compact(r.Addresses)
-	r.Node = strings.ToLower(strings.TrimSpace(r.Node))
-	if r.Node != "" && !labelRE.MatchString(r.Node) {
-		return errors.New("node must be the given name of a headscale node")
-	}
-	r.Tag = strings.TrimSpace(r.Tag)
-	if r.Tag != "" && !tagRE.MatchString(r.Tag) {
-		return errors.New("tag must be tag:<name>")
+	// Service names (_http._tcp, _acme-challenge) are for SRV, TXT and CNAME records; an address
+	// record name is a host name.
+	if typ == TypeAddr && strings.Contains(r.Name, "_") {
+		return errors.New("an A record name must not have labels that start with an underscore")
 	}
 	if len(r.Note) > maxNote {
 		return fmt.Errorf("note is longer than %d characters", maxNote)
@@ -516,16 +522,15 @@ func (m *Module) check(r *Record) error {
 // --- HTTP ---
 
 type recordReq struct {
-	Name      string   `json:"name"`
-	Addresses []string `json:"addresses,omitempty"`
-	Node      string   `json:"node,omitempty"`
-	Tag       string   `json:"tag,omitempty"`
-	Note      string   `json:"note,omitempty"`
+	Name string `json:"name"`
+	Target
+	Rules []Rule `json:"rules,omitempty"`
+	Note  string `json:"note,omitempty"`
 }
 
 // record is the record the request asks for, under the given name.
 func (q recordReq) record(name string) Record {
-	return Record{Name: name, Addresses: q.Addresses, Node: q.Node, Tag: q.Tag, Note: q.Note}
+	return Record{Name: name, Target: q.Target, Rules: q.Rules, Note: q.Note}
 }
 
 func decode(w http.ResponseWriter, r *http.Request) (recordReq, bool) {
@@ -552,13 +557,11 @@ func (m *Module) audit(r *http.Request, action, detail string) {
 }
 
 func describe(rec Record) string {
-	switch {
-	case rec.Node != "":
-		return rec.Name + " -> node " + rec.Node
-	case rec.Tag != "":
-		return rec.Name + " -> " + rec.Tag
+	d := rec.Name + " -> " + describeTarget(rec.Target)
+	if n := len(rec.Rules); n > 0 {
+		d += fmt.Sprintf(" (%d rules)", n)
 	}
-	return rec.Name + " -> " + strings.Join(rec.Addresses, ",")
+	return d
 }
 
 func (m *Module) create(w http.ResponseWriter, r *http.Request) {
@@ -652,10 +655,22 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type ruleView struct {
+	Rule
+	// Answer is what node-control answers the clients of the rule now.
+	Answer []string `json:"answer"`
+}
+
 type recordView struct {
 	Record
-	// Answer is what node-control answers now.
+	Rules []ruleView `json:"rules,omitempty"`
+	// Answer is what node-control answers a client that no rule matches.
 	Answer []string `json:"answer"`
+	// InFile: the record is in the headscale extra-records file; else only node-control answers
+	// it, and tailnet devices need a split line.
+	InFile bool `json:"in_file"`
+	// Zone is the managed zone the name is in, if any.
+	Zone string `json:"zone,omitempty"`
 }
 
 type stateResp struct {
@@ -663,11 +678,12 @@ type stateResp struct {
 	Listening  bool         `json:"listening"`   // the DNS listener is open
 	BaseDomain string       `json:"base_domain"` // the MagicDNS suffix
 	ServeZone  string       `json:"serve_zone,omitempty"`
+	Zones      []Zone       `json:"zones"`
 	Records    []recordView `json:"records"`
 	// Extra lists the extra_records names answered (from the netmap).
 	Extra []string `json:"extra_records"`
 	// Split is the dns.nameservers.split block for headscale: tailnet devices then ask node-control
-	// for the managed names.
+	// for the managed zones, and for the names the file does not hold.
 	Split  map[string][]string `json:"split"`
 	Bridge *Bridge             `json:"bridge,omitempty"`
 	// ExtraFile is the headscale extra_records_path file that node-control writes; empty: not
@@ -680,8 +696,24 @@ type stateResp struct {
 	Error            string     `json:"error,omitempty"`
 }
 
+// zoneOf gives the managed zone that holds name, the longest first.
+func zoneOf(name string, zones []Zone) string {
+	best := ""
+	for _, z := range zones {
+		if under(name, z.Name) && len(z.Name) > len(best) {
+			best = z.Name
+		}
+	}
+	return best
+}
+
 func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 	recs, err := m.st.Records()
+	if err != nil {
+		http.Error(w, "store error", http.StatusInternalServerError)
+		return
+	}
+	zones, err := m.st.Zones()
 	if err != nil {
 		http.Error(w, "store error", http.StatusInternalServerError)
 		return
@@ -689,8 +721,8 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 	m.cur.Lock()
 	out := stateResp{Listening: m.cur.listening, BaseDomain: m.cur.suffix, ServeZone: m.zone,
 		Extra: append([]string{}, m.cur.extra...), Refreshed: m.cur.at, Error: m.cur.err,
-		Records: []recordView{}, Split: map[string][]string{}}
-	self := m.cur.self4
+		Records: []recordView{}, Split: map[string][]string{}, Zones: zones}
+	self, nodes := m.cur.self4, m.cur.nodes
 	m.cur.Unlock()
 	if self.IsValid() {
 		out.Server = "tcp://" + self.String() + ":53"
@@ -705,7 +737,6 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 		}
 		out.ExtraFileError = ferr
 	}
-	t := m.dns.Slot(servedns.SlotRecords)
 	// The managed records come back from headscale as extra records when node-control writes the
 	// file: list them once, under records.
 	managed := map[string]bool{}
@@ -713,18 +744,24 @@ func (m *Module) state(w http.ResponseWriter, r *http.Request) {
 		managed[rec.Name] = true
 	}
 	out.Extra = slices.DeleteFunc(out.Extra, func(n string) bool { return managed[n] })
+	for _, z := range zones {
+		if self.IsValid() {
+			out.Split[z.Name] = []string{self.String()}
+		}
+	}
 	for _, rec := range recs {
-		v := recordView{Record: rec, Answer: []string{}}
-		if t != nil {
-			if addrs, found, _ := t.Lookup(rec.Name); found {
-				for _, a := range addrs {
-					v.Answer = append(v.Answer, a.String())
-				}
-			}
+		v := recordView{Record: rec, InFile: m.extra != nil && rec.InFile(),
+			Zone: zoneOf(rec.Name, zones)}
+		v.Record.Rules = nil
+		v.Answer = answerText(resolve(rec.Target, nodes))
+		for _, rule := range rec.Rules {
+			ans := answerText(resolve(rule.Target, nodes))
+			v.Rules = append(v.Rules, ruleView{Rule: rule, Answer: ans})
 		}
 		out.Records = append(out.Records, v)
-		// With the file, headscale already sends the records to devices: no split line is needed.
-		if self.IsValid() && m.extra == nil {
+		// With the file, headscale already sends an address record without rules to devices. A
+		// name in a managed zone is covered by the zone's line.
+		if self.IsValid() && !v.InFile && v.Zone == "" {
 			out.Split[rec.Name] = []string{self.String()}
 		}
 	}

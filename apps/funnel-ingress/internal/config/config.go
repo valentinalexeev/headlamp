@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,11 @@ type Config struct {
 	ConnectTimeout, IdleTimeout, RequestTimeout time.Duration
 
 	ClientIP *clientip.Resolver // where the client address comes from (FUNNEL_CLIENT_IP_HEADER, FUNNEL_TRUSTED_PROXIES)
+
+	// HSTS is the Strict-Transport-Security value sent on responses for routed hosts that
+	// the client reached over HTTPS (FUNNEL_HSTS). Empty (the default) sends nothing and
+	// leaves a backend's own header alone.
+	HSTS string
 }
 
 // Load builds a Config from getenv (os.Getenv in production). Error texts name settings, never values:
@@ -158,10 +164,37 @@ func Load(getenv func(string) string) (Config, error) {
 		fail("FUNNEL_CLIENT_IP_HEADER or FUNNEL_TRUSTED_PROXIES: %v", err)
 	}
 
+	if v := strings.TrimSpace(getenv("FUNNEL_HSTS")); v != "" {
+		m := hstsValue.FindStringSubmatch(v)
+		switch {
+		case m == nil:
+			fail(`FUNNEL_HSTS must be "max-age=<seconds>", ` +
+				`optionally followed by "; includeSubDomains"`)
+		case len(m[1]) > 9 || mustAtoi(m[1]) > hstsMaxAge:
+			fail("FUNNEL_HSTS max-age must be at most %d (two years)", hstsMaxAge)
+		default:
+			c.HSTS = v
+		}
+	}
+
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
 	return c, nil
+}
+
+// hstsValue accepts only max-age and includeSubDomains. preload is refused on purpose: it
+// is a commitment that cannot be taken back quickly, and it must not be switched on by a
+// typo in an environment variable. max-age is capped at two years (hstsMaxAge): a browser
+// keeps the policy that long, so a larger value is almost certainly a typo.
+var hstsValue = regexp.MustCompile(`^max-age=([0-9]{1,10})(; ?includeSubDomains)?$`)
+
+const hstsMaxAge = 63072000
+
+// mustAtoi parses digits that a regexp already checked; at most 9 digits fit in an int.
+func mustAtoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 // httpURL reports whether s parses as an absolute http or https URL with a host. It never returns the

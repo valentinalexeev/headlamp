@@ -123,6 +123,7 @@ process settings. They arrive through the configuration source.
 | `FUNNEL_RECONCILE_INTERVAL`, `FUNNEL_MISSING_CHECKS` | see Lifecycle |
 | `FUNNEL_MAX_ROUTES_PER_NODE`, `FUNNEL_MAX_BODY_BYTES` | defaults `20`, `33554432` |
 | `FUNNEL_CONNECT_TIMEOUT`, `FUNNEL_IDLE_TIMEOUT`, `FUNNEL_REQUEST_TIMEOUT` | defaults `10s`, `120s`, `300s` |
+| `FUNNEL_HSTS` | value of `Strict-Transport-Security` for service hosts reached over HTTPS, for example `max-age=31536000; includeSubDomains`. Empty (default): no header. Replaces a backend's own header. Accepts only `max-age` (at most `63072000`, two years) and `includeSubDomains`, not `preload`. Browsers keep the policy for the whole max-age, so start with a short value if you are unsure |
 | `FUNNEL_CLIENT_IP_HEADER` | header with the client address, default `Fly-Client-IP`. `X-Forwarded-For` is read as a chain. `none` uses the peer address only |
 | `FUNNEL_TRUSTED_PROXIES` | comma-separated CIDRs or addresses of the load balancer. Only these peers can set the client header and `X-Forwarded-Proto`. Empty: all peers (see the warning above) |
 | `REDIS_URL`, `REDIS_KEY`, `FUNNEL_STATE_KEY`, `STATE_ALLOW_PLAINTEXT`, `STATE_IMPORT_FROM` | state store, see below |

@@ -7,6 +7,10 @@
 # version after the highest stable tag, bump enough for the commits since then, and have a "## X.Y.Z" section in
 # UPGRADING.md if that file exists. With RELEASE_REPO=owner/name it
 # must also have no open issues in a milestone named after its version.
+#
+# A patch release of an older line comes from its maintenance branch maint/X.Y (MAINT_REMOTE, default origin): a tag
+# vX.Y.Z with Z > 0 that is not on MAIN_REF must be on <remote>/maint/X.Y. It is then the next patch after the highest
+# vX.Y.* tag, and only a patch: the commits since that tag must not need a minor or major release.
 set -euo pipefail
 
 fail() { echo "release check failed: $*" >&2; exit 1; }
@@ -28,15 +32,26 @@ major=${BASH_REMATCH[1]} minor=${BASH_REMATCH[2]} patch=${BASH_REMATCH[3]}
 commit=$(git rev-parse --verify "$tag^{commit}" 2>/dev/null) || fail "no such tag or commit: $tag"
 file=$(git show "$commit:VERSION" 2>/dev/null | tr -d '[:space:]') || fail "no VERSION file at $tag"
 [ "$file" = "${tag#v}" ] || [ "$file" = "${core#v}" ] || fail "VERSION says $file, the tag says ${tag#v}"
-git merge-base --is-ancestor "$commit" "$main_ref" || fail "$tag is not on $main_ref"
+maint_ref="${MAINT_REMOTE:-origin}/maint/$major.$minor"
+maint_line=""
+if ! git merge-base --is-ancestor "$commit" "$main_ref"; then
+	[ "$patch" != 0 ] || fail "$tag is not on $main_ref (a .0 release comes from $main_ref)"
+	git rev-parse --verify -q "$maint_ref^{commit}" >/dev/null || fail "$tag is not on $main_ref, and there is no $maint_ref"
+	git merge-base --is-ancestor "$commit" "$maint_ref" || fail "$tag is not on $main_ref or $maint_ref"
+	maint_line="$major.$minor"
+fi
 
-previous=$(git tag -l 'v*' | grep -E "$stable" | grep -vx "$tag" | sort -V | tail -1 || true)
+# On a maintenance branch, the previous release is the highest tag of that line.
+list=$(git tag -l 'v*' | grep -E "$stable" | grep -vx "$tag" || true)
+[ -z "$maint_line" ] || list=$(grep -E "^v$major\.$minor\." <<<"$list" || true)
+previous=$(sort -V <<<"$list" | sed '/^$/d' | tail -1)
+[ -z "$maint_line" ] || [ -n "$previous" ] || fail "$maint_ref has no v$major.$minor.* release to follow"
 
 if [ -n "$previous" ]; then
 	[[ $previous =~ $stable ]]
 	pmajor=${BASH_REMATCH[1]} pminor=${BASH_REMATCH[2]} ppatch=${BASH_REMATCH[3]}
 
-	# Only ever the next version, with the lower numbers reset. A fix to an older line is not supported.
+	# Only ever the next version, with the lower numbers reset (on maint/X.Y, the next patch of that line).
 	if [ "$major" = "$((pmajor + 1))" ] && [ "$minor" = 0 ] && [ "$patch" = 0 ]; then
 		bump="major"
 	elif [ "$major" = "$pmajor" ] && [ "$minor" = "$((pminor + 1))" ] && [ "$patch" = 0 ]; then
@@ -69,6 +84,8 @@ if [ -n "$previous" ]; then
 		need="minor"
 	fi
 	rank() { case $1 in patch) echo 0 ;; minor) echo 1 ;; major) echo 2 ;; esac; }
+	[ -z "$maint_line" ] || [ "$need" = patch ] ||
+		fail "the commits since $previous on maint/$maint_line need a $need release: a maintenance branch takes fixes only"
 	[ "$(rank "$bump")" -ge "$(rank "$need")" ] ||
 		fail "the commits since $previous need at least a $need release, this is a $bump"
 fi

@@ -109,6 +109,13 @@ func (h *handler) newProxy(v variant, dial func(ctx context.Context, network, ad
 			pr.Out.Header.Set("X-Forwarded-Host", pr.In.Host)
 			pr.Out.Header.Set("X-Forwarded-Proto", forwardedProto(pr.In, h.cfg.ClientIP.TrustedPeer(pr.In)))
 		},
+		ModifyResponse: func(res *http.Response) error {
+			if h.cfg.HSTS != "" {
+				// the configured value wins over a backend's own
+				res.Header.Del("Strict-Transport-Security")
+			}
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			var tooBig *http.MaxBytesError
 			switch {
@@ -175,6 +182,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNotFound)
 		return
+	}
+	if h.cfg.HSTS != "" && forwardedProto(r, h.cfg.ClientIP.TrustedPeer(r)) == "https" {
+		// service hosts only, never over plain HTTP (RFC 6797)
+		w.Header().Set("Strict-Transport-Security", h.cfg.HSTS)
 	}
 	rt, found := h.table.Lookup(routes.Key{NS: ns, Service: service})
 	if !found {

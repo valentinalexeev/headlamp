@@ -157,6 +157,11 @@ var Routes = map[string]Rule{
 	"POST /dns/records":          need(FeatureDNS, LevelAdmin),
 	"PUT /dns/records/{name}":    need(FeatureDNS, LevelAdmin),
 	"DELETE /dns/records/{name}": need(FeatureDNS, LevelAdmin),
+	// tailnet DNS zones and the console page (#285)
+	"POST /dns/zones":          need(FeatureDNS, LevelAdmin),
+	"DELETE /dns/zones/{name}": need(FeatureDNS, LevelAdmin),
+	"GET /dns":                 need(FeatureDNS, LevelView),
+	"GET /dns/static/dns.js":   need(FeatureDNS, LevelView),
 	// serve (#117): a service is a name plus the pre-auth key its proxies join with
 	"GET /serve/state":                       need(FeatureServe, LevelView),
 	"POST /serve/services":                   need(FeatureServe, LevelAdmin),

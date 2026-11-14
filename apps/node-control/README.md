@@ -555,9 +555,9 @@ Each value has one source. The page shows the source of each value:
 To change a value, do these steps:
 
 1. Change the value on the page.
-2. Click **Preview**. node-control validates the values. When the `sing-box` binary is on the `PATH` of node-control,
-   it also does `sing-box check` on a profile of a test device. The page shows each change (old value, new value and
-   their sources) and the selection groups of the sing-box and Clash profiles.
+2. Click **Preview**. node-control validates the values. If `sing-box` is on the `PATH`, node-control also does
+   `sing-box check` on a profile of a test device. The page shows each change with its old and new value and source.
+   It also shows the selection groups of the sing-box and Clash profiles.
 3. Click **Apply**. **Apply** is available only after a preview of the same values.
 4. Test the change on one device: refresh its subscription in the app.
 5. If the change is bad, click **Revert last change**. This goes back one step. A second revert is not possible.
@@ -565,8 +565,8 @@ To change a value, do these steps:
 > **WARNING:** A change applies to all devices, each at its next subscription update. A bad value stays on a device
 > until that update, and the revert does too. Test each change on one device first.
 
-The audit log (see "The enrolment audit log") records each preview (`selection.preview`), apply (`selection.apply`)
-and revert (`selection.revert`), with the caller, the time, and the old and new values.
+The audit log records each preview (`selection.preview`), apply (`selection.apply`) and revert (`selection.revert`).
+Each entry has the caller, the time, and the old and new values. See "The enrolment audit log".
 
 Permissions: the page and `GET /enroll/selection/state` need `enroll.view`. Preview, apply and revert need
 `enroll.admin`.

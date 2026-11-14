@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.19.1 - (not released)
+
 ## 0.19.0 - 2026-11-14
 
 ### Added

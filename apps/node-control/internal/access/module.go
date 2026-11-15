@@ -182,7 +182,7 @@ func (m *Module) Nav() []core.NavItem {
 	}
 	return []core.NavItem{{Label: "Access", Path: "/admin", Order: 90, Group: "configure", Icon: "key",
 		Allow: func(l string) bool {
-			return m.pol.Can(authz.Subject{Login: l}, authz.P(authz.FeatureAdmin, authz.LevelView))
+			return m.pol.Can(authz.SubjectOf(l), authz.P(authz.FeatureAdmin, authz.LevelView))
 		}}}
 }
 
@@ -194,7 +194,7 @@ func (m *Module) Activity(_ context.Context, login string, limit int) ([]core.Ac
 	if m.st == nil {
 		return nil, nil
 	}
-	if !m.pol.Can(authz.Subject{Login: login}, authz.P(authz.FeatureAudit, authz.LevelView)) {
+	if !m.pol.Can(authz.SubjectOf(login), authz.P(authz.FeatureAudit, authz.LevelView)) {
 		return nil, core.ErrNotVisible
 	}
 	es, err := m.st.Audit(limit)
@@ -261,7 +261,7 @@ func readJSON(r *http.Request, v any) error {
 
 func (m *Module) actor(r *http.Request) (string, authz.Role) {
 	l := authz.LoginFrom(r.Context())
-	return l, m.pol.Role(authz.Subject{Login: l})
+	return l, m.pol.Role(authz.SubjectOf(l))
 }
 
 func (m *Module) state(w http.ResponseWriter, r *http.Request) {

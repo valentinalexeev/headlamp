@@ -240,7 +240,7 @@ func (a *Authorizer) Wrap(pattern string, h http.Handler) (http.Handler, error) 
 			deny(w, log, "tagged")
 			return
 		}
-		s := Subject{Login: l}
+		s := subjectOf(l)
 		if !(a.Open && a.Policy.Empty()) {
 			switch r.Kind {
 			case KindAnyUser:

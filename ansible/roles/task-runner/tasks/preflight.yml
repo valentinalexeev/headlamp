@@ -79,7 +79,7 @@
       task_runner_port. Got task_runner_session_port='{{ task_runner_session_port }}',
       task_runner_port='{{ task_runner_port }}'.
     quiet: true
-  when: task_runner_session_enabled | bool
+  when: "'session' in task_runner_roles"
 
 - name: Check the user name and the paths
   ansible.builtin.assert:
@@ -102,6 +102,19 @@
       65536; paths absolute with no spaces or shell characters.
     quiet: true
 
+- name: Check the roles
+  ansible.builtin.assert:
+    that:
+      - task_runner_roles is sequence and task_runner_roles is not string
+      - task_runner_roles | length > 0
+      - task_runner_roles | difference(['run', 'session']) | length == 0
+      - "'run' in task_runner_roles"
+    fail_msg: >-
+      task-runner: task_runner_roles must be [run] or [run, session] (#324). Got
+      {{ task_runner_roles }}. A node with the session role keeps run too: node-control
+      schedules tasks on the tag, and the image stage session is built on run.
+    quiet: true
+
 - name: Check the resource limits
   ansible.builtin.assert:
     that:
@@ -113,6 +126,12 @@
       - (task_runner_tasks_max | int) > (task_runner_pids_limit | int)
       - task_runner_container_mb | int >= 256
       - (task_runner_container_mb | int) + 256 <= (task_runner_memory_max_mb | int)
+      - task_runner_session_memory is regex('^[0-9]+[kmg]\\Z')
+      - task_runner_session_mb | int >= 256
+      - (task_runner_session_mb | int) + 256 <= (task_runner_memory_max_mb | int)
+      - >-
+        task_runner_shared_slot | bool or 'session' not in task_runner_roles
+        or (task_runner_container_mb | int) + (task_runner_session_mb | int) + 256 <= (task_runner_memory_max_mb | int)
       - task_runner_min_free_mb | string is regex('^[0-9]+\\Z')
       - task_runner_min_free_disk_mb | string is regex('^[0-9]+\\Z')
     fail_msg: >-
@@ -120,7 +139,11 @@
       task_runner_container_memory like 1g (k/m/g), at least 256 MB and at least
       256 MB below task_runner_memory_max (room for the runner and podman);
       task_runner_pids_limit at least 64 and below task_runner_tasks_max.
+      task_runner_session_memory follows the same rules. With task_runner_shared_slot false and
+      the session role, a run and a session can run at once: container_memory + session_memory
+      + 256 MB must fit in memory_max (#324).
       Got memory_max={{ task_runner_memory_max }}, container_memory={{ task_runner_container_memory }},
+      session_memory={{ task_runner_session_memory }}, shared_slot={{ task_runner_shared_slot }},
       pids_limit={{ task_runner_pids_limit }}, tasks_max={{ task_runner_tasks_max }}.
     quiet: true
   vars:
@@ -128,6 +151,8 @@
       {{ (task_runner_memory_max[:-1] | int) * {'K': 1, 'M': 1024, 'G': 1048576}[task_runner_memory_max[-1:]] | default(0) // 1024 }}
     task_runner_container_mb: >-
       {{ (task_runner_container_memory[:-1] | int) * {'k': 1, 'm': 1024, 'g': 1048576}[task_runner_container_memory[-1:]] | default(0) // 1024 }}
+    task_runner_session_mb: >-
+      {{ (task_runner_session_memory[:-1] | int) * {'k': 1, 'm': 1024, 'g': 1048576}[task_runner_session_memory[-1:]] | default(0) // 1024 }}
 
 - name: Check the guard inputs
   ansible.builtin.assert:
@@ -290,21 +315,23 @@
     quiet: true
   when: task_runner_image_archive | length > 0
 
-# The tag is a content hash: a change to the Containerfile, host.js, session.sh or the base
-# digest (or to the archive) yields a new tag and a rebuild; unchanged inputs
+# The tag is a content hash: a change to the Containerfile, host.js, session.sh, the base
+# digest or the image stage (#324) (or to the archive) yields a new tag and a rebuild; unchanged inputs
 # keep the tag, so the build is skipped. "b-" = built on the node, "a-" = loaded.
 - name: Work out the architecture, the listen address and the image tag
   ansible.builtin.set_fact:
     task_runner_goarch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] }}"
     task_runner_listen: >-
       {{ ('[' ~ task_runner_listen_addr ~ ']') if ':' in task_runner_listen_addr else task_runner_listen_addr }}:{{ task_runner_port }}
+    task_runner_image_target: "{{ 'session' if 'session' in task_runner_roles else 'run' }}"
     task_runner_image: >-
       {{ task_runner_image_repo }}:{{
         ('a-' ~ task_runner_archive_stat.stat.checksum[:16]) if task_runner_image_archive | length > 0
         else ('b-' ~ ((lookup('ansible.builtin.file', task_runner_src ~ '/image/Containerfile')
                        ~ '\n--host.js--\n' ~ lookup('ansible.builtin.file', task_runner_src ~ '/image/host.js')
                        ~ '\n--session.sh--\n' ~ lookup('ansible.builtin.file', task_runner_src ~ '/image/session.sh')
-                       ~ '\n--base--\n' ~ task_runner_base_image) | hash('sha256'))[:16]) }}
+                       ~ '\n--base--\n' ~ task_runner_base_image
+                       ~ '\n--target--\n' ~ ('session' if 'session' in task_runner_roles else 'run')) | hash('sha256'))[:16]) }}
 
 # Free disk on the file system of the state dir (longest mount prefix; -1 =
 # not found). Checked in image.yml, only when the image has to be built or

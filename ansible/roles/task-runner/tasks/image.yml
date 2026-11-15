@@ -82,6 +82,8 @@
           - --pull=missing
           - --build-arg
           - "BASE={{ task_runner_base_image }}"
+          - --target
+          - "{{ task_runner_image_target }}"
           - --tag
           - "{{ task_runner_image }}"
           - --file

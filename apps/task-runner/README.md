@@ -16,13 +16,18 @@ token gives an empty `401`. Unknown routes give an empty `404`.
 | `POST /v1/runs` `{"script":"<js>","params":{},"secrets":{"NAME":"value"},"timeout_seconds":180}` | `201 {"id":"..."}`; `409` while a run is active (also while a cancelled run is still being reaped); `422` for an empty script, `timeout_seconds` outside 1..1800 (default 180), `params` that is not an object, `secrets` that is not an object of strings, wrong JSON types, trailing data, `params` or `secrets` over 100000 bytes encoded, or a body over 1 MiB |
 | `GET /v1/runs/{id}` | `{"state":"running\|succeeded\|failed\|cancelled","result":{...}\|null,"error":"","log_tail":"<last 4 KB>"}`; `404` for an unknown id, also after a restart |
 | `DELETE /v1/runs/{id}` | `204` (also for a run that already finished, which is left as it is); `404` for an unknown id. A running run is marked `cancelled` at once and its container is killed (`kill task-<id>`); the run slot frees when the container is reaped |
-| `GET /v1/health` | `{"version":"...","busy":false,"mem_available_mb":N}` (`-1` when `/proc/meminfo` is unreadable) |
-| `POST /v1/sessions` `{"ttl_seconds":3600,"idle_seconds":900}` (both optional) | `201 {"id","port","expires_at"}` (RFC 3339 UTC); `409` while a run or another session holds the slot; `422` for `ttl_seconds` outside 60..14400, `idle_seconds` outside 60..3600, bad JSON or trailing data; `404` when sessions are disabled (`RUNNER_SESSION_BIND` unset) |
+| `GET /v1/health` | `{"version":"...","api":1,"busy":false,"run_busy":false,"session_busy":false,"roles":["run","session"],"shared_slot":true,"mem_available_mb":N}` (`-1` when `/proc/meminfo` is unreadable). `busy` is true when no run can start. `roles` is `["run"]` without `RUNNER_SESSION_BIND` |
+| `POST /v1/sessions` `{"ttl_seconds":3600,"idle_seconds":900}` (both optional) | `201 {"id","port","expires_at"}` (RFC 3339 UTC); `409` while another session holds the session slot, or a run holds the shared slot; `422` for `ttl_seconds` outside 60..14400, `idle_seconds` outside 60..3600, bad JSON or trailing data; `404` when sessions are disabled (`RUNNER_SESSION_BIND` unset) |
 | `GET /v1/sessions` | `{"session":null}` or `{"session":{"id","state":"running\|ended","started_at","expires_at","port","reason":""}}`; `reason` is `ttl`, `idle`, `stopped` or `failed` once ended; the last ended session is kept for 5 minutes |
 | `DELETE /v1/sessions/{id}` | `204` (also for an ended session); `404` for an unknown id. The container is killed and removed; the slot frees when it is reaped |
 
-A session is an interactive browser (see Image). It shares the single slot with runs. A session that starts while a run is
-active gets `409`. A run that starts while a session is active also gets `409`. `busy` in `/v1/health` is true while a session runs.
+A session is an interactive browser (see Image). With `RUNNER_SHARED_SLOT=true` (the default), it shares one slot with runs.
+A session that starts while a run is active gets `409`. A run that starts while a session is active also gets `409`. `busy`
+is true while a session runs.
+
+With `RUNNER_SHARED_SLOT=false` (#324), runs and sessions each have their own slot.
+One run and one session can then run at the same time, and a session does not make the node `busy` for scheduled runs.
+Each container has its own memory limit, so the host must hold both.
 
 Finished runs are kept for an hour (at most the last 20).
 
@@ -76,8 +81,8 @@ Every session also carries a random 128-bit token (see below).
 The runner stores nothing else (no profile, no history beyond the tmpfs of the container).
 The runner removes the container when the TTL passes, when it exits after the idle period, on `DELETE` and on runner shutdown.
 
-A running session makes the node report `busy`. Scheduled tasks pinned to that node then fail with "node busy" or
-"no eligible node" until the session ends (up to the TTL).
+With the shared slot, a running session makes the node report `busy`. Scheduled tasks pinned to that node then fail with
+"node busy" or "no eligible node" until the session ends (up to the TTL). With `RUNNER_SHARED_SLOT=false` they do not.
 
 Trust model: the ACL controls reachability. The session token stops other pages and users on allowed devices from
 using the endpoint. The token is random for each session, it is in the link, and it dies with the session.
@@ -103,10 +108,13 @@ Closing the last browser window reopens Chrome. With sessions disabled
 | `RUNNER_LISTEN` | `127.0.0.1:9100` | bind address (set to the tailnet address) |
 | `RUNNER_STATE_DIR` | `/var/lib/task-runner` | |
 | `RUNNER_CONTAINER_BIN` | `podman` | tests point it at a fake |
-| `RUNNER_MEMORY` | `1g` | container memory limit |
+| `RUNNER_MEMORY` | `1g` | memory limit of a run container |
 | `RUNNER_PIDS_LIMIT` | `512` | |
 | `RUNNER_SESSION_BIND` | | host IP (the tailnet address) to publish the session port on; empty disables sessions |
 | `RUNNER_SESSION_PORT` | `6080` | noVNC port, published and used inside the container |
+| `RUNNER_SESSION_IMAGE` | `RUNNER_IMAGE` | image of session containers (the `session` stage) |
+| `RUNNER_SESSION_MEMORY` | `RUNNER_MEMORY` | memory limit of a session container |
+| `RUNNER_SHARED_SLOT` | `true` | `false`: one slot for each role, so a run and a session can run at the same time (#324) |
 
 Logs are JSON on stderr. They carry run ids, states and durations only. On SIGTERM or SIGINT, the runner cancels the
 active run or session, waits up to 30 s for it to be reaped, and exits.
@@ -121,7 +129,12 @@ cannot change under a running node. Pick the base image tag whose Playwright
 version matches the pinned `playwright` package (1.64.1 in `image/Containerfile`).
 Resolve the tag to a digest at deploy time.
 
-The image also carries the browser session tools (Xvnc of TigerVNC, openbox, noVNC).
+The Containerfile has two stages (#324):
+
+- `run`: Playwright and its Chromium, and `host.js`. This is all a scheduled run needs.
+- `session`: `run` plus the browser session tools (Xvnc of TigerVNC, openbox, noVNC, websockify) and Google Chrome.
+
+Build `--target run` for a node that only runs tasks. It has no VNC tools and no Chrome. The session stage:
 
 - `sh /app/session.sh` starts a headed Google Chrome on a virtual display. The build installs Chrome into the image (linux/amd64).
   Playwright's Chromium is the fallback.
@@ -140,7 +153,8 @@ The image also carries the browser session tools (Xvnc of TigerVNC, openbox, noV
 
 `sh image/session_test.sh` runs static checks on the script.
 
-    podman build --build-arg BASE=<image@sha256:digest> -t task-run image/
+    podman build --build-arg BASE=<image@sha256:digest> --target run -t task-run image/
+    podman build --build-arg BASE=<image@sha256:digest> --target session -t task-session image/
 
 ## Develop
 

@@ -4,6 +4,11 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control: a secret variable can be a Google Secret Manager reference, `gcpsm://projects/<project>/secrets/<secret>[/versions/<n>]` (#361). node-control reads it once at start with Application Default Credentials and does not start when a read fails. It applies to the secret variables of the fingerprint list and `REDIS_URL`, not to `AWS_SECRET_ACCESS_KEY` (refused). Without a reference, nothing changes and no call is made.
+- node-control: `REDIS_CA_FILE`, a PEM file of CA certificates for a `rediss://` `REDIS_URL` (#361), for example the server CA of Memorystore with in-transit encryption. Unset: the system roots, as before.
+
 ## 0.20.0 - 2026-11-15
 
 ### Added

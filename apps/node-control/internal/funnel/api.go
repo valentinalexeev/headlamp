@@ -684,8 +684,8 @@ func (m *Module) checklistFor(ns string) checklist {
 		st := m.dns.snapshot()
 		note := "node-control keeps *." + m.s.PublicDomain + " in the " + st.Provider + " zone, and the edge gets each certificate on demand. Nothing to do for this namespace."
 		if m.dns.check != nil {
-			note = "The edge keeps *." + m.s.PublicDomain + " (Caddy dynamic_dns), and node-control " +
-				"checks it by DNS lookup. Nothing to do for this namespace."
+			note = "The edge keeps *." + m.s.PublicDomain + " (Caddy dynamic_dns), " +
+				"and node-control checks it by DNS lookup. Nothing to do for this namespace."
 		}
 		if !st.InSync {
 			note = "The last check of the record failed: " + st.Error

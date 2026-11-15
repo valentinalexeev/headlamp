@@ -10,7 +10,7 @@
 # PASS/FAIL against: MemAvailable > 20% of MemTotal and RSS < 205 MB.
 #
 # Read-only: it runs `cat` on /proc files in the machine and GETs one URL. Needs flyctl logged in.
-set -u
+set -eu
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
   echo "usage: $0 <fly-app> [seconds=300] [status-url]" >&2

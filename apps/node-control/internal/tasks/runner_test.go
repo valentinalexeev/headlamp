@@ -189,6 +189,35 @@ func TestClientHealthFalseWhenBusy(t *testing.T) {
 	}
 }
 
+// #324: a runner with its own session slot reports busy=false while only a session runs, so the
+// scheduler still uses the node. The roles reach the Fleet page through APIs(), capped.
+func TestClientHealthRolesAndSessionSlot(t *testing.T) {
+	body := map[string]any{"version": "v", "api": 1, "busy": false, "run_busy": false,
+		"session_busy": true, "roles": []string{"run", "session"}}
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := json.Marshal(body)
+		_, _ = w.Write(b)
+	}), "tok", nil)
+	ctx := context.Background()
+	if ok, err := c.Health(ctx, "1.2.3.4"); !ok || err != nil {
+		t.Fatalf("a session alone must not make the node busy for runs: %v %v", ok, err)
+	}
+	apis := c.(RunnerAPIs).APIs()
+	if got := apis["1.2.3.4"].Roles; len(got) != 2 || got[0] != "run" || got[1] != "session" {
+		t.Fatalf("roles %v", got)
+	}
+	body["roles"] = []string{"a", "b", "c", "d", "e", "f"}
+	_, _ = c.Health(ctx, "1.2.3.4")
+	if got := c.(RunnerAPIs).APIs()["1.2.3.4"].Roles; len(got) != maxRoles {
+		t.Fatalf("roles not capped: %v", got)
+	}
+	delete(body, "roles") // a runner older than #324
+	_, _ = c.Health(ctx, "1.2.3.4")
+	if got := c.(RunnerAPIs).APIs()["1.2.3.4"].Roles; got != nil {
+		t.Fatalf("no roles: %v", got)
+	}
+}
+
 func TestClientHealthTransportError(t *testing.T) {
 	tn := &dialTailnet{fail: true}
 	c := NewRunnerClient(tn, 1, "tok", nil)

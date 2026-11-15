@@ -4,6 +4,14 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- task-runner: roles and a slot for each role (#324). The image has two stages, `run` (Playwright and its Chromium) and `session` (plus Xvnc, openbox, noVNC and Chrome). The Ansible role builds `run` only unless `task_runner_roles` has `session`, so a task-only node gets no session tools. New `task_runner_shared_slot` (default `true`, no change): with `false`, a run and a session each have their own slot and their own memory limit (`task_runner_session_memory`), so a session no longer makes the node busy for scheduled tasks. Preflight checks that both containers fit in `task_runner_memory_max`. `GET /v1/health` adds `roles`, `run_busy`, `session_busy` and `shared_slot` (additive, `runner-api` stays 1). The Fleet page shows the roles of each runner. New runner settings `RUNNER_SESSION_IMAGE`, `RUNNER_SESSION_MEMORY` and `RUNNER_SHARED_SLOT`.
+
+### Deprecated
+
+- task-runner role: `task_runner_session_enabled` (#324). Use `task_runner_roles: [run, session]`. It still works and is removed before 1.0.0.
+
 ## 0.20.0 - 2026-11-15
 
 ### Added

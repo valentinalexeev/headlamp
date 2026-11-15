@@ -86,13 +86,16 @@ reaches the node. On a fresh host, the steps that need the service user can fail
 | `task_runner_token` | `""` | Required, vault. At least 24 characters, no whitespace, quotes, backslash, `$` or backtick. Never logged. |
 | `task_runner_listen_addr` | `""` | Required. The node's tailnet address (100.64.0.0/10, or IPv6 in fd7a:115c:a1e0::/48). Preflight checks `tailscale ip` on the node reports it. |
 | `task_runner_port` | `9100` | Bound on `task_runner_listen_addr` only. |
-| `task_runner_session_enabled` | `false` | Turns on interactive browser sessions: adds `RUNNER_SESSION_BIND` (= `task_runner_listen_addr`) and `RUNNER_SESSION_PORT` to the env file. See [Browser sessions](#browser-sessions). |
+| `task_runner_roles` | `[run]` | `[run]` or `[run, session]` (#324). With `session`, the role builds the `session` image stage and adds `RUNNER_SESSION_BIND` (= `task_runner_listen_addr`), `RUNNER_SESSION_PORT` and `RUNNER_SESSION_MEMORY` to the env file. Without it, the image has no VNC tools and no Chrome. See [Which role on which node](#which-role-on-which-node). |
+| `task_runner_session_enabled` | `false` | Deprecated (#324): `true` is the same as `task_runner_roles: [run, session]`. Removed before 1.0.0. |
+| `task_runner_shared_slot` | `true` | `true`: a run and a session exclude each other (as before #324). `false`: each role has its own slot, so a session never blocks a scheduled run. |
 | `task_runner_session_port` | `6080` | noVNC port published on the tailnet address; used only when sessions are enabled. 1-65535, must differ from `task_runner_port` (preflight). |
 | `task_runner_base_image` | `""` | Required unless `task_runner_image_archive` is set. `<image>@sha256:<64 hex>`, see [Base image digest](#base-image-digest). |
 | `task_runner_image_archive` | `""` | Optional control-host path to a `podman save` tarball; loaded instead of building. |
 | `task_runner_binary` | `""` | Optional control-host path to a prebuilt linux binary; otherwise built with the control host's `go`. |
 | `task_runner_memory_max` | `2G` | systemd `MemoryMax` for the whole service (runner, podman, the container). |
-| `task_runner_container_memory` | `1g` | `RUNNER_MEMORY` (podman `--memory`); at least 256 MB below `task_runner_memory_max`. |
+| `task_runner_container_memory` | `1g` | `RUNNER_MEMORY` (podman `--memory` of a run); at least 256 MB below `task_runner_memory_max`. |
+| `task_runner_session_memory` | `task_runner_container_memory` | `RUNNER_SESSION_MEMORY` (podman `--memory` of a session), same rules. With `task_runner_shared_slot: false`, both containers plus 256 MB must fit in `task_runner_memory_max` (preflight checks it). |
 | `task_runner_pids_limit` / `task_runner_tasks_max` | `512` / `2048` | Per container (`RUNNER_PIDS_LIMIT`) / whole service (`TasksMax`). |
 | `task_runner_min_free_mb` / `task_runner_min_free_disk_mb` | `1500` / `6000` | Free memory without page cache (preflight); free disk on the file system of the state dir (checked in the image step, only when an image has to be built or loaded). |
 | `task_runner_guard_resolvers` | `["100.100.100.100", "fd7a:115c:a1e0::53"]` | Resolvers the service user may query on port 53 although they are in a blocked range. |
@@ -146,12 +149,13 @@ The layout is fixed. Variables exist for it, but change them only with reason:
 3. **Guard**: the nftables table and its units (below).
 4. **Image**: run `podman image exists <tag>`. If the image is missing, copy `image/Containerfile`, `image/host.js` and `image/session.sh` to a temp dir in
    the state dir. Then run, as the service user (async),
-   `podman --cgroup-manager=cgroupfs build --pull=missing --build-arg BASE=<digest> --tag localhost/task-runner:b-<hash>`.
-   The tag is the first 16 hex of sha256(Containerfile, host.js, session.sh, base digest). A change rebuilds, and a rerun
+   `podman --cgroup-manager=cgroupfs build --pull=missing --build-arg BASE=<digest> --target <run|session> --tag localhost/task-runner:b-<hash>`.
+   The target is `session` when `task_runner_roles` has `session`, else `run`.
+   The tag is the first 16 hex of sha256(Containerfile, host.js, session.sh, base digest, target). A change rebuilds, and a rerun
    with the same inputs does nothing. With `task_runner_image_archive`, the role copies the tarball and runs `podman load` on it (it must
    hold exactly one image). It tags the image `localhost/task-runner:a-<sha256 of the archive>`.
 5. **Config**: write the env file (`RUNNER_TOKEN`, `RUNNER_LISTEN`, `RUNNER_STATE_DIR`, `RUNNER_CONTAINER_BIN`, `RUNNER_IMAGE`,
-   `RUNNER_MEMORY`, `RUNNER_PIDS_LIMIT`, plus the two `RUNNER_SESSION_*` lines when `task_runner_session_enabled`).
+   `RUNNER_MEMORY`, `RUNNER_PIDS_LIMIT`, `RUNNER_SHARED_SLOT`). With the `session` role it adds the three `RUNNER_SESSION_*` lines.
    Check that the image named there exists. Run the handlers: daemon-reload, guard reload, and runner restart when the binary, unit or env file changed.
    Enable and start the service. Then untag old image tags, and keep the current tag and the newest other one (`podman rmi` without force, failures ignored).
    The base image stays, because a rebuild reuses it.
@@ -160,13 +164,26 @@ Every podman call of the role passes the global `--cgroup-manager=cgroupfs` and 
 `XDG_RUNTIME_DIR` of the service. Podman records the run root in its database and refuses a mismatch, so the role and the service
 must agree. The runner adds the flag to its own calls.
 
+## Which role on which node
+
+A node has the `run` role, and optionally `session` (#324).
+
+| Node | `task_runner_roles` | `task_runner_shared_slot` | Result |
+|---|---|---|---|
+| Small node (1 vCPU / 1 GB) that runs scheduled tasks | `[run]` | any | Slim image, no session tools (#215) |
+| One node for both, enough memory for both containers | `[run, session]` | `false` | A session does not block scheduled runs |
+| One node for both, little memory | `[run, session]` | `true` | One container at a time; a session makes the node `busy` for scheduled runs |
+| Two nodes | `[run]` on one, `[run, session]` on the other | any | Put only the first in the scheduled task's tag |
+
+node-control picks session nodes by `SESSIONS_TAG`, and task nodes by the task's tag. The Fleet page shows the roles of each runner.
+
 ## Browser sessions
 
 An admin can open an interactive browser on a node (noVNC in a container). The Browser page of node-control starts and stops it.
 It is off by default. To enable it on a node, set:
 
 ```yaml
-task_runner_session_enabled: true
+task_runner_roles: [run, session]
 task_runner_session_port: 6080      # optional, the default
 ```
 

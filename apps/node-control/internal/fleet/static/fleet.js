@@ -73,12 +73,14 @@
       else { fs = hl.status('ok', 'reported ' + hl.relTime(f.reported_at, now)); }
       els.control.appendChild(row(['funnel ingress', text(f.version) || 'unknown (before 0.16.0)', fs]));
     }
-    // the task runners that answered a health check, with the runner API they report (#300)
+    // the task runners that answered a health check, with the runner API they report (#300) and their roles (#324)
     hl.arr(d.runners).forEach(function (r) {
       r = hl.obj(r);
       var c = hl.obj(r.compat), rc = compatWord(c, d.compat_strict);
       var st = rc ? hl.status(rc[0], rc[1]) : c.state === 'ok' ? hl.status('ok', 'compatible') : hl.status('off', 'API unknown');
-      els.control.appendChild(row(['task runner ' + (text(r.node, 63) || text(r.address, 45)),
+      var roles = hl.arr(r.roles).slice(0, 4).map(function (x) { return text(x, 16); }).filter(Boolean).join(', ');
+      els.control.appendChild(row(['task runner ' + (text(r.node, 63) || text(r.address, 45)) +
+        (roles ? ' (' + roles + ')' : ''),
         c.reported ? 'runner-api ' + (Number(c.reported) || 0) : '-', st]));
     });
     if (els.strict) {

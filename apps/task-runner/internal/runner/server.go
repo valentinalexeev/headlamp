@@ -42,15 +42,22 @@ const (
 // Config is the runner's configuration; zero values get the documented defaults.
 type Config struct {
 	Token        string // required bearer token
-	Image        string // required container image, pinned by digest
+	Image        string // required container image of runs, pinned by digest
 	StateDir     string
 	ContainerBin string
-	Memory       string
+	Memory       string // memory limit of a run container (default 1g)
 	PidsLimit    int
 	KillGrace    time.Duration // wait after `kill <name>` before killing the process group
 	SessionBind  string        // host IP the session's noVNC port is published on; empty disables sessions
 	SessionPort  int           // noVNC port (default 6080)
-	Logger       *slog.Logger
+	// SessionImage is the image of sessions (the session stage, #324). Default: Image.
+	SessionImage string
+	// SessionMemory is the memory limit of a session container. Default: Memory.
+	SessionMemory string
+	// SharedSlot makes a run and a session exclude each other, as before #324. Without it, each
+	// role has its own slot: one run and one session can run at the same time.
+	SharedSlot bool
+	Logger     *slog.Logger
 
 	sessionUnit time.Duration // test knob: length of one TTL "second" (default time.Second)
 }
@@ -101,6 +108,12 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.Memory == "" {
 		cfg.Memory = "1g"
+	}
+	if cfg.SessionImage == "" {
+		cfg.SessionImage = cfg.Image
+	}
+	if cfg.SessionMemory == "" {
+		cfg.SessionMemory = cfg.Memory
 	}
 	if cfg.PidsLimit <= 0 {
 		cfg.PidsLimit = 512
@@ -187,10 +200,28 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func (s *Server) health(w http.ResponseWriter) {
 	s.mu.Lock()
-	busy := s.active != nil || s.activeSession != nil
+	runBusy, sessBusy := s.active != nil, s.activeSession != nil
 	s.mu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{"version": Version, "api": APIVersion, "busy": busy,
-		"mem_available_mb": memAvailableMB()})
+	roles := []string{"run"}
+	if s.bindHost != "" {
+		roles = append(roles, "session")
+	}
+	// busy keeps its meaning for the scheduler of node-control: no run can start now (#324).
+	writeJSON(w, http.StatusOK, map[string]any{"version": Version, "api": APIVersion,
+		"busy": s.slotTaken(true, runBusy, sessBusy), "run_busy": runBusy, "session_busy": sessBusy,
+		"roles": roles, "shared_slot": s.cfg.SharedSlot, "mem_available_mb": memAvailableMB()})
+}
+
+// slotTaken says whether a new run (forRun) or a new session cannot start, given what is active.
+// Each role has its own slot unless SharedSlot is set (#324).
+func (s *Server) slotTaken(forRun, runBusy, sessBusy bool) bool {
+	if s.cfg.SharedSlot {
+		return runBusy || sessBusy
+	}
+	if forRun {
+		return runBusy
+	}
+	return sessBusy
 }
 
 // memAvailableMB reads MemAvailable from /proc/meminfo, -1 when unavailable.
@@ -258,7 +289,7 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.prune()
-	if s.active != nil || s.activeSession != nil {
+	if s.slotTaken(true, s.active != nil, s.activeSession != nil) {
 		s.mu.Unlock()
 		w.WriteHeader(http.StatusConflict)
 		return
@@ -366,7 +397,7 @@ func (s *Server) cancelLocked(r *run) {
 	}
 }
 
-// Shutdown cancels the active run or session and waits for it to be reaped.
+// Shutdown cancels the active run and session and waits for them to be reaped.
 func (s *Server) Shutdown(ctx context.Context) {
 	s.mu.Lock()
 	r, sess := s.active, s.activeSession

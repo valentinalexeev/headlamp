@@ -56,8 +56,10 @@ type Module struct {
 	cfg  config
 	// selfName is this node's tailnet name, to find its address for the split line the page shows.
 	selfName string
-	mu       sync.Mutex // serialises service changes against headscale and the store
-	last     struct {
+	// con is the admin console name on HTTPS (#366).
+	con  console
+	mu   sync.Mutex // serialises service changes against headscale and the store
+	last struct {
 		sync.Mutex
 		at  time.Time
 		err string
@@ -300,7 +302,11 @@ func (m *Module) refreshDNS(ctx context.Context) {
 		nodes, err = m.hs.ListNodes(ctx)
 		cancel()
 		if err == nil {
-			m.dns.SetTable(servedns.NewTable(m.cfg.zone, records(svcs, nodes)))
+			recs := records(svcs, nodes)
+			if r, ok := m.consoleRecord(); ok {
+				recs = append(recs, r)
+			}
+			m.dns.SetTable(servedns.NewTable(m.cfg.zone, recs))
 		}
 	}
 	m.last.Lock()
@@ -421,6 +427,10 @@ func (m *Module) createService(w http.ResponseWriter, r *http.Request) {
 	name, err := m.fullName(req.Name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	if m.isConsoleName(name) {
+		http.Error(w, "this name is the admin console (ADMIN_CONSOLE_NAME)", http.StatusConflict)
 		return
 	}
 	ns := strings.ToLower(strings.TrimSpace(req.Namespace))

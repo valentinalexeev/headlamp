@@ -23,6 +23,9 @@ const (
 	KindOpen
 	// KindMachine is checked by the module itself, by tailnet tag (funnel-ingress). No human may use it.
 	KindMachine
+	// KindHuman needs a human (untagged) tailnet caller and no permission: the OIDC sign-in (#366),
+	// which must work before the caller holds a permission. The handler checks WhoIs again itself.
+	KindHuman
 )
 
 // Rule is the check for one admin route.
@@ -37,13 +40,20 @@ var (
 	open    = Rule{Kind: KindOpen}
 	anyUser = Rule{Kind: KindAnyUser}
 	machine = Rule{Kind: KindMachine}
+	human   = Rule{Kind: KindHuman}
 )
 
 // Routes is the permission of every admin route, by its exact ServeMux pattern. A route that is not here makes
 // the server refuse to start (core.Mux.Seal). Keep it in the order of the features.
 var Routes = map[string]Rule{
 	// core
-	"GET /healthz":                   open,
+	"GET /healthz": open,
+	// #366: the OIDC sign-in. The handlers check WhoIs themselves (a human tailnet caller only):
+	// the routes must work before the caller holds any permission, since the sign-in gives it.
+	"GET /auth/login":                human,
+	"GET /auth/callback":             human,
+	"POST /auth/logout":              human,
+	"GET /auth/me":                   human,
 	"GET /_attention.json":           anyUser,
 	"GET /_activity.json":            anyUser,
 	"GET /_search.json":              anyUser,
@@ -240,8 +250,8 @@ func (a *Authorizer) Wrap(pattern string, h http.Handler) (http.Handler, error) 
 			deny(w, log, "tagged")
 			return
 		}
-		s := Subject{Login: l}
-		if !(a.Open && a.Policy.Empty()) {
+		s := subjectOf(l)
+		if r.Kind != KindHuman && (!a.Open || !a.Policy.Empty()) {
 			switch r.Kind {
 			case KindAnyUser:
 				if len(a.Policy.Role(s)) == 0 {

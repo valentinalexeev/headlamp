@@ -70,7 +70,7 @@ to code that a change edits. Existing code does not need a change before it gets
 7. **Dependencies.** Add a new module only when the standard library or an existing dependency cannot do the
    work. Give the reason in the pull request.
 8. **Shell scripts.** Each script starts with `set -eu`. Bash scripts also set `-o pipefail`. `shellcheck` shows
-   warnings, not only errors.
+   warnings, not only errors. The test scripts reach this rule through their move to bats-core and Go (ADR 0004).
 9. **Fuzz tests.** A function that parses data from an operator or from the network has a Go fuzz test. The first
    targets are `tasks.ParseConfig`, `enroll.parseIngress` and the state store importer.
 

@@ -24,7 +24,7 @@ func Default() *Policy { return current.Load() }
 // the caller passes the legacy list of its feature, and a login on it is admin of that feature.
 func Can(login string, perm Perm, legacy Allowed) bool {
 	if p := current.Load(); p != nil {
-		return p.Can(Subject{Login: login}, perm)
+		return p.Can(subjectOf(login), perm)
 	}
 	return legacy.Has(login) && perm.Level <= LevelAdmin
 }

@@ -15,7 +15,7 @@
 #
 # Exit 0 = clean (or no list available and HEADLAMP_DENYLIST_REQUIRED is not 1), 1 = hit, 2 = no list
 # while HEADLAMP_DENYLIST_REQUIRED=1 (agents must set it), 64 = bad usage.
-set -u
+set -eu
 
 usage() { echo "usage: $0 --staged | --message FILE | --text FILE|-" >&2; exit 64; }
 [ $# -ge 1 ] || usage

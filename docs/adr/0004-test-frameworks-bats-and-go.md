@@ -5,8 +5,8 @@ for step 1, 0.22.0 for the rest. All of it is live in CI before 1.0.0.
 
 ## Context
 
-The repository has about 57 test scripts written by hand in shell: about 38 unit tests of shell scripts (with fake
-`curl`, `flyctl` or `sops` on `PATH`) and about 19 end-to-end tests on Docker or kind. Each one has its own helpers to
+The repository has about 57 test scripts written by hand in shell. About 38 are unit tests of shell scripts, with fake
+`curl`, `flyctl` or `sops` on `PATH`. About 19 are end-to-end tests on Docker or kind. Each one has its own helpers to
 run a command, keep its exit code, compare output, count failures and remove temp files.
 
 Rule 8 of ADR 0002 asks every script to start with `set -eu`. The test scripts cannot do this. They read exit codes
@@ -17,8 +17,8 @@ broke). The test scripts also differ in output, cleanup and skip handling.
 
 1. **Unit tests of shell scripts use [bats-core](https://github.com/bats-core/bats-core)**, with bats-support and
    bats-assert. The three are git submodules under `test/bats`, pinned to release tags. The tests live in
-   `test/scripts/<name>.bats` and load `test/helpers.bash`. `run` keeps the exit code and the output of a command, so the
-   script under test and the test file can both use `set -eu`. Each test gets its own temp directory
+   `test/scripts/<name>.bats` and load `test/helpers.bash`. `run` keeps the exit code and the output of a command.
+   Thus the script under test and the test file can both use `set -eu`. Each test gets its own temp directory
    (`BATS_TEST_TMPDIR`), which bats removes.
 2. **End-to-end tests use Go** (`testing`, `os/exec`), in one module `tests/e2e`. A test calls `t.Skip` when Docker or
    kind is missing, and `t.Cleanup` removes its containers. `go test ./...` in that module runs them all.

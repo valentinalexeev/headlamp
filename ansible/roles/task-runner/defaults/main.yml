@@ -22,12 +22,21 @@ task_runner_token: ""
 task_runner_listen_addr: ""
 task_runner_port: 9100
 
-# Interactive browser sessions (see README "Browser sessions"). Off by default.
-# When true the env file gets RUNNER_SESSION_BIND (= task_runner_listen_addr, so
-# the session port is published on the tailnet address only) and
+# Roles of the node (#324): "run" (scheduled task runs) and "session" (interactive browser sessions,
+# see README "Browser sessions"). Default: [run], or [run, session] when the deprecated
+# task_runner_session_enabled is true. Without "session" the role builds the image stage `run` only:
+# no Xvnc, noVNC, openbox or Chrome. With "session" the env file gets RUNNER_SESSION_BIND
+# (= task_runner_listen_addr, so the session port is published on the tailnet address only) and
 # RUNNER_SESSION_PORT. The port must differ from task_runner_port.
+task_runner_roles: "{{ ['run', 'session'] if task_runner_session_enabled | bool else ['run'] }}"
+# Deprecated (#324): use task_runner_roles. Removed before 1.0.0 (#374).
 task_runner_session_enabled: false
 task_runner_session_port: 6080
+# true (default, as before #324): a run and a session exclude each other on this node, and a
+# session makes the node busy for scheduled runs. false: each role has its own slot, so a
+# session never blocks a scheduled run; task_runner_memory_max must then hold both containers
+# (preflight checks it).
+task_runner_shared_slot: true
 
 # Base image of the run image, pinned by digest (REQUIRED unless
 # task_runner_image_archive is set): "<registry>/<repository>@sha256:<64 hex>".
@@ -66,9 +75,12 @@ task_runner_subid_count: 65536
 # Resource limits.
 # Whole service (runner, podman, the container): systemd MemoryMax (K/M/G).
 task_runner_memory_max: 2G
-# Per container: RUNNER_MEMORY, podman --memory (k/m/g). Must leave at least
+# Per run container: RUNNER_MEMORY, podman --memory (k/m/g). Must leave at least
 # 256 MB of task_runner_memory_max for the runner and podman.
 task_runner_container_memory: 1g
+# Per session container: RUNNER_SESSION_MEMORY (k/m/g). With task_runner_shared_slot false, run
+# and session containers can run together, so task_runner_memory_max must hold both plus 256 MB.
+task_runner_session_memory: "{{ task_runner_container_memory }}"
 # Per container: RUNNER_PIDS_LIMIT, podman --pids-limit.
 task_runner_pids_limit: 512
 # Whole service: systemd TasksMax.

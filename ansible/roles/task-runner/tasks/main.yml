@@ -26,6 +26,14 @@
       tags: [task-runner, guard]
   tags: [task-runner, guard]
 
+# #215: the optional swap file of the small profile, before the image build (the build is the first peak).
+- name: Swap file
+  ansible.builtin.include_tasks:
+    file: swap.yml
+    apply:
+      tags: [task-runner, swap]
+  tags: [task-runner, swap]
+
 - name: Build or load the run image
   ansible.builtin.include_tasks:
     file: image.yml

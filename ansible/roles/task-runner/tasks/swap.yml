@@ -1,0 +1,111 @@
+---
+# Optional swap file (#215). The small profile turns it on: a 1 GB host with a browser session has little room
+# for a peak. Only the role's own file is managed (task_runner_swap_file); a swap that the host already has is
+# left alone. Size 0 turns the file off and removes it. Swapped memory of the runner can hold task secrets; see
+# README "Smaller nodes".
+- name: Read the active swap areas
+  ansible.builtin.command:
+    argv: [swapon, --show=NAME, --noheadings, --bytes]
+  check_mode: false
+  changed_when: false
+  register: task_runner_swapon
+
+- name: Make and turn on the swap file
+  when: (task_runner_swap_mb | int) > 0
+  block:
+    - name: Read the swap file
+      ansible.builtin.stat:
+        path: "{{ task_runner_swap_file }}"
+      register: task_runner_swap_stat
+
+    # A file of the wrong size is made again (after swapoff).
+    - name: Turn off a swap file of the wrong size
+      ansible.builtin.command:
+        argv: [swapoff, "{{ task_runner_swap_file }}"]
+      when:
+        - task_runner_swap_stat.stat.exists
+        - task_runner_swap_stat.stat.size != (task_runner_swap_mb | int) * 1048576
+        - task_runner_swap_file in task_runner_swapon.stdout_lines | map('trim') | list
+      changed_when: true
+
+    - name: Write the swap file
+      ansible.builtin.command:
+        argv: [dd, if=/dev/zero, "of={{ task_runner_swap_file }}", bs=1M, "count={{ task_runner_swap_mb | int }}", status=none]
+      when: not task_runner_swap_stat.stat.exists or task_runner_swap_stat.stat.size != (task_runner_swap_mb | int) * 1048576
+      changed_when: true
+
+    - name: Restrict the swap file to root
+      ansible.builtin.file:
+        path: "{{ task_runner_swap_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    # mkswap only right after the write: a formatted file in use must not be formatted again.
+    - name: Format the swap file
+      ansible.builtin.command:
+        argv: [mkswap, "{{ task_runner_swap_file }}"]
+      when: not task_runner_swap_stat.stat.exists or task_runner_swap_stat.stat.size != (task_runner_swap_mb | int) * 1048576
+      changed_when: true
+
+    - name: Turn on the swap file
+      ansible.builtin.command:
+        argv: [swapon, "{{ task_runner_swap_file }}"]
+      when: >-
+        not task_runner_swap_stat.stat.exists
+        or task_runner_swap_stat.stat.size != (task_runner_swap_mb | int) * 1048576
+        or task_runner_swap_file not in task_runner_swapon.stdout_lines | map('trim') | list
+      changed_when: true
+
+    - name: Turn on the swap file at boot
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '^{{ task_runner_swap_file | regex_escape }}\s'
+        line: "{{ task_runner_swap_file }} none swap sw 0 0"
+
+    # Swap is for peaks only: keep the working set in RAM as long as possible.
+    - name: Prefer RAM to swap
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/60-task-runner-swap.conf
+        content: "# task-runner role (#215): swap is for peaks only.\nvm.swappiness = 10\n"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: task-runner apply swappiness
+
+- name: Remove the swap file of the role
+  when: (task_runner_swap_mb | int) == 0
+  block:
+    - name: Turn off the swap file
+      ansible.builtin.command:
+        argv: [swapoff, "{{ task_runner_swap_file }}"]
+      when: task_runner_swap_file in task_runner_swapon.stdout_lines | map('trim') | list
+      changed_when: true
+
+    - name: Remove the swap file from fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '^{{ task_runner_swap_file | regex_escape }}\s'
+        state: absent
+
+    - name: Remove the swap file and the swappiness setting
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ task_runner_swap_file }}"
+        - /etc/sysctl.d/60-task-runner-swap.conf
+
+# #215: idle services of cloud images (Ubuntu: snapd, multipathd). Only installed packages are removed.
+- name: Read the installed packages for the trim
+  ansible.builtin.package_facts:
+  when: task_runner_trim_services | bool
+
+- name: Remove services that the node does not need
+  ansible.builtin.apt:
+    name: "{{ task_runner_trim_packages | select('in', ansible_facts.packages) | list }}"
+    state: absent
+    purge: true
+  when:
+    - task_runner_trim_services | bool
+    - task_runner_trim_packages | select('in', ansible_facts.packages | default({})) | list | length > 0

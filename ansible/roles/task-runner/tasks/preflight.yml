@@ -26,6 +26,29 @@
       architecture='{{ ansible_facts.architecture }}'.
     quiet: true
 
+# The profile is looked up in the other defaults, so check it first: an unknown name would otherwise fail with
+# an unclear template error (#215).
+- name: Check the host profile
+  ansible.builtin.assert:
+    that: task_runner_profile in task_runner_profiles
+    fail_msg: >-
+      task-runner: task_runner_profile must be one of {{ task_runner_profiles.keys() | list | join(', ') }},
+      got '{{ task_runner_profile }}'.
+    quiet: true
+
+- name: Check the swap and the session browser flags
+  ansible.builtin.assert:
+    that:
+      - task_runner_swap_mb | string is regex('^[0-9]+\\Z')
+      - (task_runner_swap_mb | int) <= 8192
+      - task_runner_session_browser_flags | trim is regex('^(--[A-Za-z0-9][A-Za-z0-9_.,=:/-]*( +|\\Z))*\\Z')
+      - "'disable-site-isolation' not in task_runner_session_browser_flags"
+    fail_msg: >-
+      task-runner: task_runner_swap_mb must be a number of MB from 0 to 8192;
+      task_runner_session_browser_flags a space-separated list of --flags without quotes or spaces in a value,
+      and without --disable-site-isolation-trials (it weakens the isolation between sites).
+    quiet: true
+
 - name: Check required variables are set
   ansible.builtin.assert:
     that:
@@ -331,7 +354,9 @@
                        ~ '\n--host.js--\n' ~ lookup('ansible.builtin.file', task_runner_src ~ '/image/host.js')
                        ~ '\n--session.sh--\n' ~ lookup('ansible.builtin.file', task_runner_src ~ '/image/session.sh')
                        ~ '\n--base--\n' ~ task_runner_base_image
-                       ~ '\n--target--\n' ~ ('session' if 'session' in task_runner_roles else 'run')) | hash('sha256'))[:16]) }}
+                       ~ '\n--target--\n' ~ ('session' if 'session' in task_runner_roles else 'run')
+                       ~ '\n--chrome--\n' ~ (task_runner_session_chrome | bool | string)
+                       ~ '\n--flags--\n' ~ (task_runner_session_browser_flags | trim)) | hash('sha256'))[:16]) }}
 
 # Free disk on the file system of the state dir (longest mount prefix; -1 =
 # not found). Checked in image.yml, only when the image has to be built or

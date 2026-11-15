@@ -72,12 +72,39 @@ task_runner_bin: /usr/local/bin/task-runner
 # has no range yet; the start is chosen after the highest existing range).
 task_runner_subid_count: 65536
 
+# Host profile (#215): the defaults of the limits, the image and the swap below come from it. Set any of
+# those variables in host_vars to override one value. "default": a host with 2 GB or more. "small": a shared
+# 1 vCPU / 1 GB host (bridge plus runner): lower limits, Chromium instead of Google Chrome in sessions,
+# memory-saving browser flags and a swap file. See README "Smaller nodes".
+task_runner_profile: default
+task_runner_profiles:
+  default:
+    memory_max: 2G
+    container_memory: 1g
+    min_free_mb: 1500
+    min_free_disk_mb: 6000
+    session_chrome: true
+    session_browser_flags: ""
+    swap_mb: 0
+    trim_services: false
+  small:
+    memory_max: 768M
+    container_memory: 512m
+    min_free_mb: 550
+    min_free_disk_mb: 3000
+    session_chrome: false
+    session_browser_flags: >-
+      --renderer-process-limit=2 --disable-background-networking --disable-component-update
+      --disable-features=Translate,OptimizationHints,MediaRouter
+    swap_mb: 1024
+    trim_services: true
+
 # Resource limits.
 # Whole service (runner, podman, the container): systemd MemoryMax (K/M/G).
-task_runner_memory_max: 2G
+task_runner_memory_max: "{{ task_runner_profiles[task_runner_profile].memory_max }}"
 # Per run container: RUNNER_MEMORY, podman --memory (k/m/g). Must leave at least
 # 256 MB of task_runner_memory_max for the runner and podman.
-task_runner_container_memory: 1g
+task_runner_container_memory: "{{ task_runner_profiles[task_runner_profile].container_memory }}"
 # Per session container: RUNNER_SESSION_MEMORY (k/m/g). With task_runner_shared_slot false, run
 # and session containers can run together, so task_runner_memory_max must hold both plus 256 MB.
 task_runner_session_memory: "{{ task_runner_container_memory }}"
@@ -86,11 +113,27 @@ task_runner_pids_limit: 512
 # Whole service: systemd TasksMax.
 task_runner_tasks_max: 2048
 
+# Google Chrome in the session image (linux/amd64 only). false: sessions use Playwright's Chromium, a smaller
+# image and no download from Google; Chromium has no proprietary media codecs.
+task_runner_session_chrome: "{{ task_runner_profiles[task_runner_profile].session_chrome }}"
+# Extra flags of the session browser, baked into the session image (SESSION_BROWSER_FLAGS). Do not add
+# --disable-site-isolation-trials by default: it saves memory but weakens the isolation between sites.
+task_runner_session_browser_flags: "{{ task_runner_profiles[task_runner_profile].session_browser_flags }}"
+# Swap file /swapfile.task-runner of this size in MB (0: none, and the role removes the file it made). Runner
+# memory, which can hold task secrets, can then reach the disk; see README "Smaller nodes".
+task_runner_swap_mb: "{{ task_runner_profiles[task_runner_profile].swap_mb }}"
+task_runner_swap_file: /swapfile.task-runner
+# Remove the services that a cloud image runs but a bridge or runner node does not need (snapd, multipathd,
+# about 50 to 100 MB of idle RAM on Ubuntu). Packages that are not installed are skipped. Debian cloud images do not
+# have them.
+task_runner_trim_services: "{{ task_runner_profiles[task_runner_profile].trim_services }}"
+task_runner_trim_packages: [snapd, multipath-tools]
+
 # Preflight thresholds (free memory without page cache; free disk on the file
 # system holding task_runner_state_dir). Chromium needs a few hundred MB, the
 # base and derived images a few GB.
-task_runner_min_free_mb: 1500
-task_runner_min_free_disk_mb: 6000
+task_runner_min_free_mb: "{{ task_runner_profiles[task_runner_profile].min_free_mb }}"
+task_runner_min_free_disk_mb: "{{ task_runner_profiles[task_runner_profile].min_free_disk_mb }}"
 
 # systemd ProtectKernelTunables= for the unit. Off: its read-only mounts over
 # /proc/sys etc. become locked mounts in the container's user namespace and the

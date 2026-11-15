@@ -27,3 +27,11 @@
     state: restarted
   become: true
   when: not ansible_check_mode
+
+# #215: the swappiness of the small profile.
+- name: task-runner apply swappiness
+  ansible.builtin.command:
+    argv: [sysctl, -q, -p, /etc/sysctl.d/60-task-runner-swap.conf]
+  become: true
+  changed_when: true
+  when: not ansible_check_mode

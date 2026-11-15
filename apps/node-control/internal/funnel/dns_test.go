@@ -35,6 +35,25 @@ func TestDNSFromEnv(t *testing.T) {
 	if err != nil || d.p.Name() != "route53" || d.rec.Name != "*.f.example.com" || d.rec.Type != "CNAME" {
 		t.Fatalf("route53: %+v %v", d, err)
 	}
+
+	// #384: the edge keeps the record; node-control only looks it up, with no credentials.
+	d, err = dnsFromEnv(core.MapEnv(map[string]string{"FUNNEL_DNS_CHECK": "lookup"}), s, http.DefaultClient)
+	if err != nil || d.p.Name() != "lookup" || d.check == nil || d.rec.Type != "CNAME" {
+		t.Fatalf("lookup: %+v %v", d, err)
+	}
+	for name, c := range map[string]struct {
+		env  map[string]string
+		s    Settings
+		want string
+	}{
+		"both":      {map[string]string{"FUNNEL_DNS_CHECK": "lookup", "FUNNEL_DNS_PROVIDER": "route53"}, *s, "not both"},
+		"bad check": {map[string]string{"FUNNEL_DNS_CHECK": "write"}, *s, "must be lookup"},
+		"no target": {map[string]string{"FUNNEL_DNS_CHECK": "lookup"}, Settings{PublicDomain: "f.example.com"}, "FUNNEL_INGRESS_HOSTNAME"},
+	} {
+		if _, err := dnsFromEnv(core.MapEnv(c.env), &c.s, http.DefaultClient); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
 }
 
 // The checklist turns into a status line when node-control manages the record, and shows the error when it fails.

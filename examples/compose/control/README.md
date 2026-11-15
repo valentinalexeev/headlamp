@@ -126,9 +126,35 @@ The first request to a new host waits a few seconds for the certificate. Let's E
 certificates for each domain each week. If you have many services, use one wildcard certificate for each namespace
 instead (DNS-01, below).
 
-**node-control can write the public record.** The edge needs one record, `*.<FUNNEL_DOMAIN>`, that points at the
-edge. Set these values in `node-control.env` and node-control creates the record. It checks the record every 10
-minutes and puts it back if it changed:
+### The funnel record
+
+The edge needs one public record, `*.<FUNNEL_DOMAIN>`, that points at the edge. A wildcard also covers the deeper
+names `<service>.<namespace>.<FUNNEL_DOMAIN>`. Add the record yourself, or let the edge keep it (#384).
+
+**The edge can keep the record.** Set `FUNNEL_DDNS` in `.env` to the same DNS provider as `FUNNEL_DNS`, and add the
+`dynamic_dns` plugin to `EDGE_DNS_PLUGINS`. The edge then uses the credentials that it has for DNS-01:
+
+```sh
+EDGE_DNS_PLUGINS="github.com/caddy-dns/googleclouddns@v1.1.0 github.com/mholt/caddy-dynamicdns@67d107a42c02"
+FUNNEL_DNS=googleclouddns
+FUNNEL_DDNS=googleclouddns
+```
+
+Run `docker compose build edge`. Each value of `FUNNEL_DDNS` is a file in `caddy/ddns/`: `route53`, `cloudflare`,
+`googleclouddns` or `rfc2136`. The edge learns its public address from `FUNNEL_DDNS_IP_URL` (default
+`https://api.ipify.org`), checks it every 5 minutes, and writes the A record only when the address changes. It
+changes no other record of the zone.
+
+**NOTE:** With `rfc2136`, the plugin reads the zone with a zone transfer before it writes. Allow the transfer for the
+same key, for example in BIND: `allow-transfer { key <name>; };`.
+
+In `node-control.env`, set `FUNNEL_DNS_CHECK=lookup` and `FUNNEL_INGRESS_HOSTNAME`, the public address of the edge.
+node-control then needs no DNS credentials. It looks the record up every 10 minutes. The funnel page shows whether
+the record points at the edge.
+
+**Deprecated: node-control writes the record.** Set these values in `node-control.env` and node-control creates the
+record. It checks the record every 10 minutes and puts it back if it changed. `FUNNEL_DNS_PROVIDER` will be removed
+in a later release; use `FUNNEL_DDNS` at the edge instead:
 
 | Variable | Value |
 |---|---|
@@ -138,8 +164,11 @@ minutes and puts it back if it changed:
 | `FUNNEL_DNS_CLOUDFLARE_TOKEN` | Cloudflare only: a token that can edit DNS in that zone |
 
 On AWS, set `route53_zone_id` in the Terraform module. The instance role then gets the necessary rights. The funnel
-page in the console shows the status of the record. Without `FUNNEL_DNS_PROVIDER`, the page shows the record to add
-manually. On Fly.io, keep the manual checklist, because Fly gets the certificates with `fly certs`.
+page in the console shows the status of the record. Without `FUNNEL_DNS_PROVIDER` or `FUNNEL_DNS_CHECK`, the page
+shows the record to add manually. On Fly.io, keep the manual checklist, because Fly gets the certificates with
+`fly certs`.
+
+### DNS-01 wildcard certificates
 
 To use DNS-01 wildcards, set these values in `.env` for the DNS provider of `FUNNEL_DOMAIN`:
 

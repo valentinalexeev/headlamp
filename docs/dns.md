@@ -286,7 +286,8 @@ The funnel module can keep one public record: `*.<FUNNEL_PUBLIC_DOMAIN>`. It poi
 
 | Setting | What it does |
 |---|---|
-| `FUNNEL_DNS_PROVIDER` | `route53` or `cloudflare`. If not set, the Funnel page shows a checklist, and you add the record yourself |
+| `FUNNEL_DNS_PROVIDER` | Deprecated (#384): `route53` or `cloudflare`. Prefer `FUNNEL_DDNS` at the compose edge |
+| `FUNNEL_DNS_CHECK` | `lookup`: look the record up and show its status, with no credentials. If neither is set, the Funnel page shows a checklist, and you add the record yourself |
 | `FUNNEL_DNS_ZONE` | The ID of the zone (required with a provider) |
 | `FUNNEL_DNS_CLOUDFLARE_TOKEN` | Cloudflare only: a token that can edit DNS in that zone |
 

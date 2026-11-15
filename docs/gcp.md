@@ -10,7 +10,7 @@ missing). The gaps are at the end, as a list of follow-up work.
 |---|---|---|
 | Control host (headscale, node-control, funnel-ingress, edge) | `terraform/modules/control-host/gcp` and the compose example (#359) | works |
 | Exit nodes | `terraform/modules/exit-node-vm/gcp` and the node-control `gcp` provider (#214) | works |
-| Funnel wildcard DNS record | node-control writes it for Route 53 and Cloudflare only | gap 2 |
+| Funnel wildcard DNS record | The compose edge keeps it with `FUNNEL_DDNS=googleclouddns` | works with settings |
 | Funnel and serve certificates (DNS-01) | Caddy edge and node-control ACME with `googleclouddns` / `googlecloud` | works with settings |
 | GKE subnet router and serve proxies | `charts/tailnet-connector` | works |
 | GKE Gateway API | `charts/gateway-controller` (#338) | works |
@@ -49,11 +49,9 @@ and Workload Identity Federation from a control host outside GCP.
 `funnel-ingress` runs on the control host behind the edge, as in the compose example. Two parts touch the DNS zone:
 
 - **Certificates:** DNS-01 with `googleclouddns` (Caddy) works today.
-- **The wildcard record:** node-control writes `*.<namespace>.<FUNNEL_DOMAIN>` for `FUNNEL_DNS_PROVIDER=route53` or
-  `cloudflare`. With a Cloud DNS zone, the Funnel page shows a checklist, and you add the record by hand.
-
-**Gap 2:** a `googleclouddns` provider for the funnel record in `internal/dnsrec` (Cloud DNS `changes.create`, with the
-same service account as the edge).
+- **The wildcard record:** the edge keeps `*.<FUNNEL_DOMAIN>` with `FUNNEL_DDNS=googleclouddns` and the same service
+  account (see "The funnel record" in the compose README). Set `FUNNEL_DNS_CHECK=lookup` in node-control, and the
+  Funnel page shows the status of the record.
 
 ## Serve names (tailnet-only HTTPS)
 
@@ -94,7 +92,7 @@ Open the bridge ports in a GCE firewall rule by network tag. For a 1 vCPU / 1 GB
 | Gap | Size | Issue |
 |---|---|---|
 | 1. `terraform/modules/control-host/gcp` | done | #359 |
-| 2. Cloud DNS provider for the funnel wildcard record | ~1 day | #360 |
+| 2. Cloud DNS provider for the funnel wildcard record | done: the edge keeps it | #384 |
 | 3. Secret Manager reader for node-control secrets (and a Redis CA setting) | done | #361 |
 
 Nothing else blocks a deployment on GCP: the exit nodes, the funnel and serve certificates, and GKE work today.

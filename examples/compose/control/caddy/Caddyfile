@@ -11,6 +11,9 @@
 	on_demand_tls {
 		ask http://funnel-ingress:8080/.well-known/headlamp/tls-ask
 	}
+	# Optional (#384): the edge keeps the funnel record *.<FUNNEL_DOMAIN> on its public address. FUNNEL_DDNS names a
+	# file in ddns/ (route53, cloudflare, googleclouddns, rfc2136); unset is "none". See README.md, "The funnel record".
+	import ddns/{$FUNNEL_DDNS:none}.caddy
 }
 
 # headscale: the control API, the noise protocol and DERP over HTTPS (all on one name).

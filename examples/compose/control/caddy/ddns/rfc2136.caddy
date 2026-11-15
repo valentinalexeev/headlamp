@@ -1,0 +1,19 @@
+# The edge keeps *.<FUNNEL_DOMAIN> on its public address, with your own DNS server (RFC 2136, #384). Build with
+# EDGE_DNS_PLUGINS="github.com/caddy-dns/rfc2136@<version> github.com/mholt/caddy-dynamicdns@<commit>".
+# Credentials: the RFC2136_* values in edge.env, the same as DNS-01. The plugin reads the zone back with a zone
+# transfer: allow it for the key (BIND: allow-transfer { key <name>; };), or the edge logs an error at each check.
+dynamic_dns {
+	provider rfc2136 {
+		key_name {env.RFC2136_KEY_NAME}
+		key_alg {env.RFC2136_KEY_ALG}
+		key {env.RFC2136_KEY}
+		server {env.RFC2136_SERVER}
+	}
+	domains {
+		{$FUNNEL_DOMAIN} *
+	}
+	ip_source simple_http {$FUNNEL_DDNS_IP_URL:https://api.ipify.org}
+	versions ipv4
+	check_interval {$FUNNEL_DDNS_INTERVAL:5m}
+	ttl 5m
+}

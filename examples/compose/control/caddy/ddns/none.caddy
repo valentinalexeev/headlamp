@@ -1,0 +1,2 @@
+# The funnel record is not kept by the edge (FUNNEL_DDNS unset). Add *.<FUNNEL_DOMAIN> yourself, or set FUNNEL_DDNS
+# (see README.md, "The funnel record").

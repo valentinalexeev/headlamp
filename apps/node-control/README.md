@@ -1463,7 +1463,8 @@ The ingress reaches two machine endpoints on the admin listener: `GET /ingress/v
 | `FUNNEL_KEY_USER` | The headscale user NAME that owns publisher keys (resolved to an id when the module mints a key). |
 | `FUNNEL_ADMIN_USERS` | The tailnet logins that can use the page and API (required). |
 | `FUNNEL_RESERVED_PORTS` | The ports that the ingress uses itself. The default is `8080,9100`. No namespace can allow them (the ingress would refuse the whole configuration). |
-| `FUNNEL_DNS_PROVIDER` | Optional: `route53` or `cloudflare`. node-control then keeps the record `*.<FUNNEL_PUBLIC_DOMAIN>` that points at `FUNNEL_INGRESS_HOSTNAME`. It checks the record every 10 minutes, and the page shows its status. Use it with on-demand certificates at the edge. Not for a Fly.io target. |
+| `FUNNEL_DNS_PROVIDER` | Deprecated (#384), optional: `route53` or `cloudflare`. node-control then keeps the record `*.<FUNNEL_PUBLIC_DOMAIN>` that points at `FUNNEL_INGRESS_HOSTNAME`. It checks the record every 10 minutes, and the page shows its status. Prefer `FUNNEL_DDNS` at the compose edge. Not for a Fly.io target. |
+| `FUNNEL_DNS_CHECK` | Optional: `lookup`. node-control looks the record `*.<FUNNEL_PUBLIC_DOMAIN>` up every 10 minutes and the page shows whether it points at `FUNNEL_INGRESS_HOSTNAME`. No DNS credentials. Not with `FUNNEL_DNS_PROVIDER`. |
 | `FUNNEL_DNS_ZONE` | The ID of the zone that holds the record. |
 | `FUNNEL_DNS_CLOUDFLARE_TOKEN` | Cloudflare only: a token that can edit DNS in that one zone. Route 53 uses the standard AWS credentials, for example the instance role. |
 

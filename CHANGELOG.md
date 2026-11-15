@@ -4,6 +4,13 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.20.1 - 2026-11-15
+
+### Fixed
+
+- node-control tests: `TestTasksActivity` no longer fails when a run ends at second 12.5 of a minute (#364, #375).
+- Scripts: `set -e` in `enroll-backup.sh`, `measure-memory.sh`, `check-denylist.sh` and `fleet-check.sh`, so a failed step stops the script (#368, #379).
+
 ## 0.20.0 - 2026-11-15
 
 ### Added

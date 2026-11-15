@@ -11,6 +11,8 @@ import (
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/route53"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/dnsrec"
@@ -27,7 +29,8 @@ type dnsManager struct {
 	status dnsrec.Status
 }
 
-// dnsFromEnv reads FUNNEL_DNS_PROVIDER (route53 or cloudflare) and its settings. Unset: nil, and the console shows
+// dnsFromEnv reads FUNNEL_DNS_PROVIDER (route53, cloudflare or googleclouddns) and its
+// settings. Unset: nil, and the console shows
 // the manual checklist as before. A Fly.io target (the record points at <app>.fly.dev) keeps the manual checklist:
 // Fly issues its certificates through `fly certs`, not at our edge.
 func dnsFromEnv(env core.Env, s *Settings, hc *http.Client) (*dnsManager, error) {
@@ -67,10 +70,47 @@ func dnsFromEnv(env core.Env, s *Settings, hc *http.Client) (*dnsManager, error)
 				o.BaseEndpoint = &u
 			}
 		})}
+	case "googleclouddns":
+		project := strings.TrimSpace(env.Getenv("FUNNEL_DNS_GCP_PROJECT"))
+		if project == "" {
+			project = strings.TrimSpace(env.Getenv("GCP_PROJECT"))
+		}
+		if project == "" {
+			return nil, errors.New("FUNNEL_DNS_PROVIDER=googleclouddns needs " +
+				"FUNNEL_DNS_GCP_PROJECT (or GCP_PROJECT): the project of the managed zone")
+		}
+		p = &dnsrec.GoogleCloudDNS{Project: project, Zone: zone,
+			Base: env.Getenv("FUNNEL_DNS_GCP_URL"), HTTP: hc, Token: gcpToken(hc)}
 	default:
-		return nil, fmt.Errorf("FUNNEL_DNS_PROVIDER must be route53 or cloudflare")
+		return nil, errors.New("FUNNEL_DNS_PROVIDER must be route53, cloudflare or googleclouddns")
 	}
 	return &dnsManager{p: p, rec: rec, every: 10 * time.Minute, status: dnsrec.Status{Provider: p.Name(), Record: rec}}, nil
+}
+
+// gcpToken returns Application Default Credentials for Cloud DNS (#360), found on the first
+// call and then reused: GOOGLE_APPLICATION_CREDENTIALS, or the service account of the VM on GCE.
+func gcpToken(hc *http.Client) func(ctx context.Context) (string, error) {
+	var (
+		mu  sync.Mutex
+		src oauth2.TokenSource
+	)
+	return func(ctx context.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if src == nil {
+			ctx = context.WithValue(ctx, oauth2.HTTPClient, hc)
+			c, err := google.FindDefaultCredentials(ctx, dnsrec.GoogleCloudDNSScope)
+			if err != nil {
+				return "", err
+			}
+			src = oauth2.ReuseTokenSource(nil, c.TokenSource)
+		}
+		t, err := src.Token()
+		if err != nil {
+			return "", err
+		}
+		return t.AccessToken, nil
+	}
 }
 
 func (d *dnsManager) sync(ctx context.Context) {

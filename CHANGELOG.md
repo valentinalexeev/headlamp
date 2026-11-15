@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control funnel: `FUNNEL_DNS_PROVIDER=googleclouddns` keeps the wildcard record in a Cloud DNS managed zone (#360). `FUNNEL_DNS_ZONE` is the managed zone name, `FUNNEL_DNS_GCP_PROJECT` (default `GCP_PROJECT`) its project. Credentials are Application Default Credentials (on GCE, the VM's service account with `roles/dns.admin` on that zone). It creates or replaces that one record set and never touches others. Without the setting, nothing changes.
+
 ## 0.20.0 - 2026-11-15
 
 ### Added

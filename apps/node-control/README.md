@@ -1410,9 +1410,10 @@ The ingress reaches two machine endpoints on the admin listener: `GET /ingress/v
 | `FUNNEL_KEY_USER` | The headscale user NAME that owns publisher keys (resolved to an id when the module mints a key). |
 | `FUNNEL_ADMIN_USERS` | The tailnet logins that can use the page and API (required). |
 | `FUNNEL_RESERVED_PORTS` | The ports that the ingress uses itself. The default is `8080,9100`. No namespace can allow them (the ingress would refuse the whole configuration). |
-| `FUNNEL_DNS_PROVIDER` | Optional: `route53` or `cloudflare`. node-control then keeps the record `*.<FUNNEL_PUBLIC_DOMAIN>` that points at `FUNNEL_INGRESS_HOSTNAME`. It checks the record every 10 minutes, and the page shows its status. Use it with on-demand certificates at the edge. Not for a Fly.io target. |
-| `FUNNEL_DNS_ZONE` | The ID of the zone that holds the record. |
+| `FUNNEL_DNS_PROVIDER` | Optional: `route53`, `cloudflare` or `googleclouddns`. node-control then keeps the record `*.<FUNNEL_PUBLIC_DOMAIN>` that points at `FUNNEL_INGRESS_HOSTNAME`. It checks the record every 10 minutes, and the page shows its status. Use it with on-demand certificates at the edge. Not for a Fly.io target. |
+| `FUNNEL_DNS_ZONE` | The ID of the zone that holds the record. For `googleclouddns`, the managed zone name (not its DNS name). |
 | `FUNNEL_DNS_CLOUDFLARE_TOKEN` | Cloudflare only: a token that can edit DNS in that one zone. Route 53 uses the standard AWS credentials, for example the instance role. |
+| `FUNNEL_DNS_GCP_PROJECT` | `googleclouddns` only: the project of the managed zone. The default is `GCP_PROJECT`. Cloud DNS uses Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS`, or the VM's service account on GCE), which need `roles/dns.admin` on that one zone. |
 
 > **WARNING:** Do not use `FUNNEL_TAG_OWNERS` to control who can mint keys. Headscale does not check tag ownership when a key is created or used. The controls are the fixed tags and the user gate.
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/dnsrec"
 )
 
 func TestDNSFromEnv(t *testing.T) {
@@ -25,7 +26,8 @@ func TestDNSFromEnv(t *testing.T) {
 		"fly":          {map[string]string{"FUNNEL_DNS_PROVIDER": "cloudflare"}, Settings{PublicDomain: "f.example.com", IngressHostname: "app.fly.dev"}, "Fly.io"},
 		"no zone":      {map[string]string{"FUNNEL_DNS_PROVIDER": "cloudflare"}, *s, "FUNNEL_DNS_ZONE"},
 		"no token":     {map[string]string{"FUNNEL_DNS_PROVIDER": "cloudflare", "FUNNEL_DNS_ZONE": "Z"}, *s, "FUNNEL_DNS_CLOUDFLARE_TOKEN"},
-		"bad provider": {map[string]string{"FUNNEL_DNS_PROVIDER": "bind", "FUNNEL_DNS_ZONE": "Z"}, *s, "route53 or cloudflare"},
+		"bad provider": {map[string]string{"FUNNEL_DNS_PROVIDER": "bind", "FUNNEL_DNS_ZONE": "Z"}, *s, "route53, cloudflare or googleclouddns"},
+		"gcp project":  {map[string]string{"FUNNEL_DNS_PROVIDER": "googleclouddns", "FUNNEL_DNS_ZONE": "z1"}, *s, "FUNNEL_DNS_GCP_PROJECT"},
 	} {
 		if _, err := dnsFromEnv(core.MapEnv(c.env), &c.s, http.DefaultClient); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v", name, err)
@@ -34,6 +36,15 @@ func TestDNSFromEnv(t *testing.T) {
 	d, err := dnsFromEnv(core.MapEnv(map[string]string{"FUNNEL_DNS_PROVIDER": "route53", "FUNNEL_DNS_ZONE": "Z9"}), s, http.DefaultClient)
 	if err != nil || d.p.Name() != "route53" || d.rec.Name != "*.f.example.com" || d.rec.Type != "CNAME" {
 		t.Fatalf("route53: %+v %v", d, err)
+	}
+	for _, env := range []map[string]string{
+		{"FUNNEL_DNS_PROVIDER": "googleclouddns", "FUNNEL_DNS_ZONE": "z1", "FUNNEL_DNS_GCP_PROJECT": "p1"},
+		{"FUNNEL_DNS_PROVIDER": "GoogleCloudDNS", "FUNNEL_DNS_ZONE": "z1", "GCP_PROJECT": "p1"},
+	} {
+		d, err := dnsFromEnv(core.MapEnv(env), s, http.DefaultClient)
+		if err != nil || d.p.Name() != "googleclouddns" || d.p.(*dnsrec.GoogleCloudDNS).Project != "p1" {
+			t.Fatalf("googleclouddns %v: %+v %v", env, d, err)
+		}
 	}
 }
 

@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -204,7 +203,7 @@ func TestTasksActivity(t *testing.T) {
 	now := time.Now()
 	run := func(id string, state RunState, ended time.Duration, manual bool, reason string) Run {
 		return Run{ID: id, Task: "job", State: state, Started: now.Add(ended - time.Second), Ended: now.Add(ended), Manual: manual, Reason: reason,
-			Result: map[string]any{"balance": 12.5}}
+			Result: map[string]any{"balance": "result-sentinel"}}
 	}
 
 	t.Run("manual and failed runs are listed, passing scheduled runs are not, results never", func(t *testing.T) {
@@ -239,8 +238,13 @@ func TestTasksActivity(t *testing.T) {
 				t.Errorf("%d: %+v", i, e)
 			}
 		}
-		if strings.Contains(fmt.Sprint(got), "12.5") || strings.Contains(fmt.Sprint(got), "login rejected") {
-			t.Errorf("a result or a reason leaked: %+v", got)
+		// Check the text fields, not fmt.Sprint(got): a printed time can contain any digits (#364).
+		for _, e := range got {
+			for _, f := range []string{e.Actor, e.Source, e.Action, e.Detail} {
+				if strings.Contains(f, "result-sentinel") || strings.Contains(f, "login rejected") {
+					t.Errorf("a result or a reason leaked: %+v", e)
+				}
+			}
 		}
 		if one, _ := h.m.Activity(ctx, "alice@", 1); len(one) != 1 {
 			t.Errorf("limit: %+v", one)

@@ -8,7 +8,7 @@ missing). The gaps are at the end, as a list of follow-up work.
 
 | Part | On GCP today | Status |
 |---|---|---|
-| Control host (headscale, node-control, funnel-ingress, edge) | The compose example on a GCE VM | works with settings; no Terraform module (gap 1) |
+| Control host (headscale, node-control, funnel-ingress, edge) | `terraform/modules/control-host/gcp` and the compose example (#359) | works |
 | Exit nodes | `terraform/modules/exit-node-vm/gcp` and the node-control `gcp` provider (#214) | works |
 | Funnel wildcard DNS record | node-control writes it for Route 53 and Cloudflare only | gap 2 |
 | Funnel and serve certificates (DNS-01) | Caddy edge and node-control ACME with `googleclouddns` / `googlecloud` | works with settings |
@@ -33,9 +33,9 @@ Docker, and so on a GCE VM. What to set:
   the `googleclouddns` plugin (see "The edge and its certificates" in the compose README). On a GCE VM, the plugin uses
   the VM's service account: give it `roles/dns.admin` on the one managed zone only.
 
-**Gap 1:** there is no `terraform/modules/control-host/gcp`, the twin of `control-host/aws`. It would make the VM, the
-data disk with snapshots, a static IP or load balancer, the firewall and a service account for Cloud DNS. Today a site
-writes this itself.
+**Gap 1 (closed in #359):** [`terraform/modules/control-host/gcp`](../terraform/modules/control-host/gcp/README.md)
+makes the VM, the data disk with snapshots, and the static address or load balancer. It also makes the firewall, and a
+service account for Cloud DNS and Secret Manager.
 
 ## Exit nodes
 
@@ -93,7 +93,7 @@ Open the bridge ports in a GCE firewall rule by network tag. For a 1 vCPU / 1 GB
 
 | Gap | Size | Issue |
 |---|---|---|
-| 1. `terraform/modules/control-host/gcp` | ~2 days | #359 |
+| 1. `terraform/modules/control-host/gcp` | done | #359 |
 | 2. Cloud DNS provider for the funnel wildcard record | ~1 day | #360 |
 | 3. Secret Manager reader for node-control secrets (and a Redis CA setting) | done | #361 |
 

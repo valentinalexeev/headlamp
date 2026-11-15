@@ -2,6 +2,7 @@ package runner
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -153,14 +154,19 @@ func TestSessionStopDisabledWithoutBind(t *testing.T) {
 	}
 }
 
+// With SharedSlot (the behaviour before #324), a run and a session exclude each other.
 func TestSessionSharesSlotWithRuns(t *testing.T) {
-	h := sessHarness(t, time.Second)
+	h := newHarness(t, func(c *Config) {
+		c.SessionBind = "100.64.0.9"
+		c.sessionUnit = time.Second
+		c.SharedSlot = true
+	})
 	id := h.startSession(nil)
 	if code, _ := h.do("POST", "/v1/runs", map[string]any{"script": "# mode: ok\n{}"}, testToken); code != 409 {
 		t.Fatalf("run during session: %d", code)
 	}
 	_, out := h.do("GET", "/v1/health", nil, testToken)
-	if !strings.Contains(string(out), `"busy":true`) {
+	if !strings.Contains(string(out), `"busy":true`) || !strings.Contains(string(out), `"shared_slot":true`) {
 		t.Fatalf("health %s", out)
 	}
 	h.do("DELETE", "/v1/sessions/"+id, nil, testToken)
@@ -172,6 +178,66 @@ func TestSessionSharesSlotWithRuns(t *testing.T) {
 	}
 	h.do("DELETE", "/v1/runs/"+rid, nil, testToken)
 	h.waitIdle()
+}
+
+// #324: by default each role has its own slot. A session does not block a run, a run does not block a
+// session, and busy means "no run can start", which is what the scheduler of node-control reads.
+func TestSessionAndRunHaveOwnSlots(t *testing.T) {
+	h := sessHarness(t, time.Second)
+	health := func() map[string]any {
+		_, out := h.do("GET", "/v1/health", nil, testToken)
+		var v map[string]any
+		if json.Unmarshal(out, &v) != nil {
+			t.Fatalf("health %s", out)
+		}
+		return v
+	}
+	if v := health(); fmt.Sprint(v["roles"]) != "[run session]" || v["shared_slot"] != false || v["busy"] != false {
+		t.Fatalf("idle health %v", v)
+	}
+
+	sid := h.startSession(nil)
+	if v := health(); v["busy"] != false || v["session_busy"] != true || v["run_busy"] != false {
+		t.Fatalf("a session must not make the node busy for runs: %v", v)
+	}
+	rid := h.start(map[string]any{"script": "# mode: sleep\n"})
+	if v := health(); v["busy"] != true || v["run_busy"] != true || v["session_busy"] != true {
+		t.Fatalf("both slots taken: %v", v)
+	}
+	if code, _ := h.do("POST", "/v1/runs", map[string]any{"script": "# mode: ok\n{}"}, testToken); code != 409 {
+		t.Fatalf("a second run: %d", code)
+	}
+	if code, _ := h.do("POST", "/v1/sessions", map[string]any{}, testToken); code != 409 {
+		t.Fatalf("a second session: %d", code)
+	}
+	h.do("DELETE", "/v1/runs/"+rid, nil, testToken)
+	h.do("DELETE", "/v1/sessions/"+sid, nil, testToken)
+	h.waitIdle()
+}
+
+// A run-only node (no SessionBind) reports the run role only.
+func TestHealthRolesRunOnly(t *testing.T) {
+	h := newHarness(t)
+	_, out := h.do("GET", "/v1/health", nil, testToken)
+	if !strings.Contains(string(out), `"roles":["run"]`) {
+		t.Fatalf("health %s", out)
+	}
+}
+
+// The session container uses the session image and memory when set (#324).
+func TestSessionImageAndMemory(t *testing.T) {
+	h := newHarness(t, func(c *Config) {
+		c.SessionBind = "100.64.0.9"
+		c.SessionImage = "localhost/task-runner:session-abc"
+		c.SessionMemory = "768m"
+	})
+	args := strings.Join(h.s.sessionArgs(&session{id: "x"}, time.Minute), " ")
+	if !strings.Contains(args, "--memory 768m") || !strings.Contains(args, "localhost/task-runner:session-abc sh /app/session.sh") {
+		t.Fatalf("session args %s", args)
+	}
+	if h.s.cfg.Memory == "768m" {
+		t.Fatal("runs keep their own memory limit")
+	}
 }
 
 func TestSessionStartRaceSingle201(t *testing.T) {

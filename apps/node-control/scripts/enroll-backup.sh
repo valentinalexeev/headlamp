@@ -24,10 +24,10 @@
 # `fly ssh console -C`); the app checks the shape, writes, and verifies the copy by reading it back.
 #
 # Needs flyctl logged in, jq, and sops or age for the chosen mode. The app must already run with Redis enrolment.
-set -u
+set -eu
 
 usage() {
-  sed -n '2,/^set -u/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,/^set -/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 die() { echo "$0: $*" >&2; exit 2; }

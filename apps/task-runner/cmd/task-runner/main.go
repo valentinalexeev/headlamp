@@ -24,6 +24,7 @@ func env(name, def string) string {
 }
 
 func main() {
+	const exitUsage = 2 // a bad setting
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	token, image := os.Getenv("RUNNER_TOKEN"), os.Getenv("RUNNER_IMAGE")
 	if token == "" || image == "" {
@@ -40,16 +41,24 @@ func main() {
 		log.Error("RUNNER_SESSION_PORT is not a number")
 		os.Exit(2)
 	}
+	sharedSlot, err := strconv.ParseBool(env("RUNNER_SHARED_SLOT", "true"))
+	if err != nil {
+		log.Error("RUNNER_SHARED_SLOT is not true or false")
+		os.Exit(exitUsage)
+	}
 	srv, err := runner.New(runner.Config{
-		Token:        token,
-		Image:        image,
-		StateDir:     env("RUNNER_STATE_DIR", "/var/lib/task-runner"),
-		ContainerBin: env("RUNNER_CONTAINER_BIN", "podman"),
-		Memory:       env("RUNNER_MEMORY", "1g"),
-		PidsLimit:    pids,
-		SessionBind:  os.Getenv("RUNNER_SESSION_BIND"),
-		SessionPort:  sessPort,
-		Logger:       log,
+		Token:         token,
+		Image:         image,
+		StateDir:      env("RUNNER_STATE_DIR", "/var/lib/task-runner"),
+		ContainerBin:  env("RUNNER_CONTAINER_BIN", "podman"),
+		Memory:        env("RUNNER_MEMORY", "1g"),
+		PidsLimit:     pids,
+		SessionBind:   os.Getenv("RUNNER_SESSION_BIND"),
+		SessionPort:   sessPort,
+		SessionImage:  os.Getenv("RUNNER_SESSION_IMAGE"),
+		SessionMemory: os.Getenv("RUNNER_SESSION_MEMORY"),
+		SharedSlot:    sharedSlot,
+		Logger:        log,
 	})
 	if err != nil {
 		log.Error("init failed", "err", err.Error())

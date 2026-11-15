@@ -25,8 +25,9 @@ const (
 	keepEndedSession   = 5 * time.Minute
 )
 
-// session is one interactive browser container. Like a run it holds the
-// node's single slot (Server.activeSession) until its container is reaped.
+// session is one interactive browser container. It holds the session slot
+// (Server.activeSession) until its container is reaped; with SharedSlot it also keeps runs out
+// (#324).
 type session struct {
 	id       string
 	token    string // random per session; only ever in the child env and API answers while running
@@ -67,11 +68,11 @@ func (s *Server) sessionArgs(sess *session, ttl time.Duration) []string {
 		"run", "--rm", "--init", "--log-driver=none", "--name", "task-"+sess.id,
 		"--timeout", strconv.Itoa(int((ttl+s.cfg.KillGrace+time.Second-1)/time.Second)),
 		"--read-only", "--cap-drop=ALL", "--security-opt", "no-new-privileges",
-		"--pids-limit", strconv.Itoa(s.cfg.PidsLimit), "--memory", s.cfg.Memory,
+		"--pids-limit", strconv.Itoa(s.cfg.PidsLimit), "--memory", s.cfg.SessionMemory,
 		"--tmpfs", "/tmp", "--tmpfs", "/home/pwuser:rw", "--shm-size=512m",
 		"-p", s.bindHost+":"+port+":"+port,
 		"-e", "SESSION_IDLE_SECONDS", "-e", "SESSION_NOVNC_PORT", "-e", "SESSION_TOKEN",
-		s.cfg.Image, "sh", "/app/session.sh")
+		s.cfg.SessionImage, "sh", "/app/session.sh")
 }
 
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +110,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		port: s.cfg.SessionPort, idle: idle, stopCh: make(chan struct{}), done: make(chan struct{}),
 	}
 	s.mu.Lock()
-	if s.active != nil || s.activeSession != nil {
+	if s.slotTaken(false, s.active != nil, s.activeSession != nil) {
 		s.mu.Unlock()
 		w.WriteHeader(http.StatusConflict)
 		return

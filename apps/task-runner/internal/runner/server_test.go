@@ -204,9 +204,12 @@ func (h *harness) waitIdle() {
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		_, out := h.do("GET", "/v1/health", nil, testToken)
-		var hv struct{ Busy bool }
+		var hv struct {
+			Busy        bool
+			SessionBusy bool `json:"session_busy"`
+		}
 		_ = json.Unmarshal(out, &hv)
-		if !hv.Busy {
+		if !hv.Busy && !hv.SessionBusy {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)

@@ -11,7 +11,7 @@
 #
 # Exit: 0 when node-control reports no problem, 1 when it reports one (each is printed after the table), 2 when
 # the report cannot be read. Env: NODE_CONTROL_URL (required), CURL (default curl).
-set -u
+set -eu
 base=${NODE_CONTROL_URL:?set NODE_CONTROL_URL to the base URL of node-control on the tailnet}
 curl=${CURL:-curl}
 all=false

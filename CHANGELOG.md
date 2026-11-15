@@ -4,6 +4,18 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- The compose edge can keep the funnel record `*.<FUNNEL_DOMAIN>` on its public address with the Caddy
+  `dynamic_dns` plugin: `FUNNEL_DDNS` is `route53`, `cloudflare`, `googleclouddns` or `rfc2136` (#384). It uses the
+  DNS-01 credentials of the edge. A Go e2e test runs the `rfc2136` snippet against BIND (`tests/e2e`).
+- node-control `FUNNEL_DNS_CHECK=lookup`: it looks the funnel record up and shows its status, with no DNS credentials.
+
+### Deprecated
+
+- node-control `FUNNEL_DNS_PROVIDER` (and `FUNNEL_DNS_ZONE`, `FUNNEL_DNS_CLOUDFLARE_TOKEN`). Use `FUNNEL_DDNS` at the
+  edge and `FUNNEL_DNS_CHECK=lookup`. node-control logs a warning at start.
+
 ## 0.20.0 - 2026-11-15
 
 ### Added

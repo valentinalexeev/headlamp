@@ -683,8 +683,14 @@ func (m *Module) checklistFor(ns string) checklist {
 	if m.dns != nil {
 		st := m.dns.snapshot()
 		note := "node-control keeps *." + m.s.PublicDomain + " in the " + st.Provider + " zone, and the edge gets each certificate on demand. Nothing to do for this namespace."
+		if m.dns.check != nil {
+			note = "The edge keeps *." + m.s.PublicDomain + " (Caddy dynamic_dns), and node-control checks it by DNS lookup. Nothing to do for this namespace."
+		}
 		if !st.InSync {
-			note = "node-control manages the record, but the last check failed: " + st.Error
+			note = "The last check of the record failed: " + st.Error
+			if m.dns.check == nil {
+				note = "node-control manages the record, but the last check failed: " + st.Error
+			}
 		}
 		return checklist{Records: []map[string]string{{"type": st.Record.Type, "name": st.Record.Name + ".", "value": st.Record.Target}},
 			Commands: []string{}, Notes: []string{note}, Auto: &st}

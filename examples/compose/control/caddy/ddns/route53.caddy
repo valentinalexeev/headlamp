@@ -1,0 +1,13 @@
+# The edge keeps *.<FUNNEL_DOMAIN> on its public address, with Route 53 (#384). Build with
+# EDGE_DNS_PLUGINS="github.com/caddy-dns/route53@<version> github.com/mholt/caddy-dynamicdns@<commit>".
+# Credentials: the same as DNS-01 (the instance role on AWS).
+dynamic_dns {
+	provider route53
+	domains {
+		{$FUNNEL_DOMAIN} *
+	}
+	ip_source simple_http {$FUNNEL_DDNS_IP_URL:https://api.ipify.org}
+	versions ipv4
+	check_interval {$FUNNEL_DDNS_INTERVAL:5m}
+	ttl 5m
+}

@@ -26,6 +26,24 @@ func (e Env) Getenv(key string) string {
 	return e.lookup(key)
 }
 
+// With returns an Env that answers the keys of over from over, and every other key from e.
+// over is copied.
+func (e Env) With(over map[string]string) Env {
+	if len(over) == 0 {
+		return e
+	}
+	m := make(map[string]string, len(over))
+	for k, v := range over {
+		m[k] = v
+	}
+	return Env{lookup: func(k string) string {
+		if v, ok := m[k]; ok {
+			return v
+		}
+		return e.Getenv(k)
+	}}
+}
+
 // Default returns the value of key, or def when it is empty.
 func (e Env) Default(key, def string) string {
 	if v := e.Getenv(key); v != "" {

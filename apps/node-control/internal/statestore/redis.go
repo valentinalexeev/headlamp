@@ -12,11 +12,14 @@ package statestore
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -92,6 +95,37 @@ const errBadRedisURL = "invalid REDIS_URL: it does not parse. If the password ha
 	"(base64 has /), percent-encode it: python3 -c 'import urllib.parse,sys;" +
 	"print(urllib.parse.quote(sys.argv[1],safe=\"\"))' \"$PW\""
 
+// rootCAs is the CA pool of REDIS_CA_FILE (#361), set once at start by SetCAFile. nil: the
+// system roots.
+var rootCAs *x509.CertPool
+
+// maxCAFile caps REDIS_CA_FILE: a few PEM certificates.
+const maxCAFile = 1 << 20
+
+// SetCAFile makes every rediss:// connection check the server with the PEM certificates of path,
+// instead of the system roots (Memorystore with in-transit encryption has its own server CA).
+// "" keeps the system roots. Call it once, before the first OpenClient.
+func SetCAFile(path string) error {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path) //nolint:gosec // the operator's REDIS_CA_FILE setting names the file
+	if err != nil {
+		return fmt.Errorf("REDIS_CA_FILE: %w", err)
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxCAFile))
+	if err != nil {
+		return fmt.Errorf("REDIS_CA_FILE: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(b) {
+		return errors.New("REDIS_CA_FILE: no PEM certificate in " + path)
+	}
+	rootCAs = pool
+	return nil
+}
+
 // OpenClient connects to rawURL with the shared-Redis options (small pool, RESP2, no CLIENT SETINFO, no
 // maintenance handshake) and pings once. The second result lists the strings (the URL, the password and its
 // escaped forms) that must be removed from any error text before it is logged; use scrub.Scrub. No error text
@@ -102,6 +136,9 @@ func OpenClient(rawURL string) (*redis.Client, []string, error) {
 		// ParseURL errors may echo the URL, so none of it is passed on. The usual cause is a
 		// password with "/", "?", "#" or "@" (base64 has "/"): it ends the userinfo early (#217).
 		return nil, nil, errors.New(errBadRedisURL)
+	}
+	if opt.TLSConfig != nil && rootCAs != nil {
+		opt.TLSConfig.RootCAs = rootCAs
 	}
 	opt.DialTimeout = opTimeout
 	opt.ReadTimeout = opTimeout

@@ -192,7 +192,11 @@ func joinTailnet(ctx context.Context, up func(context.Context) error, timeout ti
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "state-import" {
-		if err := runStateImport(context.Background(), os.Args[2:], core.OSEnv(), os.Stdout); err != nil {
+		env, err := startEnv(context.Background(), core.OSEnv())
+		if err == nil {
+			err = runStateImport(context.Background(), os.Args[2:], env, os.Stdout)
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "state-import failed:", err)
 			os.Exit(1)
 		}
@@ -205,7 +209,11 @@ func main() {
 		if os.Args[1] == "enroll-export" {
 			run = runEnrollExport
 		}
-		if err := run(os.Args[2:], core.OSEnv(), os.Stdout); err != nil {
+		env, err := startEnv(context.Background(), core.OSEnv())
+		if err == nil {
+			err = run(os.Args[2:], env, os.Stdout)
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, os.Args[1]+" failed:", err)
 			os.Exit(1)
 		}
@@ -214,7 +222,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	env := core.OSEnv()
+	env, err := startEnv(ctx, core.OSEnv())
+	if err != nil {
+		slog.Error("node-control cannot start", "err", err)
+		os.Exit(1)
+	}
 	// One line per set secret: name and fingerprint, never the value (#302).
 	credcheck.Log(env, slog.Default())
 	// The admin policy is installed before the modules register, so their start checks and gates see it.

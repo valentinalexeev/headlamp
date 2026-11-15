@@ -1,10 +1,14 @@
+# Two stages (#324). `run` holds Playwright and its Chromium only, for unattended task runs. `session` adds the
+# browser session tools. A node without the session role builds `--target run` and gets no VNC tools or Chrome.
 # No default: a build without --build-arg BASE=<image>@sha256:... must fail.
 ARG BASE
-FROM ${BASE}
+FROM ${BASE} AS run
 WORKDIR /app
 RUN npm init -y >/dev/null && npm install --no-audit --no-fund playwright@1.64.1
 ENV NODE_PATH=/app/node_modules
 COPY host.js /app/host.js
+
+FROM run AS session
 # Browser session tools (noVNC mode): Xvnc (X server + VNC server with client-driven resizing), window manager,
 # VNC bridge.
 RUN apt-get update \

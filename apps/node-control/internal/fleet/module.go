@@ -180,12 +180,13 @@ type Bridge struct {
 	Compat *compat.Result `json:"compat,omitempty"`
 }
 
-// Runner is one task runner and the runner API version it reported (#300).
+// Runner is one task runner and the runner API version it reported (#300), and its roles (#324).
 type Runner struct {
 	Address string        `json:"address"`
 	Node    string        `json:"node,omitempty"`
 	At      time.Time     `json:"at"`
 	Compat  compat.Result `json:"compat"`
+	Roles   []string      `json:"roles,omitempty"`
 }
 
 func (m *module) report(w http.ResponseWriter, req *http.Request) {
@@ -271,7 +272,7 @@ func (m *module) report(w http.ResponseWriter, req *http.Request) {
 	if m.d.Runners != nil {
 		for addr, a := range m.d.Runners() {
 			c := matrix.Check(compat.RunnerAPI, a.API)
-			run := Runner{Address: addr, Node: names[addr], At: a.At, Compat: c}
+			run := Runner{Address: addr, Node: names[addr], At: a.At, Compat: c, Roles: a.Roles}
 			label := "task runner " + addr
 			if run.Node != "" {
 				label = "task runner " + run.Node

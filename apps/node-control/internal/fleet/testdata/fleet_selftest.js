@@ -48,7 +48,7 @@ assert.strictEqual(f.compatWord({ state: 'ok' }), null);
     bridges: [{ name: 'br-1', source: 'discovered', online: true, active: true, sync: 'ok', agent: '0.16.0+abc', xray: '25.10.15' }],
     funnel: { version: '0.16.0', reported_at: new Date().toISOString(), stale: false, errors: 0 },
     problems: ['<img src=x onerror=alert(1)>'], notes: [],
-    runners: [{ address: '100.64.0.8', node: 'runner-1', compat: { interface: 'runner-api', state: 'incompatible', reported: 5, hint: 'newer than node-control accepts: upgrade node-control' } }],
+    runners: [{ address: '100.64.0.8', node: 'runner-1', roles: ['run', 'session'], compat: { interface: 'runner-api', state: 'incompatible', reported: 5, hint: 'newer than node-control accepts: upgrade node-control' } }],
     compat_strict: true,
   };
   const page = f.create(els, { api: () => Promise.resolve(data), now: () => Date.now() });
@@ -58,7 +58,7 @@ assert.strictEqual(f.compatWord({ state: 'ok' }), null);
   assert.ok(allText(els.problems).includes('<img'), 'problems are shown as text');
   assert.strictEqual(els.notes.hidden, true);
   assert.strictEqual(els.control.children.length, 4, 'node-control, headscale, funnel, one runner');
-  assert.ok(allText(els.control).includes('task runner runner-1') && allText(els.control).includes('incompatible: runner-api 5'));
+  assert.ok(allText(els.control).includes('task runner runner-1 (run, session)') && allText(els.control).includes('incompatible: runner-api 5'));
   assert.strictEqual(els.strict.hidden, false);
   assert.ok(allText(els.control).includes('v0.29.7'));
   assert.strictEqual(els.bridges.children.length, 1);

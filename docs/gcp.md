@@ -14,7 +14,7 @@ missing). The gaps are at the end, as a list of follow-up work.
 | Funnel and serve certificates (DNS-01) | Caddy edge and node-control ACME with `googleclouddns` / `googlecloud` | works with settings |
 | GKE subnet router and serve proxies | `charts/tailnet-connector` | works |
 | GKE Gateway API | `charts/gateway-controller` (#338) | works |
-| Secrets for node-control | Environment and files; no Secret Manager reader | works with settings (gap 3) |
+| Secrets for node-control | `gcpsm://` references read from Secret Manager at start (#361) | works with settings |
 | node-control state | SQLite on a disk, or Redis (Memorystore) | works with settings |
 | Task runner, bridges | Ansible on any Ubuntu or Debian VM | works |
 
@@ -74,15 +74,15 @@ cert-manager`), with a cert-manager Cloud DNS issuer and Workload Identity.
 
 ## Secrets and state
 
-- **Secrets.** node-control reads its secrets from the environment and from files. On GCE, keep them in Secret
-  Manager. Write them to the compose `.env` or secret files at boot, as the exit node module does for its auth key.
+- **Secrets.** A secret variable of node-control can be a Secret Manager reference,
+  `gcpsm://projects/<project>/secrets/<secret>`, read at start with the VM's service account
+  (`roles/secretmanager.secretAccessor` on each secret). See "Secrets from Google Secret Manager" in the node-control
+  README.
 - **State.** SQLite on the data disk works. Memorystore for Redis works for the modules that use `REDIS_URL`. Put it
-  on the VPC of the control host, with in-transit encryption off. node-control encrypts the state itself
-  (`NODE_CONTROL_STATE_KEY`). With in-transit encryption on, Memorystore uses a server CA that node-control has no
-  setting for yet.
+  on the VPC of the control host. With in-transit encryption on, use a `rediss://` URL and set `REDIS_CA_FILE` to the
+  server CA of the instance. node-control also encrypts the state itself (`NODE_CONTROL_STATE_KEY`).
 
-**Gap 3 (small):** an optional Secret Manager reader in node-control, so a GCE host needs no boot script for secrets.
-This is a convenience, not a blocker.
+**Gap 3 (closed in #361):** before 0.21.0, a boot script had to copy the secrets out of Secret Manager.
 
 ## Task runner and bridges
 
@@ -95,6 +95,6 @@ Open the bridge ports in a GCE firewall rule by network tag. For a 1 vCPU / 1 GB
 |---|---|---|
 | 1. `terraform/modules/control-host/gcp` | done | #359 |
 | 2. Cloud DNS provider for the funnel wildcard record | ~1 day | #360 |
-| 3. Secret Manager reader for node-control secrets (and a Redis CA setting) | ~1 day, optional | #361 |
+| 3. Secret Manager reader for node-control secrets (and a Redis CA setting) | done | #361 |
 
 Nothing else blocks a deployment on GCP: the exit nodes, the funnel and serve certificates, and GKE work today.

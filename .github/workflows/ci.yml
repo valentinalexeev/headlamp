@@ -21,6 +21,7 @@ jobs:
       shell: ${{ steps.f.outputs.shell }}
       terraform: ${{ steps.f.outputs.terraform }}
       ansible: ${{ steps.f.outputs.ansible }}
+      e2e: ${{ steps.f.outputs.e2e }}
       base: ${{ steps.f.outputs.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,7 +39,10 @@ jobs:
           has() { grep -qE "$1" <<<"$files" && echo true || echo false; }
           {
             echo "base=$BASE"
-            echo "shell=$(has '(\.sh$|^scripts/|^\.githooks/|^Makefile$|^\.github/workflows/ci\.yml$)')"
+            # test/ and *.bats: the bats tests of the shell scripts (ADR 0004, #381).
+            echo "shell=$(has '(\.sh$|\.bats$|^test/|^\.gitmodules$|^scripts/|^\.githooks/|^Makefile$|^\.github/workflows/ci\.yml$)')"
+            # tests/e2e: the Go e2e module (ADR 0004, #384).
+            echo "e2e=$(has '(^tests/e2e/|^\.github/workflows/ci\.yml$)')"
             echo "terraform=$(has '(^terraform/|^\.github/workflows/ci\.yml$)')"
             echo "ansible=$(has '(^ansible/|^\.github/workflows/ci\.yml$)')"
           } >>"$GITHUB_OUTPUT"
@@ -140,6 +144,30 @@ jobs:
           cache-dependency-path: apps/*/go.sum
       - run: make vulncheck
 
+  go-e2e:
+    # The Go e2e module (ADR 0004): vet it and build its tests, so a broken e2e test shows up in the PR. The tests
+    # themselves need Docker and minutes each, so they run on demand (make test-*-e2e), not here.
+    needs: scope
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.scope.outputs.e2e == 'true'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: needs.scope.outputs.e2e == 'true' && hashFiles('tests/e2e/go.mod') != ''
+        with:
+          go-version-file: tests/e2e/go.mod
+          cache: false
+      - name: Vet and build the e2e tests
+        if: needs.scope.outputs.e2e == 'true'
+        run: |
+          if [ ! -f tests/e2e/go.mod ]; then echo "no tests/e2e module in this tree"; exit 0; fi
+          cd tests/e2e
+          go vet ./...
+          go test -count=1 -run '^$' ./...
+      - name: Skipped
+        if: needs.scope.outputs.e2e != 'true'
+        run: echo "no e2e change"
+
   config-lint:
     runs-on: ubuntu-26.04
     steps:
@@ -183,6 +211,19 @@ jobs:
             done
             [ "$ok" = 1 ] || exit 1
             terraform -chdir="$m" validate
+            echo "::endgroup::"
+          done
+          # The control-host modules (#359): validate and their plan tests (mocked providers, no cloud account).
+          for m in terraform/modules/control-host/*/; do
+            echo "::group::$m"
+            ok=0
+            for try in 1 2 3; do
+              if terraform -chdir="$m" init -backend=false -input=false; then ok=1; break; fi
+              echo "init failed (try $try of 3)"; sleep $((try * 20))
+            done
+            [ "$ok" = 1 ] || exit 1
+            terraform -chdir="$m" validate
+            if [ -d "$m/tests" ]; then terraform -chdir="$m" test; fi
             echo "::endgroup::"
           done
       - name: Skipped

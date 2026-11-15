@@ -249,6 +249,41 @@ Set `load_balancer = false` to use an Elastic IP on the instance and no load bal
 **CAUTION:** The module sets `prevent_destroy` on the data volume. The volume holds the tailnet. To remove it, first
 remove the block from the module code or the volume from the state.
 
+## GCP
+
+[`terraform/modules/control-host/gcp`](../../../terraform/modules/control-host/gcp/) makes these parts:
+
+- one GCE VM (Ubuntu 26.04 LTS Minimal, `e2-small` by default) with Docker and the compose plugin, and OS Login;
+- a persistent data disk, mounted at `/srv/headlamp/data`, with daily snapshots;
+- a static external address on the VM, or with `load_balancer = true` on a passthrough network load balancer;
+- a firewall rule for 443/tcp, 80/tcp and 3478/udp only, and no SSH unless you set `admin_cidrs`;
+- a service account with no project role. As options, it can change one Cloud DNS zone and read listed secrets.
+
+Example root module, in your private repo:
+
+```hcl
+module "control" {
+  source   = "github.com/valentinalexeev/headlamp//terraform/modules/control-host/gcp?ref=<version>"
+  name     = "headlamp-control"
+  project  = "<project>"
+  region   = "europe-west3"
+  zone     = "europe-west3-a"
+  dns_zone = "<managed zone name, only for funnel wildcards>"
+}
+
+output "control_address" { value = module.control.public_address }
+```
+
+1. Run `terraform apply`.
+2. Point your DNS names at the `public_address` output (A records).
+3. Open a shell on the VM with `gcloud compute ssh <instance_name> --tunnel-through-iap` (see the module README).
+4. Copy your directory to `/srv/headlamp/compose` on the VM, then do "First start".
+
+See [`docs/gcp.md`](../../../docs/gcp.md) for the funnel record, Secret Manager and Memorystore on GCP.
+
+**CAUTION:** The module sets `prevent_destroy` on the data disk. The disk holds the tailnet. To remove it, first
+remove the block from the module code or the disk from the state.
+
 ## Operations
 
 ### Backups

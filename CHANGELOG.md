@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- Terraform module `control-host/gcp` (#359), the GCE twin of `control-host/aws`: one VM with Docker (Ubuntu 26.04 LTS Minimal, Shielded VM, OS Login), a separate data disk at `/srv/headlamp/data` with `prevent_destroy` and daily snapshots, a static address on the VM or on an external passthrough network load balancer (`load_balancer`), a firewall for 443/tcp, 80/tcp and 3478/udp (SSH only from `admin_cidrs`), and a service account with no project role. As options, it can change one Cloud DNS zone (`dns_zone`) and read listed secrets (`secrets`). `make test-control-host-gcp` runs its plan checks. The compose README has a "GCP" section.
+
 ## 0.20.0 - 2026-11-15
 
 ### Added

@@ -2,6 +2,7 @@ package dnsrec
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -41,10 +42,10 @@ func TestLookupCheck(t *testing.T) {
 	if ok, err := l.Check(ctx, cn); !ok || err != nil {
 		t.Fatalf("CNAME, case and trailing dot: %v %v", ok, err)
 	}
-	if err := l.Put(ctx, rec); err != ErrNotWritten {
+	if err := l.Put(ctx, rec); !errors.Is(err, ErrNotWritten) {
 		t.Fatalf("the lookup never writes: %v", err)
 	}
-	if changed, err := Ensure(ctx, l, rec); !changed || err != ErrNotWritten {
+	if changed, err := Ensure(ctx, l, rec); !changed || !errors.Is(err, ErrNotWritten) {
 		t.Fatalf("Ensure on a lookup reports that it cannot write: %v %v", changed, err)
 	}
 }

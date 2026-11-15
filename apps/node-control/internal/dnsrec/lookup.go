@@ -18,7 +18,8 @@ type Lookup struct {
 }
 
 // ErrNotWritten is returned by Put: this provider only checks.
-var ErrNotWritten = errors.New("the record is kept by the edge (FUNNEL_DNS_CHECK=lookup); node-control does not write it")
+var ErrNotWritten = errors.New(
+	"the record is kept by the edge (FUNNEL_DNS_CHECK=lookup); node-control does not write it")
 
 func (l *Lookup) Name() string { return "lookup" }
 
@@ -36,7 +37,8 @@ func (l *Lookup) resolve(ctx context.Context, name, typ string) ([]string, error
 		}
 		return []string{c}, nil
 	}
-	ips, err := net.DefaultResolver.LookupNetIP(ctx, map[string]string{"A": "ip4", "AAAA": "ip6"}[typ], name)
+	network := map[string]string{"A": "ip4", "AAAA": "ip6"}[typ]
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, network, name)
 	if err != nil {
 		return nil, err
 	}

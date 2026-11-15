@@ -22,8 +22,8 @@ import (
 // adding a namespace needs no DNS change; the manager only creates the record and puts it back if someone changes it.
 type dnsManager struct {
 	p dnsrec.Provider
-	// check, when set, replaces Ensure: the record is checked by lookup only (FUNNEL_DNS_CHECK=lookup,
-	// #384), because the edge keeps it.
+	// check, when set, replaces Ensure: the record is checked by lookup only
+	// (FUNNEL_DNS_CHECK=lookup, #384), because the edge keeps it.
 	check  func(ctx context.Context, r dnsrec.Record) (bool, error)
 	rec    dnsrec.Record
 	every  time.Duration
@@ -47,8 +47,8 @@ func dnsFromEnv(env core.Env, s *Settings, hc *http.Client) (*dnsManager, error)
 	case prov == "":
 		return nil, nil
 	}
-	slog.Warn("FUNNEL_DNS_PROVIDER is deprecated (#384): let the edge keep the record (Caddy dynamic_dns) " +
-		"and set FUNNEL_DNS_CHECK=lookup. It is removed before 1.0.0.")
+	slog.Warn("FUNNEL_DNS_PROVIDER is deprecated (#384): let the edge keep the record " +
+		"(Caddy dynamic_dns) and set FUNNEL_DNS_CHECK=lookup. It is removed before 1.0.0.")
 	if s.IngressHostname == "" {
 		return nil, errors.New("FUNNEL_DNS_PROVIDER needs FUNNEL_INGRESS_HOSTNAME: the edge name or address the record points at")
 	}
@@ -90,17 +90,20 @@ func dnsFromEnv(env core.Env, s *Settings, hc *http.Client) (*dnsManager, error)
 // lookupFromEnv checks the record by DNS lookup only: the edge keeps it (#384).
 func lookupFromEnv(s *Settings) (*dnsManager, error) {
 	if s.IngressHostname == "" {
-		return nil, errors.New("FUNNEL_DNS_CHECK=lookup needs FUNNEL_INGRESS_HOSTNAME: the edge name or " +
-			"address the record must point at")
+		return nil, errors.New("FUNNEL_DNS_CHECK=lookup needs FUNNEL_INGRESS_HOSTNAME: " +
+			"the edge name or address the record must point at")
 	}
 	rec, err := dnsrec.For("*."+s.PublicDomain, s.IngressHostname)
 	if err != nil {
 		return nil, err
 	}
 	l := &dnsrec.Lookup{}
-	return &dnsManager{p: l, check: l.Check, rec: rec, every: 10 * time.Minute,
+	return &dnsManager{p: l, check: l.Check, rec: rec, every: dnsCheckEvery,
 		status: dnsrec.Status{Provider: l.Name(), Record: rec}}, nil
 }
+
+// dnsCheckEvery is how often the record is checked (and, with a provider, put back).
+const dnsCheckEvery = 10 * time.Minute
 
 func (d *dnsManager) sync(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

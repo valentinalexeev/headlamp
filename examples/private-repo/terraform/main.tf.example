@@ -41,3 +41,11 @@ module "node1" {
 #   ssh_user = "<admin-user>"  # defaults to "ubuntu"
 #   # ... sizing options: see the module's variables.tf
 # }
+
+# module "node5" {   # GCE: one VM that keeps its tailnet identity across stop and start (#214). See the module's README.
+#   source = "../vendor/headlamp/terraform/modules/exit-node-vm/gcp"
+#   name = "node5"  project = "<project>"  zone = "<zone>"
+#   headscale_login_server = var.headscale_login_server  tailscale_version = "<version>"
+#   authkey_from_secret = true  authkey_secret = "projects/<project>/secrets/node5-authkey"
+#   controller_member = "serviceAccount:<node-control account>"  controller_role = "projects/<project>/roles/<role>"
+# }

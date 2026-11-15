@@ -1,0 +1,53 @@
+#cloud-config
+# The node keeps its tailnet identity across stop and start (#214): tailscaled keeps its state on the boot disk, and
+# node-control only stops and starts the VM. So "tailscale up" runs only while the node is not logged in.
+write_files:
+%{ if use_secret ~}
+  - path: /usr/local/sbin/headlamp-fetch-secret
+    permissions: "0700"
+    encoding: b64
+    content: ${fetch_secret_b64}
+%{ endif ~}
+  - path: /etc/sysctl.d/99-headlamp-exit-node.conf
+    content: |
+      net.ipv4.ip_forward = 1
+      net.ipv6.conf.all.forwarding = 1
+  # Exit 0 when tailscaled has a node key from its state on the disk, so a restart does not register again.
+  - path: /usr/local/sbin/headlamp-logged-in
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      for _ in $(seq 30); do
+        s="$(tailscale status --json 2>/dev/null)" && break
+        sleep 2
+      done
+      printf '%s' "$s" | grep -q '"HaveNodeKey": *true'
+runcmd:
+  - sysctl --system
+%{ if tailscale_version != null ~}
+  - |
+    set -eu
+    if ! dpkg -s tailscale >/dev/null 2>&1; then
+      . /etc/os-release
+      install -d -m 0755 /usr/share/keyrings
+      curl -fsSL "https://pkgs.tailscale.com/stable/$ID/$VERSION_CODENAME.noarmor.gpg" -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+      echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/$ID $VERSION_CODENAME main" > /etc/apt/sources.list.d/tailscale.list
+      apt-get update -q
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -q "tailscale=${tailscale_version}"
+      apt-mark hold tailscale
+    fi
+    systemctl enable --now tailscaled
+%{ else ~}
+  - command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh
+%{ endif ~}
+  - |
+    set -eu
+    if /usr/local/sbin/headlamp-logged-in; then exit 0; fi # the state on the disk has the prefs; tailscaled logs in by itself
+%{ if use_secret ~}
+    install -d -m 0700 /run/headlamp
+    /usr/local/sbin/headlamp-fetch-secret '${authkey_secret}' /run/headlamp/authkey
+    tailscale up --login-server='${headscale_login_server}' --auth-key=file:/run/headlamp/authkey --hostname='${hostname}' --advertise-exit-node
+    rm -f /run/headlamp/authkey
+%{ else ~}
+    tailscale up --login-server='${headscale_login_server}' --auth-key='${tailscale_authkey}' --hostname='${hostname}' --advertise-exit-node
+%{ endif ~}

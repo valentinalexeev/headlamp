@@ -77,6 +77,9 @@ expands `$` in a value without quotes.
 | `OPENSTACK_CLOUDS` | Optional. Other OpenStack-compatible clouds, as `NAME=https://<keystone>/v3`, comma separated. `NAME` is upper case. The credentials of each cloud are `NAME_ACCOUNT_ID`, `NAME_PROJECT_ID`, `NAME_USER`, `NAME_PASSWORD` and `NAME_REGION`. Only this variable sets where these credentials go, so `nodes.json` cannot send them to a different URL. |
 | `AWS_REGION` | The region of the `aws` nodes that do not set `"aws": {"region": ...}`. **Required off EC2.** On an EC2 host, the host's own region from IMDSv2 is the default (#220). Then node-control in a container on a bridge network needs the IMDS hop limit 2 (`control-host/aws` `metadata_hop_limit`). |
 | `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_EC2`, `AWS_ENDPOINT_URL_AUTO_SCALING` | The standard AWS credential chain. Use an instance or task role if possible, so that no key is necessary. The endpoint override is optional. See "AWS permissions". |
+| `GCP_PROJECT` | The project of the `gcp` nodes that do not set `"gcp": {"project": ...}`. **Required off GCE.** On a GCE host, the host's own project from the metadata server is the default (#221). |
+| `GCP_ZONES` | Optional. Comma-separated zones in which the `gcp` provider looks for a VM. Empty (default): all zones, in one aggregated list call. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Optional. The `gcp` provider uses Application Default Credentials: this file (a service account key or a Workload Identity Federation config), or the metadata server on GCE. See "GCP permissions". |
 | `FLY_API_TOKEN` | The app-scoped deploy token for the controlled Fly app or apps. |
 | `ADMIN_CONFIG` | Optional. The path of the admin roles file (see "Admin roles"). A file that does not parse, has an unknown field or names an unknown role stops the start. |
 | `ADMIN_USERS` | Optional. Comma-separated tailnet logins that get the `owner` role. |
@@ -355,6 +358,39 @@ instances or groups:
 
 The two describe actions do not support resource conditions, so they must have `"Resource": "*"`. They can read the
 state of all instances and groups in the account, but they cannot change them.
+
+### GCP permissions
+
+The `gcp` provider (#214) starts and stops a GCE VM, as `terraform/modules/exit-node-vm/gcp` makes it. A stop keeps the
+boot disk and the tailscaled state on it. So a start brings back the same headscale node (same id, name and IPs).
+A preempted Spot VM is stopped, not deleted, and node-control can start it again.
+
+The provider finds the VM by its name, in the project, in one call over all zones (`GCP_ZONES` narrows it). It acts only
+on a VM with the label `headlamp-exit-node=true`: it refuses any other VM. A node block can pin the VM:
+`"gcp": {"project": "<project>", "zone": "<zone>", "instance_name": "<name>"}`.
+
+Make a custom role with only these permissions, for example `headlampExitNodeControl`:
+
+```text
+compute.instances.get
+compute.instances.start
+compute.instances.stop
+```
+
+Grant it **on each exit node VM**, not on the project. Then node-control cannot start or stop other VMs. IAM conditions
+cannot read labels, so the label check in node-control is a second guard, not the boundary. The `exit-node-vm/gcp`
+module makes this grant when you set `controller_member` and `controller_role`.
+
+The lookup by name also needs `compute.instances.list` on the project. Grant it in a second role that has only that
+permission. It reads the state of all VMs in the project, but it cannot change them. To avoid it, pin each node with
+`"gcp": {"zone": ...}`: then the provider reads the VM directly and does not list.
+
+1. The `exit-node-vm/gcp` module puts the label on the instance (not on the boot disk).
+2. On GCE, give the roles to the service account of the host that runs node-control. No key is needed.
+3. Outside GCP, for example on an AWS control host, use Workload Identity Federation. Make a workload identity pool
+   with an AWS provider. Let the host's role use a service account with the roles. Set `GOOGLE_APPLICATION_CREDENTIALS`
+   to the federation config file. Then no long-lived key is needed.
+4. A service account key file also works. Keep it as a secret.
 
 ### Optional overrides: `nodes.json`
 

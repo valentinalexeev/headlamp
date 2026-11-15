@@ -247,7 +247,20 @@ func main() {
 		closeStore()
 		os.Exit(1)
 	}
-	err = core.Run(ctx, mods, env, tn, core.WithAuthorizer(newAuthorizer(pol, tn, slog.Default())))
+	runOpts := []core.Option{core.WithAuthorizer(newAuthorizer(pol, tn, slog.Default()))}
+	// #366: the console on HTTPS with an OIDC sign-in, after serve (it uses the serve certificate).
+	ac, err := adminConsole(env, serveModule(mods), tn.Addrs)
+	if err != nil {
+		slog.Error("node-control cannot start", "err", err)
+		tn.Close()
+		closeStore()
+		os.Exit(1)
+	}
+	if ac != nil {
+		mods = insertAfterServe(mods, ac.mod)
+		runOpts = append(runOpts, ac.opts...)
+	}
+	err = core.Run(ctx, mods, env, tn, runOpts...)
 	tn.Close() // writes the final state, so the store is closed after it
 	closeStore()
 	if err != nil {

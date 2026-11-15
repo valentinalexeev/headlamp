@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,7 +134,21 @@ var shutdownTimeout = 5 * time.Second
 // Option changes how Run serves.
 type Option func(*runOptions)
 
-type runOptions struct{ auth Authorizer }
+type runOptions struct {
+	auth Authorizer
+	// tlsAdmin, when set, serves the admin handler also over TLS on :443 of the tailnet address
+	// (#366). The certificate comes from GetCertificate, called per handshake.
+	tlsAdmin *tls.Config
+}
+
+// WithAdminTLS serves the admin handler also on :443 of the tailnet address with cfg (#366). The
+// Tailnet must implement AdminTLSListener.
+func WithAdminTLS(cfg *tls.Config) Option { return func(o *runOptions) { o.tlsAdmin = cfg } }
+
+// AdminTLSListener is an optional Tailnet capability: a TCP listener on :443 of the tailnet address.
+type AdminTLSListener interface {
+	ListenAdminTLS() (net.Listener, error)
+}
 
 // WithAuthorizer puts every admin route behind a (see Mux.Seal). Run then refuses to start if any admin route has
 // no permission. Without it, routes are served as the modules registered them.
@@ -224,6 +239,25 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 	}
 	if err := add("admin", hostGuard(allowed, NavMiddleware(navItems, navActions, tn, admin)), tn.ListenAdmin); err != nil {
 		return err
+	}
+	if o.tlsAdmin != nil {
+		lt, ok := tn.(AdminTLSListener)
+		if !ok {
+			closeAll()
+			return errors.New("the console on HTTPS needs a tailnet listener on :443")
+		}
+		cfg := o.tlsAdmin
+		if err := add("admin-tls", hostGuard(allowed, NavMiddleware(navItems, navActions, tn, admin)),
+			func() (net.Listener, error) {
+				ln, err := lt.ListenAdminTLS()
+				if err != nil {
+					return nil, err
+				}
+				return tls.NewListener(ln, cfg), nil
+			}); err != nil {
+			closeAll()
+			return err
+		}
 	}
 	if public != nil {
 		if err := add("public", cleanPathGuard(public), tn.ListenPublic); err != nil {

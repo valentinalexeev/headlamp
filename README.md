@@ -38,6 +38,8 @@ ready to use, and none of them is the default:
 
 - **AWS:** `terraform/modules/control-host/aws` builds the host, and `examples/compose/control/` runs the central nodes on it.
 - **Any Docker host:** the same compose files, with the published images and your config mounted.
+- **Google Cloud:** the compose files on a GCE VM, `terraform/modules/exit-node-vm/gcp` for exit nodes, and the charts
+  on GKE. [`docs/gcp.md`](docs/gcp.md) lists what works and what is still missing.
 - **Fly.io:** a `fly.toml` per app and an overlay deploy in `examples/private-repo/`. [`docs/images.md`](docs/images.md) explains what each image does, how they fit together and what each needs from its host, and [`VERSIONING.md`](VERSIONING.md) covers tags and release rules. [`UPGRADING.md`](UPGRADING.md) lists what a site repo must change for each release.
 
 Each release also publishes the Helm chart [`charts/tailnet-connector`](charts/tailnet-connector/README.md) to

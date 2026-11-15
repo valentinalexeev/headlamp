@@ -103,6 +103,21 @@ func (t *Tsnet) Healthy(ctx context.Context) error {
 func (t *Tsnet) ListenAdmin() (net.Listener, error)  { return t.srv.Listen("tcp", ":80") }
 func (t *Tsnet) ListenPublic() (net.Listener, error) { return t.srv.Listen("tcp", ":8081") }
 
+// ListenAdminTLS listens on :443 for the console on HTTPS (#366); the caller wraps it in TLS.
+func (t *Tsnet) ListenAdminTLS() (net.Listener, error) { return t.srv.Listen("tcp", ":443") }
+
+// Addrs are the tailnet addresses of this node (the console name resolves to them, #366).
+func (t *Tsnet) Addrs() []netip.Addr {
+	ip4, ip6 := t.srv.TailscaleIPs()
+	var out []netip.Addr
+	for _, a := range []netip.Addr{ip4, ip6} {
+		if a.IsValid() {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // ListenDNS listens on port 53 of the node's IPv4 tailnet address, UDP and TCP. tsnet needs a concrete address for
 // UDP (it refuses ":53"), so the node must be up first; the spike on #117 showed both paths work through tsnet.
 func (t *Tsnet) ListenDNS() (net.PacketConn, net.Listener, error) {

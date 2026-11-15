@@ -268,6 +268,8 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 		servemod.New(env, client, servemod.WithDNS(sharedDNS)),
 		tailnetdns.New(env, client, sharedDNS),
 		access.New(env),
+		// The console OIDC sign-in (#366), with the demo's fake issuer.
+		&demoSignIn{idp: w.idp},
 		fleet.New(fleet.Deps{Others: func() []core.Module { return beforeFleet },
 			Nodes: src, Headscale: client, TailscalePin: "1.104.5",
 			Bridges: bridges(enr),

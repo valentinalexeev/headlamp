@@ -167,7 +167,7 @@ func keyViewers(env core.Env) func(string) bool {
 	// With an admin policy, whoever may view the overview sees the warning. Without one, the old rule applies.
 	if p := authz.Default(); p != nil && !p.Empty() {
 		return func(login string) bool {
-			return p.Can(authz.Subject{Login: login}, authz.P(authz.FeatureOverview, authz.LevelView))
+			return p.Can(authz.SubjectOf(login), authz.P(authz.FeatureOverview, authz.LevelView))
 		}
 	}
 	lists := strings.Join([]string{env.Getenv("POLICY_ADMIN_USERS"), env.Getenv("FUNNEL_ADMIN_USERS"), env.Getenv("TASKS_ADMIN_USERS")}, ",")
@@ -259,7 +259,20 @@ func main() {
 		closeStore()
 		os.Exit(1)
 	}
-	err = core.Run(ctx, mods, env, tn, core.WithAuthorizer(newAuthorizer(pol, tn, slog.Default())))
+	runOpts := []core.Option{core.WithAuthorizer(newAuthorizer(pol, tn, slog.Default()))}
+	// #366: the console on HTTPS with an OIDC sign-in, after serve (it uses the serve certificate).
+	ac, err := adminConsole(env, serveModule(mods), tn.Addrs)
+	if err != nil {
+		slog.Error("node-control cannot start", "err", err)
+		_ = tn.Close() // exiting anyway; the start error is what matters
+		closeStore()
+		os.Exit(1)
+	}
+	if ac != nil {
+		mods = insertAfterServe(mods, ac.mod)
+		runOpts = append(runOpts, ac.opts...)
+	}
+	err = core.Run(ctx, mods, env, tn, runOpts...)
 	tn.Close() // writes the final state, so the store is closed after it
 	closeStore()
 	if err != nil {

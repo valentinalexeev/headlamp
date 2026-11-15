@@ -94,6 +94,8 @@ commits on top of it or attempt a rewrite on your own.
 - Verify before claiming something works: `make test-tf-run`; `shellcheck` on shell scripts;
   `terraform fmt -check && terraform validate` for module changes; `ansible-playbook
   --syntax-check` for roles; `docker build` for app images. Say what you ran and what you did not.
+- New tests of shell scripts are bats files under `test/scripts/` (`make test-sh`); new end-to-end tests are Go (ADR 0004).
+  Do not add a new hand-written `run_tests.sh`.
 
 ### Repo map
 

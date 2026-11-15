@@ -64,6 +64,11 @@ type Backend interface {
 	TailnetDoc() (TailnetDoc, error)
 	PutTailnetDoc(d TailnetDoc) error
 
+	// SelectionDoc and PutSelectionDoc read and replace the bridge selection overrides (#314). An
+	// empty store gives an empty document. It is not part of the enrolment export.
+	SelectionDoc() (SelectionDoc, error)
+	PutSelectionDoc(d SelectionDoc) error
+
 	// The audit log of operator actions (audit.go) and the acknowledgements of attention items (ack.go); neither is part
 	// of the enrolment export.
 	core.AuditLog

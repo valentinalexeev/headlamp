@@ -78,7 +78,8 @@ func TestDemoServesEveryScenario(t *testing.T) {
 					t.Fatalf("minimal: want one item, got %v", labels)
 				}
 			case "partial":
-				want := []string{"Overview", "Nodes", "Devices", "Fleet", "Activity"}
+				// the demo turns on the bridge selection console (#314) with enrolment
+				want := []string{"Overview", "Nodes", "Devices", "Bridge selection", "Fleet", "Activity"}
 				if !slices.Equal(labels, want) {
 					t.Fatalf("partial: want %v, got %v", want, labels)
 				}

@@ -63,6 +63,7 @@ expands `$` in a value without quotes.
 | `AGENT_URL`, `AGENT_TOKEN` | The address (dialled through the tailnet) and bearer token of the agent of the first bridge. They are required with `ENROLL_DB` or `ENROLL_REDIS=1` only for the old single-host `enroll.json`. In the list shape, they are the optional fallback of the FIRST entry (no `agent_url`, no `AGENT_TOKEN_<NAME>`). |
 | `HY2_OBFS_<NAME>` | The Salamander password of a bridge with `hy2_port`, the same as its `hy2_obfs_password`. Same name rule as `AGENT_TOKEN_<NAME>`. Without it, the profile has no obfuscation, and a bridge with Salamander does not answer. |
 | `ENROLL_TAILNET_DST` | The ACL destinations that clients of a bridge with `"tailnet_access": "all"` may reach, comma-separated, for example `tag:lan:*,tag:db:5432`. Empty by default. See "Tailnet access through a bridge". |
+| `ENROLL_SELECTION_UI` | `1` turns on the bridge selection console (#314). Off by default. See "Bridge selection console". |
 | `ENROLL_INGRESS_TAG` | The ACL source of the generated tailnet access rule. The default is `tag:ingress`. Set it to the tag of the bridge's SOCKS tailscaled, which comes from `socks_authkey`. |
 | `AGENT_TOKEN_<NAME>` | One bearer token for each bridge. `<NAME>` is the bridge name in upper case, with `-` as `_` (`ingress-2` reads `AGENT_TOKEN_INGRESS_2`). The `token_env` of an entry names another variable in its place. |
 | `POLICY_DB` | The path of the SQLite change history. It enables the policy console (`/policy`). Put it on the state volume: `/var/lib/tailscale/policy.db`. It needs `HEADSCALE_LOGIN_SERVER` and `HEADSCALE_API_KEY`. |
@@ -77,6 +78,9 @@ expands `$` in a value without quotes.
 | `OPENSTACK_CLOUDS` | Optional. Other OpenStack-compatible clouds, as `NAME=https://<keystone>/v3`, comma separated. `NAME` is upper case. The credentials of each cloud are `NAME_ACCOUNT_ID`, `NAME_PROJECT_ID`, `NAME_USER`, `NAME_PASSWORD` and `NAME_REGION`. Only this variable sets where these credentials go, so `nodes.json` cannot send them to a different URL. |
 | `AWS_REGION` | The region of the `aws` nodes that do not set `"aws": {"region": ...}`. **Required off EC2.** On an EC2 host, the host's own region from IMDSv2 is the default (#220). Then node-control in a container on a bridge network needs the IMDS hop limit 2 (`control-host/aws` `metadata_hop_limit`). |
 | `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_EC2`, `AWS_ENDPOINT_URL_AUTO_SCALING` | The standard AWS credential chain. Use an instance or task role if possible, so that no key is necessary. The endpoint override is optional. See "AWS permissions". |
+| `GCP_PROJECT` | The project of the `gcp` nodes that do not set `"gcp": {"project": ...}`. **Required off GCE.** On a GCE host, the host's own project from the metadata server is the default (#221). |
+| `GCP_ZONES` | Optional. Comma-separated zones in which the `gcp` provider looks for a VM. Empty (default): all zones, in one aggregated list call. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Optional. The `gcp` provider uses Application Default Credentials: this file (a service account key or a Workload Identity Federation config), or the metadata server on GCE. See "GCP permissions". |
 | `FLY_API_TOKEN` | The app-scoped deploy token for the controlled Fly app or apps. |
 | `ADMIN_CONFIG` | Optional. The path of the admin roles file (see "Admin roles"). A file that does not parse, has an unknown field or names an unknown role stops the start. |
 | `ADMIN_USERS` | Optional. Comma-separated tailnet logins that get the `owner` role. |
@@ -356,6 +360,39 @@ instances or groups:
 The two describe actions do not support resource conditions, so they must have `"Resource": "*"`. They can read the
 state of all instances and groups in the account, but they cannot change them.
 
+### GCP permissions
+
+The `gcp` provider (#214) starts and stops a GCE VM, as `terraform/modules/exit-node-vm/gcp` makes it. A stop keeps the
+boot disk and the tailscaled state on it. So a start brings back the same headscale node (same id, name and IPs).
+A preempted Spot VM is stopped, not deleted, and node-control can start it again.
+
+The provider finds the VM by its name, in the project, in one call over all zones (`GCP_ZONES` narrows it). It acts only
+on a VM with the label `headlamp-exit-node=true`: it refuses any other VM. A node block can pin the VM:
+`"gcp": {"project": "<project>", "zone": "<zone>", "instance_name": "<name>"}`.
+
+Make a custom role with only these permissions, for example `headlampExitNodeControl`:
+
+```text
+compute.instances.get
+compute.instances.start
+compute.instances.stop
+```
+
+Grant it **on each exit node VM**, not on the project. Then node-control cannot start or stop other VMs. IAM conditions
+cannot read labels, so the label check in node-control is a second guard, not the boundary. The `exit-node-vm/gcp`
+module makes this grant when you set `controller_member` and `controller_role`.
+
+The lookup by name also needs `compute.instances.list` on the project. Grant it in a second role that has only that
+permission. It reads the state of all VMs in the project, but it cannot change them. To avoid it, pin each node with
+`"gcp": {"zone": ...}`: then the provider reads the VM directly and does not list.
+
+1. The `exit-node-vm/gcp` module puts the label on the instance (not on the boot disk).
+2. On GCE, give the roles to the service account of the host that runs node-control. No key is needed.
+3. Outside GCP, for example on an AWS control host, use Workload Identity Federation. Make a workload identity pool
+   with an AWS provider. Let the host's role use a service account with the roles. Set `GOOGLE_APPLICATION_CREDENTIALS`
+   to the federation config file. Then no long-lived key is needed.
+4. A service account key file also works. Keep it as a secret.
+
 ### Optional overrides: `nodes.json`
 
 The file is optional. Files from the Python version continue to work. Start from [`testdata/nodes.example.json`](testdata/nodes.example.json). The image has no `nodes.json` (the page then uses the default title). Lay your file over `app/` at deploy time.
@@ -522,6 +559,78 @@ Things to know:
   does the fix. Test a change on one device first.
 - There is no per-device choice of a group. A person can still select one outbound by hand in the app.
 - `make test-profile-clients` checks the profile goldens with the real sing-box and mihomo, on docker.
+
+### Bridge selection console
+
+The console page **Bridge selection** (`/enroll/selection`, #314) changes the bridge selection without an edit of
+`enroll.json` and without a redeploy. The page is off by default.
+
+To turn it on, set `ENROLL_SELECTION_UI=1` and restart node-control. Without it, the page, its API and the top bar
+entry are not there, and node-control does not use stored values. Then each profile is the profile of `enroll.json`.
+
+What you can change:
+
+- The `urltest` values: `tolerance`, `interval`, `url` and `strategy`. The limits are the same as in `enroll.json`.
+  The strategy `url-test` removes a `strategy` of `enroll.json`.
+- The `group` of each bridge. An empty group removes the group of `enroll.json`.
+- The order of the bridges in the profile.
+- **Drain**, for each bridge. New profiles do not have a drained bridge. The credentials stay on the bridge. You
+  cannot drain all bridges.
+
+What you cannot change: the host, public key, short ID, SNI, port and tokens of a bridge. These come only from
+`enroll.json` and from the approval of a discovered bridge.
+
+Each value has one source. The page shows the source of each value:
+
+| Source on the page | Meaning |
+|---|---|
+| console | A value from this page. It has priority. |
+| enroll.json | No console value. The value comes from `enroll.json`. |
+| default | No console value and no value in `enroll.json`. The built-in default applies. |
+
+To change a value, do these steps:
+
+1. Change the value on the page.
+2. Click **Preview**. node-control validates the values. If `sing-box` is on the `PATH`, node-control also does
+   `sing-box check` on a profile of a test device. The page shows each change with its old and new value and source.
+   It also shows the selection groups of the sing-box and Clash profiles.
+3. Click **Apply**. **Apply** is available only after a preview of the same values.
+4. Test the change on one device: refresh its subscription in the app.
+5. If the change is bad, click **Revert last change**. This goes back one step. A second revert is not possible.
+
+> **WARNING:** A change applies to all devices, each at its next subscription update. A bad value stays on a device
+> until that update, and the revert does too. Test each change on one device first.
+
+The audit log records each preview (`selection.preview`), apply (`selection.apply`) and revert (`selection.revert`).
+Each entry has the caller, the time, and the old and new values. See "The enrolment audit log".
+
+Permissions: the page and `GET /enroll/selection/state` need `enroll.view`. Preview, apply and revert need
+`enroll.admin`.
+
+The values are in the table `selection_doc` (SQLite), or in the hash `<prefix>:selection` (Redis, sealed like the
+tailnet grants). They are not part of `enroll-export` or of the backup.
+
+#### Write the console values to `enroll.json`
+
+Console values that are not in git can drift from the site repo. To prevent this, write them back to `enroll.json`
+with `scripts/bridge-selection.sh`. It works like `headscale-policy.sh pull`. Run it from a tailnet node whose user has
+`enroll.view`:
+
+```sh
+NODE_CONTROL_URL=http://node-control.<tailnet>:8080 scripts/bridge-selection.sh diff --file site/enroll.json
+NODE_CONTROL_URL=http://node-control.<tailnet>:8080 scripts/bridge-selection.sh pull --file site/enroll.json
+```
+
+- `diff` shows the change, and exits 1 when the file is different.
+- `pull` writes the top-level `urltest` object (only values that are not built-in defaults), the `group` of each
+  bridge and the order of `ingresses`. It does not change other keys.
+- `enroll.json` has no drain key. `pull` keeps a drained bridge in the file and shows a note. Remove the bridge from the
+  file yourself if necessary.
+- The command reads `GET /enroll/selection/export`. Exit codes: 0 no change or written, 1 difference (`diff`), 2 usage
+  or a bad file, 3 remote failure.
+
+After you deploy the new `enroll.json`, revert the console values, or apply empty values, so that `enroll.json` is the
+source again.
 
 ### Intermittent bridges
 
@@ -1049,7 +1158,7 @@ The command palette (`Ctrl/Cmd+K`, or the search button) filters these in the br
 
 ### The enrolment audit log
 
-With enrolment on, the app records device and node actions as `core.AuditEntry` (`at`, `actor`, `action`, `detail`) in the enrolment backend. The actions are `device.create`, `device.link`, `device.revoke`, `device.delete`, `device.extend`, `device.rotate_secret`, `bridge.approve`, `bridge.unapprove`, and node start and stop. The backend location is the `audit` table in SQLite, or the list `<prefix>:audit` in Redis.
+With enrolment on, the app records device and node actions as `core.AuditEntry` (`at`, `actor`, `action`, `detail`) in the enrolment backend. The actions are `device.create`, `device.link`, `device.revoke`, `device.delete`, `device.extend`, `device.rotate_secret`, `bridge.approve`, `bridge.unapprove`, `selection.preview`, `selection.apply`, `selection.revert`, and node start and stop. The backend location is the `audit` table in SQLite, or the list `<prefix>:audit` in Redis.
 
 The log has a limit of **1000** entries, newest first. The app drops older entries when it writes new ones. It also records acknowledgements here (`attention.acknowledge`, `attention.unacknowledge`). The detail holds names and dates only, never a link, key or subscription URL. The app cuts each field to a fixed length. A failure to write an entry goes to the log and never fails the action.
 

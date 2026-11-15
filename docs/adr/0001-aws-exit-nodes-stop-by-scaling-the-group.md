@@ -44,6 +44,9 @@ no `asg` key, it uses the group name that the module makes, `<name>-asg`.
   limited by a tag on the group (documented in the node-control README).
 - Stop is not instant: the group terminates the instance asynchronously. The provider reports `STOPPING` until it is gone.
 - Plain instances keep the cheaper stop/start, with their disk and identity intact.
+- GCP (#214) does not repeat this choice. `exit-node-vm/gcp` makes one plain VM, not a managed instance group. A Spot
+  VM is stopped, not deleted, on preemption. So a stop keeps the disk, and the node keeps its identity. The AWS answer
+  (state in SSM) has no GCP twin, because tailscaled has no Google Cloud state store.
 
 Alternatives not chosen:
 

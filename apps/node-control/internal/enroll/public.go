@@ -74,12 +74,15 @@ func NewPublic(store Backend, cfg IngressConfig) *Public { return newPublic(stor
 
 // NewPublicFor returns the public handler over store whose profiles list the ingresses the
 // registry has approved at the time of the request.
-func NewPublicFor(store Backend, reg *Registry) *Public {
+func NewPublicFor(store Backend, reg *Registry) *Public { return newPublicFor(store, reg, nil) }
+
+// newPublicFor is NewPublicFor with the bridge selection overrides of sel (#314); nil: none.
+func newPublicFor(store Backend, reg *Registry, sel *Selector) *Public {
 	p := newPublic(store, reg.LinkConfig())
 	p.profileCfg = func(ctx context.Context) IngressConfig {
 		// the readings the page and the reconcile loop keep fresh: a profile request never waits for
 		// the network
-		return reg.Current(ctx, false).Cfg
+		return sel.Apply(reg.Current(ctx, false).Cfg)
 	}
 	return p
 }

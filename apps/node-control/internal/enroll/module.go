@@ -175,11 +175,14 @@ func (m *Module) Register(r *core.Routes) error {
 	m.admin = NewAdminFor(store, reg)
 	m.admin.SetTailnet(r.Tailnet)
 	m.admin.tacl = m.tailnetACL()
+	if SelectionUIEnabled(m.env) {
+		m.admin.sel = NewSelector(store)
+	}
 	m.admin.Register(r.Admin)
 	if err := m.registerSelf(r, []byte(key)); err != nil {
 		return err
 	}
-	NewPublicFor(store, reg).Register(r.Public)
+	newPublicFor(store, reg, m.admin.sel).Register(r.Public)
 	return nil
 }
 
@@ -259,12 +262,25 @@ func (m *Module) Bridges(ctx context.Context) []IngressView {
 	return m.reg.Current(ctx, false).Views
 }
 
+// Places of the enrolment pages in the top bar.
+const (
+	navOrderDevices   = 20
+	navOrderSelection = 22
+)
+
 // Nav puts the enrolment page in the top bar, but only when the module registered (enrolment enabled).
 func (m *Module) Nav() []core.NavItem {
 	if m.store == nil {
 		return nil
 	}
-	return []core.NavItem{{Label: "Devices", Path: "/enroll", Order: 20, Group: "operate", Icon: "devices", Source: "enroll", Allow: authz.NavAllow(authz.P(authz.FeatureEnroll, authz.LevelView))}}
+	items := []core.NavItem{{Label: "Devices", Path: "/enroll", Order: navOrderDevices,
+		Group: "operate",
+		Icon:  "devices", Source: "enroll",
+		Allow: authz.NavAllow(authz.P(authz.FeatureEnroll, authz.LevelView))}}
+	if m.admin != nil && m.admin.sel != nil {
+		items = append(items, selectionNav())
+	}
+	return items
 }
 
 // Actions puts "Enrol device" in the top bar, but only when the module registered.

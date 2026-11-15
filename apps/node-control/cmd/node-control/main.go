@@ -252,7 +252,7 @@ func main() {
 	ac, err := adminConsole(env, serveModule(mods), tn.Addrs)
 	if err != nil {
 		slog.Error("node-control cannot start", "err", err)
-		tn.Close()
+		_ = tn.Close() // exiting anyway; the start error is what matters
 		closeStore()
 		os.Exit(1)
 	}

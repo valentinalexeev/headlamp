@@ -251,7 +251,7 @@ func (a *Authorizer) Wrap(pattern string, h http.Handler) (http.Handler, error) 
 			return
 		}
 		s := subjectOf(l)
-		if r.Kind != KindHuman && !(a.Open && a.Policy.Empty()) {
+		if r.Kind != KindHuman && (!a.Open || !a.Policy.Empty()) {
 			switch r.Kind {
 			case KindAnyUser:
 				if len(a.Policy.Role(s)) == 0 {

@@ -1,7 +1,9 @@
-// Package adminoidc signs an admin in to the console with OIDC (#366), so stored grants to OIDC groups
+// Package adminoidc signs an admin in to the console with OIDC (#366), so stored grants to OIDC
+// groups
 // apply. It does not replace the tailnet check: every admin route still asks WhoIs, and a tagged
 // caller is still refused. The sign-in only adds the groups of the ID token to the caller's tailnet
-// login, and only when the person who signed in is that login (ADMIN_OIDC_MATCH=login): the verified
+// login, and only when the person who signed in is that login (ADMIN_OIDC_MATCH=login): the
+// verified
 // email of the ID token must be the tailnet login, or, for a login without a domain ("alice@"), its
 // local part.
 //
@@ -16,8 +18,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
-	"fmt"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -37,15 +38,19 @@ const (
 	DefaultSession = 8 * time.Hour
 	maxSessions    = 1024
 	maxFlows       = 256
+	// tokenBytes is the length of a session id before encoding: 256 bits.
+	tokenBytes = 32
 )
 
 // Provider is the part of an OIDC provider the sign-in uses (oidc.Provider; a fake in tests).
 type Provider interface {
 	AuthURL(f oidc.Flow) string
-	Exchange(ctx context.Context, f oidc.Flow, gotState, code, groupsClaim string) (oidc.Identity, error)
+	Exchange(ctx context.Context, f oidc.Flow, gotState, code, groupsClaim string) (
+		oidc.Identity, error)
 }
 
-// WhoIs answers who is calling: the tailnet login and tags of a remote address (core.Tailnet has it).
+// WhoIs answers who is calling: the tailnet login and tags of a remote address (core.Tailnet
+// has it).
 type WhoIs interface {
 	WhoIs(ctx context.Context, remoteAddr string) (login string, tags []string, err error)
 }
@@ -85,7 +90,8 @@ func New(cfg Config) *Module {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Module{cfg: cfg, sessions: map[string]session{}, flows: map[string]oidc.Flow{}, flowAt: map[string]time.Time{}}
+	return &Module{cfg: cfg, sessions: map[string]session{}, flows: map[string]oidc.Flow{},
+		flowAt: map[string]time.Time{}}
 }
 
 // Register adds the routes. They are tailnet-checked by the caller's WhoIs in the handlers, like
@@ -108,7 +114,7 @@ func (m *Module) human(r *http.Request) string {
 }
 
 func random() string {
-	b := make([]byte, 32)
+	b := make([]byte, tokenBytes)
 	if _, err := rand.Read(b); err != nil {
 		panic(err)
 	}
@@ -138,7 +144,8 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 	}
 	m.flows[f.State], m.flowAt[f.State] = f, now
 	m.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: flowCookie, Value: f.State, Path: "/", Secure: true, HttpOnly: true,
+	http.SetCookie(w, &http.Cookie{Name: flowCookie, Value: f.State, Path: "/", Secure: true,
+		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: int(flowTTL / time.Second)})
 	http.Redirect(w, r, m.cfg.Provider.AuthURL(f), http.StatusFound)
 }
@@ -164,8 +171,10 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := r.Cookie(flowCookie)
 	state := r.URL.Query().Get("state")
-	if err != nil || c.Value == "" || subtle.ConstantTimeCompare([]byte(c.Value), []byte(state)) != 1 {
-		http.Error(w, "sign-in expired or was started elsewhere: open /auth/login again", http.StatusBadRequest)
+	if err != nil || c.Value == "" ||
+		subtle.ConstantTimeCompare([]byte(c.Value), []byte(state)) != 1 {
+		http.Error(w, "sign-in expired or was started elsewhere: open /auth/login again",
+			http.StatusBadRequest)
 		return
 	}
 	m.mu.Lock()
@@ -174,13 +183,13 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 	delete(m.flows, state)
 	delete(m.flowAt, state)
 	m.mu.Unlock()
-	clear := &http.Cookie{Name: flowCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, MaxAge: -1}
-	http.SetCookie(w, clear)
+	expire(w, flowCookie, false)
 	if !ok || m.cfg.Now().Sub(at) > flowTTL {
 		http.Error(w, "sign-in expired: open /auth/login again", http.StatusBadRequest)
 		return
 	}
-	id, err := m.cfg.Provider.Exchange(r.Context(), f, state, r.URL.Query().Get("code"), m.cfg.GroupsClaim)
+	id, err := m.cfg.Provider.Exchange(r.Context(), f, state, r.URL.Query().Get("code"),
+		m.cfg.GroupsClaim)
 	if err != nil {
 		m.cfg.Log.Warn("admin sign-in failed", "login", login, "err", err.Error())
 		http.Error(w, "sign-in failed", http.StatusUnauthorized)
@@ -188,8 +197,10 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	if !matches(login, id) {
 		// Someone else's account on this device, or an unverified email: no groups for this login.
-		m.cfg.Log.Warn("admin sign-in refused: the identity is not the tailnet login", "login", login)
-		http.Error(w, "the account you signed in with is not your tailnet login", http.StatusForbidden)
+		m.cfg.Log.Warn("admin sign-in refused: the identity is not the tailnet login",
+			"login", login)
+		http.Error(w, "the account you signed in with is not your tailnet login",
+			http.StatusForbidden)
 		return
 	}
 	sid := random()
@@ -204,8 +215,10 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 	m.sessions[hash(sid)] = session{login: login, until: until}
 	m.mu.Unlock()
 	authz.SetSessionGroups(login, id.Groups, until)
-	m.cfg.Log.Info("admin signed in", "login", login, "groups", len(id.Groups), "until", until.UTC().Format(time.RFC3339))
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: sid, Path: "/", Secure: true, HttpOnly: true,
+	m.cfg.Log.Info("admin signed in", "login", login, "groups", len(id.Groups),
+		"until", until.UTC().Format(time.RFC3339))
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: sid, Path: "/", Secure: true,
+		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: int(m.cfg.Session / time.Second)})
 	http.Redirect(w, r, "/", http.StatusFound)
 }
@@ -253,7 +266,7 @@ func (m *Module) logout(w http.ResponseWriter, r *http.Request) {
 		authz.SetSessionGroups(login, nil, time.Time{})
 		m.cfg.Log.Info("admin signed out", "login", login)
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, MaxAge: -1})
+	expire(w, sessionCookie, true)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -264,15 +277,30 @@ func (m *Module) me(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
+	out := meView{Login: login}
+	if _, s, ok := m.sessionOf(r, login); ok {
+		out.SignedIn, out.Until = true, s.until.UTC().Format(time.RFC3339)
+		out.Groups = len(authz.SessionGroups(login))
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	if _, s, ok := m.sessionOf(r, login); ok {
-		fmt.Fprintf(w, `{"signed_in":true,"login":%q,"until":%q,"groups":%d}`+"\n",
-			login, s.until.UTC().Format(time.RFC3339), len(authz.SessionGroups(login)))
-		return
-	}
-	fmt.Fprintf(w, `{"signed_in":false,"login":%q}`+"\n", login)
+	_ = json.NewEncoder(w).Encode(out)
 }
 
-// ErrConfig is returned by FromEnv for a bad configuration.
-var ErrConfig = errors.New("ADMIN_OIDC")
+type meView struct {
+	SignedIn bool   `json:"signed_in"`
+	Login    string `json:"login"`
+	Until    string `json:"until,omitempty"`
+	Groups   int    `json:"groups,omitempty"`
+}
+
+// expire removes a cookie, with the same attributes it was set with.
+func expire(w http.ResponseWriter, name string, strict bool) {
+	if strict {
+		http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", Secure: true,
+			HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1})
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", Secure: true, HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, MaxAge: -1})
+}

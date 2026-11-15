@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- node-control: sign in with OIDC on the admin console (#366), off unless `ADMIN_OIDC=1`. A stored `group:<name>` grant (#123) then applies to a signed-in admin. The console stays tailnet-only: every route still asks WhoIs, and the sign-in only adds the ID token's groups to the caller's tailnet login, when the verified email is that login. The session (default 8 hours, `ADMIN_OIDC_SESSION_HOURS`) is bound to the login. For the HTTPS redirect and the Secure cookie, node-control also serves the console at `https://<ADMIN_CONSOLE_NAME>` (default `console.<SERVE_ZONE>`) on its tailnet address, port 443, with the serve certificate, so serve must be on. The name resolves through the serve DNS answers. Routes: `/auth/login`, `/auth/callback`, `/auth/me`, `POST /auth/logout`.
+
 ## 0.20.0 - 2026-11-15
 
 ### Added

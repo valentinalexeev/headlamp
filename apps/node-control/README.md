@@ -187,7 +187,43 @@ CAUTION: Import replaces all stored roles and grants. The rules above also apply
 
 **Export** gives the stored roles and grants in the `ADMIN_CONFIG` format.
 
-NOTE: With no OIDC sign-in on the console, a `group:<name>` grant has no effect yet. Only tailnet logins match.
+NOTE: A `group:<name>` grant applies only to an admin who signed in with OIDC on the console (see the next section).
+Without the sign-in, only tailnet logins match.
+
+### Sign in with OIDC on the console
+
+With `ADMIN_OIDC=1` (#366), an admin can sign in to the console with your identity provider. A `group:<name>` grant
+then applies to them while the session lasts. The tailnet check does not change:
+
+- The console stays on the tailnet only. Every admin route still asks the tailnet who calls, and refuses a tagged node.
+- The sign-in adds the groups of the ID token to the caller's tailnet login. It adds nothing else.
+- The person who signs in must be the tailnet login. The verified email of the ID token must be the login. For a
+  login without a domain (`alice@`), the name before the `@` must match. Another account gets `403` and no groups.
+- The session cookie is valid only for the tailnet login that signed in. On another device with another login, it
+  gives nothing.
+
+The sign-in needs HTTPS, so node-control serves the console also at `https://<ADMIN_CONSOLE_NAME>` on its tailnet
+address, port 443. It uses the serve certificate, so the serve module must be on (`SERVE_DB`, `SERVE_ZONE`). With
+`SERVE_CERT_SOURCE=acme`, browsers trust the certificate. With the serve CA, install the CA on the admin devices
+(`/serve/ca.crt`). The name resolves to node-control through the serve DNS answers. Plain `:80` stays as before.
+
+| Variable | Purpose |
+|---|---|
+| `ADMIN_OIDC` | `1` turns on the sign-in and the console on HTTPS. Unset: no change. |
+| `ADMIN_CONSOLE_NAME` | The console name, one label under `SERVE_ZONE`. The default is `console.<SERVE_ZONE>`. A serve service cannot use it. |
+| `ADMIN_OIDC_CLIENT_ID` | Required. A client of its own at the identity provider. Register the redirect URL `https://<ADMIN_CONSOLE_NAME>/auth/callback`. |
+| `ADMIN_OIDC_CLIENT_SECRET` | The client secret. Empty for a public client (PKCE is used either way). |
+| `ADMIN_OIDC_ISSUER` | The issuer. The default is `OIDC_ISSUER`. |
+| `ADMIN_OIDC_GROUPS_CLAIM` | The claim with the groups. The default is `OIDC_GROUPS_CLAIM`, then `groups`. |
+| `ADMIN_OIDC_SCOPES` | The scopes. The default is `openid email profile groups`. |
+| `ADMIN_OIDC_SESSION_HOURS` | The session length, 1 to 24. The default is 8. There is no refresh: sign in again after it. |
+
+To sign in, open `https://<ADMIN_CONSOLE_NAME>/auth/login`. `GET /auth/me` shows whether you are signed in, and until
+when. `POST /auth/logout` signs you out at once.
+
+A grant change on the Access page applies at the next request. A person whom the identity provider removes from a
+group keeps the group until the session ends, at most `ADMIN_OIDC_SESSION_HOURS`. Sessions are in memory: a restart
+of node-control signs everyone out.
 
 ### No admin configured
 

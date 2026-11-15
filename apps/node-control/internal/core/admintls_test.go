@@ -67,7 +67,12 @@ func TestAdminTLSListener(t *testing.T) {
 	done := make(chan error, 1)
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &cert, nil }}
 	go func() { done <- Run(ctx, []Module{mod}, env, tn, WithAdminTLS(cfg)) }()
-	defer func() { cancel(); <-done }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Run: %v", err)
+		}
+	}()
 	select {
 	case <-tn.got:
 	case <-time.After(5 * time.Second):

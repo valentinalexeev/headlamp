@@ -22,7 +22,10 @@ import (
 // as the services.
 
 // consoleLeafTTL is how long a console certificate from the serve CA lasts. It is renewed at half.
-const consoleLeafTTL = 7 * 24 * time.Hour
+const (
+	consoleLeafTTL     = 7 * 24 * time.Hour
+	consoleRenewBefore = consoleLeafTTL / 2
+)
 
 // console is the state of the console name: its addresses and, with the serve CA, its leaf.
 type console struct {
@@ -41,7 +44,8 @@ func (m *Module) SetConsole(name string, addrs []netip.Addr) error {
 	if name != "" {
 		label, rest, _ := strings.Cut(name, ".")
 		if m.cfg.zone == "" || rest != m.cfg.zone || label == "" || label == "*" {
-			return errors.New("the console name must be one label under SERVE_ZONE, for example console.<SERVE_ZONE>")
+			return errors.New("the console name must be one label under SERVE_ZONE, " +
+				"for example console.<SERVE_ZONE>")
 		}
 	}
 	m.con.mu.Lock()
@@ -98,18 +102,20 @@ func (m *Module) ConsoleCert(hello *tls.ClientHelloInfo) (*tls.Certificate, erro
 	now := m.now()
 	m.con.mu.Lock()
 	defer m.con.mu.Unlock()
-	if m.con.leaf != nil && now.Before(m.con.until.Add(-consoleLeafTTL/2)) {
+	if m.con.leaf != nil && now.Before(m.con.until.Add(-consoleRenewBefore)) {
 		return m.con.leaf, nil
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
 	}
-	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: []string{name}}, key)
+	csr := &x509.CertificateRequest{DNSNames: []string{name}}
+	der, err := x509.CreateCertificateRequest(rand.Reader, csr, key)
 	if err != nil {
 		return nil, err
 	}
-	leafPEM, until, err := m.ca.SignCSR(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}),
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
+	leafPEM, until, err := m.ca.SignCSR(csrPEM,
 		[]string{name}, consoleLeafTTL)
 	if err != nil {
 		return nil, err

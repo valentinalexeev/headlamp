@@ -145,7 +145,8 @@ type runOptions struct {
 // Tailnet must implement AdminTLSListener.
 func WithAdminTLS(cfg *tls.Config) Option { return func(o *runOptions) { o.tlsAdmin = cfg } }
 
-// AdminTLSListener is an optional Tailnet capability: a TCP listener on :443 of the tailnet address.
+// AdminTLSListener is an optional Tailnet capability: a TCP listener on :443 of the tailnet
+// address.
 type AdminTLSListener interface {
 	ListenAdminTLS() (net.Listener, error)
 }
@@ -247,7 +248,8 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 			return errors.New("the console on HTTPS needs a tailnet listener on :443")
 		}
 		cfg := o.tlsAdmin
-		if err := add("admin-tls", hostGuard(allowed, NavMiddleware(navItems, navActions, tn, admin)),
+		guarded := hostGuard(allowed, NavMiddleware(navItems, navActions, tn, admin))
+		if err := add("admin-tls", guarded,
 			func() (net.Listener, error) {
 				ln, err := lt.ListenAdminTLS()
 				if err != nil {

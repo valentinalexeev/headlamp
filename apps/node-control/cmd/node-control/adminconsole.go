@@ -21,9 +21,11 @@ import (
 // The admin console on HTTPS with an OIDC sign-in (#366). Off unless ADMIN_OIDC=1.
 //
 //	ADMIN_OIDC=1                  turn it on
-//	ADMIN_CONSOLE_NAME            the console name, one label under SERVE_ZONE (default console.<SERVE_ZONE>)
+//	ADMIN_CONSOLE_NAME            the console name, one label under SERVE_ZONE
+//	                              (default console.<SERVE_ZONE>)
 //	ADMIN_OIDC_ISSUER             the issuer (default OIDC_ISSUER)
-//	ADMIN_OIDC_CLIENT_ID          the client id (required; a client of its own, with the redirect URL below)
+//	ADMIN_OIDC_CLIENT_ID          the client id (required; a client of its own, with the
+//	                              redirect URL below)
 //	ADMIN_OIDC_CLIENT_SECRET      the client secret (optional for a public client)
 //	ADMIN_OIDC_GROUPS_CLAIM       the groups claim (default OIDC_GROUPS_CLAIM, then "groups")
 //	ADMIN_OIDC_SCOPES             the scopes (default "openid email profile groups")
@@ -54,8 +56,9 @@ func (m *adminOIDCModule) Name() string { return "adminoidc" }
 func (m *adminOIDCModule) Register(r *core.Routes) error {
 	ctx, cancel := context.WithTimeout(context.Background(), adminOIDCTimeout)
 	defer cancel()
-	p, err := oidc.Discover(ctx, oidc.Config{Issuer: m.issuer, ClientID: m.clientID, ClientSecret: m.secret,
-		RedirectURL: "https://" + m.name + "/auth/callback", Scopes: strings.Fields(m.scopes),
+	p, err := oidc.Discover(ctx, oidc.Config{Issuer: m.issuer, ClientID: m.clientID,
+		ClientSecret: m.secret,
+		RedirectURL:  "https://" + m.name + "/auth/callback", Scopes: strings.Fields(m.scopes),
 		HTTP: &http.Client{Timeout: adminOIDCTimeout}})
 	if err != nil {
 		return fmt.Errorf("ADMIN_OIDC: issuer %s: %w", m.issuer, err)
@@ -73,20 +76,24 @@ func (m *adminOIDCModule) Start(context.Context) error {
 }
 
 // adminConsole reads the ADMIN_OIDC settings. It returns nil when ADMIN_OIDC is not 1.
-func adminConsole(env core.Env, serve core.Module, addrs func() []netip.Addr) (*adminConsoleSetup, error) {
+func adminConsole(env core.Env, serve core.Module, addrs func() []netip.Addr) (
+	*adminConsoleSetup, error,
+) {
 	if strings.TrimSpace(env.Getenv("ADMIN_OIDC")) != "1" {
 		return nil, nil
 	}
 	sm, ok := serve.(*servemod.Module)
 	if !ok || env.Getenv("SERVE_DB") == "" || env.Getenv("SERVE_ZONE") == "" {
-		return nil, errors.New("ADMIN_OIDC=1 needs serve (SERVE_DB, SERVE_ZONE): the console uses the serve certificate")
+		return nil, errors.New("ADMIN_OIDC=1 needs serve (SERVE_DB, SERVE_ZONE): " +
+			"the console uses the serve certificate")
 	}
 	zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(env.Getenv("SERVE_ZONE"))), ".")
 	name := strings.ToLower(strings.TrimSpace(env.Default("ADMIN_CONSOLE_NAME", "console."+zone)))
 	issuer := env.Default("ADMIN_OIDC_ISSUER", env.Getenv("OIDC_ISSUER"))
 	clientID := env.Getenv("ADMIN_OIDC_CLIENT_ID")
 	if issuer == "" || clientID == "" {
-		return nil, errors.New("ADMIN_OIDC=1 needs ADMIN_OIDC_CLIENT_ID and ADMIN_OIDC_ISSUER (or OIDC_ISSUER)")
+		return nil, errors.New("ADMIN_OIDC=1 needs ADMIN_OIDC_CLIENT_ID and " +
+			"ADMIN_OIDC_ISSUER (or OIDC_ISSUER)")
 	}
 	hours := 8
 	if v := env.Getenv("ADMIN_OIDC_SESSION_HOURS"); v != "" {
@@ -100,8 +107,9 @@ func adminConsole(env core.Env, serve core.Module, addrs func() []netip.Addr) (*
 		issuer: issuer, clientID: clientID, secret: env.Getenv("ADMIN_OIDC_CLIENT_SECRET"),
 		scopes: env.Default("ADMIN_OIDC_SCOPES", "openid email profile groups"),
 		cfg: adminoidc.Config{
-			GroupsClaim: env.Default("ADMIN_OIDC_GROUPS_CLAIM", env.Default("OIDC_GROUPS_CLAIM", "groups")),
-			Session:     time.Duration(hours) * time.Hour,
+			GroupsClaim: env.Default("ADMIN_OIDC_GROUPS_CLAIM",
+				env.Default("OIDC_GROUPS_CLAIM", "groups")),
+			Session: time.Duration(hours) * time.Hour,
 		}}
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: sm.ConsoleCert}
 	slog.Info("console on https", "name", name, "session_hours", hours)

@@ -39,7 +39,7 @@ func TestConsoleNameCertAndDNS(t *testing.T) {
 	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: name, Roots: pool}); err != nil {
 		t.Fatalf("the console certificate must chain to the serve CA for %s: %v", name, err)
 	}
-	if leaf.NotAfter.Sub(time.Now()) > consoleLeafTTL+time.Hour {
+	if time.Until(leaf.NotAfter) > consoleLeafTTL+time.Hour {
 		t.Fatalf("leaf lasts too long: %v", leaf.NotAfter)
 	}
 	again, _ := r.mod.ConsoleCert(&tls.ClientHelloInfo{ServerName: name})

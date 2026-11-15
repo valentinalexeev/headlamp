@@ -18,14 +18,15 @@
   function keyed(el, key) { el.setAttribute('data-fk', key); return el; }
   function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-  // alertWord: what a run's notify outcome ("alert=<outcome> ping=<outcome>", either part optional) says about its
+  // alertWord: what a run's notify outcome ("alert=<outcome> ping=<outcome> recovery=<outcome>", each part optional) says about its
   // alert, in words. Empty when the run had no alert to send: "alert=none", or only a healthcheck ping.
   function alertWord(outcome) {
-    var m = /^alert=([\s\S]*?)(?: ping=[\s\S]*)?$/.exec(typeof outcome === 'string' ? outcome : '');
+    var m = /^alert=([\s\S]*?)(?: (?:ping|recovery)=[\s\S]*)?$/.exec(typeof outcome === 'string' ? outcome : '');
     var a = m ? m[1] : '';
     if (!a || a === 'none') { return ''; }
     if (a === 'sent') { return 'Sent'; }
     if (a === 'suppressed') { return 'Held back by the cooldown'; }
+    if (a === 'held') { return 'Held until on_failure.streak'; }
     if (a.indexOf('failed: ') === 0) { return 'Failed: ' + hl.plain(a.slice(8), 100); }
     return hl.plain(a, 100);
   }
@@ -202,6 +203,15 @@
 
     // ----- the panel of the selected task
 
+    // The reason with its class and, for "no eligible node", the node counts:
+    // "no eligible node (tagged 0) [structural]".
+    function failText(r) {
+      var t = String(r.reason || '');
+      if (typeof r.detail === 'string' && r.detail) { t += ' (' + r.detail + ')'; }
+      if (typeof r.class === 'string' && r.class) { t += ' [' + r.class + ']'; }
+      return t;
+    }
+
     function lastFailure(runs) {
       for (var i = 0; i < runs.length; i++) {
         var r = hl.obj(runs[i]);
@@ -237,7 +247,7 @@
       var fail = runs ? lastFailure(runs) : null;
       if (sel.streak > 0 && fail) {
         var note = hl.el('div', 'note');
-        note.appendChild(hl.el('p', null, label(fail.reason, 400)));
+        note.appendChild(hl.el('p', null, label(failText(fail), 500)));
         var ago = fail.ended || fail.started;
         note.appendChild(hl.el('p', 't2 small', 'Last failure ' + when(String(ago || '')) + (fail.node ? ' on ' + label(fail.node, 100) : '') + '.'));
         panel.appendChild(note);
@@ -292,6 +302,8 @@
           s.appendChild(hl.status(w[0], w[1]));
           tr.appendChild(s);
           tr.appendChild(hl.el('td', 'mono t2', fmtDuration(r.duration_ms) || '-'));
+          var why = (r.state === 'failed' || r.state === 'lost') && r.reason ? label(failText(r), 200) : '';
+          tr.appendChild(hl.el('td', 'small t2', why));
           var act = hl.el('td', 'act');
           if (r.state === 'running' && typeof r.id === 'string') {
             var c = keyed(hl.button('Cancel', null, 'sm quiet', function () { cancelRun(sel.id, r.id); }), 'cancel:' + r.id);

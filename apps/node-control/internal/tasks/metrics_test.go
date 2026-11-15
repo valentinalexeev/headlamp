@@ -22,10 +22,10 @@ func TestMetricsTextGolden(t *testing.T) {
 	m := NewMetrics()
 	weird := "we\"ird\\task\nx"
 	// Recorded out of order: the output must not depend on it.
-	m.Observe(weird, "n1", RunLost, 30250*time.Millisecond)
-	m.Observe("job", "n2", RunSucceeded, 500*time.Millisecond)
-	m.Observe("job", "n1", RunSucceeded, 2*time.Second)
-	m.Observe("job", "n1", RunFailed, 1500*time.Millisecond)
+	m.Observe(weird, "n1", RunLost, ClassTransient, 30250*time.Millisecond)
+	m.Observe("job", "n2", RunSucceeded, "", 500*time.Millisecond)
+	m.Observe("job", "n1", RunSucceeded, "", 2*time.Second)
+	m.Observe("job", "n1", RunFailed, ClassUnknown, 1500*time.Millisecond)
 	m.NotifySent("scheduler", "ping", true)
 	m.NotifySent("job", "ping", false)
 	m.NotifySent("job", "alert", true)
@@ -51,7 +51,7 @@ func TestMetricsTextGolden(t *testing.T) {
 
 func TestMetricsSnapshotAndForget(t *testing.T) {
 	m := NewMetrics()
-	m.Observe("a", "n1", RunSucceeded, time.Second)
+	m.Observe("a", "n1", RunSucceeded, "", time.Second)
 	m.NotifySent("a", "alert", false)
 	m.Snapshot("a", TaskState{LastSuccess: t0, Streak: 2, NextRun: t0.Add(time.Hour)})
 	m.Snapshot("b", TaskState{Streak: 1})
@@ -80,7 +80,7 @@ func TestMetricsSnapshotAndForget(t *testing.T) {
 		t.Fatalf("other task lost:\n%s", out)
 	}
 	// Counters are cumulative and survive Forget.
-	if !strings.Contains(out, `task_runs_total{task="a",node="n1",state="succeeded"} 1`) ||
+	if !strings.Contains(out, `task_runs_total{task="a",node="n1",state="succeeded",class=""} 1`) ||
 		!strings.Contains(out, `task_notify_failures_total{task="a"} 1`) {
 		t.Fatalf("counters dropped:\n%s", out)
 	}
@@ -88,7 +88,7 @@ func TestMetricsSnapshotAndForget(t *testing.T) {
 
 func TestMetricsNilIsNoop(t *testing.T) {
 	var m *Metrics
-	m.Observe("a", "n", RunFailed, time.Second)
+	m.Observe("a", "n", RunFailed, ClassUnknown, time.Second)
 	m.NotifySent("a", "ping", true)
 	m.Snapshot("a", TaskState{})
 	m.Forget("a")
@@ -113,7 +113,7 @@ func startMetricsServer(t *testing.T, m *Metrics) (string, context.CancelFunc, <
 
 func TestMetricsServerOnlyServesMetricsPath(t *testing.T) {
 	m := NewMetrics()
-	m.Observe("job", "n1", RunSucceeded, time.Second)
+	m.Observe("job", "n1", RunSucceeded, "", time.Second)
 	base, _, _ := startMetricsServer(t, m)
 
 	resp, err := http.Get(base + "/metrics")
@@ -125,7 +125,7 @@ func TestMetricsServerOnlyServesMetricsPath(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "text/plain; version=0.0.4; charset=utf-8" {
 		t.Fatalf("GET /metrics: %d %q", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
-	if !strings.Contains(string(body), `task_runs_total{task="job",node="n1",state="succeeded"} 1`) {
+	if !strings.Contains(string(body), `task_runs_total{task="job",node="n1",state="succeeded",class=""} 1`) {
 		t.Fatalf("body:\n%s", body)
 	}
 
@@ -208,7 +208,7 @@ func TestEngineReportsMetricsForAttempts(t *testing.T) {
 
 	f.step()
 	out := metricsText(m)
-	if !strings.Contains(out, `task_runs_total{task="job",node="n1",state="failed"} 1`) {
+	if !strings.Contains(out, `task_runs_total{task="job",node="n1",state="failed",class="unknown"} 1`) {
 		t.Fatalf("failed attempt not counted:\n%s", out)
 	}
 	retryAt := float64(f.store.State("job").AttemptAt.UnixMilli()) / 1000
@@ -220,8 +220,8 @@ func TestEngineReportsMetricsForAttempts(t *testing.T) {
 	f.step()
 	out = metricsText(m)
 	for _, s := range []string{
-		`task_runs_total{task="job",node="n1",state="failed"} 1`,
-		`task_runs_total{task="job",node="n1",state="succeeded"} 1`,
+		`task_runs_total{task="job",node="n1",state="failed",class="unknown"} 1`,
+		`task_runs_total{task="job",node="n1",state="succeeded",class=""} 1`,
 		`task_run_duration_seconds_count{task="job"} 2`,
 		`task_run_duration_seconds_sum{task="job"} 3`,
 		`task_failure_streak{task="job"} 0`,
@@ -272,7 +272,7 @@ func TestNotifierObserverFeedsMetrics(t *testing.T) {
 
 	f.success(500) // ping ok, alert ok
 	f.ntfyCode = []int{500}
-	f.n.Failure(context.Background(), "tk", alertTask(), "x") // ping ok, failure fails
+	f.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: "x"}) // ping ok, failure fails
 	if out := f.n.PingSecret(context.Background(), "hc"); out != "sent" {
 		t.Fatalf("PingSecret = %q", out)
 	}

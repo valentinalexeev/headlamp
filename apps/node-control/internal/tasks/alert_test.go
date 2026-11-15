@@ -279,15 +279,15 @@ func TestAlertBadResultSendsNothing(t *testing.T) {
 
 func TestFailureNotificationHasOwnCooldown(t *testing.T) {
 	f := newFixture(t)
-	if r := f.n.Failure(context.Background(), "tk", alertTask(), "exit 3"); r.Alert != "sent" {
+	if r := f.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: "exit 3"}); r.Alert != "sent" {
 		t.Fatalf("%+v", r)
 	}
 	f.now = f.now.Add(time.Hour)
-	if r := f.n.Failure(context.Background(), "tk", alertTask(), "exit 3"); r.Alert != "suppressed" {
+	if r := f.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: "exit 3"}); r.Alert != "suppressed" {
 		t.Fatalf("%+v", r)
 	}
 	f.now = f.now.Add(6 * time.Hour)
-	if r := f.n.Failure(context.Background(), "tk", alertTask(), "exit 4"); r.Alert != "sent" {
+	if r := f.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: "exit 4"}); r.Alert != "sent" {
 		t.Fatalf("%+v", r)
 	}
 	// The alert cooldown is independent.
@@ -303,7 +303,7 @@ func TestFailureNotificationHasOwnCooldown(t *testing.T) {
 
 func TestFailureReasonCapped(t *testing.T) {
 	f := newFixture(t)
-	f.n.Failure(context.Background(), "tk", alertTask(), strings.Repeat("é", 1000))
+	f.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: strings.Repeat("é", 1000)})
 	var m map[string]any
 	json.Unmarshal(f.ntfy[0].body, &m)
 	msg := m["message"].(string)
@@ -318,7 +318,7 @@ func TestPingSuccessAndFail(t *testing.T) {
 	if r := f.n.Success(context.Background(), "tk", tk, nil); r.Ping != "sent" || r.Alert != "" {
 		t.Fatalf("%+v", r)
 	}
-	if r := f.n.Failure(context.Background(), "tk", tk, "boom"); r.Ping != "sent" || r.Alert != "" {
+	if r := f.n.Failure(context.Background(), "tk", tk, FailureInfo{Reason: "boom"}); r.Ping != "sent" || r.Alert != "" {
 		t.Fatalf("%+v", r)
 	}
 	want := []string{"GET /ping/uuid-1234", "GET /ping/uuid-1234/fail"}
@@ -393,7 +393,7 @@ func TestFailedSendDoesNotSetCooldown(t *testing.T) {
 	}
 	g := newFixture(t)
 	g.ntfyCode = []int{500}
-	g.n.Failure(context.Background(), "tk", alertTask(), "x")
+	g.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: "x"})
 	if !g.store.State("tk").FailNotifyUntil.IsZero() {
 		t.Fatal("failure cooldown set after failed send")
 	}
@@ -445,7 +445,7 @@ func TestNotifierNeverLogsTopicOrURL(t *testing.T) {
 	f := newFixture(t)
 	f.ntfyCode = []int{500, 500, 200}
 	f.success(500)
-	f.n.Failure(context.Background(), "tk", alertTask(), "boom")
+	f.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: "boom"})
 	f.pingCode = 500
 	f.success(5000)
 	out := f.logs.String()
@@ -462,7 +462,7 @@ func TestNotifierNeverLogsTopicOrURL(t *testing.T) {
 func TestObserverReceivesEvents(t *testing.T) {
 	f := newFixture(t)
 	f.success(500)
-	f.n.Failure(context.Background(), "tk", alertTask(), "x")
+	f.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: "x"})
 	want := "tk/ping/ok,tk/alert/ok,tk/ping/ok,tk/failure/ok"
 	if got := strings.Join(f.events, ","); got != want {
 		t.Fatalf("%s", got)
@@ -516,7 +516,7 @@ func TestConcurrentFailureSendsOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r := f.n.Failure(context.Background(), "tk", alertTask(), "boom")
+			r := f.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: "boom"})
 			mu.Lock()
 			got[r.Alert]++
 			mu.Unlock()
@@ -609,7 +609,7 @@ func TestInterruptedSendDoesNotSetCooldown(t *testing.T) {
 				if kind == "alert" {
 					done <- f.n.Success(ctx, "tk", alertTask(), map[string]any{"balance": 500.0})
 				} else {
-					done <- f.n.Failure(ctx, "tk", alertTask(), "boom")
+					done <- f.n.Failure(ctx, "tk", alertTask(), FailureInfo{Reason: "boom"})
 				}
 			}()
 			<-started
@@ -715,7 +715,7 @@ func TestPingBadURLNotEchoed(t *testing.T) {
 func TestPingQueryReachesServer(t *testing.T) {
 	f := newFixture(t)
 	f.store.PutSecret("qhc", f.pingSrv.URL+"/ping/u?x=1")
-	f.n.Failure(context.Background(), "tk", Task{Healthcheck: "qhc"}, "boom")
+	f.n.Failure(context.Background(), "tk", Task{Healthcheck: "qhc"}, FailureInfo{Reason: "boom"})
 	if len(f.pings) != 1 || f.pings[0] != "GET /ping/u/fail?x=1" {
 		t.Fatalf("%v", f.pings)
 	}
@@ -773,7 +773,7 @@ func TestRedirectIsNotFollowed(t *testing.T) {
 func TestFailureReasonScrubbed(t *testing.T) {
 	f := newFixture(t)
 	reason := "curl " + f.pingSrv.URL + "/ping/uuid-1234 topic " + testTopic + " failed"
-	f.n.Failure(context.Background(), "tk", alertTask(), reason)
+	f.n.Failure(context.Background(), "tk", alertTask(), FailureInfo{Reason: reason})
 	var m map[string]any
 	json.Unmarshal(f.ntfy[0].body, &m)
 	msg := m["message"].(string)
@@ -808,7 +808,7 @@ func TestPanicInSendFreesTheSlot(t *testing.T) {
 				if kind == "alert" {
 					f.n.Success(context.Background(), "tk", task, map[string]any{"balance": 500.0})
 				} else {
-					f.n.Failure(context.Background(), "tk", task, "boom")
+					f.n.Failure(context.Background(), "tk", task, FailureInfo{Reason: "boom"})
 				}
 			}()
 			field := alertField

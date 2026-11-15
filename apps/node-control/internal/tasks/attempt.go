@@ -17,13 +17,31 @@ import (
 type outcome struct {
 	state    RunState
 	reason   string
+	class    FailureClass // of a failure; "" on success
+	counts   *NodeCounts  // of a "no eligible node" failure
 	result   map[string]any
 	shutdown bool // interrupted by shutdown: neither a success nor a failure
 	operator bool // cancelled by the operator: ends the sequence quietly
 }
 
-func failed(reason string) outcome { return outcome{state: RunFailed, reason: reason} }
-func lost(reason string) outcome   { return outcome{state: RunLost, reason: reason} }
+// failed is a failure of the script or of a source the module cannot classify.
+func failed(reason string) outcome {
+	return outcome{state: RunFailed, reason: reason, class: ClassUnknown}
+}
+
+// transient is a failure a retry can fix.
+func transient(reason string) outcome {
+	return outcome{state: RunFailed, reason: reason, class: ClassTransient}
+}
+
+// structural is a failure no retry fixes.
+func structural(reason string) outcome {
+	return outcome{state: RunFailed, reason: reason, class: ClassStructural}
+}
+
+func lost(reason string) outcome {
+	return outcome{state: RunLost, reason: reason, class: ClassTransient}
+}
 
 // attempt runs attempt n of the task and records its consequences.
 func (e *Engine) attempt(ctx context.Context, task, id string, n int, manual bool) {
@@ -55,11 +73,12 @@ func (e *Engine) attempt(ctx context.Context, task, id string, n int, manual boo
 func (e *Engine) execute(ctx context.Context, task string, t Task, run *Run, values *[]string) outcome {
 	script, ok := e.d.Store.Script(t.Script)
 	if !ok {
-		return failed("script not found: " + t.Script)
+		return structural("script not found: " + t.Script)
 	}
 	secrets, err := e.d.Store.Secrets(t.Secrets)
 	if err != nil {
-		return failed("secret not configured: " + strings.Join(e.missingSecrets(t.Secrets), ", "))
+		missing := strings.Join(e.missingSecrets(t.Secrets), ", ")
+		return structural("secret not configured: " + missing)
 	}
 	for _, v := range secrets {
 		*values = append(*values, v)
@@ -75,12 +94,13 @@ func (e *Engine) execute(ctx context.Context, task string, t Task, run *Run, val
 		if ctx.Err() != nil {
 			return outcome{shutdown: true}
 		}
-		return failed("cannot list nodes")
+		return transient("cannot list nodes")
 	}
 	// Only nodes with the runner tag are ever considered: the probe and the
 	// run itself carry the runner token.
 	nodes = WithTag(nodes, e.d.RunnerTag)
-	cand, err := Select(t.Target, nodes, e.healthProbe(ctx), e.busySnapshot(), lastOK(e.d.Store.Runs(task)))
+	cand, counts, err := SelectCounts(t.Target, nodes, e.healthProbe(ctx), e.busySnapshot(),
+		lastOK(e.d.Store.Runs(task)))
 	if err != nil {
 		if ctx.Err() != nil {
 			return outcome{shutdown: true}
@@ -90,9 +110,11 @@ func (e *Engine) execute(ctx context.Context, task string, t Task, run *Run, val
 				e.log.Warn("ambiguous task target: more than one node has this given name; the task does not run",
 					"task", task, "node", t.Target.Node)
 			}
-			return failed("ambiguous target")
+			return structural("ambiguous target")
 		}
-		return failed("no eligible node")
+		out := structural("no eligible node")
+		out.counts = &counts
+		return out
 	}
 	node := cand.Node.Name
 	e.addBusy(node, 1)
@@ -116,9 +138,10 @@ func (e *Engine) execute(ctx context.Context, task string, t Task, run *Run, val
 		case ctx.Err() != nil:
 			return outcome{shutdown: true}
 		case errors.Is(err, ErrRunnerBusy):
-			return failed("node busy")
+			return transient("node busy")
 		}
-		return failed(err.Error())
+		// The start call did not reach a runner that took the run.
+		return transient(err.Error())
 	}
 	// Recorded before polling so a successor process can cancel the run if
 	// this one dies (see sweep).
@@ -174,7 +197,7 @@ func (e *Engine) poll(ctx context.Context, t Task, addr, rid string, started tim
 		}
 		if !now.Before(cancelAt) {
 			e.cancelRun(ctx, addr, rid)
-			return failed("timeout")
+			return transient("timeout")
 		}
 	}
 }
@@ -239,6 +262,7 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 	run.Ended = now
 	run.Result = scrubResult(out.result, values)
 	run.State, run.Reason = out.state, ""
+	run.Class, run.Counts = out.class, out.counts
 	if out.reason != "" {
 		run.Reason = scrub.Scrub(out.reason, values)
 	}
@@ -247,17 +271,22 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 		// the error names the field, never its value.
 		if err := CheckResult(t, run.Result); err != nil {
 			run.State, run.Reason = RunFailed, scrub.Scrub("bad result: "+err.Error(), values)
+			run.Class = ClassUnknown
 		}
 	}
 	if out.shutdown {
-		run.State, run.Reason = RunFailed, reasonShutdown
+		run.State, run.Reason, run.Class, run.Counts = RunFailed, reasonShutdown, "", nil
+	}
+	if out.operator {
+		run.Class = ""
 	}
 	e.setActive(run)
 	e.log.Info("attempt_result", "task", task, "run", run.ID, "node", run.Node, "attempt", run.Attempt,
-		"state", string(run.State), "dur_ms", now.Sub(run.Started).Milliseconds(), "reason", run.Reason)
+		"state", string(run.State), "class", string(run.Class),
+		"dur_ms", now.Sub(run.Started).Milliseconds(), "reason", run.Reason)
 	if !out.shutdown {
 		// Metrics count real attempts only: a deploy is not a failure.
-		e.d.Metrics.Observe(task, run.Node, run.State, now.Sub(run.Started))
+		e.d.Metrics.Observe(task, run.Node, run.State, run.Class, now.Sub(run.Started))
 	}
 
 	nctx, ncancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
@@ -286,20 +315,32 @@ func (e *Engine) finish(ctx context.Context, task string, t Task, run Run, out o
 			reschedule(s)
 		})
 		e.endSequence(task)
-		run.NotifyOutcome = notifyText(e.d.Notifier.Success(nctx, task, t, run.Result))
-	case run.Attempt < t.Retry.Attempts:
+		res := e.d.Notifier.Success(nctx, task, t, run.Result)
+		res.Recovery = e.d.Notifier.Recovery(nctx, task, t)
+		run.NotifyOutcome = notifyText(res)
+	case run.Attempt < t.Retry.Attempts && run.Class != ClassStructural:
+		// A structural failure skips the retries left: none can succeed.
 		at := now.Add(Backoff(t.Retry, run.Attempt))
 		e.updateState(task, func(s *TaskState) { s.Attempt, s.AttemptAt = run.Attempt, at })
 		e.log.Info("retry_scheduled", "task", task, "run", run.ID, "node", run.Node, "attempt", run.Attempt,
 			"state", string(run.State), "reason", run.Reason)
 	default:
+		if run.Attempt < t.Retry.Attempts {
+			e.log.Info("retries_skipped", "task", task, "run", run.ID, "attempt", run.Attempt,
+				"class", string(run.Class), "reason", run.Reason)
+		}
 		e.updateState(task, func(s *TaskState) {
 			s.Streak++
 			s.Attempt, s.AttemptAt = 0, time.Time{}
 			reschedule(s)
 		})
 		e.endSequence(task)
-		run.NotifyOutcome = notifyText(e.d.Notifier.Failure(nctx, task, t, run.Reason))
+		streak := e.d.Store.State(task).Streak
+		info := FailureInfo{Reason: run.Reason, Class: run.Class, Streak: streak}
+		if run.Counts != nil {
+			info.Detail = run.Counts.Detail()
+		}
+		run.NotifyOutcome = notifyText(e.d.Notifier.Failure(nctx, task, t, info))
 	}
 	if err := e.d.Store.AppendRun(run); err != nil {
 		e.log.Warn("task run record not stored", "task", task, "run", run.ID, "err", err)
@@ -321,6 +362,9 @@ func notifyText(r NotifyResult) string {
 	}
 	if r.Ping != "" {
 		parts = append(parts, "ping="+r.Ping)
+	}
+	if r.Recovery != "" {
+		parts = append(parts, "recovery="+r.Recovery)
 	}
 	return strings.Join(parts, " ")
 }

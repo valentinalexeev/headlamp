@@ -125,11 +125,15 @@ func priorityNumber(name string) int {
 }
 
 // NotifyResult is stored on the run record. "" means not applicable.
-type NotifyResult struct{ Alert, Ping string } // "sent", "suppressed", "none" or "failed: <reason>"
+// Each field is "sent", "suppressed", "held", "none" or "failed: <reason>".
+type NotifyResult struct{ Alert, Ping, Recovery string }
 
 type Notifier interface {
 	Success(ctx context.Context, task string, t Task, result map[string]any) NotifyResult
-	Failure(ctx context.Context, task string, t Task, reason string) NotifyResult
+	Failure(ctx context.Context, task string, t Task, f FailureInfo) NotifyResult
+	// Recovery sends on_recovery when a failure message went out since the
+	// last success; it returns "" when there is nothing to send.
+	Recovery(ctx context.Context, task string, t Task) string
 }
 
 // HTTPNotifier sends ntfy messages and healthcheck pings.
@@ -241,7 +245,12 @@ func (n *HTTPNotifier) alert(ctx context.Context, task string, t Task, result ma
 	return true, outcome
 }
 
-func (n *HTTPNotifier) Failure(ctx context.Context, task string, t Task, reason string) NotifyResult {
+// Failure pings the healthcheck with /fail on every failed sequence, and
+// sends on_failure once the streak reaches on_failure.streak, at most once per
+// its cooldown. "held" means the streak is still below that value.
+func (n *HTTPNotifier) Failure(
+	ctx context.Context, task string, t Task, f FailureInfo,
+) NotifyResult {
 	var res NotifyResult
 	now := n.now()
 	if t.Healthcheck != "" {
@@ -250,17 +259,52 @@ func (n *HTTPNotifier) Failure(ctx context.Context, task string, t Task, reason 
 	if t.OnFailure == nil {
 		return res
 	}
+	if max(f.Streak, 1) < t.OnFailure.Streak {
+		res.Alert = "held"
+		return res
+	}
 	if !n.reserve(task, "failure", now, failField) {
 		res.Alert = "suppressed"
 		return res
 	}
-	reason = capBytes(scrub.Scrub(reason, n.known(t)), maxNotifyReason)
-	vars := map[string]any{"task": task, "reason": reason}
+	known := n.known(t)
+	class := f.Class
+	if class == "" {
+		class = ClassUnknown
+	}
+	vars := map[string]any{
+		"task":   task,
+		"reason": capBytes(scrub.Scrub(f.Reason, known), maxNotifyReason),
+		"class":  string(class),
+		"detail": capBytes(scrub.Scrub(f.Detail, known), maxNotifyReason),
+	}
 	var sent bool // stays false if send panics: the slot is freed, nothing stored
-	defer func() { n.settle(task, "failure", failField, now.Add(time.Duration(t.OnFailure.Cooldown)), sent) }()
+	defer func() {
+		if sent {
+			n.setState(task, func(s *TaskState) { s.FailNotified = true })
+		}
+		n.settle(task, "failure", failField, now.Add(time.Duration(t.OnFailure.Cooldown)), sent)
+	}()
 	res.Alert = n.send(ctx, task, "failure", t.OnFailure.Notify, vars)
 	sent = res.Alert == "sent"
 	return res
+}
+
+// Recovery sends on_recovery one time after a failure message. A failed send
+// keeps the mark, so the next success tries again.
+func (n *HTTPNotifier) Recovery(ctx context.Context, task string, t Task) string {
+	if !n.store.State(task).FailNotified {
+		return ""
+	}
+	if t.OnRecovery == nil {
+		n.setState(task, func(s *TaskState) { s.FailNotified = false })
+		return ""
+	}
+	out := n.send(ctx, task, "recovery", t.OnRecovery.Notify, map[string]any{"task": task})
+	if out == "sent" {
+		n.setState(task, func(s *TaskState) { s.FailNotified = false })
+	}
+	return out
 }
 
 func alertField(s *TaskState) *time.Time { return &s.AlertUntil }
@@ -308,6 +352,9 @@ func (n *HTTPNotifier) known(t Task) []string {
 	}
 	if t.OnFailure != nil {
 		names = append(names, t.OnFailure.Notify.Topic)
+	}
+	if t.OnRecovery != nil {
+		names = append(names, t.OnRecovery.Notify.Topic)
 	}
 	out := []string{n.ntfyBase}
 	for _, name := range names {

@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -496,5 +497,31 @@ func TestStoreFlattenedTransportTextAbortsFlush(t *testing.T) {
 	if !isTransportErr(errors.New("writing state to redis: dial tcp 10.0.0.1:6379: i/o timeout")) ||
 		isTransportErr(errors.New("writing state to redis: OOM command not allowed when used memory > 'maxmemory'")) {
 		t.Fatal("transport detection")
+	}
+}
+
+// The class, counts and recovery mark survive a reopen; records from before
+// they existed decode with them empty.
+func TestStoreKeepsFailureClassFields(t *testing.T) {
+	kv := newMemKV()
+	s := openStore(t, kv)
+	if err := s.PutConfig(&Config{Tasks: map[string]Task{"job": baseTask()}}, map[string]string{"job.sh": jobScript}); err != nil {
+		t.Fatal(err)
+	}
+	c := &NodeCounts{Tagged: 2, Matching: 1}
+	if err := s.AppendRun(Run{ID: "r1", Task: "job", State: RunFailed, Reason: "no eligible node", Class: ClassStructural, Counts: c}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateState("job", func(st *TaskState) { st.FailNotified = true }); err != nil {
+		t.Fatal(err)
+	}
+	s2 := openStore(t, kv)
+	r := s2.Runs("job")[0]
+	if r.Class != ClassStructural || r.Counts == nil || *r.Counts != *c || !s2.State("job").FailNotified {
+		t.Fatalf("run = %+v state = %+v", r, s2.State("job"))
+	}
+	var old Run
+	if err := json.Unmarshal([]byte(`{"ID":"x","State":"failed","Reason":"boom"}`), &old); err != nil || old.Class != "" || old.Counts != nil {
+		t.Fatalf("old record: %+v %v", old, err)
 	}
 }

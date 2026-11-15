@@ -21,10 +21,18 @@
       },
       "on_failure": {
         "cooldown": "24h",
+        "streak": 1,
         "notify": {
           "topic": "NTFY_TOPIC",
-          "title": "{task} failed",
-          "message": "{reason}"
+          "title": "{task} failed ({class})",
+          "message": "{reason} {detail}"
+        }
+      },
+      "on_recovery": {
+        "notify": {
+          "topic": "NTFY_TOPIC",
+          "title": "{task} recovered",
+          "message": "{task} succeeded again"
         }
       }
     }

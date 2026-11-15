@@ -11,6 +11,13 @@ says "No action required".
 
 ## Unreleased (0.20.0)
 
+No action required.
+
+GCE exit nodes (#214) are new and optional: the module `exit-node-vm/gcp` and the node-control provider `gcp` do nothing
+until a site uses them. See "GCP permissions" in the node-control README for the role and the per-VM grant.
+
+Behaviour change in node-control tasks (#323): a structural failure does not retry. Structural reasons are `no eligible node`, `ambiguous target`, `script not found` and `secret not configured`. The module sends the `on_failure` message after the first attempt. The cooldown still applies. The new `on_failure.streak` (default `1`) and `on_recovery` are optional. A scrape rule or dashboard that matches `task_runs_total` by its exact label set must accept the new `class` label.
+
 ### Optional
 
 - **Bridge selection console** (#314): no action required. The console is off by default, and the profiles do not

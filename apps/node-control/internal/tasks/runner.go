@@ -77,15 +77,20 @@ type runnerClient struct {
 }
 
 // RunnerAPI is what a runner last reported about its API (#300): 0 is a runner older than #300.
+// Roles is what it serves, "run" and "session" (#324); nil for a runner older than #324.
 type RunnerAPI struct {
-	API int
-	At  time.Time
+	API   int
+	At    time.Time
+	Roles []string
 }
 
 // RunnerAPIs is an optional Runner capability: the API version of each runner, by tailnet address.
 type RunnerAPIs interface {
 	APIs() map[string]RunnerAPI
 }
+
+// maxRoles caps the roles kept from one runner's health answer (it reports at most two).
+const maxRoles = 4
 
 // APIs returns a copy of the API versions the runners reported.
 func (c *runnerClient) APIs() map[string]RunnerAPI {
@@ -205,17 +210,21 @@ func (c *runnerClient) Health(ctx context.Context, addr string) (bool, error) {
 		return false, nil
 	}
 	var h struct {
-		Busy bool `json:"busy"`
-		API  int  `json:"api"`
+		Busy  bool     `json:"busy"`
+		API   int      `json:"api"`
+		Roles []string `json:"roles"`
 	}
 	if err := json.Unmarshal(data, &h); err != nil {
 		return false, c.wrap("health", errors.New("undecodable answer"))
+	}
+	if len(h.Roles) > maxRoles {
+		h.Roles = h.Roles[:maxRoles]
 	}
 	c.apiMu.Lock()
 	if c.api == nil {
 		c.api = map[string]RunnerAPI{}
 	}
-	c.api[addr] = RunnerAPI{API: h.API, At: time.Now()}
+	c.api[addr] = RunnerAPI{API: h.API, At: time.Now(), Roles: h.Roles}
 	c.apiMu.Unlock()
 	if c.strict {
 		// #322: a runner that answers without an API version (older than 0.18.0) is refused too.

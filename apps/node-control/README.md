@@ -37,6 +37,22 @@ the same fingerprint of the value in your secret store, to see whether the value
 Compose, write secret values in single quotes in an `env_file` (see `examples/compose/control/README.md`). Compose
 expands `$` in a value without quotes.
 
+### Secrets from Google Secret Manager
+
+A secret variable can hold a reference instead of the value (#361). `gcpsm://projects/<project>/secrets/<secret>`
+reads the latest version. `.../secrets/<secret>/versions/<n>` reads version `n`. node-control reads each reference
+once at start, with Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS`, or the VM's service account on
+GCE). When a read fails, node-control does not start. The
+service account needs `roles/secretmanager.secretAccessor` on each secret. A trailing newline of the value is removed.
+
+- It applies to the secret variables of the fingerprint list (`HEADSCALE_API_KEY`, `TAILSCALE_AUTH_KEY`,
+  `ENROLL_SECRET_KEY`, `OIDC_CLIENT_SECRET`, `NODE_CONTROL_STATE_KEY`, `TASKS_RUNNER_TOKEN`, the OpenStack
+  `<NAME>_PASSWORD` and the others) and to `REDIS_URL`. Not to `AWS_SECRET_ACCESS_KEY`: the AWS SDK reads it from the
+  process environment, so node-control refuses a reference there.
+- The start log has one line with the names it read (`secrets read from Secret Manager`), never a value. The
+  fingerprint line is of the value, not of the reference.
+- A variable with a plain value does not change. Without a reference, node-control makes no call to Google.
+
 | variable | purpose |
 |---|---|
 | `HEADSCALE_LOGIN_SERVER` | The headscale URL. It is the control server of the embedded node and the base of the node API. |
@@ -45,6 +61,7 @@ expands `$` in a value without quotes.
 | `TAILNET_HOSTNAME` | The name on the tailnet. The default is `node-control`. |
 | `TSNET_VERBOSE` | `1` forwards the logs of the embedded tailscale node (a large quantity of log lines). By default, the app logs only messages for users, such as the login URL. At start, the app waits up to 60 s for the node to join the tailnet. If the node cannot join (bad auth key, control server not reachable), the app exits with a non-zero code. |
 | `REDIS_URL` | Secret (never in a plain config file such as `fly.toml`). The plain `redis://` URL of the shared Redis on a private network. **Percent-encode the password** if it has `/`, `?`, `#` or `@` (#217). A base64 password often has `/`, and then the URL does not parse: `python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=""))' "$PW"`. Or make the password with `openssl rand -hex 32`, which has none of these. When it is set, the tailscale state is in Redis, not in a file (see "Tailscale state"). When it is not set, the state is in a file under `/var/lib/tailscale`, as before. |
+| `REDIS_CA_FILE` | Optional. A PEM file with the CA certificates that a `rediss://` `REDIS_URL` must chain to, instead of the system roots. Memorystore for Redis with in-transit encryption has its own server CA: download it (`gcloud redis instances describe ... --format='value(serverCaCerts[0].cert)'`) and set this. A file that does not read or has no certificate stops the start. |
 | `REDIS_KEY` | Optional hash key for the state. The default is `<FLY_APP_NAME or TAILNET_HOSTNAME>:tsnet` (for example `node-control:tsnet`; Fly.io sets `FLY_APP_NAME`). It must have the form `<app>:<name>` and must not contain `* ? [ \`. |
 | `NODE_CONTROL_STATE_KEY` | Secret. 32 random bytes, base64 (`openssl rand -base64 32`). It encrypts the Redis state (AES-256-GCM). It is required with `REDIS_URL` unless `STATE_ALLOW_PLAINTEXT=1`. Without `REDIS_URL`, the app ignores it and logs a warning. |
 | `STATE_ALLOW_PLAINTEXT` | `1` keeps the Redis state unencrypted. This is an explicit opt-out. We do not recommend it, because the state holds node private keys. |

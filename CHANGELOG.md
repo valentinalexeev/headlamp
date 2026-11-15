@@ -6,7 +6,14 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Added
 
+- node-control: a secret variable can be a Google Secret Manager reference, `gcpsm://projects/<project>/secrets/<secret>[/versions/<n>]` (#361). node-control reads it once at start with Application Default Credentials and does not start when a read fails. It applies to the secret variables of the fingerprint list and `REDIS_URL`, not to `AWS_SECRET_ACCESS_KEY` (refused). Without a reference, nothing changes and no call is made.
+- node-control: `REDIS_CA_FILE`, a PEM file of CA certificates for a `rediss://` `REDIS_URL` (#361), for example the server CA of Memorystore with in-transit encryption. Unset: the system roots, as before.
+- task-runner: roles and a slot for each role (#324). The image has two stages, `run` (Playwright and its Chromium) and `session` (plus Xvnc, openbox, noVNC and Chrome). The Ansible role builds `run` only unless `task_runner_roles` has `session`, so a task-only node gets no session tools. New `task_runner_shared_slot` (default `true`, no change): with `false`, a run and a session each have their own slot and their own memory limit (`task_runner_session_memory`), so a session no longer makes the node busy for scheduled tasks. Preflight checks that both containers fit in `task_runner_memory_max`. `GET /v1/health` adds `roles`, `run_busy`, `session_busy` and `shared_slot` (additive, `runner-api` stays 1). The Fleet page shows the roles of each runner. New runner settings `RUNNER_SESSION_IMAGE`, `RUNNER_SESSION_MEMORY` and `RUNNER_SHARED_SLOT`.
 - node-control: sign in with OIDC on the admin console (#366), off unless `ADMIN_OIDC=1`. A stored `group:<name>` grant (#123) then applies to a signed-in admin. The console stays tailnet-only: every route still asks WhoIs, and the sign-in only adds the ID token's groups to the caller's tailnet login, when the verified email is that login. The session (default 8 hours, `ADMIN_OIDC_SESSION_HOURS`) is bound to the login. For the HTTPS redirect and the Secure cookie, node-control also serves the console at `https://<ADMIN_CONSOLE_NAME>` (default `console.<SERVE_ZONE>`) on its tailnet address, port 443, with the serve certificate, so serve must be on. The name resolves through the serve DNS answers. Routes: `/auth/login`, `/auth/callback`, `/auth/me`, `POST /auth/logout`.
+
+### Deprecated
+
+- task-runner role: `task_runner_session_enabled` (#324). Use `task_runner_roles: [run, session]`. It still works and is removed before 1.0.0.
 
 ## 0.20.0 - 2026-11-15
 

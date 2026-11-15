@@ -36,9 +36,9 @@ func Fingerprint(v string) string {
 	return "len=" + strconv.Itoa(len(v)) + " sha256=" + hex.EncodeToString(sum[:])[:shortHash]
 }
 
-// Names lists the secret variables that are set in env, in a stable order. It adds
+// Candidates lists every secret variable name, set or not, in a stable order. It adds
 // <NAME>_PASSWORD for each cloud of OPENSTACK_CLOUDS.
-func Names(env core.Env) []string {
+func Candidates(env core.Env) []string {
 	names := slices.Clone(fixed)
 	for _, e := range strings.Split(env.Getenv("OPENSTACK_CLOUDS"), ",") {
 		name, _, ok := strings.Cut(strings.TrimSpace(e), "=")
@@ -47,7 +47,12 @@ func Names(env core.Env) []string {
 		}
 	}
 	slices.Sort(names)
-	names = slices.Compact(names)
+	return slices.Compact(names)
+}
+
+// Names lists the secret variables that are set in env, in a stable order.
+func Names(env core.Env) []string {
+	names := Candidates(env)
 	out := names[:0]
 	for _, n := range names {
 		if env.Getenv(n) != "" {

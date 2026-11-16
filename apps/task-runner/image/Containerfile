@@ -1,14 +1,31 @@
 # Two stages (#324). `run` holds Playwright and its Chromium only, for unattended task runs. `session` adds the
 # browser session tools. A node without the session role builds `--target run` and gets no VNC tools or Chrome.
 # No default: a build without --build-arg BASE=<image>@sha256:... must fail.
+#
+# BASE is either the official Playwright image (Chromium, Firefox and WebKit, about 2.5 GB) or a slim Node image
+# such as node:22-trixie-slim (#215). On a slim base, the run stage installs Chromium and its system libraries
+# only, which gives a much smaller image. On the Playwright image, the install finds Chromium and does nothing.
 ARG BASE
 FROM ${BASE} AS run
 WORKDIR /app
-RUN npm init -y >/dev/null && npm install --no-audit --no-fund playwright@1.64.1
+# The same browser path as the official image, so both bases put Chromium in one place.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Task runs are headless: chromium-headless-shell is enough, the full Chromium is not installed.
+RUN npm init -y >/dev/null && npm install --no-audit --no-fund playwright@1.64.1 \
+ && npx playwright install --with-deps --only-shell chromium \
+ && npm cache clean --force \
+ && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 ENV NODE_PATH=/app/node_modules
 COPY host.js /app/host.js
 
 FROM run AS session
+# Google Chrome is optional (#215): CHROME=0 keeps Playwright's Chromium for sessions too. That saves about
+# 350 MB of image and a download from Google at build time. Chromium has no proprietary media codecs.
+ARG CHROME=1
+# Extra flags for the session browser (#215), for example memory-saving flags on a small host. session.sh reads
+# them from SESSION_BROWSER_FLAGS. Do not put secrets here: the value is visible in the image.
+ARG SESSION_BROWSER_FLAGS=""
+ENV SESSION_BROWSER_FLAGS=${SESSION_BROWSER_FLAGS}
 # Browser session tools (noVNC mode): Xvnc (X server + VNC server with client-driven resizing), window manager,
 # VNC bridge.
 RUN apt-get update \
@@ -17,8 +34,11 @@ RUN apt-get update \
 # Google Chrome for browser sessions only (task runs keep Playwright's own Chromium). The installer downloads
 # Google's package at build time (linux/amd64 only). The managed policy hides the "unsupported command-line flag"
 # infobar that the required --no-sandbox would otherwise show.
-RUN cd /app && npx playwright install chrome \
- && mkdir -p /etc/opt/chrome/policies/managed \
- && printf '{"CommandLineFlagSecurityWarningsEnabled": false}\n' > /etc/opt/chrome/policies/managed/session.json \
- && rm -rf /var/lib/apt/lists/*
+# Without Chrome, a session runs Playwright's full (headed) Chromium.
+RUN cd /app && if [ "$CHROME" = 1 ]; then \
+      npx playwright install chrome \
+      && mkdir -p /etc/opt/chrome/policies/managed \
+      && printf '{"CommandLineFlagSecurityWarningsEnabled": false}\n' > /etc/opt/chrome/policies/managed/session.json; \
+    else npx playwright install --with-deps chromium; fi \
+ && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 COPY session.sh /app/session.sh

@@ -82,6 +82,10 @@
           - --pull=missing
           - --build-arg
           - "BASE={{ task_runner_base_image }}"
+          - --build-arg
+          - "CHROME={{ '1' if task_runner_session_chrome | bool else '0' }}"
+          - --build-arg
+          - "SESSION_BROWSER_FLAGS={{ task_runner_session_browser_flags | trim }}"
           - --target
           - "{{ task_runner_image_target }}"
           - --tag

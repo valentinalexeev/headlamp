@@ -21,7 +21,8 @@
 #
 # Test-only hooks, honoured ONLY when CANARY_TEST=1 (otherwise ignored): CANARY_DIRECT_PORT
 # (default 8081), CANARY_LINK_PORT (default none), CANARY_LINK_SCHEME (https or http, default https).
-set -u
+# set -e (#368): curl's exit code is read with `|| rc=$?`, so a failed fetch still gets its own message.
+set -eu
 
 usage() {
   echo "usage: profile-canary.sh <tailnet-base-url> <link-host> [<canary-sub-secret> | -]" >&2
@@ -91,10 +92,10 @@ link_url="$scheme://$host${lport:+:$lport}/sub/$secret"
 # the process list; curl's own messages are discarded (they can repeat the URL). Redirects are not
 # followed, and only a 200 with a non-empty body counts as a profile.
 fetch() {
+  rc=0
   code=$(printf 'url = "%s"\n' "$2" |
     curl --config - --max-time 20 --silent --show-error \
-      --header "User-Agent: profile-canary" --output "$tmp/$1" --write-out '%{http_code}' 2>/dev/null)
-  rc=$?
+      --header "User-Agent: profile-canary" --output "$tmp/$1" --write-out '%{http_code}' 2>/dev/null) || rc=$?
   [ $rc -eq 0 ] || die "fetching the $1 profile failed (curl exit $rc)"
   [ "$code" = 200 ] || die "the $1 side answered HTTP $code, not 200"
   [ -s "$tmp/$1" ] || die "the $1 side answered with an empty body"

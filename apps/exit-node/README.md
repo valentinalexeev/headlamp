@@ -22,7 +22,7 @@ roles instead. They do not use this image.
 
 | Variable | Kind | Meaning |
 | --- | --- | --- |
-| `TAILSCALE_AUTH_KEY` | secret | A reusable, non-ephemeral auth key. Ephemeral keys are IPv6-only on Tailscale and work poorly for exit nodes. |
+| `TAILSCALE_AUTH_KEY` | secret | A one-time (not reusable), non-ephemeral auth key with a short expiry, for the first login only. See [The auth key](#the-auth-key). Ephemeral keys are IPv6-only on Tailscale and work poorly for exit nodes. |
 | `HEADSCALE_LOGIN_SERVER` | env | `https://<your-headscale-url>` |
 | `EXIT_NODE_HOSTNAME` | env | The tailnet name of the node. The default is `ams`. |
 | `DIRECT_HOSTS_FILE` | env | Path of a mounted host list that replaces the built-in placeholder (see `docs/images.md`). |
@@ -56,8 +56,36 @@ that forwarding works.
 
 - State: `flyctl volumes create tailscale_state -a <app> -r <region> -n 1`. The `[mounts]` section of `fly.toml`
   mounts it at `/var/lib/tailscale`.
-- Secrets: `flyctl secrets set TAILSCALE_AUTH_KEY=<key> HEADSCALE_LOGIN_SERVER=https://<your-headscale-url>`.
+- Secrets: `flyctl secrets set TAILSCALE_AUTH_KEY=<one-time key> HEADSCALE_LOGIN_SERVER=https://<your-headscale-url>`.
 - Deploy: `flyctl deploy [--build-arg TSVERSION=<x.y.z>]`.
+
+## The auth key
+
+The node uses `TAILSCALE_AUTH_KEY` once, for its first login (#394). After that, the node state in
+`/var/lib/tailscale` (or in Redis) holds the node identity. A restart with that state logs in without the key.
+
+Make a one-time key with a short expiry. Do not make a reusable key:
+
+```sh
+headscale preauthkeys create -u <user> -e 1h --tags tag:exit
+```
+
+A reusable key stays valid in the secret store and in the environment of the container. A person who reads it can
+register more exit nodes. `autoApprovers.exitNode` then approves those nodes too. A one-time key is used at the
+first login, and it is of no use after that.
+
+The script gives the key to tailscale through a file with mode 0600. It removes the file after the login. The key
+is not on a command line, and it is not in the environment of `tailscaled`.
+
+**When the node loses its state**, it needs a new key from an admin. This happens, for example, when the volume is
+deleted. The node does not try the old key in a loop. It writes one line that starts with
+`error: the login with TAILSCALE_AUTH_KEY failed`. Then it waits, and the health check answers `503`. To bring the
+node back:
+
+1. Make a new one-time key (see above).
+2. Set it as the `TAILSCALE_AUTH_KEY` secret.
+3. Restart the node.
+4. In headscale, remove the old node record if it is still there.
 
 ## Run with Docker or another container host
 

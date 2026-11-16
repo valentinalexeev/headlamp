@@ -93,11 +93,16 @@ reaches the node. On a fresh host, the steps that need the service user can fail
 | `task_runner_base_image` | `""` | Required unless `task_runner_image_archive` is set. `<image>@sha256:<64 hex>`, see [Base image digest](#base-image-digest). |
 | `task_runner_image_archive` | `""` | Optional control-host path to a `podman save` tarball; loaded instead of building. |
 | `task_runner_binary` | `""` | Optional control-host path to a prebuilt linux binary; otherwise built with the control host's `go`. |
-| `task_runner_memory_max` | `2G` | systemd `MemoryMax` for the whole service (runner, podman, the container). |
-| `task_runner_container_memory` | `1g` | `RUNNER_MEMORY` (podman `--memory` of a run); at least 256 MB below `task_runner_memory_max`. |
+| `task_runner_profile` | `default` | `default` or `small` (#215). The defaults of the limits, the session image, the swap and the service trim come from it. See [Smaller nodes](#smaller-nodes). |
+| `task_runner_memory_max` | `2G` (small: `768M`) | systemd `MemoryMax` for the whole service (runner, podman, the container). |
+| `task_runner_container_memory` | `1g` (small: `512m`) | `RUNNER_MEMORY` (podman `--memory` of a run); at least 256 MB below `task_runner_memory_max`. |
 | `task_runner_session_memory` | `task_runner_container_memory` | `RUNNER_SESSION_MEMORY` (podman `--memory` of a session), same rules. With `task_runner_shared_slot: false`, both containers plus 256 MB must fit in `task_runner_memory_max` (preflight checks it). |
 | `task_runner_pids_limit` / `task_runner_tasks_max` | `512` / `2048` | Per container (`RUNNER_PIDS_LIMIT`) / whole service (`TasksMax`). |
-| `task_runner_min_free_mb` / `task_runner_min_free_disk_mb` | `1500` / `6000` | Free memory without page cache (preflight); free disk on the file system of the state dir (checked in the image step, only when an image has to be built or loaded). |
+| `task_runner_min_free_mb` / `task_runner_min_free_disk_mb` | `1500` / `6000` (small: `550` / `3000`) | Free memory without page cache (preflight); free disk on the file system of the state dir (checked in the image step, only when an image has to be built or loaded). |
+| `task_runner_session_chrome` | `true` (small: `false`) | Google Chrome in the session image. `false`: sessions use Playwright's Chromium. The image is smaller and the build downloads nothing from Google. Chromium has no proprietary media codecs. |
+| `task_runner_session_browser_flags` | `""` (small: memory-saving flags) | Extra flags of the session browser, set in the session image. Preflight refuses `--disable-site-isolation-trials`. |
+| `task_runner_swap_mb` | `0` (small: `1024`) | Size of the swap file `/swapfile.task-runner` in MB. `0` removes the file of the role. A swap that the host already has stays. |
+| `task_runner_trim_services` | `false` (small: `true`) | Remove `task_runner_trim_packages` (`snapd`, `multipath-tools`) if installed. Debian cloud images do not have them. |
 | `task_runner_guard_resolvers` | `["100.100.100.100", "fd7a:115c:a1e0::53"]` | Resolvers the service user may query on port 53 although they are in a blocked range. |
 | `task_runner_guard_extra_drop` | `[]` | IPv4/IPv6 addresses or CIDRs the service user may never reach, dropped after the DNS accepts. List the node's public address here when it is not configured on an interface (1:1 NAT, see Guard). Entries must not overlap (preflight checks IPv4 ranges and IPv6 duplicates). |
 | `task_runner_guard_check_interval` | `30s` | How often the guard check timer looks for the table. |
@@ -362,7 +367,56 @@ or until you stop it yourself. The role disables and stops the other three packa
 
 ## Smaller nodes
 
-The spike node had 2 vCPU and about 3.9 GB RAM. Chromium needs a few hundred MB per run. On a node with less memory:
+The spike node had 2 vCPU and about 3.9 GB RAM. Chromium needs a few hundred MB per run.
+
+### The small profile (1 GB)
+
+Use this profile for a shared 1 vCPU / 1 GB host that also runs the bridge. Set `task_runner_profile: small`. Use a
+slim Node base image instead of the Playwright image:
+
+```yaml
+task_runner_profile: small
+task_runner_base_image: "docker.io/library/node@sha256:<digest of node:22-trixie-slim>"
+```
+
+The profile sets:
+
+- the limits: `MemoryMax` 768M, 512m for each container, and preflight wants 550 MB free.
+- Playwright's Chromium for sessions instead of Google Chrome.
+- memory-saving browser flags: `--renderer-process-limit=2`, `--disable-background-networking`,
+  `--disable-component-update` and `--disable-features=Translate,OptimizationHints,MediaRouter`.
+- a 1 GB swap file with `vm.swappiness = 10`, so swap is used for peaks only.
+- the removal of `snapd` and `multipath-tools` when they are installed.
+
+On the slim base, the run stage installs only the headless shell of Chromium and its system libraries.
+
+**CAUTION:** With swap, memory of a run can reach the disk, and that memory can hold the secrets of a task. Use
+`task_runner_swap_mb: 0` if this is not acceptable, or encrypt the disk.
+
+The flag `--disable-site-isolation-trials` saves more memory, but it weakens the isolation between sites. The
+profile does not use it, and preflight refuses it.
+
+The values below come from a test on 2026-11-15 (#215). The host was a Selectel shared 1 vCPU / 1 GB VM (10% vCPU
+guarantee). It had Debian 13, a 10 GB disk and the small profile:
+
+| Item | Value |
+|---|---|
+| Idle, the runner running, no bridge | 260 MB used of 967 MB |
+| Run image (slim base, headless shell) | 891 MB (the Playwright base alone is about 2.5 GB) |
+| Session image without Chrome / with Chrome | 1.67 GB / 1.83 GB |
+| Disk used after the deploy | 4.0 GB of 9.8 GB |
+| First build of the session image on the node | about 5 minutes |
+| One task run (open a page, read the title) | peak 420 MB used, run succeeded |
+| A session with two light tabs, a noVNC client connected, 128 MB extra load in place of the bridge | peak 678 MB used, 190 MB swap, no OOM kill |
+| The same session with Chrome and without the flags | peak 705 MB used, 260 MB swap, no OOM kill |
+
+A bridge without the runner used about 300 MB on a 1 GB host. The test used 128 MB of extra load in its place, on
+top of the 260 MB idle, so the real margin is somewhat smaller. A run that starts while a session holds the shared
+slot gets `409`, as designed.
+
+### Other limits
+
+On a node with less memory than the default profile needs:
 
 - Lower `task_runner_container_memory` (and `task_runner_memory_max`, with 256 MB between them).
 - Lower `task_runner_min_free_mb` only after you measure a real run. `GET /v1/health` reports `mem_available_mb`. Watch

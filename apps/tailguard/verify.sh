@@ -6,7 +6,7 @@
 #
 # Needs config/cli-test.conf — a client config with Endpoint = <host-lan-ip>:51820
 # (see README "Home-router client config"; keep DNS/MTU as shown).
-set -e
+set -eu
 cd "$(dirname "$0")"
 
 CONF=config/cli-test.conf

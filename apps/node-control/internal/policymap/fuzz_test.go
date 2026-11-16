@@ -13,8 +13,10 @@ func FuzzBuild(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	for _, seed := range []string{string(full), "", "{}", `{"acls": [1]}`, `{"grants": [{"ip": ["::"]}]}`,
-		`{"acls": [{"action": "accept", "src": ["*"], "dst": ["[::1]:*"]}]}`} {
+	seeds := []string{string(full), "", "{}", `{"acls": [1]}`, `{"grants": [{"ip": ["::"]}]}`,
+		`{"acls": [{"action": "accept", "src": ["*"], "dst": ["[::1]:*"]}]}`,
+		`{"acls": [{"action": "accept", "src": ["*", "*", "a@"], "dst": ["*:*", "*:*", "fd7a::1"]}]}`}
+	for _, seed := range seeds {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, text string) {
@@ -29,7 +31,7 @@ func FuzzBuild(f *testing.F) {
 			t.Fatalf("limits: %d nodes, %d edges, %d warnings", len(g.Nodes), len(g.Edges), len(g.Warnings))
 		}
 		for _, e := range g.Edges {
-			if len(e.Refs) == 0 || e.Refs[0].Line < 1 {
+			if len(e.Refs) == 0 || len(e.Refs) > RefsMax || e.Refs[0].Line < 1 {
 				t.Fatalf("edge without a valid ref: %+v", e)
 			}
 		}

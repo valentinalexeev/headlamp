@@ -10,6 +10,8 @@ type Pair struct {
 // graphs when everything but its rule references is equal, so a rule that only moved is no change.
 // Added edges carry the references of the new graph, removed edges those of the old graph.
 // Changed lists the pairs that have both an added and a removed edge, for example new ports.
+// When a graph is truncated, the diff can show edges as added or removed that only the cut hid:
+// the caller shows the Truncated flag of both graphs with the diff.
 type EdgeDiff struct {
 	Added   []Edge `json:"added"`
 	Removed []Edge `json:"removed"`

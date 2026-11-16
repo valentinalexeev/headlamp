@@ -19,10 +19,14 @@ import (
 	"sort"
 )
 
-// Limits of one graph. Above them the graph is cut and Truncated is set.
+// Limits of one graph. Above them the graph is cut and Truncated is set. PairsMax limits the
+// work: the number of source, destination and access combinations that one build looks at.
+// RefsMax limits the rule references of one edge, and with EdgesMax the size of the answer.
 const (
 	NodesMax    = 1500
 	EdgesMax    = 3000
+	RefsMax     = 20
+	PairsMax    = 100000
 	WarningsMax = 100
 )
 

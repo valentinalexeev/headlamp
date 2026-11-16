@@ -1451,19 +1451,38 @@ The graph has these parts:
 
 | Field | Content |
 |---|---|
-| `nodes` | One node for each selector: `id`, `kind`, `label`, `rule_types` (`acls`, `grants`, `ssh`). A group also has `members`, a tag has `owners`, a host has `address`. `approves` shows what the node approves in `autoApprovers` (`exit node`, `route <prefix>`). `unused` is `true` for a group, tag or host that no rule uses. |
-| `edges` | One edge for each source, destination and access: `from`, `to`, `proto`, `ports`, and as applicable `via`, `posture`, `apps`, `ssh_users`, `ssh_action`. `refs` gives the rules of the edge: `section`, `index` (from 0) and `line` (from 1). |
-| `warnings` | The parts of the policy that the map cannot read. |
-| `truncated` | `true` when the graph is cut at 1500 nodes or 3000 edges. |
+| `nodes` | One node for each selector: `id`, `kind`, `label`, `rule_types` (`acls`, `grants`, `ssh`). A group also has `members`, a tag has `owners`, a host has `address`. `approves` shows what the node approves in `autoApprovers` (`exit node`, `route <prefix>`). `unused` is `true` for a group, tag or host that no rule, approver, tag owner or group member list uses. |
+| `edges` | One edge for each source, destination and access: `from`, `to`, `proto`, `ports`, and as applicable `via`, `posture`, `apps`, `ssh_users`, `ssh_action`. `refs` gives the rules of the edge: `section`, `index` (from 0) and `line` (from 1). An edge has 20 references at most. |
+| `warnings` | The parts of the policy that the map cannot read. There are 100 warnings at most. After them, one more line gives the number of the other warnings. |
+| `truncated` | `true` when the map is cut. See the limits below. |
 | `updated_at` | The version of the live policy. |
 
 The node kinds are `group`, `tag`, `user`, `host`, `cidr`, `autogroup`, `internet` (`autogroup:internet`, the internet
 through an exit node), `any` (`*`) and `unknown`.
 
+The map has these limits. Above a limit, the map stops and sets `truncated` to `true`:
+
+| Limit | Value |
+|---|---|
+| Nodes | 1500 |
+| Edges | 3000 |
+| References of one edge | 20 |
+| Source, destination and access combinations that one map examines | 100000 |
+
+A selector that a rule gives two times counts one time.
+
 The map reads JSON and HuJSON (comments and trailing commas). headscale validates the policy. The map does not: it
-shows a warning for each part that it cannot read, and it never blocks an apply. The map gives 422 only when the policy
-is not a JSON or HuJSON object. It gives 413 when the policy is larger than `POLICY_MAX_BYTES`. It never logs policy
-text.
+shows a warning for each part that it cannot read, and it never blocks an apply.
+
+The map gives these errors:
+
+| Status | Cause |
+|---|---|
+| 413 | The policy is larger than `POLICY_MAX_BYTES`. |
+| 422 | The policy is not a JSON or HuJSON object. Or headscale refuses the request: the answer gives the message of headscale. |
+| 502 | headscale does not answer, or its answer is not correct. |
+
+The map never logs policy text.
 
 ## Funnel module (optional)
 

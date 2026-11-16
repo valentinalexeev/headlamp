@@ -65,7 +65,9 @@ func splitDestination(dst string) (alias, ports string, ok bool) {
 		return dst[1:end], dst[end+2:], true
 	}
 	i := strings.LastIndex(dst, ":")
-	if i < 0 || !validPorts(dst[i+1:]) {
+	// An alias that ends with ":" is an IPv6 address without brackets: "fd7a::1" is not
+	// "fd7a:" with port 1.
+	if i < 0 || strings.HasSuffix(dst[:i], ":") || !validPorts(dst[i+1:]) {
 		return dst, "", false
 	}
 	return dst[:i], dst[i+1:], true
@@ -81,11 +83,23 @@ func validPorts(ports string) bool {
 	}
 	for _, part := range strings.Split(ports, ",") {
 		low, high, isRange := strings.Cut(part, "-")
-		if !validPort(low) || (isRange && !validPort(high)) {
+		if !validPort(low) {
+			return false
+		}
+		if isRange && (!validPort(high) || portNumber(low) > portNumber(high)) {
 			return false
 		}
 	}
 	return true
+}
+
+// portNumber returns the number of a port that validPort accepted.
+func portNumber(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return -1 // not reached: the caller checked s with validPort
+	}
+	return n
 }
 
 func validPort(s string) bool {
@@ -115,7 +129,7 @@ type access struct {
 // "icmp"), and one for its "app" names.
 func grantAccesses(rule grantRule) []access {
 	out := make([]access, 0, len(rule.IP)+1)
-	for _, entry := range rule.IP {
+	for _, entry := range distinct(rule.IP) {
 		out = append(out, ipAccess(entry))
 	}
 	if len(rule.App) > 0 {

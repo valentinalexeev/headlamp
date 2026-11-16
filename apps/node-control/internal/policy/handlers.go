@@ -13,6 +13,7 @@ import (
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policymap"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/ui"
 )
 
@@ -49,6 +50,7 @@ func (c *console) register(mux *core.Mux, gate func(http.Handler) http.Handler) 
 	get("GET /policy", asset("text/html; charset=utf-8", pageHTML))
 	get("GET /policy/static/policy.js", asset("text/javascript; charset=utf-8", pageJS))
 	get("GET /policy/state", c.state)
+	get("GET /policy/api/map", c.policyMap)
 	post("POST /policy/preview", c.preview)
 	post("POST /policy/apply", c.apply)
 	post("POST /policy/confirm", c.confirm)
@@ -287,4 +289,30 @@ func (c *console) revert(w http.ResponseWriter, r *http.Request) {
 	}
 	id, dl, err := c.svc.RevertTo(r.Context(), authz.LoginFrom(r.Context()), hid)
 	changeResult(w, id, dl, err)
+}
+
+// mapJSON is the answer of GET /policy/api/map: the graph of the live policy and its update stamp.
+type mapJSON struct {
+	policymap.Graph
+	UpdatedAt string `json:"updated_at"`
+}
+
+// policyMap serves the reachability graph of the live policy (#428, ADR 0005). It is read-only and
+// never logs policy text.
+func (c *console) policyMap(w http.ResponseWriter, r *http.Request) {
+	text, updated, err := c.svc.Current(r.Context())
+	if err != nil {
+		fail(w, err, 0, time.Time{})
+		return
+	}
+	if len(text) > c.maxBytes {
+		fail(w, ErrTooLarge, 0, time.Time{})
+		return
+	}
+	g, err := policymap.Build(text)
+	if err != nil {
+		detail(w, http.StatusUnprocessableEntity, "the live policy is not a JSON or HuJSON object")
+		return
+	}
+	writeJSON(w, http.StatusOK, mapJSON{Graph: g, UpdatedAt: updated})
 }

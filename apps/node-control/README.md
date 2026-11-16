@@ -1419,6 +1419,7 @@ API: `GET /enroll/people`, `POST /enroll/people/{subject}/lock` (body `{"reason"
 - The tailnet key is single-use, not reusable and not ephemeral. It has no tags, so the node gets only the ACL of its own user.
 - A person sees and revokes only their own devices.
 
+## Policy console (optional)
 
 Set `POLICY_DB` to serve `/policy` on the admin listener for the logins in `POLICY_ADMIN_USERS`. Use the console to edit the headscale policy, preview the diff, apply and confirm. An applied change reverts by itself after `POLICY_REVERT_SECONDS` unless you confirm it. This also covers a restart of this app during that time.
 
@@ -1433,6 +1434,36 @@ Confirm names the pending change. It succeeds only while headscale still serves 
 > **WARNING:** If the page shows a warning that the automatic revert continues to fail, check headscale. Then use Confirm or Revert now as the way out. Confirm keeps the change. Revert now tries the revert again.
 
 The console adds a "Policy" entry to the sidebar. Its Content-Security-Policy (`ui.PageCSP`, like every admin page) allows scripts and styles only from the files of the page: no inline script and no style attributes.
+
+### Policy map
+
+The policy map shows the live policy as a graph: who can reach what. The idea comes from
+[tailscale-network-topology-mapper](https://github.com/SimplyMinimal/tailscale-network-topology-mapper) by SimplyMinimal
+(Apache-2.0). node-control copies no code from that project. The design is in ADR 0005
+(`docs/adr/0005-policy-map-in-node-control.md`).
+
+At this time, only the API is available (#428). The page comes with #429.
+
+`GET /policy/api/map` returns the graph of the live policy. It needs `policy.view`, the same as the console. It changes
+nothing. It is available when the console is active (`POLICY_DB`).
+
+The graph has these parts:
+
+| Field | Content |
+|---|---|
+| `nodes` | One node for each selector: `id`, `kind`, `label`, `rule_types` (`acls`, `grants`, `ssh`). A group also has `members`, a tag has `owners`, a host has `address`. `approves` shows what the node approves in `autoApprovers` (`exit node`, `route <prefix>`). `unused` is `true` for a group, tag or host that no rule uses. |
+| `edges` | One edge for each source, destination and access: `from`, `to`, `proto`, `ports`, and as applicable `via`, `posture`, `apps`, `ssh_users`, `ssh_action`. `refs` gives the rules of the edge: `section`, `index` (from 0) and `line` (from 1). |
+| `warnings` | The parts of the policy that the map cannot read. |
+| `truncated` | `true` when the graph is cut at 1500 nodes or 3000 edges. |
+| `updated_at` | The version of the live policy. |
+
+The node kinds are `group`, `tag`, `user`, `host`, `cidr`, `autogroup`, `internet` (`autogroup:internet`, the internet
+through an exit node), `any` (`*`) and `unknown`.
+
+The map reads JSON and HuJSON (comments and trailing commas). headscale validates the policy. The map does not: it
+shows a warning for each part that it cannot read, and it never blocks an apply. The map gives 422 only when the policy
+is not a JSON or HuJSON object. It gives 413 when the policy is larger than `POLICY_MAX_BYTES`. It never logs policy
+text.
 
 ## Funnel module (optional)
 

@@ -135,6 +135,7 @@ var allRoutes = []struct{ method, path string }{
 	{"GET", "/policy"},
 	{"GET", "/policy/static/policy.js"},
 	{"GET", "/policy/state"},
+	{"GET", "/policy/api/map"},
 	{"POST", "/policy/preview"},
 	{"POST", "/policy/apply"},
 	{"POST", "/policy/confirm"},

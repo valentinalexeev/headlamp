@@ -256,9 +256,15 @@ func (p *Pathcheck) tlsConn(ctx context.Context, addr, name string) (*tls.Conn, 
 }
 
 // reachTLS sends a ClientHello with no server name to the same address. Any answer of the
-// server, a finished handshake or a TLS alert, means the address is reachable at the TLS
-// layer. Together with a failed TLS probe with the real name, it shows a block by name.
+// server, a finished handshake, a TLS alert or a certificate that does not verify, means the
+// address is reachable at the TLS layer. Together with a failed TLS probe with the real name, it
+// shows a block by name. The server name is the IP address: Go sends no SNI for an IP, and the
+// certificate is still checked (no InsecureSkipVerify), so a failed check counts as an answer.
 func (p *Pathcheck) reachTLS(ctx context.Context, addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
 	c, err := p.dial(ctx, "tcp", addr)
 	if err != nil {
 		return err
@@ -267,10 +273,10 @@ func (p *Pathcheck) reachTLS(ctx context.Context, addr string) error {
 	if dl, ok := ctx.Deadline(); ok {
 		_ = c.SetDeadline(dl)
 	}
-	//nolint:gosec // reachability only: no data is sent and the certificate does not matter
-	t := tls.Client(c, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})
+	t := tls.Client(c, p.tlsConfig(host))
 	err = t.HandshakeContext(ctx)
-	if err == nil || strings.Contains(err.Error(), "remote error") {
+	var verr *tls.CertificateVerificationError
+	if err == nil || errors.As(err, &verr) || strings.Contains(err.Error(), "remote error") {
 		return nil
 	}
 	return err

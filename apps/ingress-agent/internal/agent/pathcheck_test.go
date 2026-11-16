@@ -309,3 +309,29 @@ func TestPathcheckEndpoint(t *testing.T) {
 		t.Fatalf("no token: %d", w.Code)
 	}
 }
+
+// The no-SNI probe verifies the certificate (no InsecureSkipVerify) and still counts a server that answers with a
+// certificate for another name, or with one from an unknown CA, as reachable. A closed port is not reachable.
+func TestReachTLSCountsAnyServerAnswer(t *testing.T) {
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
+	defer srv.Close()
+	addr := srv.Listener.Addr().String()
+
+	trusted := newCheck(t, srv, "") // trusts the test CA; the IP is not in the certificate
+	if err := trusted.reachTLS(context.Background(), addr); err != nil {
+		t.Fatalf("a name mismatch must count as an answer: %v", err)
+	}
+	untrusted := &Pathcheck{Host: "example.com"} // system roots: the test CA is unknown
+	if err := untrusted.reachTLS(context.Background(), addr); err != nil {
+		t.Fatalf("an unknown CA must count as an answer: %v", err)
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := l.Addr().String()
+	_ = l.Close()
+	if err := untrusted.reachTLS(context.Background(), closed); err == nil {
+		t.Fatal("a closed port must not count as reachable")
+	}
+}

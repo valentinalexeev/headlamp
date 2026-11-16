@@ -13,7 +13,9 @@
 #                  gets 404 from the edge. --link-host defaults to the host of the subscription URL of step 2.
 #
 # Env: NODE_CONTROL_URL (required), CURL (default curl), SMOKE_DEVICE_HOURS (default 1, the test device's lifetime).
-set -u
+# set -e (#368): a failed request is a FAIL line, not an exit: each curl call ends with `|| true` and a status
+# of 000, and each check uses if/else.
+set -eu
 base=${NODE_CONTROL_URL:?set NODE_CONTROL_URL to the base URL of node-control on the tailnet}
 curl=${CURL:-curl}
 hours=${SMOKE_DEVICE_HOURS:-1}
@@ -38,9 +40,9 @@ trap 'rm -rf "$T"' EXIT INT TERM
 api() { # METHOD PATH [JSON]: writes the body to $T/body, prints the status. A write always sends JSON (the console
   # refuses another Content-Type, as a CSRF guard).
   if [ "$1" = GET ]; then
-    $curl -sS -o "$T/body" -w '%{http_code}' --max-time 30 "$base$2"
+    $curl -sS -o "$T/body" -w '%{http_code}' --max-time 30 "$base$2" || true
   else
-    $curl -sS -o "$T/body" -w '%{http_code}' --max-time 30 -X "$1" -H 'Content-Type: application/json' --data "${3:-{\}}" "$base$2"
+    $curl -sS -o "$T/body" -w '%{http_code}' --max-time 30 -X "$1" -H 'Content-Type: application/json' --data "${3:-{\}}" "$base$2" || true
   fi
 }
 
@@ -50,7 +52,7 @@ code=$(api GET /enroll/ingresses)
 cp "$T/body" "$T/ingresses.json"
 for name in $(jq -r '.ingresses[] | select(.approval == "approved" or .approval == "configured") | .name' "$T/ingresses.json"); do
   s=$(jq -r --arg n "$name" '.ingresses[] | select(.name == $n) | if .sync.pending then .sync.state else "ok" end' "$T/ingresses.json")
-  [ "$s" = ok ] && ok "$name is in sync" || nok "$name is out of sync ($s)"
+  if [ "$s" = ok ]; then ok "$name is in sync"; else nok "$name is out of sync ($s)"; fi
   e=$(jq -c --arg n "$name" '.egress[$n] // empty' "$T/ingresses.json")
   if [ -z "$e" ]; then
     echo "note $name: no self-test (an agent before 0.15.2, or ingress_egress_socks is empty)"
@@ -70,9 +72,9 @@ if [ "$code" != 200 ]; then
 else
   id=$(jq -r .id "$T/body"); sub=$(jq -r .subscription_url "$T/body")
   pending=$(jq -r '.sync_pending' "$T/body")
-  [ "$pending" = false ] && ok "created $name (id $id), pushed to every bridge" || nok "created $name, but the push is pending: $(jq -c '[.ingresses[] | select(.sync.pending) | .name]' "$T/body")"
-  [ -n "$link" ] || link=$(printf '%s' "$sub" | sed -n 's#^https://\([^/]*\)/.*#\1#p')
-  c=$($curl -s -o "$T/sub" -w '%{http_code}' --max-time 20 -A smoke-test "$sub")
+  if [ "$pending" = false ]; then ok "created $name (id $id), pushed to every bridge"; else nok "created $name, but the push is pending: $(jq -c '[.ingresses[] | select(.sync.pending) | .name]' "$T/body")"; fi
+  if [ -z "$link" ]; then link=$(printf '%s' "$sub" | sed -n 's#^https://\([^/]*\)/.*#\1#p'); fi
+  c=$($curl -s -o "$T/sub" -w '%{http_code}' --max-time 20 -A smoke-test "$sub") || true
   if [ "$c" = 200 ] && [ -s "$T/sub" ]; then ok "the subscription answers through $link ($(wc -c < "$T/sub") bytes)"
   else nok "the subscription through $link answered $c"; fi
   if $keep; then
@@ -80,9 +82,9 @@ else
   else
     code=$(api POST "/enroll/devices/$id/revoke")
     if [ "$code" = 200 ] && [ "$(jq -r '.sync_pending' "$T/body")" = false ]; then ok "revoked $name on every bridge"
-    else nok "revoke $name answered $code, sync pending $(jq -r '.sync_pending' "$T/body" 2>/dev/null)"; fi
-    c=$($curl -s -o /dev/null -w '%{http_code}' --max-time 20 -A smoke-test "$sub")
-    [ "$c" = 404 ] && ok "the revoked subscription answers 404" || nok "the revoked subscription answered $c"
+    else nok "revoke $name answered $code, sync pending $(jq -r '.sync_pending' "$T/body" 2>/dev/null || echo '?')"; fi
+    c=$($curl -s -o /dev/null -w '%{http_code}' --max-time 20 -A smoke-test "$sub") || true
+    if [ "$c" = 404 ]; then ok "the revoked subscription answers 404"; else nok "the revoked subscription answered $c"; fi
   fi
 fi
 
@@ -90,14 +92,14 @@ echo "# 3. public paths of ${link:-<no link host>}"
 if [ -z "$link" ]; then
   nok "no link host: pass --link-host"
 else
-  c=$($curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$link/me")
+  c=$($curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$link/me") || true
   case "$c" in
     200) ok "https://$link/me reaches node-control" ;;
     404) echo "note https://$link/me answers 404: self-enrolment is off, or the edge lacks the path (#260)" ;;
     *) nok "https://$link/me answered $c" ;;
   esac
-  c=$($curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$link/smoke-test-not-a-path")
-  [ "$c" = 404 ] && ok "an unknown path gets 404 from the edge" || nok "an unknown path answered $c"
+  c=$($curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$link/smoke-test-not-a-path") || true
+  if [ "$c" = 404 ]; then ok "an unknown path gets 404 from the edge"; else nok "an unknown path answered $c"; fi
 fi
 
 echo "$pass passed, $fails failed"

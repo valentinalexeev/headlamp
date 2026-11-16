@@ -201,9 +201,10 @@ lint:
 	  scripts/headscale-tag-node.sh scripts/test/headscale-tag-node/run.sh scripts/test/bridge-selection/run.sh \
 	  .githooks/pre-commit .githooks/commit-msg \
 	  apps/tailguard/*.sh apps/headscale/*.sh scripts/test/feature-defaults/run.sh scripts/check-enroll-paths.sh scripts/smoke-test.sh scripts/test/exit-node-health/run_tests.sh \
-	  scripts/fleet-check.sh \
+	  scripts/fleet-check.sh scripts/check-set-eu.sh \
 	  scripts/check-compat.sh scripts/test/check-compat/run_tests.sh \
 	  scripts/ssh-cert-sign.sh scripts/test/ssh-ca/run_tests.sh scripts/test/ssh-ca/e2e-docker.sh ansible/roles/ssh-ca/tests/render.sh
+	./scripts/check-set-eu.sh
 	./scripts/check-feature-defaults.sh
 	./scripts/check-enroll-paths.sh
 	-./scripts/check-statestore-port.sh

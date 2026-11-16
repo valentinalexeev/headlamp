@@ -11,6 +11,9 @@
 #                traffic). The last result is cached for HEALTH_EGRESS_TTL seconds (default 60).
 # A kernel without xt_connmark is not a fault (see start.sh).
 # Test hooks: HEALTH_TAILSCALE (the tailscale binary), HEALTH_PROC (the /proc root), HEALTH_IPTABLES.
+# set -e (#368): every probe below is guarded with `|| ...`, so a failed probe is a failed check (503), never an
+# exit without an answer.
+set -eu
 ts=${HEALTH_TAILSCALE:-/app/tailscale}
 proc=${HEALTH_PROC:-/proc}
 ipt=${HEALTH_IPTABLES:-iptables}
@@ -30,7 +33,7 @@ fail=""
 ok=""
 check() { if [ "$2" = 0 ]; then ok="$ok $1"; else fail="$fail $1"; fi; }
 
-status=$("$ts" status --json 2>/dev/null)
+status=$("$ts" status --json 2>/dev/null) || status=""
 case "$status" in *'"BackendState": "Running"'* | *'"BackendState":"Running"'*) r=0 ;; *) r=1 ;; esac
 check tailscaled $r
 case "$status" in *'"0.0.0.0/0"'*) r=0 ;; *) r=1 ;; esac
@@ -41,13 +44,13 @@ if "$ipt" -t nat -S POSTROUTING 2>/dev/null | grep -q -- '-o eth0 -j MASQUERADE'
 check nat $r
 
 now=$(date +%s)
-last=$(cat "$cache" 2>/dev/null)
+last=$(cat "$cache" 2>/dev/null) || last=""
 at=${last%% *}
 if [ -n "$at" ] && [ $((now - at)) -lt "$ttl" ]; then
     r=${last#* }
 else
-    wget -q -T 5 --spider "$url" >/dev/null 2>&1
-    r=$?
+    r=0
+    wget -q -T 5 --spider "$url" >/dev/null 2>&1 || r=$?
     echo "$now $r" > "$cache"
 fi
 check egress "$r"

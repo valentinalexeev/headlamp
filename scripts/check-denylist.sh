@@ -15,7 +15,7 @@
 #
 # Exit 0 = clean (or no list available and HEADLAMP_DENYLIST_REQUIRED is not 1), 1 = hit, 2 = no list
 # while HEADLAMP_DENYLIST_REQUIRED=1 (agents must set it), 64 = bad usage.
-set -eu
+set -euo pipefail
 
 usage() { echo "usage: $0 --staged | --message FILE | --text FILE|-" >&2; exit 64; }
 [ $# -ge 1 ] || usage
@@ -35,7 +35,7 @@ grep -vE '^[[:space:]]*(#|$)' "$list" > "$pats" || true
 case "$1" in
   --staged)
     what="staged changes"
-    text="$({ git diff --cached --name-only --diff-filter=ACMR; git diff --cached -U0 --diff-filter=ACMR | grep -E '^\+' | grep -vE '^\+\+\+'; } 2>/dev/null)" ;;
+    text="$({ git diff --cached --name-only --diff-filter=ACMR; git diff --cached -U0 --diff-filter=ACMR | { grep -E '^\+' || true; } | { grep -vE '^\+\+\+' || true; }; } 2>/dev/null)" ;;
   --message)
     [ $# -ge 2 ] || usage
     what="commit message"; text="$(cat "$2")" ;;

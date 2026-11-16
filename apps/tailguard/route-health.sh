@@ -17,7 +17,9 @@
 # grace period keeps a slow boot (tailscale not up yet) from tripping it.
 #
 # Fail-open: on exit (compose stop) the listener is always restored.
-set -u
+# set -e (#368): the loop must never stop on one failed command, so every command that can fail in normal work
+# (a probe, an iptables check) is in a condition or has `|| true`.
+set -eu
 
 WG_PORT="${WG_PORT:-51820}"
 PROBE_TIMEOUT="${PROBE_TIMEOUT:-6}"  # per-probe curl timeout
@@ -72,7 +74,7 @@ echo "$(ts) route-health: watching exit-node egress (interval ${INTERVAL}s, time
 while :; do
   if egress_ok; then
     oks=$((oks + 1)); fails=0
-    [ "$armed" -eq 0 ] && { armed=1; echo "$(ts) route-health: armed (egress reachable)"; }
+    if [ "$armed" -eq 0 ]; then armed=1; echo "$(ts) route-health: armed (egress reachable)"; fi
   else
     fails=$((fails + 1)); oks=0
     if [ "$armed" -eq 0 ] && [ $(( $(date +%s) - start )) -ge "$GRACE" ]; then

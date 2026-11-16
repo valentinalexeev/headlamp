@@ -19,7 +19,9 @@
 # TS_EXIT_NODE): env_file values are baked in when the container is created, so
 # a stale pin there would make `tailscale up --exit-node=<dead ip>` fail and
 # crashloop tailguard after a reboot. This tracker pins it right after boot.
-set -u
+# set -e (#368): the loop must never stop on one failed command, so every command that can fail in normal work
+# (tailscale, iptables, curl) is in a condition or has `|| true`.
+set -eu
 
 PREFIX="${EXIT_NODE_PREFIX:?set EXIT_NODE_PREFIX (name prefix of the exit node to follow)}"
 INTERVAL="${TRACK_INTERVAL:-20}"      # seconds between checks
@@ -34,7 +36,7 @@ TS() { tailscale --socket="$SOCK" "$@"; }
 # Exit-node-capable peers as "ip label online selected" (online/selected 0|1).
 # `exit-node list` only prints peers that offer exit node; label = first DNS label.
 nodes() {
-  TS exit-node list 2>/dev/null | awk '
+  { TS exit-node list 2>/dev/null || true; } | awk '
     $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ {
       h = $2; sub(/\..*/, "", h)
       print $1, h, ($0 ~ /offline/ ? 0 : 1), ($0 ~ /selected/ ? 1 : 0)
@@ -60,28 +62,28 @@ decide() {
 derp_guard() {
   [ -n "$BLOCK_DERP" ] || return 0
   changed=0
-  for ip in $(TS debug derp-map 2>/dev/null | awk -v list=" $BLOCK_DERP " '
+  for ip in $({ TS debug derp-map 2>/dev/null || true; } | awk -v list=" $BLOCK_DERP " '
       /"RegionCode"/ { gsub(/[",]/, "", $2); code = $2 }
       /"IPv4"/       { gsub(/[",]/, "", $2); if (index(list, " " code " ")) print $2 }'); do
-    iptables -C OUTPUT -p udp --dport 3478 -d "$ip" -j DROP 2>/dev/null && continue
-    iptables -I OUTPUT 1 -p udp --dport 3478 -d "$ip" -j DROP && changed=1
+    if iptables -C OUTPUT -p udp --dport 3478 -d "$ip" -j DROP 2>/dev/null; then continue; fi
+    if iptables -I OUTPUT 1 -p udp --dport 3478 -d "$ip" -j DROP; then changed=1; fi
   done
   if [ "$changed" = 1 ]; then
     echo "$(ts) derp-guard: dropping STUN to DERP regions [$BLOCK_DERP]; re-STUN"
-    TS debug restun >/dev/null 2>&1; TS debug rebind >/dev/null 2>&1
+    TS debug restun >/dev/null 2>&1 || true; TS debug rebind >/dev/null 2>&1 || true
   fi
 }
 
-[ "${1:-}" = "--decide" ] && { decide; exit 0; }     # self-test hook: rows on stdin
+if [ "${1:-}" = "--decide" ]; then decide; exit 0; fi     # self-test hook: rows on stdin
 
 last=""; n=0
-note() { [ "$1" != "$last" ] && { echo "$(ts) $1"; last="$1"; }; }   # log on change only
+note() { if [ "$1" != "$last" ]; then echo "$(ts) $1"; last="$1"; fi; }   # log on change only
 
 echo "$(ts) exit-node-tracker: following '${PREFIX}*' (interval ${INTERVAL}s)"
 while :; do
   if [ ! -S "$SOCK" ]; then note "waiting for tailscaled socket"; sleep 5; continue; fi
 
-  [ $((n % 10)) -eq 0 ] && derp_guard; n=$((n + 1))
+  if [ $((n % 10)) -eq 0 ]; then derp_guard; fi; n=$((n + 1))
   # shellcheck disable=SC2046 # word splitting of decide's output into positional args is intended
   set -- $(nodes | decide)
   case "${1:-}" in
@@ -93,7 +95,7 @@ while :; do
         code=000
         for _ in 1 2 3 4; do                      # path to the node can take a few seconds to settle
           sleep 5
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "$PROBE" 2>/dev/null); code=${code:-000}
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "$PROBE" 2>/dev/null) || true; code=${code:-000}
           case "$code" in 200|204) break ;; esac
         done
         case "$code" in

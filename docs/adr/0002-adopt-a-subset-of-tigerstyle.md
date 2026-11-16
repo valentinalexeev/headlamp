@@ -71,6 +71,8 @@ to code that a change edits. Existing code does not need a change before it gets
    work. Give the reason in the pull request.
 8. **Shell scripts.** Each script starts with `set -eu`. Bash scripts also set `-o pipefail`. `shellcheck` shows
    warnings, not only errors. The test scripts reach this rule through their move to bats-core and Go (ADR 0004).
+   `scripts/check-set-eu.sh` checks the rule in CI (#368). Its list `scripts/check-set-eu.allow` has only the test
+   harnesses that #382 has not moved yet. The list only becomes shorter.
 9. **Fuzz tests.** A function that parses data from an operator or from the network has a Go fuzz test. The first
    targets are `tasks.ParseConfig`, `enroll.parseIngress` and the state store importer.
 

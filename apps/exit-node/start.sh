@@ -1,9 +1,14 @@
 #!/usr/bin/env sh
+# set -eu (#368): a step that may fail on some kernels or hosts says so and continues (`|| echo ...`); a missing
+# setting stops the start with a clear error instead of a login loop with an empty value.
+set -eu
+: "${HEADSCALE_LOGIN_SERVER:?HEADSCALE_LOGIN_SERVER is required}"
+: "${TAILSCALE_AUTH_KEY:?TAILSCALE_AUTH_KEY is required}"
 
 echo 'Starting up...'
 
 # error: adding [-i tailscale0 -j MARK --set-mark 0x40000] in v4/filter/ts-forward: running [/sbin/iptables -t filter -A ts-forward -i tailscale0 -j MARK --set-mark 0x40000 --wait]: exit status 2: iptables v1.8.6 (legacy): unknown option "--set-mark"
-modprobe xt_mark
+modprobe xt_mark || echo "warning: modprobe xt_mark failed"
 # tailscale 1.104 adds connmark rules for rp_filter (mangle PREROUTING/OUTPUT) on every start. The Fly microVM kernel
 # has no xt_connmark, so tailscaled logs "router config failed (enabling connmark rules ...)" each time. The NAT and
 # filter rules are in place and exit traffic flows: the self-test below proves it (#196). Say so once, as info.
@@ -14,13 +19,13 @@ fi
 
 echo 'net.ipv4.ip_forward = 1' | tee -a /etc/sysctl.conf
 echo 'net.ipv6.conf.all.forwarding = 1' | tee -a /etc/sysctl.conf
-sysctl -p /etc/sysctl.conf
+sysctl -p /etc/sysctl.conf || echo "warning: sysctl -p reported an error"
 #echo 'net.ipv6.conf.all.disable_policy = 1' | tee -a /etc/sysctl.conf
 
-ethtool -K eth0 rx-udp-gro-forwarding on rx-gro-list off
+ethtool -K eth0 rx-udp-gro-forwarding on rx-gro-list off || echo "warning: ethtool could not set UDP GRO forwarding"
 
 iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
-ip6tables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+ip6tables -t nat -A POSTROUTING -o eth0 -j MASQUERADE || echo "warning: no IPv6 NAT rule"
 
 # --tun=userspace-networking --socks5-server=localhost:1055
 # Persistent state (see fly.toml's [mounts]) -- was --state=mem:, which
@@ -40,8 +45,8 @@ WATCH_PID=""
 shutdown() {
     trap '' TERM INT
     /app/state-sync.sh push || echo "final state push failed"
-    [ -z "$WATCH_PID" ] || kill "$WATCH_PID" 2>/dev/null
-    [ -z "$TAILSCALED_PID" ] || kill "$TAILSCALED_PID" 2>/dev/null
+    [ -z "$WATCH_PID" ] || kill "$WATCH_PID" 2>/dev/null || true
+    [ -z "$TAILSCALED_PID" ] || kill "$TAILSCALED_PID" 2>/dev/null || true
     exit 0
 }
 trap shutdown TERM INT
@@ -65,8 +70,8 @@ fi
 # immediately after via `tailscale set` (which has no such all-flags rule).
 until /app/tailscale up \
     --reset \
-    --login-server=${HEADSCALE_LOGIN_SERVER} \
-    --authkey=${TAILSCALE_AUTH_KEY} \
+    --login-server="${HEADSCALE_LOGIN_SERVER}" \
+    --authkey="${TAILSCALE_AUTH_KEY}" \
     --hostname="${EXIT_NODE_HOSTNAME:-ams}" \
     --advertise-exit-node
 #    --advertise-tags=tag:exit
@@ -86,7 +91,7 @@ fi
 /app/state-sync.sh watch &
 WATCH_PID=$!
 
-/app/tailscale set --webclient=true
+/app/tailscale set --webclient=true || echo "warning: could not turn on the web client"
 
 # Advertise the direct-hosts routes (Claude, currently) so they route via
 # ams independent of any client's exit-node selection -- see
@@ -102,5 +107,5 @@ WATCH_PID=$!
 
 while :; do
     sleep 1 &
-    wait $!
+    wait $! || true
 done

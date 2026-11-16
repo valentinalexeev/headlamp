@@ -13,7 +13,9 @@
 #        PREFLIGHT_PULL=ghcr.io/<owner>/<repo> pulls the src-<hash> images instead of building them (fallback: build).
 # Needs docker (linux/amd64 emulation on arm64), git, jq, python3 (tomllib), ansible-playbook with community.docker.
 # Prints "PREFLIGHT <step> <item> ok|FAIL" lines and exits 1 on any failure.
-set -uo pipefail
+# set -e (#368): a failed check is a FAIL line and the run goes on, so each check is in a condition. Only the setup
+# (the release tree) stops the run.
+set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 ref="${1:-HEAD}"
@@ -25,7 +27,7 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/hl-preflight.XXXXXX")"
 built=()
 cleanup() {
   rm -rf "$work"
-  [ "${KEEP_IMAGES:-}" = 1 ] || for i in ${built[@]+"${built[@]}"}; do docker rmi -f "$i" >/dev/null 2>&1; done
+  [ "${KEEP_IMAGES:-}" = 1 ] || for i in ${built[@]+"${built[@]}"}; do docker rmi -f "$i" >/dev/null 2>&1 || true; done
 }
 trap cleanup EXIT
 fails=0
@@ -51,7 +53,7 @@ has() { case " $steps " in *" $1 "*) return 0 ;; esac; return 1; }
 
 if has roles; then
   # The base tailscale role goes first: the other roles check for its client in their preflight.
-  roles=(); [ -d "$tree/ansible/roles/tailscale" ] && roles=(tailscale)
+  roles=(); if [ -d "$tree/ansible/roles/tailscale" ]; then roles=(tailscale); fi
   for d in "$tree"/ansible/roles/*/; do r="$(basename "$d")"; [ "$r" = tailscale ] || roles+=("$r"); done
   for r in "${roles[@]}"; do
     printf -- '- hosts: all\n  roles: [%s]\n' "$r" > "$work/syntax-$r.yml"
@@ -61,9 +63,11 @@ if has roles; then
   done
   # Check mode for every role: the preflight asserts run. Only the base tailscale role is also applied (in the
   # throwaway container), since the other roles check for its client and address. PREFLIGHT_APPLY changes the list.
-  APPLY="${PREFLIGHT_APPLY:-tailscale}" KEEP_IMAGE=1 bash "$tree/scripts/test/ansible-os/run.sh" "$os" "${roles[@]}" 2>&1 | tee "$work/roles.log" | grep -vE '^(all roles passed|[0-9]+ role\(s\) failed)'
+  # The results come from the RESULT lines below, so the exit code of the matrix itself is not used.
+  { APPLY="${PREFLIGHT_APPLY:-tailscale}" KEEP_IMAGE=1 bash "$tree/scripts/test/ansible-os/run.sh" "$os" "${roles[@]}" 2>&1 || true; } |
+    tee "$work/roles.log" | { grep -vE '^(all roles passed|[0-9]+ role\(s\) failed)' || true; }
   for r in "${roles[@]}"; do
-    line="$(grep -E "^RESULT $os $r " "$work/roles.log")"
+    line="$(grep -E "^RESULT $os $r " "$work/roles.log" || true)"
     case "$line" in *check=ok*) res check "$r" ok ;; *) res check "$r" FAIL ;; esac
   done
 fi
@@ -71,7 +75,7 @@ fi
 # build <tag> <context> <dockerfile> <build-args (newline list)>
 build() {
   local tag="$1" ctx="$2" df="$3" args="$4" a=()
-  while IFS= read -r kv; do [ -n "$kv" ] && a+=(--build-arg "$kv"); done <<<"$args"
+  while IFS= read -r kv; do if [ -n "$kv" ]; then a+=(--build-arg "$kv"); fi; done <<<"$args"
   docker build -q -t "$tag" -f "$ctx/$df" ${a[@]+"${a[@]}"} "$ctx" >"$work/build.log" 2>&1 && built+=("$tag")
 }
 args_of() { # components.json entry -> build args, values from files read from the release tree
@@ -110,12 +114,12 @@ starts() {
   local id ok=1; read -r -a cmd <<<"$2"
   id="$(docker run -d "$1" "${cmd[@]}" 2>"$work/run.log")" || return 1
   sleep "${START_WAIT:-8}"
-  [ "$(docker inspect -f '{{.State.Running}}' "$id")" = true ] || { ok=0; docker logs "$id" >"$work/run.log" 2>&1; }
-  docker rm -f "$id" >/dev/null 2>&1; [ $ok = 1 ]
+  [ "$(docker inspect -f '{{.State.Running}}' "$id" 2>/dev/null || true)" = true ] || { ok=0; docker logs "$id" >"$work/run.log" 2>&1 || true; }
+  docker rm -f "$id" >/dev/null 2>&1 || true; [ $ok = 1 ]
 }
 
 if has overlay; then
-  prev="$(git -C "$repo" tag -l 'v[0-9]*.[0-9]*.[0-9]*' --merged "$sha" | grep -vE -- '-' | sort -V | grep -vx "$ref" | tail -n 1)"
+  prev="$(git -C "$repo" tag -l 'v[0-9]*.[0-9]*.[0-9]*' --merged "$sha" | { grep -vE -- '-' || true; } | sort -V | { grep -vx "$ref" || true; } | tail -n 1)"
   for ov in "$tree"/examples/private-repo/fly/*/; do
     app="$(basename "$ov")"; [ -d "$tree/apps/$app" ] || continue
     e="$(jq -c --arg c "apps/$app" '[.[] | select(.context == $c and .dockerfile == "Dockerfile")][0] // empty' "$manifest")"

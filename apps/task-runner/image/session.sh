@@ -15,7 +15,8 @@
 #                            cut off)
 #      SESSION_NOVNC_PORT    port noVNC listens on (all interfaces)
 #      SESSION_TOKEN         secret a WebSocket client must present as ?token=
-set -u
+# set -e (#368): a child that exits (the browser, openbox) is expected and handled, so those calls carry `|| ...`.
+set -eu
 
 IDLE="${SESSION_IDLE_SECONDS:?SESSION_IDLE_SECONDS is required}"
 PORT="${SESSION_NOVNC_PORT:?SESSION_NOVNC_PORT is required}"
@@ -47,8 +48,8 @@ PIDS=""
 RESPAWNS=""
 cleanup() {
   # shellcheck disable=SC2086
-  [ -n "$PIDS$RESPAWNS" ] && kill $PIDS $RESPAWNS 2>/dev/null
-  wait 2>/dev/null
+  if [ -n "$PIDS$RESPAWNS" ]; then kill $PIDS $RESPAWNS 2>/dev/null || true; fi
+  wait 2>/dev/null || true
 }
 trap 'cleanup; exit 143' TERM INT
 
@@ -65,7 +66,7 @@ respawn() {
     quick=0
     while :; do
       t0=$(date +%s)
-      "$@"
+      "$@" || true
       if [ $(($(date +%s) - t0)) -lt 3 ]; then quick=$((quick + 1)); else quick=0; fi
       if [ "$quick" -ge 5 ]; then
         echo "session: $1 keeps exiting" >&2
@@ -107,7 +108,7 @@ start websockify --web "$NOVNC_ROOT" --token-plugin=TokenFile --token-source="$R
 # Connected VNC clients = established connections to Xvnc's port (5900 = 0x170C),
 # which websockify holds one of per noVNC client; read from /proc (no ss in the image).
 clients() {
-  cat /proc/net/tcp /proc/net/tcp6 2>/dev/null |
+  { cat /proc/net/tcp /proc/net/tcp6 2>/dev/null || true; } |
     awk '$2 ~ /:170C$/ && $4 == "01" { n++ } END { print n + 0 }'
 }
 

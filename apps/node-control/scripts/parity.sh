@@ -12,7 +12,8 @@
 # Do not paste or share it.
 #
 # Requires: curl, jq. Nothing is modified on either side.
-set -u
+# set -e (#368): a failed fetch or a diff is a result, not an error, so they are in conditions.
+set -eu
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 <python-url> <go-url>" >&2

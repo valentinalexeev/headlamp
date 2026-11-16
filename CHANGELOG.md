@@ -17,6 +17,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
   DNS-01 credentials of the edge. A Go e2e test runs the `rfc2136` snippet against BIND (`tests/e2e`).
 - node-control `FUNNEL_DNS_CHECK=lookup`: it looks the funnel record up and shows its status, with no DNS credentials.
 
+### Changed
+
+- Shell scripts: `set -eu` (bash: `set -euo pipefail`) in every production and helper script (#368). This covers the exit node (`start.sh`, `health.sh`), the tailguard watchdogs, the session entrypoint of the task runner, `fleet-run.sh`, `release-preflight.sh`, `smoke-test.sh` and the node-control helpers. Each command that may fail in normal work is guarded, so the behaviour stays the same: a failed probe is still a failed check, and a watchdog loop never stops on one error. `start.sh` now stops at once with a clear message when `HEADSCALE_LOGIN_SERVER` or `TAILSCALE_AUTH_KEY` is not set. `make lint` runs the new check `scripts/check-set-eu.sh` (ADR 0002 rule 8). Its allow list holds the 45 test harnesses that #382 moves to bats-core and Go.
+
 ### Deprecated
 
 - task-runner role: `task_runner_session_enabled` (#324). Use `task_runner_roles: [run, session]`. It still works and is removed before 1.0.0.

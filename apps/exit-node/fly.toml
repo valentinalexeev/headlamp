@@ -10,9 +10,9 @@ kill_timeout = "5s"
 
 [env]
   PORT = "41641"
-  # create a reusable auth key and set it:
-  # flyctl secrets set TAILSCALE_AUTH_KEY=tskey-...
-  # ephemeral keys are hardly working for use as exit node as they are ipv6 only
+  # Create a one-time auth key for the first login only (README, "The auth key", #394), and set it:
+  # flyctl secrets set TAILSCALE_AUTH_KEY=<one-time key>
+  # Ephemeral keys work poorly for an exit node (IPv6 only on Tailscale).
 
 # Persists tailscaled's state across redeploys (was --state=mem: in start.sh,
 # meaning every single deploy -- even a one-line direct-hosts.txt change --

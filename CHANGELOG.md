@@ -19,6 +19,7 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ### Changed
 
+- exit-node (#394): `TAILSCALE_AUTH_KEY` is for the first login only. With a valid node state the node logs in without it, so a one-time key works and a reusable key is no longer needed. The key goes to tailscale through a 0600 file that is removed after the login; it is not on a command line or in the environment of `tailscaled`. A used or expired key with no state no longer loops on the login: the node logs one clear error, waits, and the health check answers 503. A Go e2e test runs the image against a real headscale (`make test-exit-node-key-e2e`).
 - Shell scripts: `set -eu` (bash: `set -euo pipefail`) in every production and helper script (#368). This covers the exit node (`start.sh`, `health.sh`), the tailguard watchdogs, the session entrypoint of the task runner, `fleet-run.sh`, `release-preflight.sh`, `smoke-test.sh` and the node-control helpers. Each command that may fail in normal work is guarded, so the behaviour stays the same: a failed probe is still a failed check, and a watchdog loop never stops on one error. `start.sh` now stops at once with a clear message when `HEADSCALE_LOGIN_SERVER` or `TAILSCALE_AUTH_KEY` is not set. `make lint` runs the new check `scripts/check-set-eu.sh` (ADR 0002 rule 8). Its allow list holds the 45 test harnesses that #382 moves to bats-core and Go.
 
 ### Deprecated

@@ -14,6 +14,10 @@ says "No action required".
 - task-runner (#215): the image files changed. Each runner node builds its image again at the next deploy. With the
   same base digest, the build pulls nothing new. The default profile keeps all values as before. For a 1 GB host,
   see "Smaller nodes" in the role README.
+- exit-node (#394), recommended: replace the reusable `TAILSCALE_AUTH_KEY` with a one-time key. Make sure the
+  node has its state first (the volume, or Redis state mode). Then make a one-time key (`headscale preauthkeys create
+  -u <user> -e 1h --tags tag:exit`), set it as the secret, and deploy. Last, expire the old reusable key in headscale
+  (`headscale preauthkeys expire`). A node that keeps the reusable key works as before.
 
 ## 0.20.0
 

@@ -95,9 +95,12 @@ respawn openbox >/dev/null 2>&1
 # Real Chrome when the image has it, Playwright's Chromium otherwise.
 CHROME=/opt/google/chrome/chrome
 [ -x "$CHROME" ] || CHROME=$(node -e "console.log(require('playwright').chromium.executablePath())")
+# SESSION_BROWSER_FLAGS (set at image build, #215): extra flags, for example memory-saving ones on a small host.
+# Split on spaces on purpose; a flag value cannot contain a space.
+# shellcheck disable=SC2086
 respawn "$CHROME" --no-sandbox --disable-dev-shm-usage --no-first-run \
   --no-default-browser-check --password-store=basic --user-data-dir="$RUN/profile" \
-  --start-maximized about:blank
+  ${SESSION_BROWSER_FLAGS:-} --start-maximized about:blank
 
 start websockify --web "$NOVNC_ROOT" --token-plugin=TokenFile --token-source="$RUN/tokens" "$PORT" >/dev/null 2>&1
 

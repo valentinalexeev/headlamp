@@ -16,6 +16,15 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
   DNS-01 credentials of the edge. A Go e2e test runs the `rfc2136` snippet against BIND (`tests/e2e`).
 - node-control `FUNNEL_DNS_CHECK=lookup`: it looks the funnel record up and shows its status, with no DNS credentials.
 
+- ingress-agent: a path check from the network of a bridge to the control host, off unless
+  `INGRESS_PATHCHECK_TARGET` is set (role: `ingress_pathcheck_target`). Every 15 minutes (with jitter) it probes DNS,
+  TCP, TLS with and without the server name, the headscale health path, the DERP upgrade and STUN. It reads the
+  bridge's own `tailscale status`. Optionally it times a transfer against a reference host within a daily byte budget.
+  It classifies the run (`ok`, `ip-blocked`, `sni-blocked`, `derp-blocked`, `throttled`, `stalled`, `udp-blocked`,
+  ...) and serves it with a 24-hour history at `GET /v1/pathcheck`. node-control shows a "Bridge paths" line on the
+  overview and an Attention item for a bridge with the same bad class in two runs in a row. It collects the data for
+  the decision about wrapping the edge-to-central traffic; it changes no traffic and opens no port.
+
 ### Deprecated
 
 - task-runner role: `task_runner_session_enabled` (#324). Use `task_runner_roles: [run, session]`. It still works and is removed before 1.0.0.

@@ -695,6 +695,15 @@ gets an answer (`GET /v1/egress`, see the ingress-agent README). When it fails, 
 no reply, though the bridge is in sync. `GET /enroll/ingresses` has the result of each bridge in `egress`. An agent
 before 0.15.2 has no self-test, and node-control then shows nothing for it.
 
+**Bridge path check.** The agent of a bridge can also run a path check, which is off by default. It tests the
+path from the bridge network to the control host (`GET /v1/pathcheck`, "Path check" in the ingress-agent README). When at least one
+agent reports it, the overview shows the system line "Bridge paths". The line counts the bridges that reach the control
+host cleanly, and the bridges of each other class. `GET /enroll/ingresses` has the result of each bridge in `pathcheck`.
+
+A bridge with the same bad class in two runs in a row gets an Attention item. The title is "`<bridge>`: path to the
+control host is `<class>`". A class that cuts the bridge from the tailnet gives a critical item. `throttled`,
+`stalled`, `transfer-failed`, `udp-blocked`, `derp-only` and `edge-uplink-bad` give an info item.
+
 > **WARNING:** Mark a bridge as intermittent only if you accept this risk for it. `unreachable` over the tailnet does not prove that the bridge no longer serves clients. Its tailnet connection can be down while its front still accepts connections. Revocations and extensions that you make during that time are then not in effect on it. A revoked device can continue to work there until the agent answers again.
 
 A bridge that you stopped at its provider does not need this setting. It serves nobody, and it is already an info item.

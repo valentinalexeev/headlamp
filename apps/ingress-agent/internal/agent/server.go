@@ -309,7 +309,10 @@ type Server struct {
 	Info  *Info
 	// Egress is the bridge path self-test (#196); nil: GET /v1/egress answers {"disabled": true}.
 	Egress *Egress
-	Clock  func() int64
+	// Pathcheck is the edge-to-central path check; nil: GET /v1/pathcheck answers
+	// {"disabled": true}.
+	Pathcheck *Pathcheck
+	Clock     func() int64
 }
 
 func (s *Server) now() int64 {
@@ -319,7 +322,8 @@ func (s *Server) now() int64 {
 	return time.Now().Unix()
 }
 
-// Handler serves PUT /v1/credentials, GET /v1/stats, GET /v1/info and GET /v1/egress, each behind
+// Handler serves PUT /v1/credentials, GET /v1/stats, GET /v1/info, GET /v1/egress and
+// GET /v1/pathcheck, each behind
 // the bearer token. Every error
 // has an empty body. Nothing else exists.
 func (s *Server) Handler() http.Handler {
@@ -339,12 +343,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/stats", authed(s.stats))
 	mux.HandleFunc("GET /v1/info", authed(s.info))
 	mux.HandleFunc("GET /v1/egress", authed(s.egress))
+	mux.HandleFunc("GET /v1/pathcheck", authed(s.pathcheck))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h, pattern := mux.Handler(r)
 		if pattern == "" {
 			// no body, and a wrong method on a known path is still answered after the token check
 			switch r.URL.Path {
-			case "/v1/credentials", "/v1/stats", "/v1/info", "/v1/egress":
+			case "/v1/credentials", "/v1/stats", "/v1/info", "/v1/egress", "/v1/pathcheck":
 				authed(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusMethodNotAllowed) })(w, r)
 				return
 			}
@@ -406,6 +411,12 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 // egress gives the last bridge path self-test (#196). It never probes on request: the loop does.
 func (s *Server) egress(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.Egress.Result())
+}
+
+// pathcheck gives the edge-to-central path check: the last run, its class and a short
+// history. It never probes on request: the loop does.
+func (s *Server) pathcheck(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, s.Pathcheck.View())
 }
 
 func (s *Server) info(w http.ResponseWriter, _ *http.Request) {

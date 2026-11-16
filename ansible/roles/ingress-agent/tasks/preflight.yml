@@ -87,6 +87,32 @@
       reality-ingress), and ingress_egress_url an https URL without user info.
     quiet: true
 
+# The same checks as the agent (LoadPathcheck): a bad value would stop it at start. Only when the check is on.
+- name: Check the path check settings
+  when: ingress_pathcheck_target | length > 0
+  ansible.builtin.assert:
+    that:
+      - ingress_pathcheck_target is regex('^[A-Za-z0-9.-]+(:[0-9]{1,5})?\\Z')
+      - ingress_pathcheck_addrs is sequence and ingress_pathcheck_addrs is not string
+      - ingress_pathcheck_addrs | select('regex', '^[0-9A-Fa-f.:]+\\Z') | list | length == ingress_pathcheck_addrs | length
+      - ingress_pathcheck_health_path == '-' or ingress_pathcheck_health_path is regex('^/[^\\s?#]*\\Z')
+      - ingress_pathcheck_derp_path == '-' or ingress_pathcheck_derp_path is regex('^/[^\\s?#]*\\Z')
+      - ingress_pathcheck_stun in ['', '-'] or ingress_pathcheck_stun is regex('^[A-Za-z0-9.-]+:[0-9]{1,5}\\Z')
+      - ingress_pathcheck_blob_url == '' or ingress_pathcheck_blob_url is regex('^https://[^/@\\s]+(/\\S*)?\\Z')
+      - ingress_pathcheck_ref_url == '' or ingress_pathcheck_ref_url is regex('^https://[^/@\\s]+(/\\S*)?\\Z')
+      - ingress_pathcheck_interval is regex('^[0-9]+(m|h)\\Z')
+      - ingress_pathcheck_blob_every | int >= 1
+      - 1 <= ingress_pathcheck_blob_bytes | int <= 16777216
+      - ingress_pathcheck_daily_bytes | int >= 0
+      - ingress_pathcheck_tailscale == '' or ingress_pathcheck_tailscale is regex('^/[A-Za-z0-9._/-]+\\Z')
+    fail_msg: >-
+      ingress-agent: ingress_pathcheck_target must be host[:port]; ingress_pathcheck_addrs a list of IP
+      addresses; the paths must start with / or be "-"; ingress_pathcheck_stun host:port, "" or "-";
+      ingress_pathcheck_blob_url and ingress_pathcheck_ref_url https URLs without user info or "";
+      ingress_pathcheck_interval minutes or hours (at least 1m, for example 15m); ingress_pathcheck_blob_every
+      at least 1; ingress_pathcheck_blob_bytes 1 to 16777216; ingress_pathcheck_tailscale an absolute path or "".
+    quiet: true
+
 # Gate: only the two variables that are NEW with /v1/info. ingress_host and
 # reality_short_id are required by the reality-ingress role, so hosts that have
 # only those must keep passing. The gate is a superset of env.j2's export

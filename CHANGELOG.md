@@ -4,6 +4,8 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+## 0.21.0 - 2026-11-16
+
 ### Added
 
 - task-runner role: `task_runner_profile: small` for a shared 1 vCPU / 1 GB host (#215). It lowers the limits, uses Playwright's Chromium instead of Google Chrome in sessions, adds memory-saving session browser flags, a 1 GB swap file and the removal of snapd and multipath-tools. New variables `task_runner_session_chrome`, `task_runner_session_browser_flags`, `task_runner_swap_mb` and `task_runner_trim_services`. The image builds on a slim Node base (for example `node:22-trixie-slim`): the run stage then installs only the headless shell of Chromium, and the run image is 891 MB instead of about 2.5 GB. Tested on a 1 GB Debian 13 VM: a task run and a session with two tabs, with no OOM kill (numbers in the role README, "Smaller nodes").
@@ -36,6 +38,13 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 - task-runner role: `task_runner_session_enabled` (#324). Use `task_runner_roles: [run, session]`. It still works and is removed before 1.0.0.
 - node-control `FUNNEL_DNS_PROVIDER` (and `FUNNEL_DNS_ZONE`, `FUNNEL_DNS_CLOUDFLARE_TOKEN`). Use `FUNNEL_DDNS` at the
   edge and `FUNNEL_DNS_CHECK=lookup`. node-control logs a warning at start.
+
+## 0.20.1 - 2026-11-15
+
+### Fixed
+
+- node-control tests: `TestTasksActivity` no longer fails when a run ends at second 12.5 of a minute (#364, #375).
+- Scripts: `set -e` in `enroll-backup.sh`, `measure-memory.sh`, `check-denylist.sh` and `fleet-check.sh`, so a failed step stops the script (#368, #379).
 
 ## 0.20.0 - 2026-11-15
 

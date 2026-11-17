@@ -9,7 +9,7 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
-## Unreleased (0.21.0)
+## 0.21.0
 
 - task-runner (#215): the image files changed. Each runner node builds its image again at the next deploy. With the
   same base digest, the build pulls nothing new. The default profile keeps all values as before. For a 1 GB host,
@@ -18,6 +18,12 @@ says "No action required".
   node has its state first (the volume, or Redis state mode). Then make a one-time key (`headscale preauthkeys create
   -u <user> -e 1h --tags tag:exit`), set it as the secret, and deploy. Last, expire the old reusable key in headscale
   (`headscale preauthkeys expire`). A node that keeps the reusable key works as before.
+- ingress-agent path check (#411): no action required. It is off by default. To turn it on, set
+  `ingress_pathcheck_target` for the bridges and run the `ingress-agent` role again.
+
+## 0.20.1
+
+No action required.
 
 ## 0.20.0
 
@@ -250,7 +256,6 @@ No action required. The old site files and modules keep working.
   pending. Add `.fleet-pending` to your `.gitignore`.
 - `make deploy-headscale` now takes a volume snapshot before the deploy, and stops when the snapshot fails (#197). The
   deploying Fly token needs to create snapshots. For a deploy with no snapshot, set `NO_SNAPSHOT=1`.
-
 
 ### Action required
 

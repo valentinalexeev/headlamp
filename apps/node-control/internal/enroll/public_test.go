@@ -591,3 +591,24 @@ func TestRenderErrorIsEmpty500(t *testing.T) {
 		t.Fatalf("%d %q", rec.Code, rec.Body)
 	}
 }
+
+// #436: serving the profile records the download, which is how the console knows that the app of a self-enrolled
+// device is set up. A preview, a rotated secret and an unknown secret record nothing.
+func TestSubscriptionRecordsTheProfileDownload(t *testing.T) {
+	f := newPubFx(t)
+	if g, _ := f.store.GetDevice(f.device.ID); g.ProfileAt != 0 {
+		t.Fatalf("a new device has a download: %+v", g)
+	}
+	assertEmpty404(t, f.get("/sub/"+f.secret, previewUAs[0]), nil)
+	if g, _ := f.store.GetDevice(f.device.ID); g.ProfileAt != 0 {
+		t.Fatal("a link preview counted as a download")
+	}
+	if rec := f.get("/sub/" + f.secret); rec.Code != 200 {
+		t.Fatalf("%d", rec.Code)
+	}
+	g, _ := f.store.GetDevice(f.device.ID)
+	if g.ProfileAt == 0 || g.ProfileLast < g.ProfileAt {
+		t.Fatalf("download not recorded: %+v", g)
+	}
+	assertEmpty404(t, f.get("/sub/9999.bad"), nil)
+}

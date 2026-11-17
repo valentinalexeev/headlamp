@@ -404,17 +404,20 @@ func TestMergedStatsPartialWhenAgentDown(t *testing.T) {
 	a2 := &statsAgent{answer: map[string]any{}}
 	ts := targetsFor(cfg, a1, a2)
 	ds, _ := e.store.ListDevices()
-	t.Run("pending and empty is partial", func(t *testing.T) {
-		ts[1].State.Failed("unreachable")
+	t.Run("an agent that answers with no traffic is not partial", func(t *testing.T) {
+		ts[1].State.Failed("unreachable") // a pending push does not matter: the agent did answer
+		if _, partial := MergedStats(context.Background(), ts, cfg, ds); partial {
+			t.Fatal("partial")
+		}
+	})
+	// #436: an agent that does not answer (nil) is partial, also with its credentials in sync. Before, only a
+	// pending push made it partial, so the Traffic column could show "-" for a bridge that was down.
+	t.Run("an agent that does not answer is partial, also in sync", func(t *testing.T) {
+		a2.answer = nil
+		ts[1].State.OK("ok")
 		got, partial := MergedStats(context.Background(), ts, cfg, ds)
 		if !partial || got[d.ID] != (Traffic{1, 2}) {
 			t.Fatalf("%v %+v", partial, got)
-		}
-	})
-	t.Run("healthy and idle is not partial", func(t *testing.T) {
-		ts[1].State.OK("ok")
-		if _, partial := MergedStats(context.Background(), ts, cfg, ds); partial {
-			t.Fatal("partial")
 		}
 	})
 }

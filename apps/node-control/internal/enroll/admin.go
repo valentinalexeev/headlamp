@@ -350,6 +350,9 @@ type deviceRow struct {
 	EnrolledAt int64 `json:"enrolled_at"`
 	Enrolments int64 `json:"enrol_count"`
 	LastActive int64 `json:"last_active"`
+	// The first and the last download of the profile (#436): the sign that an app is set up.
+	ProfileAt   int64 `json:"profile_at"`
+	ProfileLast int64 `json:"profile_last"`
 }
 
 // ingressRow is one active ingress in the responses.
@@ -410,7 +413,8 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 			traffic = map[string]any{"up": tr.Up, "down": tr.Down}
 		}
 		rows = append(rows, deviceRow{d.ID, d.Name, d.Owner, emails[d.Owner], d.Client, d.ExpiresAt,
-			d.Revoked, traffic, d.EnrolledAt, d.Enrolments, d.LastActive})
+			d.Revoked, traffic, d.EnrolledAt, d.Enrolments, d.LastActive, d.ProfileAt,
+			d.ProfileLast})
 	}
 	snaps := snapshotsOf(cur.SyncTargets)
 	pending := cur.Pending

@@ -9,6 +9,12 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## Unreleased (0.21.1)
+
+No action required. node-control adds two columns to the devices table on start (SQLite), or reads them as 0
+(Redis). A device made on the self-service page shows **Not set up** until its app downloads the profile again
+(the app does this within 12 hours).
+
 ## 0.21.0
 
 - task-runner (#215): the image files changed. Each runner node builds its image again at the next deploy. With the

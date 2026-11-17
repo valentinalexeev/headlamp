@@ -324,3 +324,30 @@ func TestListShowsEnrolledAndActivityWithoutLeaking(t *testing.T) {
 		t.Fatalf("last_active changed on partial stats: %v", row["last_active"])
 	}
 }
+
+// #436: a profile download records the first time once and the last time only forward, for SQLite and Redis, and
+// never creates a record. GET /sub/<secret> records it; a download of an unknown secret records nothing.
+func TestProfileDownloadRecorded(t *testing.T) {
+	eachBackend(t, func(t *testing.T, e contractEnv) {
+		d, _ := e.create(t, "phone", time.Hour)
+		for _, at := range []int64{5000, 7000, 6000} {
+			if err := e.b.TouchProfile(d.ID, at); err != nil {
+				t.Fatal(err)
+			}
+		}
+		g, _ := e.b.GetDevice(d.ID)
+		if g.ProfileAt != 5000 || g.ProfileLast != 7000 {
+			t.Fatalf("profile at %d, last %d; want 5000 and 7000", g.ProfileAt, g.ProfileLast)
+		}
+		if err := e.b.TouchProfile(999, 1); err != nil {
+			t.Fatal(err)
+		}
+		if devs, _ := e.b.ListDevices(); len(devs) != 1 {
+			t.Fatalf("TouchProfile on an unknown id created a device: %d devices", len(devs))
+		}
+		listed, _ := e.b.ListDevices()
+		if listed[0].ProfileAt != 5000 || listed[0].ProfileLast != 7000 {
+			t.Fatalf("ListDevices lost the profile times: %+v", listed[0])
+		}
+	})
+}

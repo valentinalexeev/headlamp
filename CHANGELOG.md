@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Fixed
+
+- node-control Devices page (#436): a device made on the self-service page no longer shows "Link not used yet" forever. node-control records the first and the last download of a device's profile (`profile_at`, `profile_last`; times only), and the state is now **Not set up**, **Set up, no traffic yet** or **Active**. A self-enrolled device gets no "New link". The Client column is gone (for a self-enrolled device it was always `sing-box`). The row of a person or an owner says "last connected" (the newest traffic of its devices) instead of the last sign-in to the web page, which moved to the hover text. The Traffic column is now marked partial whenever a bridge does not answer the stats request; before, only a bridge with a pending update marked it, so "-" could mean a bridge that was down.
+
 ## 0.21.0 - 2026-11-16
 
 ### Added

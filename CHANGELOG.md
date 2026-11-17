@@ -2,7 +2,7 @@
 
 Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions follow [VERSIONING.md](VERSIONING.md).
 
-## Unreleased
+## 0.21.1 - 2026-11-17
 
 ### Fixed
 

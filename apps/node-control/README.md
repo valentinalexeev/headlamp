@@ -836,7 +836,8 @@ Every create, revoke or extend pushes the full credential set to the agent. A re
 Activity (no connection log, no client addresses): each device row shows two values.
 
 - **Enrolled** shows when a one-time link of the device was last spent, and how often.
-- **Last active** shows when its traffic last increased.
+- **Last connected** shows when its traffic last increased. The row of a person or an owner shows the newest
+  value of its devices.
 
 The profile downloads are a third value (#436). node-control records the first and the last download of the
 profile of a device (`GET /sub/<secret>`). It keeps two times, and no address and no user agent. A link preview does not
@@ -849,7 +850,7 @@ The state of an active device:
 - **Set up, no traffic yet**: the app has the profile, but the device has no traffic yet.
 - **Active**: the device had traffic.
 
-A link spend marks the device in the same step as the spend (one SQLite transaction, one script on Redis). The app derives Last active from the traffic totals that the agents already report. It looks every 5 minutes (and at each page load) and records the time when the total of a device increased since the previous look.
+A link spend marks the device in the same step as the spend (one SQLite transaction, one script on Redis). The app derives Last connected from the traffic totals that the agents already report. It looks every 5 minutes (and at each page load) and records the time when the total of a device increased since the previous look.
 
 The counters reset when xray restarts (the agent restarts it whenever the credential set changes). Thus a total that fell but is above zero also counts as activity since the reset. The first look at a device only gives the baseline. The app skips a look at which a bridge did not answer, because the absent counters would read as a reset. The resolution is therefore about 5 minutes. A device that was active only while node-control was down shows nothing for that time.
 
@@ -1131,8 +1132,8 @@ Open a row to see its devices and its invitations. A device row has the same col
 
 - A closed row shows its counts: devices, how many need attention, and waiting invitations.
 - The filters (**Active**, **Expiring soon**, **Not set up**, **Revoked**, **All**) apply to the devices. A waiting invitation shows under **Active** and **All**. A used, expired or withdrawn invitation shows only under **All**.
-- The row of a person shows the last sign-in to the self-service page (**last web sign-in**). That is not a
-  connection of a device.
+- The row of a person or an owner shows **last connected**: the newest traffic of its devices. The last sign-in to
+  the self-service page is in the hover text only, because it is not a connection.
 - The table has no **Client** column (#436). For a device made on the self-service page, the stored client is
   always `sing-box`: the person picks the app later.
 - The search box finds people, owners, device names and invitation emails, and opens the rows that it finds.

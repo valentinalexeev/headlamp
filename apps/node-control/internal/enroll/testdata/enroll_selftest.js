@@ -880,7 +880,11 @@ const fieldValue = (els, label) => {
     assert.ok(/1 person|2 people/.test(els.sub.textContent) && /2 invitations waiting/.test(els.sub.textContent), els.sub.textContent);
     const anna = groupRows(els)[0];
     assert.ok(textOf(anna).includes('anna@example.test') && textOf(anna).includes('Active') && textOf(anna).includes('1 device, 1 invitation waiting'));
-    assert.ok(textOf(anna).includes('last web sign-in 2 h 0 min ago'), textOf(anna));
+    // The newest traffic of her devices, not the web sign-in; that moved to the hover title.
+    assert.ok(textOf(anna).includes('last connected 1 h 0 min ago'), textOf(anna));
+    assert.ok(!textOf(anna).includes('sign-in'), 'no web sign-in in the row: ' + textOf(anna));
+    const annaInfo = findAll(anna, (n) => n.tag === 'td' && /last connected/.test(n.textContent || ''))[0];
+    assert.ok(/self-service page: 2 h 0 min ago/.test(annaInfo.getAttribute('title')), annaInfo.getAttribute('title'));
     assert.ok(textOf(groupRows(els)[1]).includes('Locked: left') && buttonNamed(groupRows(els)[1], 'Unlock'));
     assert.ok(!buttonNamed(groupRows(els)[2], 'Lock'), 'an operator-made owner has no lock');
     assert.ok(textOf(groupRows(els)[3]).includes('<b>carol</b>@example.test') === false, 'a closed group shows only its counts');

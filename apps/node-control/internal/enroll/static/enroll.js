@@ -194,6 +194,11 @@
     });
   }
 
+  // lastConnected: the newest last_active of the group's devices (unix seconds), 0 when none had traffic.
+  function lastConnected(g) {
+    return g.devices.reduce(function (m, d) { return Math.max(m, Number(d.last_active) || 0); }, 0);
+  }
+
   // groupCounts: the short summary of a group, so that a closed group hides nothing that needs attention.
   function groupCounts(g, nowMs) {
     var parts = [];
@@ -611,8 +616,15 @@
       var info = hl.el('td', 't2');
       info.setAttribute('colspan', '3');
       var bits = [groupCounts(g, t)];
-      if (g.person) { bits.push('last web sign-in ' + (g.person.last_login ? hl.relTime(new Date(g.person.last_login * 1000).toISOString(), t) : 'never')); }
+      // The newest traffic of any device of the group: when the person last used the VPN. The sign-in to the
+      // self-service page is not a connection, so it is only in the hover title.
+      var seen = lastConnected(g);
+      if (g.devices.length) { bits.push('last connected ' + (seen ? hl.relTime(new Date(seen * 1000).toISOString(), t) : 'never')); }
       info.textContent = bits.join(' · ');
+      if (g.person) {
+        info.setAttribute('title', 'Last sign-in to the self-service page: ' +
+          (g.person.last_login ? hl.relTime(new Date(g.person.last_login * 1000).toISOString(), t) : 'never'));
+      }
       tr.appendChild(info);
       var act = hl.el('td', 'act');
       var box = hl.el('div', 'rowbtns');

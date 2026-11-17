@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS devices (
     secret_epoch INTEGER NOT NULL DEFAULT 0,
     enrolled_at INTEGER NOT NULL DEFAULT 0,
     enrol_count INTEGER NOT NULL DEFAULT 0,
-    last_active INTEGER NOT NULL DEFAULT 0
+    last_active INTEGER NOT NULL DEFAULT 0,
+    profile_at INTEGER NOT NULL DEFAULT 0,
+    profile_last INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS device_uuids (
     device_id INTEGER NOT NULL REFERENCES devices(id),
@@ -83,6 +85,11 @@ type Device struct {
 	EnrolledAt int64
 	Enrolments int64
 	LastActive int64
+	// The first and the last download of the device's profile (GET /sub/<secret>, #436): the
+	// sign that an app is set up, for self-enrolled devices too. Times only, no address and no
+	// user agent.
+	ProfileAt   int64
+	ProfileLast int64
 }
 
 // Credential is one entry of the set pushed to the ingress agent (PUT /v1/credentials body
@@ -168,7 +175,8 @@ func (s *Store) init() error {
 			return err
 		}
 	}
-	for _, col := range []string{"enrolled_at", "enrol_count", "last_active"} {
+	activity := []string{"enrolled_at", "enrol_count", "last_active", "profile_at", "profile_last"}
+	for _, col := range activity {
 		if err := s.addColumnIfMissing(ctx, "devices", col, "INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return err
 		}
@@ -246,13 +254,15 @@ type queryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-const deviceColsNew = "id, name, owner, client, expires_at, revoked, enrolled_at, enrol_count, last_active"
+const deviceColsNew = "id, name, owner, client, expires_at, revoked, enrolled_at, enrol_count," +
+	" last_active, profile_at, profile_last"
 
 // deviceColumns is the column list every device query uses; a read-only copy of an old database reads the activity
 // columns as 0.
 func (s *Store) deviceColumns(prefix string) string {
 	if s.noActivity {
-		return prefix + "id, " + prefix + "name, " + prefix + "owner, " + prefix + "client, " + prefix + "expires_at, " + prefix + "revoked, 0, 0, 0"
+		return prefix + "id, " + prefix + "name, " + prefix + "owner, " + prefix + "client, " +
+			prefix + "expires_at, " + prefix + "revoked, 0, 0, 0, 0, 0"
 	}
 	return prefix + strings.ReplaceAll(deviceColsNew, ", ", ", "+prefix)
 }
@@ -263,7 +273,8 @@ func scanDevices(ctx context.Context, q queryer, rows *sql.Rows) ([]Device, erro
 	for rows.Next() {
 		var d Device
 		var revoked int64
-		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked, &d.EnrolledAt, &d.Enrolments, &d.LastActive); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked,
+			&d.EnrolledAt, &d.Enrolments, &d.LastActive, &d.ProfileAt, &d.ProfileLast); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -443,6 +454,16 @@ func (s *Store) ConsumeToken(token string) (*Device, error) {
 // and does nothing for an unknown device.
 func (s *Store) TouchActive(deviceID, at int64) error {
 	_, err := s.db.Exec("UPDATE devices SET last_active=? WHERE id=? AND last_active<?", at, deviceID, at)
+	return err
+}
+
+// TouchProfile records a download of the device's profile (#436): the first time once, the
+// last time only forward. It never creates a record.
+func (s *Store) TouchProfile(deviceID, at int64) error {
+	const q = "UPDATE devices SET" +
+		" profile_at=CASE WHEN profile_at=0 THEN ? ELSE profile_at END," +
+		" profile_last=CASE WHEN profile_last<? THEN ? ELSE profile_last END WHERE id=?"
+	_, err := s.db.ExecContext(context.Background(), q, at, at, at, deviceID)
 	return err
 }
 

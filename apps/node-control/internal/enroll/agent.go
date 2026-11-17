@@ -263,9 +263,11 @@ func errorFor(status int) *AgentUnavailable {
 	return &AgentUnavailable{Outcome: OutcomeRejected, Status: status}
 }
 
-// Stats returns per-device traffic keyed by opaque id; an empty non-nil map on any failure.
+// Stats returns per-device traffic keyed by opaque id. A working agent with no traffic gives
+// an empty map; any failure gives nil, so the page can tell "no traffic" from "this bridge
+// did not answer" (#436).
 func (a *agentClient) Stats(ctx context.Context) map[string]any {
-	empty := map[string]any{}
+	var empty map[string]any
 	ctx, cancel := context.WithTimeout(ctx, statsTimeout)
 	defer cancel()
 	base, err := a.baseURL(ctx)
@@ -286,8 +288,11 @@ func (a *agentClient) Stats(ctx context.Context) map[string]any {
 		return empty
 	}
 	var out map[string]any
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAgentBody)).Decode(&out); err != nil || out == nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAgentBody)).Decode(&out); err != nil {
 		return empty
+	}
+	if out == nil { // the agent answered "null": it works, and has no traffic
+		out = map[string]any{}
 	}
 	return out
 }

@@ -313,7 +313,18 @@ const fieldValue = (els, label) => {
     assert.ok(devices.actionsFor(D.never, NOW).every((a) => typeof a.icon === 'string' && a.icon));
     const word = (d) => devices.stateOf(d, NOW).word;
     assert.strictEqual(word(D.active), 'Active');
-    assert.strictEqual(word(D.never), 'Link not used yet');
+    assert.strictEqual(word(D.never), 'Not set up');
+    // #436: a self-enrolled device has no one-time link. A profile download sets it up; without traffic it says so.
+    const selfDev = (extra) => dev(11, 'phone-b4', Object.assign({ owner: 'oidc:b4', enrol_count: 0, enrolled_at: 0, last_active: 0,
+      profile_at: 0, profile_last: 0 }, extra));
+    assert.strictEqual(word(selfDev()), 'Not set up');
+    assert.strictEqual(devices.stateOf(selfDev(), NOW).level, 'warn');
+    assert.deepStrictEqual(labels(selfDev()), ['Extend', 'Revoke'], 'a self-enrolled device gets no New link');
+    assert.strictEqual(word(selfDev({ profile_at: sec(NOW - 60000) })), 'Set up, no traffic yet');
+    assert.strictEqual(devices.stateOf(selfDev({ profile_at: sec(NOW - 60000) }), NOW).level, 'ok');
+    assert.strictEqual(word(selfDev({ profile_at: sec(NOW - 60000), last_active: sec(NOW - 30000) })), 'Active');
+    assert.strictEqual(word(selfDev({ last_active: sec(NOW - 30000) })), 'Active', 'traffic alone (older data) counts as set up');
+    assert.strictEqual(word(dev(12, 'y', { last_active: 0 })), 'Set up, no traffic yet', 'a spent link with no traffic');
     assert.strictEqual(word(D.expiring), 'Expires in 4 days');
     assert.strictEqual(word(D.expired), 'Expired');
     assert.strictEqual(word(D.revoked), 'Revoked');
@@ -336,17 +347,17 @@ const fieldValue = (els, label) => {
     const first = rowTexts(els)[0];
     assert.strictEqual(first[0], 'laptop-2', 'the expired device is listed first');
     const r1 = rowTexts(els).find((r) => r[0] === 'phone-1');
-    assert.deepStrictEqual(r1.slice(1, 4), ['sam', 'karing', 'Active']);
-    assert.strictEqual(r1[5], '3.0 KB');
-    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'tablet-3')[4], 'Never');
-    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'tablet-3')[5], '-');
+    assert.deepStrictEqual(r1.slice(1, 3), ['sam', 'Active'], 'no Client column (#436)');
+    assert.strictEqual(r1[4], '3.0 KB');
+    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'tablet-3')[3], 'Never');
+    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'tablet-3')[4], '-');
     chip(els, 'Revoked').click();
     assert.deepStrictEqual(names(), ['phone-3']);
-    assert.strictEqual(rowTexts(els)[0][6], 'n/a');
+    assert.strictEqual(rowTexts(els)[0][5], 'n/a');
     assert.ok(/filter=revoked/.test(replaced[replaced.length - 1]), 'filter is in the URL: ' + replaced);
     chip(els, 'Expiring soon').click();
     assert.deepStrictEqual(names(), ['phone-4']);
-    chip(els, 'Never used').click();
+    chip(els, 'Not set up').click();
     assert.deepStrictEqual(names(), ['tablet-3']);
     chip(els, 'All').click();
     assert.strictEqual(names().length, 5);
@@ -357,7 +368,7 @@ const fieldValue = (els, label) => {
     update(ctrl, [D.active], { stats_partial: true });
     assert.strictEqual(els.traffic.textContent, 'Traffic*');
     assert.ok(els.traffic.getAttribute('title'));
-    chip(els, 'Never used').click();
+    chip(els, 'Not set up').click();
     assert.ok(/No devices match/.test(els.rows.textContent));
   }
   {
@@ -869,7 +880,7 @@ const fieldValue = (els, label) => {
     assert.ok(/1 person|2 people/.test(els.sub.textContent) && /2 invitations waiting/.test(els.sub.textContent), els.sub.textContent);
     const anna = groupRows(els)[0];
     assert.ok(textOf(anna).includes('anna@example.test') && textOf(anna).includes('Active') && textOf(anna).includes('1 device, 1 invitation waiting'));
-    assert.ok(textOf(anna).includes('last sign-in 2 h 0 min ago'), textOf(anna));
+    assert.ok(textOf(anna).includes('last web sign-in 2 h 0 min ago'), textOf(anna));
     assert.ok(textOf(groupRows(els)[1]).includes('Locked: left') && buttonNamed(groupRows(els)[1], 'Unlock'));
     assert.ok(!buttonNamed(groupRows(els)[2], 'Lock'), 'an operator-made owner has no lock');
     assert.ok(textOf(groupRows(els)[3]).includes('<b>carol</b>@example.test') === false, 'a closed group shows only its counts');

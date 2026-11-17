@@ -107,10 +107,10 @@ func TestStats(t *testing.T) {
 			}
 			w.Write([]byte(`{"abc":{"up":1}}`))
 		}, map[string]any{"abc": map[string]any{"up": float64(1)}}},
-		{"500", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }, map[string]any{}},
-		{"401", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) }, map[string]any{}},
-		{"list body", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`[1]`)) }, map[string]any{}},
-		{"bad json", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{`)) }, map[string]any{}},
+		{"500", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }, nil},
+		{"401", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) }, nil},
+		{"list body", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`[1]`)) }, nil},
+		{"bad json", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{`)) }, nil},
 		{"null", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`null`)) }, map[string]any{}},
 	}
 	for _, c := range cases {
@@ -118,7 +118,8 @@ func TestStats(t *testing.T) {
 			srv := httptest.NewServer(c.handler)
 			defer srv.Close()
 			got := NewAgent(srv.URL, "tok", srv.Client()).Stats(context.Background())
-			if got == nil || !reflect.DeepEqual(got, c.want) {
+			// #436: a failure is nil (no answer); a working agent gives a map, empty when it has no traffic.
+			if (got == nil) != (c.want == nil) || !reflect.DeepEqual(got, c.want) {
 				t.Fatalf("got %#v", got)
 			}
 		})
@@ -127,9 +128,8 @@ func TestStats(t *testing.T) {
 		srv := httptest.NewServer(http.NotFoundHandler())
 		url := srv.URL
 		srv.Close()
-		got := NewAgent(url, "tok", nil).Stats(context.Background())
-		if got == nil || len(got) != 0 {
-			t.Fatalf("got %#v", got)
+		if got := NewAgent(url, "tok", nil).Stats(context.Background()); got != nil {
+			t.Fatalf("an unreachable agent must give nil, got %#v", got)
 		}
 	})
 }
@@ -279,9 +279,8 @@ func TestStatsBodyIsLimited(t *testing.T) {
 	t.Run("over the limit", func(t *testing.T) {
 		srv := serve(2 << 20)
 		defer srv.Close()
-		got := NewAgent(srv.URL, "tok", srv.Client()).Stats(context.Background())
-		if got == nil || len(got) != 0 {
-			t.Fatalf("want empty non-nil map, got %d keys", len(got))
+		if got := NewAgent(srv.URL, "tok", srv.Client()).Stats(context.Background()); got != nil {
+			t.Fatalf("a body over the limit is no answer (nil), got %d keys", len(got))
 		}
 	})
 }

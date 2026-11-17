@@ -64,7 +64,8 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 	out := map[int64]Traffic{}
 	partial := false
 	for i, t := range targets {
-		if panicked[i] || (len(answers[i]) == 0 && t.State.Snapshot().Pending) {
+		// nil: the bridge did not answer (#436). An empty map is a bridge with no traffic.
+		if panicked[i] || answers[i] == nil {
 			partial = true
 		}
 		for _, d := range devices {

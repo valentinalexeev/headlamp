@@ -838,18 +838,36 @@ Activity (no connection log, no client addresses): each device row shows two val
 - **Enrolled** shows when a one-time link of the device was last spent, and how often.
 - **Last active** shows when its traffic last increased.
 
+The profile downloads are a third value (#436). node-control records the first and the last download of the
+profile of a device (`GET /sub/<secret>`). It keeps two times, and no address and no user agent. A link preview does not
+count. The download is the sign that an app is set up. A device made on the self-service page has no one-time
+link, so this is the only sign for it.
+
+The state of an active device:
+
+- **Not set up**: no link was spent, the profile was never downloaded, and the device has no traffic.
+- **Set up, no traffic yet**: the app has the profile, but the device has no traffic yet.
+- **Active**: the device had traffic.
+
 A link spend marks the device in the same step as the spend (one SQLite transaction, one script on Redis). The app derives Last active from the traffic totals that the agents already report. It looks every 5 minutes (and at each page load) and records the time when the total of a device increased since the previous look.
 
 The counters reset when xray restarts (the agent restarts it whenever the credential set changes). Thus a total that fell but is above zero also counts as activity since the reset. The first look at a device only gives the baseline. The app skips a look at which a bridge did not answer, because the absent counters would read as a reset. The resolution is therefore about 5 minutes. A device that was active only while node-control was down shows nothing for that time.
 
-`GET /enroll/devices` rows carry `enrolled_at`, `enrol_count` and `last_active` (unix seconds, 0 = never). SQLite databases get the three columns on open. Redis device records without them read as 0. JSON and SQLite exports and imports carry them.
+`GET /enroll/devices` rows carry `enrolled_at`, `enrol_count`, `last_active`, `profile_at` and `profile_last`
+(unix seconds, 0 = never). SQLite databases get the columns on open. Redis device records without them read as
+0. JSON and SQLite exports and imports carry them.
+
+The **Traffic** column shows the counters since each bridge last restarted them (on a credential change). It is
+marked **Traffic\*** (partial) when a bridge did not answer, so an empty value means no traffic only when all
+bridges answered (#436).
 
 The buttons of a row depend on its state, so the page shows no useless button:
 
 - A revoked device has only Delete.
 - An expired device has Extend and Revoke.
-- An active device that was never enrolled has New link, Extend and Revoke.
-- An active device that is already enrolled has Extend and Revoke (it has its profile).
+- An active device that is not set up has New link, Extend and Revoke. A device made on the self-service page
+  gets no New link: its person adds the app from the self-service page.
+- An active device that is set up has Extend and Revoke (it has its profile).
 
 `POST /enroll/devices/{id}/links` answers `409` for a revoked or expired device, because a link for it would exist and never work.
 
@@ -1112,7 +1130,11 @@ The Devices page (#287) shows one tree. Each row of the first level is one of th
 Open a row to see its devices and its invitations. A device row has the same columns and actions as before (**New link**, **Extend**, **Revoke**, **Delete**). An invitation row shows its state, its end date and who made it, with **Withdraw** while it waits.
 
 - A closed row shows its counts: devices, how many need attention, and waiting invitations.
-- The filters (**Active**, **Expiring soon**, **Never used**, **Revoked**, **All**) apply to the devices. A waiting invitation shows under **Active** and **All**. A used, expired or withdrawn invitation shows only under **All**.
+- The filters (**Active**, **Expiring soon**, **Not set up**, **Revoked**, **All**) apply to the devices. A waiting invitation shows under **Active** and **All**. A used, expired or withdrawn invitation shows only under **All**.
+- The row of a person shows the last sign-in to the self-service page (**last web sign-in**). That is not a
+  connection of a device.
+- The table has no **Client** column (#436). For a device made on the self-service page, the stored client is
+  always `sing-box`: the person picks the app later.
 - The search box finds people, owners, device names and invitation emails, and opens the rows that it finds.
 - The open rows are in the URL (`?open=`). A reload and the refresh keep them.
 - Without self-enrolment, the tree has only the owners and their devices.

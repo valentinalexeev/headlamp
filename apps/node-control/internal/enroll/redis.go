@@ -25,7 +25,8 @@ import (
 //	<prefix>:meta        hash; field seq = last device id (never reused, like SQLite AUTOINCREMENT)
 //	<prefix>:d:<id>      hash per device, no TTL: meta = sealed JSON {name, owner, client, uuids}; plain numbers
 //	                     expires_at, revoked, epoch (so revoke, extend and rotate are single atomic commands) and
-//	                     enrolled_at, enrol_count, last_active (activity times; absent in older records, read as 0)
+//	                     enrolled_at, enrol_count, last_active, profile_at, profile_last
+//	                     (activity times; absent in older records, read as 0)
 //	<prefix>:t:<hash>    hash per one-time link, with a TTL: device_id, expires, max_uses, uses
 //	<prefix>:approvals   hash; field = ingress name, value = sealed JSON
 //	<prefix>:tailnet     hash; field doc = sealed JSON of the tailnet grant state (#139)
@@ -154,7 +155,9 @@ func (s *RedisStore) parseDevice(id int64, h map[string]string) (devRec, error) 
 	}
 	return devRec{
 		Device: Device{ID: id, Name: m.Name, Owner: m.Owner, Client: m.Client, ExpiresAt: exp, Revoked: h["revoked"] == "1", UUIDs: m.UUIDs,
-			EnrolledAt: opt("enrolled_at"), Enrolments: opt("enrol_count"), LastActive: opt("last_active")},
+			EnrolledAt: opt("enrolled_at"), Enrolments: opt("enrol_count"),
+			LastActive: opt("last_active"),
+			ProfileAt:  opt("profile_at"), ProfileLast: opt("profile_last")},
 		Epoch: epoch,
 	}, nil
 }
@@ -212,7 +215,9 @@ func (s *RedisStore) putDevice(ctx context.Context, d Device, epoch int64) error
 	if err := s.rdb.HSet(ctx, s.deviceKey(d.ID),
 		"meta", sealed, "expires_at", strconv.FormatInt(d.ExpiresAt, 10), "revoked", revoked, "epoch", strconv.FormatInt(epoch, 10),
 		"enrolled_at", strconv.FormatInt(d.EnrolledAt, 10), "enrol_count", strconv.FormatInt(d.Enrolments, 10),
-		"last_active", strconv.FormatInt(d.LastActive, 10)).Err(); err != nil {
+		"last_active", strconv.FormatInt(d.LastActive, 10),
+		"profile_at", strconv.FormatInt(d.ProfileAt, 10),
+		"profile_last", strconv.FormatInt(d.ProfileLast, 10)).Err(); err != nil {
 		return s.wrap("writing device to redis", err)
 	}
 	return nil
@@ -526,6 +531,27 @@ func (s *RedisStore) TouchActive(deviceID, at int64) error {
 	defer cancel()
 	if err := touchScript.Eval(ctx, s.rdb, []string{s.deviceKey(deviceID)}, strconv.FormatInt(at, 10)).Err(); err != nil {
 		return s.wrap("recording activity in redis", err)
+	}
+	return nil
+}
+
+// profileScript records a profile download: profile_at once, profile_last only forward, and
+// only for an existing device.
+var profileScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+local first = tonumber(redis.call('HGET', KEYS[1], 'profile_at')) or 0
+if first == 0 then redis.call('HSET', KEYS[1], 'profile_at', ARGV[1]) end
+local last = tonumber(redis.call('HGET', KEYS[1], 'profile_last')) or 0
+if last < tonumber(ARGV[1]) then redis.call('HSET', KEYS[1], 'profile_last', ARGV[1]) end
+return 1`)
+
+// TouchProfile records a download of the device's profile (#436). It never creates a record.
+func (s *RedisStore) TouchProfile(deviceID, at int64) error {
+	ctx, cancel := opCtx()
+	defer cancel()
+	keys := []string{s.deviceKey(deviceID)}
+	if err := profileScript.Eval(ctx, s.rdb, keys, strconv.FormatInt(at, 10)).Err(); err != nil {
+		return s.wrap("recording a profile download in redis", err)
 	}
 	return nil
 }

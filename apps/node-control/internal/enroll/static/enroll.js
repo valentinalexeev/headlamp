@@ -19,8 +19,8 @@
   var LINK_TTL = 86400;
   var CLIENTS = ['karing', 'sing-box', 'clash', 'shadowrocket', 'stash', 'happ', 'throne']; // the catalog of clients.go
   var CLIENT_KEY = 'enrollClient';
-  var FILTERS = [['active', 'Active'], ['expiring', 'Expiring soon'], ['never', 'Never used'], ['revoked', 'Revoked'], ['all', 'All']];
-  var COLUMNS = 8;
+  var FILTERS = [['active', 'Active'], ['expiring', 'Expiring soon'], ['never', 'Not set up'], ['revoked', 'Revoked'], ['all', 'All']];
+  var COLUMNS = 7;
   var SYNC_REASON = {
     unreachable: 'Agent unreachable', unauthorized: 'Agent refused the credentials',
     rejected: 'Agent rejected the credentials', conflict: 'Agent reports a conflict', error: 'Sync ended in an error'
@@ -45,10 +45,14 @@
     return d.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
+  // setUp: an app has the device's profile (#436). A spent one-time link, a profile download (also for a device made
+  // on the self-service page, which has no link) or traffic each show it; older data has only the first and the last.
+  function setUp(d) { return d.enrol_count > 0 || d.profile_at > 0 || d.last_active > 0; }
+
   // stateOf: where a device stands now. level and word are what the row shows; kind, expiring and neverUsed are
   // what the filters and the actions go by. A device that is both near its expiry and unused reads as expiring.
   function stateOf(d, nowMs) {
-    var used = d.enrol_count > 0;
+    var used = setUp(d);
     var exp = d.expires_at * 1000;
     if (d.revoked) { return { kind: 'revoked', level: 'off', word: 'Revoked', expiring: false, neverUsed: false }; }
     if (exp < nowMs) { return { kind: 'expired', level: 'warn', word: 'Expired', expiring: false, neverUsed: false }; }
@@ -61,7 +65,9 @@
       out.word = left < DAY ? 'Expires today' : (days === 1 ? 'Expires in 1 day' : 'Expires in ' + days + ' days');
     } else if (!used) {
       out.level = 'warn';
-      out.word = 'Link not used yet';
+      out.word = 'Not set up';
+    } else if (!(d.last_active > 0)) {
+      out.word = 'Set up, no traffic yet';
     }
     return out;
   }
@@ -69,14 +75,16 @@
   // actionsFor: only what can do something for the device's state.
   //   revoked:                  Delete (nothing else works on it)
   //   expired:                  Extend, Revoke (a link would not work: the spend refuses an expired device)
-  //   active, never enrolled:   New link, Extend, Revoke
-  //   active, already enrolled: Extend, Revoke (it has its profile; a link is not needed)
+  //   active, not set up:       New link (made by an admin only), Extend, Revoke
+  //   active, set up:           Extend, Revoke (it has its profile; a link is not needed)
+  // A self-enrolled device ("oidc:" owner) gets no "New link": its person adds the app from the self-service page.
   function actionsFor(d, nowMs) {
     var s = stateOf(d, nowMs);
     var a = function (key, label, danger) { return { key: key, label: label, icon: ICON[key], danger: !!danger }; };
     if (s.kind === 'revoked') { return [a('delete', 'Delete', true)]; }
     var out = [];
-    if (s.kind === 'active' && !(d.enrol_count > 0)) { out.push(a('link', 'New link')); }
+    var self = String(d.owner || '').indexOf('oidc:') === 0;
+    if (s.kind === 'active' && !setUp(d) && !self) { out.push(a('link', 'New link')); }
     out.push(a('extend', 'Extend'));
     out.push(a('revoke', 'Revoke', true));
     return out;
@@ -346,7 +354,7 @@
       var s = stateOf(d, t);
       var total = d.traffic && typeof d.traffic === 'object' ? (Number(d.traffic.up) || 0) + (Number(d.traffic.down) || 0) : null;
       return {
-        id: d.id, name: hl.plain(d.name, 100), owner: ownerLabel(d), ownerId: hl.plain(d.owner, 100), client: hl.plain(d.client, 20),
+        id: d.id, name: hl.plain(d.name, 100), owner: ownerLabel(d), ownerId: hl.plain(d.owner, 100), 
         level: s.level, word: s.word, kind: s.kind,
         seen: d.last_active > 0 ? hl.relTime(new Date(d.last_active * 1000).toISOString(), t) : 'Never',
         traffic: total === null ? '-' : (hl.fmtBytes(total) || '-'),
@@ -587,7 +595,7 @@
       var open = isOpen(g.key);
       var tr = hl.el('tr', 'grp');
       var head = hl.el('td', 'name');
-      head.setAttribute('colspan', '3');
+      head.setAttribute('colspan', '2');
       var tog = keyed(hl.el('button', 'btn quiet sm tog'), 'grp:' + g.key);
       tog.setAttribute('type', 'button');
       tog.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -603,7 +611,7 @@
       var info = hl.el('td', 't2');
       info.setAttribute('colspan', '3');
       var bits = [groupCounts(g, t)];
-      if (g.person) { bits.push('last sign-in ' + (g.person.last_login ? hl.relTime(new Date(g.person.last_login * 1000).toISOString(), t) : 'never')); }
+      if (g.person) { bits.push('last web sign-in ' + (g.person.last_login ? hl.relTime(new Date(g.person.last_login * 1000).toISOString(), t) : 'never')); }
       info.textContent = bits.join(' · ');
       tr.appendChild(info);
       var act = hl.el('td', 'act');
@@ -631,7 +639,6 @@
       var oc = hl.el('td', 't2 clip', r.owner);
       oc.setAttribute('title', r.ownerId);
       tr.appendChild(oc);
-      tr.appendChild(hl.el('td', 'mono t2', r.client));
       var state = hl.el('td');
       state.appendChild(hl.status(r.level, r.word));
       tr.appendChild(state);
@@ -659,8 +666,7 @@
       who.appendChild(hl.el('span', 't3', '✉ '));
       who.appendChild(hl.el('span', null, hl.plain(inv.email, 120)));
       tr.appendChild(who);
-      tr.appendChild(hl.el('td', 't2', 'Invitation'));
-      tr.appendChild(hl.el('td', 't2 clip', inv.created_by ? 'by ' + hl.plain(inv.created_by, 80) : ''));
+      tr.appendChild(hl.el('td', 't2 clip', inv.created_by ? 'Invitation by ' + hl.plain(inv.created_by, 80) : 'Invitation'));
       var w = INVITE_WORD[inv.state] || ['warn', hl.plain(inv.state, 20)];
       var stc = hl.el('td');
       stc.appendChild(hl.status(w[0], w[1]));
@@ -829,7 +835,7 @@
       var dr = st.drawer;
       if (!dr || dr.step !== 'link' || dr.enrolled || !dr.device) { return; }
       var d = find(dr.device.id);
-      if (d && d.enrol_count > 0) {
+      if (d && setUp(d)) {
         dr.enrolled = true;
         dr.enrolledAt = d.enrolled_at || 0;
         setWaiting(dr);
@@ -1143,7 +1149,8 @@
       st.ingresses = hl.arr(d.ingresses);
       st.partial = !!d.stats_partial;
       els.traffic.textContent = st.partial ? 'Traffic*' : 'Traffic';
-      if (st.partial) { els.traffic.setAttribute('title', 'Partial: a bridge did not answer, so its traffic is missing.'); } else { els.traffic.removeAttribute('title'); }
+      els.traffic.setAttribute('title', st.partial ? 'Partial: a bridge did not answer, so its traffic is missing.' :
+        'Traffic since each bridge last restarted its counters (on a credential change). Not a history.');
       renderSync();
       checkEnrolled();
       render();
@@ -1212,7 +1219,7 @@
 
   hl.devices = {
     stateOf: stateOf, actionsFor: actionsFor, mount: mount, init: init, endOfDay: endOfDay, defaultExpiry: defaultExpiry,
-    extendTo: extendTo, lastClient: lastClient, groupTree: groupTree, groupCounts: groupCounts
+    extendTo: extendTo, lastClient: lastClient, setUp: setUp, groupTree: groupTree, groupCounts: groupCounts
   };
   init();
 })();

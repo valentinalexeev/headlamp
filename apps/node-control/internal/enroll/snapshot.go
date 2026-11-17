@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -36,9 +37,11 @@ type SnapDevice struct {
 	Epoch     int64             `json:"epoch"`
 	UUIDs     map[string]string `json:"uuids"`
 	// Activity (see Device); absent in exports made before it existed.
-	EnrolledAt int64 `json:"enrolled_at,omitempty"`
-	Enrolments int64 `json:"enrol_count,omitempty"`
-	LastActive int64 `json:"last_active,omitempty"`
+	EnrolledAt  int64 `json:"enrolled_at,omitempty"`
+	Enrolments  int64 `json:"enrol_count,omitempty"`
+	LastActive  int64 `json:"last_active,omitempty"`
+	ProfileAt   int64 `json:"profile_at,omitempty"`
+	ProfileLast int64 `json:"profile_last,omitempty"`
 }
 
 type SnapLink struct {
@@ -101,14 +104,29 @@ func (s *Store) Snapshot() (Snapshot, error) {
 	if err != nil {
 		return snap, err
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, owner, client, expires_at, revoked, "+epochCol+", "+enrolledCol+", "+countCol+", "+activeCol+" FROM devices ORDER BY id")
+	profileCol, err := col("profile_at")
+	if err != nil {
+		return snap, err
+	}
+	profileLastCol, err := col("profile_last")
+	if err != nil {
+		return snap, err
+	}
+	// The column names come from col (PRAGMA table_info), never from input.
+	cols := strings.Join([]string{epochCol, enrolledCol, countCol, activeCol, profileCol,
+		profileLastCol}, ", ")
+	//nolint:gosec // G202: column names from PRAGMA table_info, not input
+	q := "SELECT id, name, owner, client, expires_at, revoked, " + cols +
+		" FROM devices ORDER BY id"
+	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return snap, err
 	}
 	for rows.Next() {
 		var d SnapDevice
 		var revoked int64
-		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked, &d.Epoch, &d.EnrolledAt, &d.Enrolments, &d.LastActive); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked, &d.Epoch,
+			&d.EnrolledAt, &d.Enrolments, &d.LastActive, &d.ProfileAt, &d.ProfileLast); err != nil {
 			rows.Close()
 			return snap, err
 		}
@@ -213,7 +231,8 @@ func (s *RedisStore) Snapshot() (Snapshot, error) {
 	for _, r := range recs {
 		snap.Devices = append(snap.Devices, SnapDevice{ID: r.ID, Name: r.Name, Owner: r.Owner, Client: r.Client,
 			ExpiresAt: r.ExpiresAt, Revoked: r.Revoked, Epoch: r.Epoch, UUIDs: r.UUIDs,
-			EnrolledAt: r.EnrolledAt, Enrolments: r.Enrolments, LastActive: r.LastActive})
+			EnrolledAt: r.EnrolledAt, Enrolments: r.Enrolments, LastActive: r.LastActive,
+			ProfileAt: r.ProfileAt, ProfileLast: r.ProfileLast})
 	}
 	h, err := s.rdb.HGetAll(ctx, s.approvalsKey()).Result()
 	if err != nil {
@@ -267,7 +286,8 @@ func (s *RedisStore) Restore(snap Snapshot, force bool) (devices, links, approva
 			uu = map[string]string{}
 		}
 		if err := s.putDevice(ctx, Device{ID: d.ID, Name: d.Name, Owner: d.Owner, Client: d.Client, ExpiresAt: d.ExpiresAt, Revoked: d.Revoked, UUIDs: uu,
-			EnrolledAt: d.EnrolledAt, Enrolments: d.Enrolments, LastActive: d.LastActive}, d.Epoch); err != nil {
+			EnrolledAt: d.EnrolledAt, Enrolments: d.Enrolments, LastActive: d.LastActive,
+			ProfileAt: d.ProfileAt, ProfileLast: d.ProfileLast}, d.Epoch); err != nil {
 			return 0, 0, 0, err
 		}
 		devices++

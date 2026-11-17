@@ -53,6 +53,10 @@ type Backend interface {
 	// forward and does nothing for an unknown device (it never creates a record).
 	TouchActive(deviceID, at int64) error
 
+	// TouchProfile records a download of the device's profile (#436): the first time once,
+	// the last time only forward. It does nothing for an unknown device.
+	TouchProfile(deviceID, at int64) error
+
 	ApprovalRows() (map[string]ApprovalRow, error)
 	Approvals() (map[string]string, error)
 	Approve(name, fingerprint string) error

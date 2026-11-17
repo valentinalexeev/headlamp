@@ -363,8 +363,9 @@ func TestDeviceHasNoSecretFields(t *testing.T) {
 	for i := 0; i < typ.NumField(); i++ {
 		got = append(got, typ.Field(i).Name)
 	}
-	// EnrolledAt, Enrolments and LastActive are activity times and a count, not secrets.
-	want := []string{"ID", "Name", "Owner", "Client", "ExpiresAt", "Revoked", "UUIDs", "EnrolledAt", "Enrolments", "LastActive"}
+	// EnrolledAt, Enrolments, LastActive, ProfileAt and ProfileLast are activity times and a count, not secrets.
+	want := []string{"ID", "Name", "Owner", "Client", "ExpiresAt", "Revoked", "UUIDs", "EnrolledAt", "Enrolments", "LastActive",
+		"ProfileAt", "ProfileLast"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("fields = %v", got)
 	}

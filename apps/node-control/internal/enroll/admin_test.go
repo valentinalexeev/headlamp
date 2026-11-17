@@ -48,7 +48,10 @@ func (a *stubAgent) PutCredentials(ctx context.Context, creds []Credential, conf
 func (a *stubAgent) Stats(ctx context.Context) map[string]any {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.down || a.stats == nil {
+	if a.down {
+		return nil // as agentClient: no answer
+	}
+	if a.stats == nil {
 		return map[string]any{}
 	}
 	return a.stats
@@ -364,13 +367,15 @@ func TestListLeaksNothingAndHasTraffic(t *testing.T) {
 			t.Fatalf("%s = %v want %v", k, row[k], v)
 		}
 	}
-	// Plus traffic and the three activity numbers (enrolled_at, enrol_count, last_active): times and a count, no secrets.
-	for _, k := range []string{"enrolled_at", "enrol_count", "last_active"} {
+	// Plus traffic and the activity numbers (enrolled_at, enrol_count, last_active, and the profile downloads of #436):
+	// times and a count, no secrets.
+	activity := []string{"enrolled_at", "enrol_count", "last_active", "profile_at", "profile_last"}
+	for _, k := range activity {
 		if v, ok := row[k].(float64); !ok || v != 0 {
 			t.Fatalf("%s = %v, want 0 for a device nobody enrolled", k, row[k])
 		}
 	}
-	if len(row) != len(want)+1+3 {
+	if len(row) != len(want)+1+len(activity) {
 		t.Fatalf("unexpected fields: %v", row)
 	}
 }

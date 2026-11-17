@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // The public enrolment handler serves ONLY GET /e/{token} and GET /sub/{secret}. It is meant to run
@@ -58,6 +59,12 @@ type publicStore interface {
 	ConsumeToken(token string) (*Device, error)
 	VerifySecret(secret string) (*Device, error)
 	SubscriptionSecret(deviceID int64) (string, error)
+}
+
+// profileToucher is the optional part of a store that records profile downloads (#436).
+type profileToucher interface {
+	TouchProfile(deviceID, at int64) error
+	Clock() func() time.Time
 }
 
 // Public is the public enrolment handler.
@@ -199,4 +206,11 @@ func (p *Public) subscription(w http.ResponseWriter, r *http.Request, secret str
 	h.Set("Content-Type", ctype)
 	h.Set("Profile-Update-Interval", "12")
 	w.Write(body)
+	// #436: the download shows that an app is set up. A failed write only loses that note;
+	// the profile is served anyway.
+	if t, ok := p.store.(profileToucher); ok {
+		if err := t.TouchProfile(d.ID, t.Clock()().Unix()); err != nil {
+			slog.Warn("recording a profile download failed", "error_type", typeName(err))
+		}
+	}
 }

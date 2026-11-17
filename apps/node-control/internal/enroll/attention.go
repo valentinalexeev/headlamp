@@ -133,6 +133,17 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 		items = append(items, it)
 		critical = true
 	}
+	// The edge-to-central path check: which part of the path from a bridge's own network to the
+	// control host fails. Same bridges as the egress self-test.
+	var pathTargets []SyncTarget
+	for _, t := range cur.SyncTargets {
+		pending := t.State != nil && t.State.Snapshot().Pending
+		if !pending && !bridgeStopped(stopped, t.Name, cur.Views) {
+			pathTargets = append(pathTargets, t)
+		}
+	}
+	pathItems, pathLines := pathAttention(pathcheckOf(ctx, pathTargets))
+	items = append(items, pathItems...)
 
 	waiting := false
 	for _, v := range cur.Views {
@@ -198,7 +209,7 @@ func (m *Module) Attention(ctx context.Context, _ string) ([]core.AttentionItem,
 	if outOfSync > 0 {
 		line.Summary += fmt.Sprintf(". %d bridge sync pending", outOfSync)
 	}
-	return items, []core.SystemLine{line}, nil
+	return items, append([]core.SystemLine{line}, pathLines...), nil
 }
 
 // bridgeStopped reports whether the bridge is one of the stopped machines, matched as the Nodes page joins a bridge to

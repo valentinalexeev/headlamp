@@ -45,6 +45,25 @@ ingress_exit_dns: []
 ingress_egress_socks: "{{ socks_listen | default('127.0.0.1:1055') }}"
 ingress_egress_url: "https://www.gstatic.com/generate_204"
 
+# Edge-to-central path check (off by default). With ingress_pathcheck_target set, the agent tests the path from
+# this host's own network (not the client tunnel) to the control host every ingress_pathcheck_interval: DNS, TCP,
+# TLS with and without the server name, the headscale health path, the DERP upgrade, STUN, and, every
+# ingress_pathcheck_blob_every runs, a timed transfer within a daily byte budget. It serves the result at
+# GET /v1/pathcheck; node-control shows it on the overview ("Bridge paths"). It opens no port and changes no
+# access rule. See "Path check" in apps/ingress-agent/README.md.
+ingress_pathcheck_target: ""          # host[:port] of headscale (server_url), for example headscale.example.com
+ingress_pathcheck_addrs: []           # optional: the addresses the name must resolve to
+ingress_pathcheck_health_path: "/health"
+ingress_pathcheck_derp_path: "/derp"  # "-": no DERP probe
+ingress_pathcheck_stun: ""            # host:port; empty: <target host>:3478; "-": no STUN probe
+ingress_pathcheck_blob_url: ""        # https URL of a file on the central side; empty: no transfer
+ingress_pathcheck_blob_bytes: 1048576
+ingress_pathcheck_ref_url: ""         # https URL of a neutral reference host; empty: no reference
+ingress_pathcheck_interval: "15m"
+ingress_pathcheck_blob_every: 4
+ingress_pathcheck_daily_bytes: 52428800
+ingress_pathcheck_tailscale: "/usr/bin/tailscale"  # "": do not read the status of the edge's tailscaled
+
 # Geodata directory (xray run -test needs it for geoip:/geosite: rules).
 xray_asset_dir: /usr/local/share/xray
 

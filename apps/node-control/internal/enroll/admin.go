@@ -682,7 +682,8 @@ func (a *Admin) listIngresses(w http.ResponseWriter, r *http.Request) {
 		pending = []string{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ingresses": cur.Views, "pending_ingresses": pending,
-		"discovery": cur.Discovery, "egress": egressOf(r.Context(), cur.SyncTargets)})
+		"discovery": cur.Discovery, "egress": egressOf(r.Context(), cur.SyncTargets),
+		"pathcheck": pathcheckOf(r.Context(), cur.SyncTargets)})
 }
 
 // egressOf gives the bridge path self-test of each bridge whose agent reports one (#196), by

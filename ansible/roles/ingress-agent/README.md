@@ -100,3 +100,24 @@ templates files normally. It skips the handlers and the service start.
 - The tailnet ACL limits reachability. Allow `<port>` to this host from the operator
   side (node-control) only.
 - `--no-access-log` keeps request details out of the journal.
+
+## Path check (`GET /v1/pathcheck`)
+
+The path check tests the path from the network of the bridge to the control host. It is off by default. Set
+`ingress_pathcheck_target` to turn it on. The role then writes the `INGRESS_PATHCHECK_*` variables into the env file.
+Preflight checks the values before the agent gets them. See "Path check" in `apps/ingress-agent/README.md`.
+
+| Variable | Default | Env var in the agent |
+|---|---|---|
+| `ingress_pathcheck_target` | `""` (off) | `INGRESS_PATHCHECK_TARGET`: `host[:port]` of headscale |
+| `ingress_pathcheck_addrs` | `[]` | `INGRESS_PATHCHECK_ADDRS` |
+| `ingress_pathcheck_health_path` | `/health` | `INGRESS_PATHCHECK_HEALTH_PATH` (`-`: no probe) |
+| `ingress_pathcheck_derp_path` | `/derp` | `INGRESS_PATHCHECK_DERP_PATH` (`-`: no probe) |
+| `ingress_pathcheck_stun` | `""` (`<target host>:3478`) | `INGRESS_PATHCHECK_STUN` (`-`: no probe) |
+| `ingress_pathcheck_blob_url` | `""` (no transfer) | `INGRESS_PATHCHECK_BLOB_URL` |
+| `ingress_pathcheck_blob_bytes` | `1048576` | `INGRESS_PATHCHECK_BLOB_BYTES` |
+| `ingress_pathcheck_ref_url` | `""` (no reference) | `INGRESS_PATHCHECK_REF_URL` |
+| `ingress_pathcheck_interval` | `15m` | `INGRESS_PATHCHECK_INTERVAL` (minutes or hours) |
+| `ingress_pathcheck_blob_every` | `4` | `INGRESS_PATHCHECK_BLOB_EVERY` |
+| `ingress_pathcheck_daily_bytes` | `52428800` | `INGRESS_PATHCHECK_DAILY_BYTES` |
+| `ingress_pathcheck_tailscale` | `/usr/bin/tailscale` | `INGRESS_PATHCHECK_TAILSCALE` (`""`: not read) |

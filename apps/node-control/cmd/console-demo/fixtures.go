@@ -109,7 +109,13 @@ func newWorld(sc scenario) (*world, error) {
 	w.prov = newFakeProvider()
 	w.run = newFakeRunner(sc)
 	w.hs = httptest.NewServer(w.hsState)
-	w.agent = httptest.NewServer(http.HandlerFunc(agentHandler))
+	w.agent = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/pathcheck" {
+			pathcheckHandler(rw, r, sc.problems)
+			return
+		}
+		agentHandler(rw, r)
+	}))
 	w.runner = httptest.NewServer(w.run)
 	if !sc.nodesOnly {
 		if w.redis, err = miniredis.Run(); err != nil {
@@ -469,6 +475,28 @@ type ingressInfo struct {
 	ShortID   string `json:"short_id"`
 	Version   string `json:"version,omitempty"`
 	Xray      string `json:"xray,omitempty"`
+}
+
+// Demo values of the path check.
+const (
+	demoPathRuns     = 96  // the history the agent keeps: 24 h at 15 min
+	demoPathBad      = 6   // runs in a row of the throttled demo bridge
+	demoPathInterval = 900 // seconds
+)
+
+// pathcheckHandler is the edge-to-central path check of the demo agents. With problems, bridge-1
+// sees its transfers from the control host throttled; otherwise every bridge reaches it cleanly.
+func pathcheckHandler(w http.ResponseWriter, r *http.Request, problems bool) {
+	w.Header().Set("Content-Type", "application/json")
+	now := time.Now().Unix()
+	class, streak, counts := "ok", demoPathRuns, map[string]int{"ok": demoPathRuns}
+	if problems && strings.HasPrefix(r.Host, "bridge-1.") {
+		class, streak = "throttled", demoPathBad
+		counts = map[string]int{"ok": demoPathRuns - demoPathBad, "throttled": demoPathBad}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"class": class, "findings": []string{class},
+		"streak": streak, "checked": now, "since": now - int64(streak)*demoPathInterval,
+		"interval_s": demoPathInterval, "counts": counts})
 }
 
 // agentHandler stands in for every ingress agent: it takes credentials, reports no traffic and

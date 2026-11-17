@@ -17,6 +17,15 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
   DNS-01 credentials of the edge. A Go e2e test runs the `rfc2136` snippet against BIND (`tests/e2e`).
 - node-control `FUNNEL_DNS_CHECK=lookup`: it looks the funnel record up and shows its status, with no DNS credentials.
 
+- ingress-agent: a path check from the network of a bridge to the control host, off unless
+  `INGRESS_PATHCHECK_TARGET` is set (role: `ingress_pathcheck_target`). Every 15 minutes (with jitter) it probes DNS,
+  TCP, TLS with and without the server name, the headscale health path, the DERP upgrade and STUN. It reads the
+  bridge's own `tailscale status`. Optionally it times a transfer against a reference host within a daily byte budget.
+  It classifies the run (`ok`, `ip-blocked`, `sni-blocked`, `derp-blocked`, `throttled`, `stalled`, `udp-blocked`,
+  ...) and serves it with a 24-hour history at `GET /v1/pathcheck`. node-control shows a "Bridge paths" line on the
+  overview and an Attention item for a bridge with the same bad class in two runs in a row. It collects the data for
+  the decision about wrapping the edge-to-central traffic; it changes no traffic and opens no port.
+
 ### Changed
 
 - exit-node (#394): `TAILSCALE_AUTH_KEY` is for the first login only. With a valid node state the node logs in without it, so a one-time key works and a reusable key is no longer needed. The key goes to tailscale through a 0600 file that is removed after the login; it is not on a command line or in the environment of `tailscaled`. A used or expired key with no state no longer loops on the login: the node logs one clear error, waits, and the health check answers 503. A Go e2e test runs the image against a real headscale (`make test-exit-node-key-e2e`).

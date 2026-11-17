@@ -4,6 +4,10 @@ Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions fo
 
 ## Unreleased
 
+### Added
+
+- ADR 0006 (#395): no route that a tagged node can reach mints, returns or forwards a pre-auth key, an API key or an admin credential. Keys reach a node only through the operator. A new test (`TestNoKeyRouteForTaggedNodes`) runs every node-control module behind the production Authorizer and calls every admin route as each machine tag: only the node's own machine routes answer, no answer has a key, and no key is minted. A new machine route fails the test until it is checked against the ADR.
+
 ## 0.21.0 - 2026-11-16
 
 ### Added

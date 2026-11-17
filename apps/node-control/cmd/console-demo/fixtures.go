@@ -315,6 +315,13 @@ type fakeHeadscale struct {
 
 const basePolicy = `{"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}`
 
+// keyCount is the number of pre-auth keys minted so far (tests).
+func (f *fakeHeadscale) keyCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.keys)
+}
+
 func newFakeHeadscale(sc scenario) *fakeHeadscale {
 	now := time.Now().UTC()
 	node := func(id int, name string, online bool, ip string, seen time.Duration, tags ...string) map[string]any {

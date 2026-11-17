@@ -71,12 +71,19 @@ func loopbackOnly(addr string) error {
 // serve builds the scenario, runs the console until ctx ends and calls ready with the admin address
 // once the scenario data is in place.
 func serve(ctx context.Context, o options, ready func(admin string)) error {
-	if err := loopbackOnly(o.addr); err != nil {
-		return err
-	}
 	sc, ok := scenarios[o.scenario]
 	if !ok {
 		return fmt.Errorf("unknown scenario %q (want attention, clear, minimal, partial or viewer)", o.scenario)
+	}
+	return serveWith(ctx, o, sc, nil, ready)
+}
+
+// serveWith is serve with the scenario given, and a hook that receives the demo tailnet before the
+// server starts (tests: the key route test of ADR 0006 sets a tagged caller on it).
+func serveWith(ctx context.Context, o options, sc scenario, hook func(*demoTailnet),
+	ready func(admin string)) error {
+	if err := loopbackOnly(o.addr); err != nil {
+		return err
 	}
 	pol, err := demoPolicy(sc)
 	if err != nil {
@@ -94,6 +101,9 @@ func serve(ctx context.Context, o options, ready func(admin string)) error {
 
 	tn := &demoTailnet{addr: o.addr, world: world, adminUp: make(chan string, 1)}
 	tn.login.Store("alice") // the seeding below acts as an administrator
+	if hook != nil {
+		hook(tn)
+	}
 	mods, env, err := world.modules()
 	if err != nil {
 		return err
@@ -102,7 +112,13 @@ func serve(ctx context.Context, o options, ready func(admin string)) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	runDone := make(chan error, 1)
-	go func() { runDone <- core.Run(ctx, mods, env, tn) }()
+	go func() {
+		var opts []core.Option
+		if tn.authorize != nil {
+			opts = append(opts, core.WithAuthorizer(tn.authorize(pol)))
+		}
+		runDone <- core.Run(ctx, mods, env, tn, opts...)
+	}()
 
 	// The seeding runs in the background and is waited for before returning, so nothing it started touches
 	// the fakes after they are closed. A failed seeding stops the demo instead of announcing it ready.
@@ -136,9 +152,13 @@ func serve(ctx context.Context, o options, ready func(admin string)) error {
 // demoTailnet is a core.Tailnet on loopback. Dial maps the invented tailnet addresses to the local
 // fakes and refuses everything else, so nothing leaves the machine.
 type demoTailnet struct {
-	addr         string
-	world        *world
-	login        atomic.Value // string: who WhoIs reports
+	addr   string
+	world  *world
+	login  atomic.Value // string: who WhoIs reports
+	tagged atomic.Value // string: when set, WhoIs reports a node with this tag and no login (tests)
+	// authorize, when set (tests), puts the admin routes behind an Authorizer as node-control does
+	// (core.WithAuthorizer). The demo itself runs without one.
+	authorize    func(*authz.Policy) core.Authorizer
 	adminUp      chan string
 	ingressConns sync.Map // local address (string) of each open connection made by the ingress client
 
@@ -209,6 +229,19 @@ func (t *demoTailnet) WhoIs(_ context.Context, remoteAddr string) (string, []str
 	if _, ok := t.ingressConns.Load(remoteAddr); ok {
 		return "", []string{"tag:funnel-ingress"}, nil
 	}
+	if tag, _ := t.tagged.Load().(string); tag != "" {
+		return "tagged-devices", []string{tag}, nil
+	}
 	l, _ := t.login.Load().(string)
 	return l, nil, nil
+}
+
+// publicAddr is the address of the public enrolment listener, or "" before it listens.
+func (t *demoTailnet) publicAddr() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.public == nil {
+		return ""
+	}
+	return t.public.Addr().String()
 }

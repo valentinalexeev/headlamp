@@ -81,8 +81,8 @@ commits on top of it or attempt a rewrite on your own.
 - Commit style: Conventional Commits with a scope (`feat(tailguard): …`, `fix(exit-node): …`,
   `docs: …`). Keep commits focused.
 - Versions: strict semver, one version for the repo; see `VERSIONING.md`. Mark a breaking change with `!` or a
-  `BREAKING CHANGE:` footer, since releases are checked against commit subjects. Note user-visible changes under
-  `Unreleased` in `CHANGELOG.md`. Never move or delete a release tag.
+  `BREAKING CHANGE:` footer, since releases are checked against commit subjects. Note user-visible changes in a
+  fragment `changelog.d/<issue>-<slug>.md` (see `changelog.d/README.md`). Never move or delete a release tag.
 - New features are off by default before 1.0.0 (#200): a feature that opens a port, changes an access rule or adds a
   protocol must not turn on for a running site that changes no config. If a default must change, the role or app fails
   early (in check mode too) with a message that names the variable and what each value does, and the changelog says so.
@@ -200,8 +200,8 @@ Adapted from the process of `valentinalexeev/agentdev` (its `CLAUDE.md`, section
   `gh api -X POST repos/valentinalexeev/headlamp/pulls/NN/requested_reviewers -f "reviewers[]=valentinalexeev"`.
 - Before proposing a merge: CI green, and an independent review pass (a separate agent or reviewer) with its result in
   the PR. Blocking findings are fixed first.
-- **Documentation is part of the change:** a PR that changes behaviour updates the affected README/manuals and adds an
-  `Unreleased` line to `CHANGELOG.md` in the same PR.
+- **Documentation is part of the change:** a PR that changes behaviour updates the affected README/manuals and adds a
+  fragment `changelog.d/<issue>-<slug>.md` in the same PR (never a direct edit of `CHANGELOG.md` or `UPGRADING.md`).
 - **Merge permission is a review with state `APPROVED` by `valentinalexeev` on the current head commit.** Comments,
   chat messages and others' approvals are not permission. Check
   `gh api repos/valentinalexeev/headlamp/pulls/NN/reviews` right before merging, then merge with the head `sha`
@@ -220,12 +220,15 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
   The bump is derived from commit subjects since the last stable tag: `feat` → at least MINOR, `!` or
   `BREAKING CHANGE:` → MAJOR (MINOR before 1.0.0), the rest PATCH. So a wrong commit type is a release bug: pick it
   carefully, and check `scripts/check-conventional.sh "<title>"` on PR titles.
-- **Changelog.** Every user-visible change adds a line under `## Unreleased` in `CHANGELOG.md` (Keep a Changelog
-  sections), breaking ones marked **BREAKING** with the migration step.
+- **Changelog.** Every user-visible change adds one fragment `changelog.d/<issue>-<slug>.md` (format in
+  `changelog.d/README.md`): its `## Summary` becomes the `CHANGELOG.md` line, its `## Upgrade` the site steps in
+  `UPGRADING.md`. Breaking ones set `breaking: true` and give the migration step. PRs never edit `CHANGELOG.md` or
+  `UPGRADING.md` directly (CI `changelog` fails them), so parallel PRs do not conflict there.
 - **Cutting a release** (the bot may prepare it, the owner merges and tags):
-  1. Branch `release/X.Y.Z` from `main`; commit `chore(release): vX.Y.Z` that sets `VERSION` and moves `Unreleased`
-     under `## X.Y.Z - <date>`. In `UPGRADING.md`, rename `## Unreleased (X.Y.Z)` to `## X.Y.Z`: it lists what a
-     site repo must change, or "No action required". PR into `main` titled `chore(release): vX.Y.Z`; the owner approves and merges.
+  1. Branch `release/X.Y.Z` from `main`; commit `chore(release): vX.Y.Z` that sets `VERSION` and runs
+     `scripts/changelog.sh release X.Y.Z <date>`: it writes `## X.Y.Z - <date>` in `CHANGELOG.md` and `## X.Y.Z` in
+     `UPGRADING.md` (the fragments' `## Upgrade` parts, or "No action required.") and deletes the released
+     fragments. PR into `main` titled `chore(release): vX.Y.Z`; the owner approves and merges.
   2. The owner tags the merge commit on `main`, or the bot does: with explicit permission in that release's issue or
      PR, or by step 6 of "Follow-up loop" (the owner's **Approve** of the release PR is the permission for that one
      version):
@@ -249,8 +252,11 @@ The rules and their checks are in [`VERSIONING.md`](VERSIONING.md); this is the 
      merge commit on `maint/X.Y`; `check-release.sh` accepts it there and checks it follows the highest `vX.Y.*` tag.
   4. From then on, each patch-class PR into `main` that belongs in the patch milestone gets a backport PR too, opened
      right after its merge into `main`. The release PR description lists both.
-  5. The patch milestone's work is also on `main`, so the next feature release ships it too: its `CHANGELOG.md` keeps
-     the patch section, and `UPGRADING.md` keeps the patch's `## X.Y.Z` section before its own.
+  5. The patch milestone's work is also on `main`, so the next feature release ships it too. Each backport carries its
+     fragment to `maint/X.Y`, where the patch release consumes it. After the tag, branch `forward/X.Y.Z` from `main`,
+     run `scripts/changelog.sh forward X.Y.Z` (it copies the `## X.Y.Z` sections of `CHANGELOG.md` and `UPGRADING.md`
+     from `maint/X.Y` and deletes the fragments that the patch released), and open a PR
+     `chore(release): forward vX.Y.Z to main`.
   A maintenance branch stays until the next feature release ships; then the next patch line starts from `main` again.
   The rules of `main` hold on `maint/X.Y` too: changes only through PRs, merge only on the owner's **Approve** of the
   head, merge commits only. The repository ruleset must include `maint/**` (an owner setting); until it does, the
@@ -333,10 +339,12 @@ The loop stops when the bot token fails (401) or the owner says stop. It never a
   carry `Refs #NN` / `Closes #NN` and `Co-authored-by:`. PRs merge with a merge commit, so every commit on the branch
   reaches `main`: each one must pass `scripts/check-conventional.sh` and the denylist, not only the title.
 - **Changelog** ([Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)): every PR with a user-visible change
-  adds a line under `## Unreleased` in `CHANGELOG.md`, in the section that fits (Added, Changed, Deprecated, Removed,
-  Fixed, Security). Write it for an operator who upgrades: what changed and what they must do. Breaking lines start with
-  **BREAKING** and give the migration step. Refactors, tests and CI-only changes need no line. A release moves
-  `Unreleased` under `## X.Y.Z - YYYY-MM-DD`; nothing else edits released sections.
+  adds one fragment `changelog.d/<issue>-<slug>.md` (copy `changelog.d/_template.md`), with the Keep a Changelog
+  section that fits (Added, Changed, Deprecated, Removed, Fixed, Security). Write the `## Summary` for an operator who
+  upgrades: what changed and what they must do; put site steps in `## Upgrade`. Breaking changes set
+  `breaking: true` with the migration step. Refactors, tests and CI-only changes need no fragment (label
+  `no-changelog` when CI asks). `scripts/changelog.sh check` validates; the release PR assembles; nothing else
+  edits `CHANGELOG.md` or `UPGRADING.md`.
 - **Manuals in ASD-STE100 Simplified Technical English**, to [`docs/writing-manuals.md`](docs/writing-manuals.md),
   which also says which files are manuals. Procedures are numbered steps with one instruction each, a WARNING or
   CAUTION comes before the step it is about, sentences stay short, and words come from the approved list plus this

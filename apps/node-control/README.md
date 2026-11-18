@@ -242,6 +242,17 @@ A grant change on the Access page applies at the next request. A person whom the
 group keeps the group until the session ends, at most `ADMIN_OIDC_SESSION_HOURS`. Sessions are in memory: a restart
 of node-control signs everyone out.
 
+#### Sign-in refused
+
+A refused sign-in gets `403` and a page that tells the cause. The log line `admin sign-in refused` has the same cause
+in the field `reason`.
+
+| `reason` | Cause | What to do |
+|---|---|---|
+| `no_email` | The ID token has no email address. | Add the `email` scope or claim to the console client at the identity provider. |
+| `email_not_verified` | The claim `email_verified` is false or missing. | Make the identity provider send `email_verified=true` for the console client. Some providers send `false` by default, for example Authentik with an external source. |
+| `other_account` | The verified email is not the tailnet login. | Sign out of the identity provider and sign in with the account of your tailnet login. The log line shows the other email in the field `email`. The page does not show it. |
+
 ### No admin configured
 
 If no source names anyone, node-control logs a warning at every start. Every user who can reach the console can

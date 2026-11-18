@@ -147,7 +147,8 @@ type runOptions struct {
 	// tlsAdmin, when set, serves the admin handler also over TLS on :443 of the tailnet address
 	// (#366). The certificate comes from GetCertificate, called per handshake.
 	tlsAdmin *tls.Config
-	// tlsName is the console name (ADMIN_CONSOLE_NAME): the only Host the TLS listener accepts (#445).
+	// tlsName is the console name (ADMIN_CONSOLE_NAME): the only Host the TLS listener accepts
+	// (#445).
 	tlsName string
 }
 
@@ -265,7 +266,8 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 		name := strings.ToLower(strings.TrimSpace(o.tlsName))
 		if name == "" || strings.Contains(name, "*") {
 			closeAll()
-			return errors.New("the console on HTTPS needs its name (ADMIN_CONSOLE_NAME), with no wildcard")
+			return errors.New("the console on HTTPS needs its name (ADMIN_CONSOLE_NAME), " +
+				"with no wildcard")
 		}
 		cfg := o.tlsAdmin
 		guarded := hostGuard([]string{name}, NavMiddleware(navItems, navActions, tn, admin))

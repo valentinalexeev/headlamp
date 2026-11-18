@@ -259,8 +259,7 @@ Do these steps to serve the console at `https://<ADMIN_CONSOLE_NAME>` with the O
            - 100.64.0.1
    ```
 
-3. Add a policy rule that lets the admins reach node-control on port 443 (the console) and on port 53 (its DNS
-   server):
+3. Add a policy rule for the admins to node-control, port 443 (the console) and port 53 (its DNS server):
 
    ```json
    {"action": "accept", "src": ["group:admins"], "dst": ["tag:node-control:443", "tag:node-control:53"]}

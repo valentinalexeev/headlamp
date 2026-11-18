@@ -223,6 +223,12 @@ dns:
 The Serve page shows this line with the address of node-control. node-control keeps its address while its state
 volume stays. Serve does not start when the zone is under `base_domain`, or contains it.
 
+The policy must let the people who use the serve names reach node-control on port 53. Without this rule, each query
+for the serve zone times out: the connection opens, and the policy filter drops the queries. For the admin console on
+HTTPS, add this rule with your admin group:
+`{"action": "accept", "src": ["group:admins"], "dst": ["tag:node-control:443", "tag:node-control:53"]}`. See
+"Admin console on HTTPS: checklist" in the node-control README.
+
 With `SERVE_CERT_SOURCE=acme` (#334), the serve zone must also be a zone in public DNS. You must control it.
 node-control writes the `_acme-challenge` TXT records of the DNS-01 challenge there, through `SERVE_ACME_DNS` (`googlecloud`,
 `route53`, `cloudflare` or `rfc2136`). Do not add A records for the services to public DNS: tailnet devices get them

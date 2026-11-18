@@ -242,6 +242,53 @@ A grant change on the Access page applies at the next request. A person whom the
 group keeps the group until the session ends, at most `ADMIN_OIDC_SESSION_HOURS`. Sessions are in memory: a restart
 of node-control signs everyone out.
 
+### Admin console on HTTPS: checklist
+
+Do these steps to serve the console at `https://<ADMIN_CONSOLE_NAME>` with the OIDC sign-in. Do them in this sequence.
+
+1. Turn on the serve module (`SERVE_DB`, `SERVE_ZONE`) and get its certificate (`SERVE_CERT_SOURCE`). The console
+   uses the serve certificate.
+2. Add the serve zone to the split DNS of `headscale.yaml`, with the tailnet address of node-control. The Serve page
+   shows the line:
+
+   ```yaml
+   dns:
+     nameservers:
+       split:
+         svc.example.com:
+           - 100.64.0.1
+   ```
+
+3. Add a policy rule that lets the admins reach node-control on port 443 (the console) and on port 53 (its DNS
+   server):
+
+   ```json
+   {"action": "accept", "src": ["group:admins"], "dst": ["tag:node-control:443", "tag:node-control:53"]}
+   ```
+
+   Add policy tests for it. `examples/compose/control/config/acl.json` has the rule and its tests.
+4. Make a client at the identity provider for the console:
+   - a public client with PKCE, or a confidential client with a secret;
+   - the redirect URL `https://<ADMIN_CONSOLE_NAME>/auth/callback` only;
+   - the scopes `openid email profile groups`, and the claim with the groups;
+   - the claim `email_verified=true` for the email of each admin.
+5. Set the variables of node-control: `ADMIN_OIDC=1`, `ADMIN_OIDC_CLIENT_ID`, `ADMIN_OIDC_ISSUER` (or `OIDC_ISSUER`),
+   and `ADMIN_OIDC_CLIENT_SECRET` for a confidential client. Set `ADMIN_CONSOLE_NAME` if you do not use the default
+   `console.<SERVE_ZONE>`. Do not add the console name to `ENROLL_ALLOWED_HOSTS`.
+6. Restart node-control. Make sure that the log has `console on https` and a `listener hosts` line for `admin-tls`.
+7. On an admin device, reconnect the Tailscale client. macOS uses a new split DNS route only after a reconnect.
+8. Open `https://<ADMIN_CONSOLE_NAME>/auth/login` and sign in. Then open `https://<ADMIN_CONSOLE_NAME>/auth/me`. It
+   shows that you are signed in, and until when.
+
+#### Troubleshooting
+
+| Symptom | Cause | What to do |
+|---|---|---|
+| The console name times out on each device | The policy does not let the admins reach `tag:node-control:53`. The connection opens, and the filter drops the queries. | Add the rule of step 3. |
+| The console name does not resolve on macOS only | The client did not get the new split DNS route. | Reconnect the Tailscale client. |
+| `400 Invalid host header` | The browser uses a name that is not `ADMIN_CONSOLE_NAME`, or node-control is older than 0.21.2. Before 0.21.2, the console name had to be in `ENROLL_ALLOWED_HOSTS`. | Open the console with `ADMIN_CONSOLE_NAME`. On an older release, add the name to `ENROLL_ALLOWED_HOSTS`. |
+| `403` after the sign-in | The sign-in was refused. | See "Sign-in refused". The log line `admin sign-in refused` gives the cause. |
+
 ### No admin configured
 
 If no source names anyone, node-control logs a warning at every start. Every user who can reach the console can

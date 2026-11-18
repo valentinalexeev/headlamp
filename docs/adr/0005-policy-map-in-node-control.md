@@ -148,8 +148,9 @@ Added here: a filter by kind and "devices on/off". A click on a rule reference o
 | `GET /policy/api/map?devices=0\|1` | `policy.view` | the graph of the live policy |
 | `POST /policy/api/map/preview` | `policy.view` | the graph of the draft and the edge diff |
 
-Graph JSON: `{nodes: [{id, kind, label, ruleTypes, devices}], edges: [{from, to, proto, ports, via, posture, refs:
-[{section, index, line}]}], warnings: [], truncated}`.
+Graph JSON: `{nodes: [{id, kind, label, rule_types, devices}], edges: [{from, to, proto, ports, via, posture,
+refs: [{section, index, line}]}], warnings: [], truncated, updated_at}`. The names use snake_case, as the other
+answers of the console. The node-control README, section "Policy map", has the full list of fields and limits.
 
 ### 7. Tests
 

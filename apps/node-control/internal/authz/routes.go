@@ -145,6 +145,7 @@ var Routes = map[string]Rule{
 	"GET /policy":                  need(FeaturePolicy, LevelView),
 	"GET /policy/static/policy.js": open,
 	"GET /policy/state":            need(FeaturePolicy, LevelView),
+	"GET /policy/api/map":          need(FeaturePolicy, LevelView),
 	"POST /policy/preview":         need(FeaturePolicy, LevelView),
 	"POST /policy/apply":           need(FeaturePolicy, LevelAdmin),
 	"POST /policy/confirm":         need(FeaturePolicy, LevelAdmin),

@@ -1,0 +1,44 @@
+// A sample policy with every feature that the map reads. Placeholder names only.
+{
+	"groups": {
+		"group:admins": ["alice@example.com"],
+		"group:staff":  ["bob@example.com", "group:admins"], // a group in a group
+		"group:idle":   ["carol@example.com"],
+	},
+	"tagOwners": {
+		"tag:web":    ["group:admins"],
+		"tag:exit":   ["group:admins"],
+		"tag:router": ["group:admins"],
+		"tag:spare":  ["group:admins"],
+	},
+	"hosts": {
+		"db": "192.0.2.10/32",
+	},
+	"acls": [
+		// two sources, two destinations (the next line is line 19)
+		{"action": "accept", "src": ["group:admins", "tag:web"], "dst": ["db:5432", "tag:web:80,443"]},
+		{
+			"action": "accept",
+			"src":    ["group:staff"],
+			"proto":  "tcp",
+			"dst":    ["autogroup:internet:*", "198.51.100.0/24:22"],
+		},
+		{"action": "accept", "src": ["*"], "dst": ["tag:web:bad"]},
+		{"action": "accept", "src": ["nobody"], "dst": ["tag:web:443"]},
+		{"action": "deny", "src": ["*"], "dst": ["*:*"]},
+		{"action": "accept", "src": ["group:admins"], "dst": ["db:5432"]}, // the same edge as the rule on line 19
+	],
+	"grants": [
+		{"src": ["group:staff"], "dst": ["tag:web"], "ip": ["tcp:443", "*"], "via": ["tag:router"]},
+		{"src": ["autogroup:member"], "dst": ["tag:web"], "app": {"example.com/cap/web": [{}]}},
+		{"src": ["group:staff"], "dst": ["tag:web"]},
+	],
+	"ssh": [
+		{"action": "check", "src": ["group:admins"], "dst": ["tag:web"], "users": ["root"]},
+	],
+	"autoApprovers": {
+		"exitNode": ["tag:exit"],
+		"routes":   {"192.0.2.0/24": ["tag:router"]},
+	},
+	"futureKey": true,
+}

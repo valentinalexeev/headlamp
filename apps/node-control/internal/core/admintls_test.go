@@ -54,7 +54,8 @@ func selfSigned(t *testing.T, name string) (tls.Certificate, *x509.CertPool) {
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, pool
 }
 
-// With WithAdminTLS, the same admin handler answers on the TLS listener, behind the same Host guard.
+// With WithAdminTLS, the same admin handler answers on the TLS listener. That listener accepts only the console
+// name, also when ENROLL_ALLOWED_HOSTS does not list it (#445), and every other Host gets 400.
 func TestAdminTLSListener(t *testing.T) {
 	const name = "console.svc.example.test"
 	cert, pool := selfSigned(t, name)
@@ -62,11 +63,12 @@ func TestAdminTLSListener(t *testing.T) {
 	mod := &stubModule{name: "s", register: func(r *Routes) {
 		r.Admin.HandleFunc("GET /hello", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "hi") })
 	}}
-	env := MapEnv(map[string]string{"ENROLL_ALLOWED_HOSTS": name})
+	// The plain admin hosts only: the console name is not in the list.
+	env := MapEnv(map[string]string{"ENROLL_ALLOWED_HOSTS": "node-control,node-control.example.test"})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &cert, nil }}
-	go func() { done <- Run(ctx, []Module{mod}, env, tn, WithAdminTLS(cfg)) }()
+	go func() { done <- Run(ctx, []Module{mod}, env, tn, WithAdminTLS(cfg, "Console.svc.example.test")) }()
 	defer func() {
 		cancel()
 		if err := <-done; err != nil {
@@ -95,21 +97,48 @@ func TestAdminTLSListener(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || strings.TrimSpace(string(b)) != "hi" {
 		t.Fatalf("over TLS: %d %q", resp.StatusCode, b)
 	}
-	req, _ := http.NewRequest(http.MethodGet, "https://"+name+"/hello", nil)
-	req.Host = "evil.example"
-	resp, err = c.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	for _, host := range []string{"evil.example", "node-control", "node-control.example.test"} {
+		req, _ := http.NewRequest(http.MethodGet, "https://"+name+"/hello", nil)
+		req.Host = host
+		resp, err = c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("Host %s on the TLS console: %d, want 400", host, resp.StatusCode)
+		}
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("the Host guard applies on TLS too: %d", resp.StatusCode)
+	// The plain admin listener keeps ENROLL_ALLOWED_HOSTS: the console name is refused there.
+	plain := "http://" + tn.AdminAddr() + "/hello"
+	for host, want := range map[string]int{"node-control": http.StatusOK, name: http.StatusBadRequest} {
+		req, _ := http.NewRequest(http.MethodGet, plain, nil)
+		req.Host = host
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Fatalf("Host %s on the plain admin listener: %d, want %d", host, resp.StatusCode, want)
+		}
+	}
+}
+
+// The console on HTTPS needs its name: no name or a wildcard stops the start.
+func TestAdminTLSNeedsName(t *testing.T) {
+	for _, name := range []string{"", " ", "*.svc.example.test"} {
+		tn := &tlsLocal{Local: NewLocal("127.0.0.1"), got: make(chan struct{})}
+		err := Run(context.Background(), nil, MapEnv(nil), tn, WithAdminTLS(&tls.Config{}, name))
+		if err == nil || !strings.Contains(err.Error(), "ADMIN_CONSOLE_NAME") {
+			t.Fatalf("name %q: %v", name, err)
+		}
 	}
 }
 
 // A tailnet without a :443 listener cannot run the console on HTTPS.
 func TestAdminTLSNeedsListener(t *testing.T) {
-	err := Run(context.Background(), nil, MapEnv(nil), NewLocal("127.0.0.1"), WithAdminTLS(&tls.Config{}))
+	err := Run(context.Background(), nil, MapEnv(nil), NewLocal("127.0.0.1"), WithAdminTLS(&tls.Config{}, "console.example.test"))
 	if err == nil || !strings.Contains(err.Error(), ":443") {
 		t.Fatalf("%v", err)
 	}

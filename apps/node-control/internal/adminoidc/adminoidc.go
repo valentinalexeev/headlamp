@@ -150,17 +150,57 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, m.cfg.Provider.AuthURL(f), http.StatusFound)
 }
 
-// matches reports whether the verified email of the ID token is the tailnet login.
-func matches(login string, id oidc.Identity) bool {
+// refusal is why the identity of the ID token is not the tailnet login (#446). The zero value means a match.
+type refusal int
+
+const (
+	refusedNone refusal = iota
+	refusedNoEmail
+	refusedUnverified
+	refusedOtherAccount
+)
+
+// reason is the log field value of r.
+func (r refusal) reason() string {
+	return [...]string{"", "no_email", "email_not_verified", "other_account"}[r]
+}
+
+// page is the text that the person sees. It never shows the email of the other account.
+func (r refusal) page() string {
+	switch r {
+	case refusedNoEmail:
+		return "sign-in refused: the ID token has no email address. Ask the IdP administrator to add " +
+			"the email scope or claim to the console client."
+	case refusedUnverified:
+		return "sign-in refused: the IdP does not mark your email address as verified " +
+			"(email_verified is false or missing). Ask the IdP administrator to send " +
+			"email_verified=true for the console client."
+	default:
+		return "sign-in refused: the account you signed in with is not your tailnet login. " +
+			"Sign out of the IdP and sign in with your tailnet account."
+	}
+}
+
+// check tells whether the verified email of the ID token is the tailnet login, and if not, why.
+func check(login string, id oidc.Identity) refusal {
 	email := strings.ToLower(strings.TrimSpace(id.Email))
-	if !id.EmailVerified || email == "" || !strings.Contains(email, "@") {
-		return false
+	if email == "" || !strings.Contains(email, "@") {
+		return refusedNoEmail
+	}
+	if !id.EmailVerified {
+		return refusedUnverified
 	}
 	if strings.Contains(login, "@") && !strings.HasSuffix(login, "@") {
-		return login == email
+		if login != email {
+			return refusedOtherAccount
+		}
+		return refusedNone
 	}
 	local, _, _ := strings.Cut(email, "@")
-	return strings.TrimSuffix(login, "@") == local
+	if strings.TrimSuffix(login, "@") != local {
+		return refusedOtherAccount
+	}
+	return refusedNone
 }
 
 func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
@@ -195,12 +235,14 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sign-in failed", http.StatusUnauthorized)
 		return
 	}
-	if !matches(login, id) {
-		// Someone else's account on this device, or an unverified email: no groups for this login.
-		m.cfg.Log.Warn("admin sign-in refused: the identity is not the tailnet login",
-			"login", login)
-		http.Error(w, "the account you signed in with is not your tailnet login",
-			http.StatusForbidden)
+	if why := check(login, id); why != refusedNone {
+		// No groups for this login. The log may name the other account; the page does not.
+		attrs := []any{"login", login, "reason", why.reason()}
+		if why == refusedOtherAccount {
+			attrs = append(attrs, "email", strings.ToLower(strings.TrimSpace(id.Email)))
+		}
+		m.cfg.Log.Warn("admin sign-in refused", attrs...)
+		http.Error(w, why.page(), http.StatusForbidden)
 		return
 	}
 	sid := random()

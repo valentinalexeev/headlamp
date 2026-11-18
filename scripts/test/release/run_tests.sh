@@ -103,7 +103,17 @@ no try v2.0.1
 printf '# Upgrading\n\n## 2.0.1\n\nNo action required.\n' >UPGRADING.md
 commit 'docs: upgrading'
 ok try v2.0.1
-git reset -q --hard HEAD~2
+# a changelog fragment with status done that the release did not consume is refused (#455); planned is fine
+mkdir -p changelog.d
+printf -- '---\nissue: 7\nstatus: done\n---\n' >changelog.d/7-left.md
+printf -- '---\nissue: 8\nstatus: planned\n---\n' >changelog.d/8-later.md
+printf -- 'status: done\n' >changelog.d/_template.md
+commit 'docs: a fragment'
+no try v2.0.1
+git rm -q changelog.d/7-left.md
+commit 'docs: the fragment is released'
+ok try v2.0.1
+git reset -q --hard HEAD~4
 
 # .release-retype corrects the type of a named commit: a feat retyped to fix needs only a patch
 commit 'feat(api): really a fix' 2.0.1

@@ -224,6 +224,10 @@ address, port 443. It uses the serve certificate, so the serve module must be on
 `SERVE_CERT_SOURCE=acme`, browsers trust the certificate. With the serve CA, install the CA on the admin devices
 (`/serve/ca.crt`). The name resolves to node-control through the serve DNS answers. Plain `:80` stays as before.
 
+The console on port 443 accepts only the Host `ADMIN_CONSOLE_NAME`. Do not add this name to `ENROLL_ALLOWED_HOSTS`:
+that list applies only to the plain admin listener on port 80. Each other Host gets `400`. At startup, node-control
+logs the host names of each listener (`listener hosts`).
+
 | Variable | Purpose |
 |---|---|
 | `ADMIN_OIDC` | `1` turns on the sign-in and the console on HTTPS. Unset: no change. |
@@ -241,6 +245,17 @@ when. `POST /auth/logout` signs you out at once.
 A grant change on the Access page applies at the next request. A person whom the identity provider removes from a
 group keeps the group until the session ends, at most `ADMIN_OIDC_SESSION_HOURS`. Sessions are in memory: a restart
 of node-control signs everyone out.
+
+#### Sign-in refused
+
+A refused sign-in gets `403` and a page that tells the cause. The log line `admin sign-in refused` has the same cause
+in the field `reason`.
+
+| `reason` | Cause | What to do |
+|---|---|---|
+| `no_email` | The ID token has no email address. | Add the `email` scope or claim to the console client at the identity provider. |
+| `email_not_verified` | The claim `email_verified` is false or missing. | Make the identity provider send `email_verified=true` for the console client. Some providers send `false` by default, for example Authentik with an external source. |
+| `other_account` | The verified email is not the tailnet login. | Sign out of the identity provider and sign in with the account of your tailnet login. The log line shows the other email in the field `email`. The page does not show it. |
 
 ### Admin console on HTTPS: checklist
 

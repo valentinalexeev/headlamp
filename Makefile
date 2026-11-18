@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: test-sh bats-init test-control-host-gcp test-exit-node-gcp test-gateway-controller test-gateway-controller-e2e test-ssh-ca test-ssh-ca-e2e test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-serve-acme-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-edge-ddns-e2e test-exit-node-key-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
+.PHONY: test-sh bats-init test-control-host-gcp test-exit-node-gcp test-gateway-controller test-gateway-controller-e2e test-ssh-ca test-ssh-ca-e2e test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-serve-acme-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-edge-ddns-e2e test-exit-node-key-e2e test-relogin-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
   test-tasks-cli test-bridge-selection test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -146,6 +146,10 @@ test-edge-ddns-e2e:
 # waits with a clear message (no login loop) when the state is lost. A Go e2e test against a real headscale.
 test-exit-node-key-e2e:
 	cd tests/e2e && go test ./exitnode -count=1 -v -timeout 20m
+
+# What a second login of a tagged node changes on the pinned headscale and tailscale (#398).
+test-relogin-e2e:
+	cd tests/e2e && go test ./relogin -count=1 -v -timeout 15m
 
 # On demand (#110): Hysteria 2 beside VLESS Reality. Tailnet, exit node, bridge, enrolment and real clients in docker.
 test-hysteria-e2e:

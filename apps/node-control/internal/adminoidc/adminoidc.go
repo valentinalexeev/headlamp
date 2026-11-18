@@ -150,7 +150,8 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, m.cfg.Provider.AuthURL(f), http.StatusFound)
 }
 
-// refusal is why the identity of the ID token is not the tailnet login (#446). The zero value means a match.
+// refusal is why the identity of the ID token is not the tailnet login (#446). The zero value
+// means a match.
 type refusal int
 
 const (
@@ -169,8 +170,8 @@ func (r refusal) reason() string {
 func (r refusal) page() string {
 	switch r {
 	case refusedNoEmail:
-		return "sign-in refused: the ID token has no email address. Ask the IdP administrator to add " +
-			"the email scope or claim to the console client."
+		return "sign-in refused: the ID token has no email address. Ask the IdP administrator " +
+			"to add the email scope or claim to the console client."
 	case refusedUnverified:
 		return "sign-in refused: the IdP does not mark your email address as verified " +
 			"(email_verified is false or missing). Ask the IdP administrator to send " +

@@ -224,6 +224,10 @@ address, port 443. It uses the serve certificate, so the serve module must be on
 `SERVE_CERT_SOURCE=acme`, browsers trust the certificate. With the serve CA, install the CA on the admin devices
 (`/serve/ca.crt`). The name resolves to node-control through the serve DNS answers. Plain `:80` stays as before.
 
+The console on port 443 accepts only the Host `ADMIN_CONSOLE_NAME`. Do not add this name to `ENROLL_ALLOWED_HOSTS`:
+that list applies only to the plain admin listener on port 80. Each other Host gets `400`. At startup, node-control
+logs the host names of each listener (`listener hosts`).
+
 | Variable | Purpose |
 |---|---|
 | `ADMIN_OIDC` | `1` turns on the sign-in and the console on HTTPS. Unset: no change. |

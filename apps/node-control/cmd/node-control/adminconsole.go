@@ -113,7 +113,7 @@ func adminConsole(env core.Env, serve core.Module, addrs func() []netip.Addr) (
 		}}
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: sm.ConsoleCert}
 	slog.Info("console on https", "name", name, "session_hours", hours)
-	return &adminConsoleSetup{mod: m, opts: []core.Option{core.WithAdminTLS(tlsCfg)}}, nil
+	return &adminConsoleSetup{mod: m, opts: []core.Option{core.WithAdminTLS(tlsCfg, name)}}, nil
 }
 
 // serveModule finds the serve module in mods (nil when it is not there).

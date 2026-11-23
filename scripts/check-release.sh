@@ -95,6 +95,11 @@ if upgrading=$(git show "$commit:UPGRADING.md" 2>/dev/null); then
 	grep -qxF "## ${core#v}" <<<"$upgrading" || fail "UPGRADING.md has no '## ${core#v}' section"
 fi
 
+# Every finished change is in the changelog (#455): no fragment with "status: done" is left in changelog.d/.
+left=$(git grep -l -E '^status:[[:space:]]*done([[:space:]]|$)' "$commit" -- 'changelog.d/*.md' 2>/dev/null |
+	sed "s/^$commit://" | grep -v -E '^changelog\.d/(_|README\.md$)' || true)
+[ -z "$left" ] || fail "changelog.d has fragments with 'status: done' that are not released: $(tr '\n' ' ' <<<"$left")"
+
 if [ -n "${RELEASE_REPO:-}" ]; then
 	open=$(gh api "repos/$RELEASE_REPO/milestones?state=all&per_page=100" \
 		--jq ".[] | select(.title == \"${core#v}\") | .open_issues")

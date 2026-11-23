@@ -58,7 +58,8 @@ Before 1.0.0, a minor release must not change a running site that has no config 
   only a patch: a feature or a breaking change is refused there.
 - A milestone named after the version, if there is one, has no open issues.
 - [`UPGRADING.md`](UPGRADING.md) at that commit has a section for the version (`## X.Y.Z`). It lists what a site repo
-  must change, or says "No action required". Rename the `## Unreleased (X.Y.Z)` section in the release PR.
+  must change, or says "No action required." The release PR makes this section from the fragments.
+- No fragment with `status: done` stays in `changelog.d/`.
 
 A published version never changes. If a release is wrong, fix it in a new one: never move or delete its tag.
 
@@ -157,8 +158,12 @@ helm install tc oci://ghcr.io/valentinalexeev/headlamp/charts/tailnet-connector 
 All work merges into `main` through pull requests. A maintenance branch `maint/X.Y` is the only other long-lived
 branch. It gets fixes only, as backports of work that is on `main` already.
 
-1. Make a `release/X.Y.Z` branch from `main`. In one commit `chore(release): vX.Y.Z`, set `VERSION` and move the
-   `Unreleased` part of `CHANGELOG.md` under the new version. Merge it into `main` through a PR.
+Each pull request with a change that an operator sees adds one fragment file in `changelog.d/`. The format is in
+[`changelog.d/README.md`](changelog.d/README.md). Pull requests do not edit `CHANGELOG.md` or `UPGRADING.md`.
+
+1. Make a `release/X.Y.Z` branch from `main`. In one commit `chore(release): vX.Y.Z`, set `VERSION` and run
+   `scripts/changelog.sh release X.Y.Z <date>`. This writes the release sections of `CHANGELOG.md` and `UPGRADING.md`
+   from the fragments, and deletes the fragments. Merge the branch into `main` through a PR.
 2. Tag the merge commit on `main` and push the tag: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
 
 A hotfix is a normal fix on a `hotfix/` branch, followed at once by a PATCH release.
@@ -171,7 +176,11 @@ still due, the patch comes from a maintenance branch:
 1. Make `maint/X.Y` from the highest `vX.Y.*` tag.
 2. Cherry-pick each fix of the patch (`git cherry-pick -x -m 1 <merge commit>`) onto a `backport/X.Y/...` branch. Merge
    it into `maint/X.Y` through a PR.
-3. Make the `release/X.Y.(Z+1)` branch from `maint/X.Y`, merge it into `maint/X.Y`, and tag that merge commit.
+3. Make the `release/X.Y.(Z+1)` branch from `maint/X.Y`, merge it into `maint/X.Y`, and tag that merge commit. The
+   backports bring their fragments, and the release uses them.
+4. After the tag, make a `forward/X.Y.(Z+1)` branch from `main` and run `scripts/changelog.sh forward X.Y.(Z+1)`. This
+   copies the release sections from `maint/X.Y` and deletes the released fragments on `main`. Merge it into `main`
+   through a PR.
 
 The fixes are on `main` too, so the next feature release also has them. CI publishes `maint/X.Y` images as
 `maint-X.Y`. A tag on `maint/X.Y` moves the `X.Y` image tag only while it is the highest `vX.Y.*` release.

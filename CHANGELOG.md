@@ -2,6 +2,38 @@
 
 Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions follow [VERSIONING.md](VERSIONING.md).
 
+## 0.21.2 - 2026-11-23
+
+### Added
+
+- node-control, docs (#449): **A checklist for the admin console on HTTPS.** The node-control README has "Admin console on HTTPS: checklist": the policy rule for `tag:node-control:443` and
+  `tag:node-control:53`, split DNS, the IdP client, the first sign-in and a troubleshooting table. `docs/dns.md` tells
+  that the people who use the serve names need port 53 of node-control. The example policy of `examples/compose/control`
+  has the console rule for `admin@` and its policy tests.
+
+### Changed
+
+- ci, scripts (#455): **Changelog fragments in changelog.d.** A pull request now adds one file `changelog.d/<issue>-<slug>.md` instead of a line in `CHANGELOG.md` and a section in
+  `UPGRADING.md` (format: `changelog.d/README.md`, after agentdev#448). `scripts/changelog.sh release` makes both release
+  sections from the fragments; `forward` brings a patch release of `maint/X.Y` back to `main`. The workflow `changelog`
+  fails a pull request that changes code without a fragment (label `no-changelog` to skip) or edits these files directly.
+  `check-release.sh` refuses a tag while a `status: done` fragment is left.
+
+- node-control, funnel-ingress (#463): **Go module updates.** The Go modules of node-control and funnel-ingress use newer minor and patch versions of the AWS SDK for Go v2
+  (`config`, `credentials`, `autoscaling`, `ec2`, `route53`) and `golang.org/x/oauth2` 0.38.0. No setting changes.
+
+### Fixed
+
+- node-control (#445): **The HTTPS console accepts its own name.** The admin console on HTTPS answered `400 Invalid host header` to its own name unless `ADMIN_CONSOLE_NAME` was also
+  in `ENROLL_ALLOWED_HOSTS`. The TLS listener now accepts only `ADMIN_CONSOLE_NAME`, with no extra setting.
+  `ENROLL_ALLOWED_HOSTS` guards the plain admin listener on port 80, as before. At startup, a `listener hosts` log
+  line shows the names that each admin listener accepts.
+
+- node-control (#446): **A refused admin sign-in names the failed check.** A refused admin sign-in names the failed check: no email in the ID token, an email that is not verified
+  (`email_verified` false or missing), or another account. The page and the log line `admin sign-in refused` (field
+  `reason`) give the cause. Only the log shows the email of another account. Before, every refusal said "not your
+  tailnet login". The node-control README has a "Sign-in refused" table.
+
 ## 0.21.1 - 2026-11-17
 
 ### Fixed

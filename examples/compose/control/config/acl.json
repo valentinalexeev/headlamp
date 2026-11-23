@@ -27,7 +27,11 @@
     // node. headscale allows the internet through an exit node only with autogroup:internet for the source.
     {"action": "accept", "src": ["tag:ingress"], "dst": ["autogroup:internet:*"]},
     // node-control pushes credentials to the agent of each bridge (ingress_agent_port).
-    {"action": "accept", "src": ["tag:node-control"], "dst": ["tag:ingress:9000"]}
+    {"action": "accept", "src": ["tag:node-control"], "dst": ["tag:ingress:9000"]},
+    // The admin console on HTTPS (ADMIN_OIDC=1, #449). Admins reach node-control on 443 (the console) and on 53 (its
+    // DNS server: split DNS sends the serve zone there). Without port 53 the console name times out on every device.
+    // Change admin@ to your admin group, for example group:admins, here and in the tests.
+    {"action": "accept", "src": ["admin@"], "dst": ["tag:node-control:443", "tag:node-control:53"]}
     // Add the rules for your people here, for example:
     // {"action": "accept", "src": ["admin@"], "dst": ["*:*"]},
     // {"action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:internet:*", "tag:exit:*"]}
@@ -36,6 +40,10 @@
   "tests": [
     {"src": "tag:ingress", "accept": ["tag:node-control:8081"], "deny": ["tag:node-control:22", "tag:node-control:80"]},
     {"src": "tag:node-control", "accept": ["tag:ingress:9000"], "deny": ["tag:ingress:22", "tag:ingress:8443"]},
-    {"src": "tag:exit", "deny": ["tag:ingress:9000", "tag:ingress:22", "tag:node-control:8081"]}
+    {"src": "tag:exit", "deny": ["tag:ingress:9000", "tag:ingress:22", "tag:node-control:8081"]},
+    // The console rule is for people only: a bridge or an exit node does not reach 443 or 53 of node-control.
+    {"src": "admin@", "accept": ["tag:node-control:443", "tag:node-control:53"]},
+    {"src": "tag:ingress", "deny": ["tag:node-control:443"]},
+    {"src": "tag:exit", "deny": ["tag:node-control:443", "tag:node-control:53"]}
   ]
 }

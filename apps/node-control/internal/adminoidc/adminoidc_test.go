@@ -1,6 +1,7 @@
 package adminoidc
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,10 +32,29 @@ type rig struct {
 	who    *authz.Who
 	client *http.Client
 	pol    *authz.Policy
+	log    *syncBuffer
+}
+
+// syncBuffer is a bytes.Buffer safe for the server goroutines that write the log.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 func newRig(t *testing.T) *rig {
-	r := &rig{t: t, who: &authz.Who{Login: "alice@example.test"}}
+	r := &rig{t: t, who: &authz.Who{Login: "alice@example.test"}, log: &syncBuffer{}}
 	pol, err := authz.NewPolicy(authz.Config{Grants: []authz.Grant{{Subject: "owner@", Roles: []string{"owner"}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +76,7 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := New(Config{Provider: p, GroupsClaim: "groups", Tailnet: tn, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	m := New(Config{Provider: p, GroupsClaim: "groups", Tailnet: tn, Log: slog.New(slog.NewTextHandler(r.log, nil))})
 	m.Register(mux)
 	gate := func(perm authz.Perm) http.Handler {
 		return authz.Gate(gateTailnet{f: tn}, perm, authz.Allowed{}, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -113,15 +134,23 @@ func (r *rig) status(method, path string) int {
 
 func (r *rig) signIn() int {
 	r.t.Helper()
+	c, _ := r.signInPage()
+	return c
+}
+
+// signInPage signs in and returns the status and the text of the last page.
+func (r *rig) signInPage() (int, string) {
+	r.t.Helper()
 	resp, err := r.client.Get(r.srv.URL + "/auth/login")
 	if err != nil {
 		r.t.Fatal(err)
 	}
+	b, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.Request.URL.Path == "/" {
-		return http.StatusOK // the callback redirected home: signed in
+		return http.StatusOK, string(b) // the callback redirected home: signed in
 	}
-	return resp.StatusCode
+	return resp.StatusCode, string(b)
 }
 
 // The acceptance criterion of #123: an owner grants viewer to an OIDC group; a member then views
@@ -178,6 +207,78 @@ func TestOtherAccountRefused(t *testing.T) {
 	r.is.Tamper = func(c jwt.MapClaims) { c["email_verified"] = false }
 	if c := r.signIn(); c != http.StatusForbidden {
 		t.Fatalf("unverified email: %d", c)
+	}
+}
+
+// Each refusal names its check, on the page and in the log (#446). The page never shows the email
+// of another account; the log does.
+func TestRefusalNamesTheCheck(t *testing.T) {
+	cases := []struct {
+		name, email string
+		tamper      func(jwt.MapClaims)
+		page        string
+		reason      string
+	}{
+		{"no email", "", func(c jwt.MapClaims) { delete(c, "email"); c["email_verified"] = true },
+			"has no email address", "reason=no_email"},
+		{"not verified", "alice@example.test", func(c jwt.MapClaims) { c["email_verified"] = false },
+			"email_verified is false or missing", "reason=email_not_verified"},
+		{"claim missing", "alice@example.test", func(c jwt.MapClaims) { delete(c, "email_verified") },
+			"email_verified is false or missing", "reason=email_not_verified"},
+		{"other account", "mallory@example.test", func(c jwt.MapClaims) { c["email_verified"] = true },
+			"not your tailnet login", "reason=other_account"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t)
+			r.is.SetUser(oidctest.User{Subject: "s-x", Email: tc.email, Groups: []string{"netops"}})
+			r.is.Tamper = tc.tamper
+			c, page := r.signInPage()
+			if c != http.StatusForbidden {
+				t.Fatalf("status %d, want 403", c)
+			}
+			if !strings.Contains(page, tc.page) {
+				t.Fatalf("page %q does not contain %q", page, tc.page)
+			}
+			if strings.Contains(page, "mallory") {
+				t.Fatalf("the page shows the other account: %q", page)
+			}
+			log := r.log.String()
+			if !strings.Contains(log, "admin sign-in refused") || !strings.Contains(log, tc.reason) ||
+				!strings.Contains(log, "login=alice@example.test") {
+				t.Fatalf("log %q: want %q and the login", log, tc.reason)
+			}
+			if tc.reason == "reason=other_account" && !strings.Contains(log, "email=mallory@example.test") {
+				t.Fatalf("the log must name the other account: %q", log)
+			}
+			if tc.reason != "reason=other_account" && strings.Contains(log, "email=") {
+				t.Fatalf("only the other-account refusal logs the email: %q", log)
+			}
+		})
+	}
+}
+
+// check, case by case, also for a login without a domain ("alice@").
+func TestCheck(t *testing.T) {
+	cases := []struct {
+		login, email string
+		verified     bool
+		want         refusal
+	}{
+		{"alice@example.test", "Alice@Example.test ", true, refusedNone},
+		{"alice@", "alice@example.test", true, refusedNone},
+		{"alice", "alice@example.test", true, refusedNone},
+		{"alice@example.test", "", true, refusedNoEmail},
+		{"alice@example.test", "alice", true, refusedNoEmail},
+		{"alice@example.test", "alice@example.test", false, refusedUnverified},
+		{"alice@example.test", "bob@example.test", true, refusedOtherAccount},
+		{"alice@example.test", "alice@other.test", true, refusedOtherAccount},
+		{"alice@", "bob@example.test", true, refusedOtherAccount},
+	}
+	for _, tc := range cases {
+		if got := check(tc.login, oidc.Identity{Email: tc.email, EmailVerified: tc.verified}); got != tc.want {
+			t.Errorf("check(%q, %q, %v) = %v, want %v", tc.login, tc.email, tc.verified, got, tc.want)
+		}
 	}
 }
 

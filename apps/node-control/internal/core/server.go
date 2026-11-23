@@ -14,6 +14,14 @@ import (
 	"time"
 )
 
+// hostsLog is the list of Host names that a guard accepts, for the startup log.
+func hostsLog(allowed []string) string {
+	if len(allowed) == 0 {
+		return "any (ENROLL_ALLOWED_HOSTS is empty)"
+	}
+	return strings.Join(allowed, ",")
+}
+
 // hostGuard rejects requests whose Host header (port stripped) matches none of
 // allowed, with HTTP 400. An empty allowed list disables the guard. Patterns
 // follow Starlette's TrustedHostMiddleware: "*" allows any host; "*.example.com"
@@ -139,11 +147,18 @@ type runOptions struct {
 	// tlsAdmin, when set, serves the admin handler also over TLS on :443 of the tailnet address
 	// (#366). The certificate comes from GetCertificate, called per handshake.
 	tlsAdmin *tls.Config
+	// tlsName is the console name (ADMIN_CONSOLE_NAME): the only Host the TLS listener accepts
+	// (#445).
+	tlsName string
 }
 
 // WithAdminTLS serves the admin handler also on :443 of the tailnet address with cfg (#366). The
-// Tailnet must implement AdminTLSListener.
-func WithAdminTLS(cfg *tls.Config) Option { return func(o *runOptions) { o.tlsAdmin = cfg } }
+// Tailnet must implement AdminTLSListener. The TLS listener accepts only the Host name, the console
+// name: the console is reached under no other name, so ENROLL_ALLOWED_HOSTS does not apply there
+// (#445).
+func WithAdminTLS(cfg *tls.Config, name string) Option {
+	return func(o *runOptions) { o.tlsAdmin, o.tlsName = cfg, name }
+}
 
 // AdminTLSListener is an optional Tailnet capability: a TCP listener on :443 of the tailnet
 // address.
@@ -216,8 +231,8 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 		}
 	}
 
-	// ENROLL_ALLOWED_HOSTS guards the admin listener only; the public one is
-	// reached through an ingress proxy under other Host values.
+	// ENROLL_ALLOWED_HOSTS guards the plain admin listener only; the public one is reached through
+	// an ingress proxy under other Host values, and the TLS console accepts only its own name.
 	allowed := env.List("ENROLL_ALLOWED_HOSTS")
 	type srv struct {
 		name string
@@ -241,14 +256,21 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 	if err := add("admin", hostGuard(allowed, NavMiddleware(navItems, navActions, tn, admin)), tn.ListenAdmin); err != nil {
 		return err
 	}
+	log.Info("listener hosts", "listener", "admin", "hosts", hostsLog(allowed))
 	if o.tlsAdmin != nil {
 		lt, ok := tn.(AdminTLSListener)
 		if !ok {
 			closeAll()
 			return errors.New("the console on HTTPS needs a tailnet listener on :443")
 		}
+		name := strings.ToLower(strings.TrimSpace(o.tlsName))
+		if name == "" || strings.Contains(name, "*") {
+			closeAll()
+			return errors.New("the console on HTTPS needs its name (ADMIN_CONSOLE_NAME), " +
+				"with no wildcard")
+		}
 		cfg := o.tlsAdmin
-		guarded := hostGuard(allowed, NavMiddleware(navItems, navActions, tn, admin))
+		guarded := hostGuard([]string{name}, NavMiddleware(navItems, navActions, tn, admin))
 		if err := add("admin-tls", guarded,
 			func() (net.Listener, error) {
 				ln, err := lt.ListenAdminTLS()
@@ -260,6 +282,7 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 			closeAll()
 			return err
 		}
+		log.Info("listener hosts", "listener", "admin-tls", "hosts", name)
 	}
 	if public != nil {
 		if err := add("public", cleanPathGuard(public), tn.ListenPublic); err != nil {

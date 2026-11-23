@@ -30,8 +30,9 @@ T=$(mktemp -d)
 sfx=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
 net="bp-e2e-$sfx"; far="bp-e2e-far-$sfx"
 hs="bp-e2e-hs-$sfx"; ex="bp-e2e-exit-$sfx"; br="bp-e2e-bridge-$sfx"; nc="bp-e2e-nc-$sfx"; web="bp-e2e-web-$sfx"
+adm="bp-e2e-admin-$sfx"
 cleanup() {
-  for c in "$hs" "$ex" "$br" "$nc" "$web"; do dk rm -f "$c" >/dev/null 2>&1; done
+  for c in "$hs" "$ex" "$br" "$nc" "$web" "$adm"; do dk rm -f "$c" >/dev/null 2>&1; done
   dk network rm "$net" "$far" >/dev/null 2>&1; rm -rf "$T"
 }
 trap cleanup EXIT
@@ -91,7 +92,13 @@ dk run -d --name "$nc" --network "$net" -e TS_AUTHKEY="$(key tag:node-control)" 
   --device /dev/net/tun -e TS_HOSTNAME=node-control -e TS_STATE_DIR=/var/lib/ts \
   -e TS_EXTRA_ARGS="--login-server=http://$hs:8080" "$ts_image" >/dev/null || die "node-control"
 online() { [ "$(hsx nodes list -o json | jq --arg n "$1" '[.[] | select(.given_name == $n and .online)] | length')" = 1 ]; }
-for n in exit1 bridge1-socks node-control; do wait_for 60 online "$n" || die "$n did not join"; done
+# A person of the admin@ user: the source of the console rule (tag:node-control:443 and :53, #449).
+hsx users create admin >/dev/null || die "admin user"
+aid=$(hsx users list -o json | jq -r '.[] | select(.name == "admin") | .id')
+admkey=$(hsx preauthkeys create -u "$aid" -e 1h -o json | jq -r .key)
+dk run -d --name "$adm" --network "$net" -e TS_AUTHKEY="$admkey" -e TS_USERSPACE=true -e TS_HOSTNAME=admin1 \
+  -e TS_STATE_DIR=/var/lib/ts -e TS_EXTRA_ARGS="--login-server=http://$hs:8080" "$ts_image" >/dev/null || die "admin"
+for n in exit1 bridge1-socks node-control admin1; do wait_for 60 online "$n" || die "$n did not join"; done
 # An exit node does not forward to a network it is attached to unless it also advertises it (as in the hysteria
 # e2e). "far" uses a public test range (TEST-NET-2), because autogroup:internet does not cover private addresses.
 dk exec "$ex" tailscale set --advertise-exit-node --advertise-routes=198.51.100.0/24 >/dev/null || die "exit routes"

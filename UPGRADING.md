@@ -9,6 +9,18 @@ To upgrade more than one release, do the sections in order, from the oldest to t
 Each release has a section here before its tag (see [VERSIONING.md](VERSIONING.md)). A release with no site action
 says "No action required".
 
+## 0.21.2
+
+### The HTTPS console accepts its own name (#445)
+
+If you added `ADMIN_CONSOLE_NAME` to `ENROLL_ALLOWED_HOSTS` as a workaround, remove it. The console on HTTPS no
+longer reads that list. With the name in the list, the plain admin listener on port 80 also answers to it.
+
+### A checklist for the admin console on HTTPS (#449)
+
+The admins need `tag:node-control:53` next to `tag:node-control:443` in the policy. If the console name times out on
+the devices, add the rule of "Admin console on HTTPS: checklist" in the node-control README.
+
 ## 0.21.1
 
 No action required. node-control adds two columns to the devices table on start (SQLite), or reads them as 0

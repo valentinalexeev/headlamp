@@ -388,7 +388,8 @@ def cmd_forward(version, ref):
         print(f"{rel(path)}: {version} copied from {ref}")
     # the fragments that the release commit on REF deleted
     subj = f"chore(release): v{version}"
-    commit = git("log", "--format=%H", "-1", "--fixed-strings", f"--grep={subj}", ref).strip()
+    # --no-merges: the merge of the release PR has the same subject in its body, and a merge lists no files
+    commit = git("log", "--format=%H", "-1", "--no-merges", "--fixed-strings", f"--grep={subj}", ref).strip()
     if not commit:
         sys.exit(f"forward: no commit '{subj}' on {ref}")
     gone = git("diff-tree", "--no-commit-id", "--name-only", "--diff-filter=D", "-r", commit).split()

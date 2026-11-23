@@ -365,11 +365,13 @@ New.
 EOF
 	gitc add -A
 	gitc commit -qm "feat: a feature"
-	# the patch release on maint/0.1
-	gitc checkout -q maint/0.1
+	# the patch release on maint/0.1, through a release PR: the merge repeats the subject in its body
+	gitc checkout -q -b release/0.1.1 maint/0.1
 	(cd "$g" && scripts/changelog.sh release 0.1.1 2026-02-01 >/dev/null)
 	gitc add -A
 	gitc commit -qm "chore(release): v0.1.1"
+	gitc checkout -q maint/0.1
+	gitc merge -q --no-ff -m "Merge pull request #9 from release/0.1.1" -m "chore(release): v0.1.1" release/0.1.1
 	gitc checkout -q main
 	run bash -c "cd '$g' && scripts/changelog.sh forward 0.1.1 maint/0.1"
 	assert_success

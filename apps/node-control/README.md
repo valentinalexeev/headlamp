@@ -991,15 +991,18 @@ Above the table, the **Bridges** strip has one line for each bridge (#438). Use 
 user is a bridge problem. Each line shows:
 
 - The sync: in sync, or pending with the reason and the start time.
-- The agent: if it answered the traffic read of this page load, and the time of its last answer (a traffic read or a
-  push). node-control keeps this time in memory only, so it is empty after a restart until the agent answers.
+- The agent: if it answered the traffic read of this page load, and the time of its last answer. An answer is a
+  traffic read or a push. The node-control service keeps this time in memory only. After a restart, the time is
+  empty until the agent answers.
 - The egress self-test (#196): OK, the error, or "not reported".
 - The class of the path check (#411): `ok`, the bad class, or "off".
 
 A line is red when the sync is pending, the agent did not answer or the egress self-test fails. A line is amber
 when the path check gives a class that is not `ok`. The strip shows no connection log and no client addresses.
-`GET /enroll/devices` gives the same data in `bridges`: one object for each bridge with `name`, `sync`, `answered`,
-`last_answer` (unix seconds, 0 = none), `egress` and `pathcheck` (`null` when the agent does not report it).
+
+`GET /enroll/devices` gives the same data in `bridges`, with one object for each bridge. Each object has `name`,
+`sync`, `answered`, `last_answer`, `egress` and `pathcheck`. `last_answer` is in unix seconds (0 = none). `egress`
+and `pathcheck` are `null` when the agent does not report them.
 
 The buttons of a row depend on its state, so the page shows no useless button:
 

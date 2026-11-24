@@ -434,14 +434,16 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 	if pending == nil {
 		pending = []string{}
 	}
+	bridges := bridgeHealthOf(cur.SyncTargets, snaps, answered, egress, paths)
 	writeJSON(w, http.StatusOK, map[string]any{"devices": rows, "sync": summarize(snaps),
-		"ingresses": rowsOf(cur, cur.SyncTargets, snaps), "pending_ingresses": pending, "stats_partial": partial,
-		"bridges": bridgeHealthOf(cur.SyncTargets, snaps, answered, egress, paths)})
+		"ingresses": rowsOf(cur, cur.SyncTargets, snaps), "pending_ingresses": pending,
+		"stats_partial": partial, "bridges": bridges})
 }
 
-// bridgeHealth is one line of the bridge strip of the Devices page (#438): the sync, whether the
-// agent answered the traffic read of this request and when it last answered, the egress self-test
-// and the path check. Egress and PathCheck are nil when the agent reports none.
+// bridgeHealth is one line of the bridge strip of the Devices page (#438): the sync,
+// whether the agent answered the traffic read of this request and when it last answered,
+// the egress self-test and the path check. Egress and PathCheck are nil when the agent
+// reports none.
 type bridgeHealth struct {
 	Name       string       `json:"name"`
 	Sync       SyncSnapshot `json:"sync"`

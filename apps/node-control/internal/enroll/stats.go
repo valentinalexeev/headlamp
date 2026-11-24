@@ -51,7 +51,9 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 
 // mergedStats is MergedStats that also says which targets answered (same order as targets). An
 // answer is recorded in the target's sync state as its last agent answer (#438).
-func mergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, devices []Device) (map[int64]Traffic, bool, []bool) {
+func mergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig,
+	devices []Device,
+) (map[int64]Traffic, bool, []bool) {
 	answers := make([]map[string]any, len(targets))
 	panicked := make([]bool, len(targets))
 	var wg sync.WaitGroup
@@ -79,31 +81,43 @@ func mergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 			answered[i] = true
 			t.State.Answered()
 		}
-		for _, d := range devices {
-			auto := d.UUIDs["auto"]
-			if auto == "" {
-				continue
-			}
-			u, err := cfg.UUIDFor(t.Ingress, "auto", auto)
-			if err != nil {
-				partial = true
-				continue
-			}
-			sum := sha256.Sum256([]byte(u))
-			entry, ok := answers[i][hex.EncodeToString(sum[:])[:8]].(map[string]any)
-			if !ok {
-				continue
-			}
-			up, ok1 := numeric(entry["up"])
-			down, ok2 := numeric(entry["down"])
-			if !ok1 || !ok2 {
-				continue
-			}
-			tr := out[d.ID]
-			tr.Up = math.Min(tr.Up+up, maxTraffic)
-			tr.Down = math.Min(tr.Down+down, maxTraffic)
-			out[d.ID] = tr
+		if !addTraffic(out, cfg, t.Ingress, answers[i], devices) {
+			partial = true
 		}
 	}
 	return out, partial, answered
+}
+
+// addTraffic adds the answer of one target to out, per device. It returns false when an id could
+// not be computed.
+func addTraffic(out map[int64]Traffic, cfg IngressConfig, ing Ingress, answer map[string]any,
+	devices []Device,
+) bool {
+	complete := true
+	for _, d := range devices {
+		auto := d.UUIDs["auto"]
+		if auto == "" {
+			continue
+		}
+		u, err := cfg.UUIDFor(ing, "auto", auto)
+		if err != nil {
+			complete = false
+			continue
+		}
+		sum := sha256.Sum256([]byte(u))
+		entry, ok := answer[hex.EncodeToString(sum[:])[:8]].(map[string]any)
+		if !ok {
+			continue
+		}
+		up, ok1 := numeric(entry["up"])
+		down, ok2 := numeric(entry["down"])
+		if !ok1 || !ok2 {
+			continue
+		}
+		tr := out[d.ID]
+		tr.Up = math.Min(tr.Up+up, maxTraffic)
+		tr.Down = math.Min(tr.Down+down, maxTraffic)
+		out[d.ID] = tr
+	}
+	return complete
 }

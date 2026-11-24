@@ -47,7 +47,8 @@ type SyncState struct {
 	ver     uint64 // bumped on every outcome: lets a caller tell "no result yet" from "same result"
 	// groups are the grant groups the bridge reported (#139); nil: not known.
 	groups []string
-	// answered is the unix time of the last answer of the agent (a push or a stats read; #438); 0: never.
+	// answered is the unix time of the last answer of the agent (a push or a stats read;
+	// #438); 0: never.
 	answered int64
 }
 

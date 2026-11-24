@@ -110,7 +110,12 @@ func adminConsole(env core.Env, serve core.Module, addrs func() []netip.Addr) (
 			GroupsClaim: env.Default("ADMIN_OIDC_GROUPS_CLAIM",
 				env.Default("OIDC_GROUPS_CLAIM", "groups")),
 			Session: time.Duration(hours) * time.Hour,
+			TrustedEmailDomains: adminoidc.ParseDomains(
+				env.Getenv("ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS")),
 		}}
+	for _, d := range m.cfg.TrustedEmailDomains {
+		slog.Warn("admin sign-in trusts email domain without email_verified", "domain", d)
+	}
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: sm.ConsoleCert}
 	slog.Info("console on https", "name", name, "session_hours", hours)
 	return &adminConsoleSetup{mod: m, opts: []core.Option{core.WithAdminTLS(tlsCfg, name)}}, nil

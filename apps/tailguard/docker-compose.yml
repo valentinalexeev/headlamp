@@ -11,6 +11,9 @@ services:
       # stale IP would crashloop `tailscale up` after a reboot. exit-node-tracker
       # selects it at runtime instead (see track-exit-node.sh).
       - TS_EXIT_NODE=
+      # Status page (#390): off unless TG_STATUS_PORT is set. It replaces TG_WEBUI_PORT, so an old .env that still
+      # has TG_WEBUI_PORT=8088 does not open it. Compose stops with this message if the variable is missing.
+      - "TG_WEBUI_PORT=${TG_STATUS_PORT?TG_STATUS_PORT is not set in .env (#390). Set TG_STATUS_PORT= (empty) to keep the status page off, or TG_STATUS_PORT=<port> to open it on wg0 and tailscale0}"
     volumes:
       - ./config:/etc/wireguard          # wg0.conf = the WireGuard SERVER config
       - ./state:/tailguard/state         # in-container tailscale state (persist!)
@@ -23,9 +26,10 @@ services:
       - net.ipv6.conf.all.forwarding=1
       - net.ipv4.conf.all.src_valid_mark=1
     networks: [ip6net]
+    # TG_BIND_ADDR (#390): the host address that the ports listen on, normally <host-lan-ip>. 0.0.0.0 = all addresses.
     ports:
-      - "51820:51820/udp"                # WireGuard: clients hit <host-lan-ip>:51820
-      - "41642:41642/udp"                # in-container tailscale (host tailscaled owns 41641)
+      - "${TG_BIND_ADDR:?TG_BIND_ADDR is not set in .env (#390). Set TG_BIND_ADDR=<host-lan-ip> to publish the WireGuard and tailscale ports on that address only, or TG_BIND_ADDR=0.0.0.0 to publish them on all host addresses (the behaviour before #390)}:51820:51820/udp"  # WireGuard: clients hit <host-lan-ip>:51820
+      - "${TG_BIND_ADDR:?TG_BIND_ADDR is not set in .env}:41642:41642/udp"  # in-container tailscale (host tailscaled owns 41641)
     restart: unless-stopped
     # If the host runs watchtower it auto-updates :latest. To pin this container instead,
     # uncomment:
@@ -62,7 +66,7 @@ services:
     #   - OK_N=2
 
   # Follows the exit node across re-registrations (new IP / suffixed name): selects the
-  # online exit node named $EXIT_NODE_PREFIX* whenever the selected one is gone.
+  # online exit node named $EXIT_NODE_PREFIX* with $EXIT_NODE_TAG (default tag:exit) whenever the selected one is gone.
   # Talks to tailguard's own tailscaled through the shared ./run:/tmp socket.
   exit-node-tracker:
     image: ghcr.io/juhovh/tailguard:latest
@@ -75,6 +79,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/track-exit-node.sh"]
+    environment:
+      # LAN access through the exit node (#390). No default: compose stops with this message if it is missing.
+      - "TG_LAN_ACCESS=${TG_LAN_ACCESS:?TG_LAN_ACCESS is not set in .env (#390). Set TG_LAN_ACCESS=0 so that WireGuard peers reach the internet through the exit node only, or TG_LAN_ACCESS=1 so that they can also reach the LAN of the host (the behaviour before #390)}"
     volumes:
       - ./track-exit-node.sh:/track-exit-node.sh:ro
       - ./run:/tmp

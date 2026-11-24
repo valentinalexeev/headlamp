@@ -276,7 +276,8 @@ func TestCheck(t *testing.T) {
 		{"alice@", "bob@example.test", true, refusedOtherAccount},
 	}
 	for _, tc := range cases {
-		if got := check(tc.login, oidc.Identity{Email: tc.email, EmailVerified: tc.verified}); got != tc.want {
+		id := oidc.Identity{Email: tc.email, EmailVerified: tc.verified}
+		if got := check(tc.login, id, nil); got != tc.want {
 			t.Errorf("check(%q, %q, %v) = %v, want %v", tc.login, tc.email, tc.verified, got, tc.want)
 		}
 	}

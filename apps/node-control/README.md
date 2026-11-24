@@ -238,6 +238,7 @@ logs the host names of each listener (`listener hosts`).
 | `ADMIN_OIDC_GROUPS_CLAIM` | The claim with the groups. The default is `OIDC_GROUPS_CLAIM`, then `groups`. |
 | `ADMIN_OIDC_SCOPES` | The scopes. The default is `openid email profile groups`. |
 | `ADMIN_OIDC_SESSION_HOURS` | The session length, 1 to 24. The default is 8. There is no refresh: sign in again after it. |
+| `ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS` | Optional. A comma list of email domains, for example `example.com,corp.example.com`. Unset: off. See "Trusted email domains". |
 
 To sign in, open `https://<ADMIN_CONSOLE_NAME>/auth/login`. `GET /auth/me` shows whether you are signed in, and until
 when. `POST /auth/logout` signs you out at once.
@@ -245,6 +246,31 @@ when. `POST /auth/logout` signs you out at once.
 A grant change on the Access page applies at the next request. A person whom the identity provider removes from a
 group keeps the group until the session ends, at most `ADMIN_OIDC_SESSION_HOURS`. Sessions are in memory: a restart
 of node-control signs everyone out.
+
+#### Trusted email domains
+
+The sign-in needs `email_verified=true` in the ID token. Some identity providers send `false` or no claim. The best
+fix is a mapping at the identity provider:
+
+- Authentik: add a scope mapping to the console client that returns `email_verified: True`. For example
+  `return {"email": request.user.email, "email_verified": True}`.
+- Keycloak: in the user, turn on "Email verified". Or, for users from an identity provider or LDAP, turn on "Trust
+  Email" in that provider. The default `email` client scope then sends `email_verified=true`.
+- Microsoft Entra ID: the ID token has no `email_verified`. Add the optional claim `email` to the app registration.
+  Then use `ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS` for your verified tenant domains.
+
+If you cannot change the identity provider, set `ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS`. An email in one of these domains
+then counts as verified when `email_verified` is false or missing. The rules:
+
+- The domain is the part after the last `@`. The match is exact and does not use case. A subdomain does not match:
+  list it on its own.
+- The email must still be the tailnet login. A different email is refused with `other_account`, also when it is
+  verified.
+- At start, node-control logs `admin sign-in trusts email domain without email_verified` once for each domain.
+
+**Warning:** trust a domain only when nobody can sign in at the identity provider with an address there without
+owning the mailbox. For example, users must not be able to type their own email at registration, and no external
+source may bring in addresses of that domain. Otherwise a person can take the tailnet login of an admin.
 
 #### Sign-in refused
 
@@ -254,7 +280,7 @@ in the field `reason`.
 | `reason` | Cause | What to do |
 |---|---|---|
 | `no_email` | The ID token has no email address. | Add the `email` scope or claim to the console client at the identity provider. |
-| `email_not_verified` | The claim `email_verified` is false or missing. | Make the identity provider send `email_verified=true` for the console client. Some providers send `false` by default, for example Authentik with an external source. |
+| `email_not_verified` | The claim `email_verified` is false or missing. | Make the identity provider send `email_verified=true` for the console client. Some providers send `false` by default, for example Authentik with an external source. If you cannot, and the domain is safe, add it to `ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS` (see "Trusted email domains"). |
 | `other_account` | The verified email is not the tailnet login. | Sign out of the identity provider and sign in with the account of your tailnet login. The log line shows the other email in the field `email`. The page does not show it. |
 
 ### Admin console on HTTPS: checklist

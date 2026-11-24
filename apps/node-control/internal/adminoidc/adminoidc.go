@@ -63,6 +63,9 @@ type Config struct {
 	Tailnet     WhoIs
 	Log         *slog.Logger
 	Now         func() time.Time
+	// TrustedEmailDomains are email domains whose addresses count as verified when the ID token
+	// has email_verified false or missing (#447). Empty: off.
+	TrustedEmailDomains []string
 }
 
 type session struct {
@@ -183,12 +186,13 @@ func (r refusal) page() string {
 }
 
 // check tells whether the verified email of the ID token is the tailnet login, and if not, why.
-func check(login string, id oidc.Identity) refusal {
+// An email in a trusted domain counts as verified when email_verified is false or missing (#447).
+func check(login string, id oidc.Identity, trusted []string) refusal {
 	email := strings.ToLower(strings.TrimSpace(id.Email))
 	if email == "" || !strings.Contains(email, "@") {
 		return refusedNoEmail
 	}
-	if !id.EmailVerified {
+	if !id.EmailVerified && !trustedDomain(email, trusted) {
 		return refusedUnverified
 	}
 	if strings.Contains(login, "@") && !strings.HasSuffix(login, "@") {
@@ -236,7 +240,7 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sign-in failed", http.StatusUnauthorized)
 		return
 	}
-	if why := check(login, id); why != refusedNone {
+	if why := check(login, id, m.cfg.TrustedEmailDomains); why != refusedNone {
 		// No groups for this login. The log may name the other account; the page does not.
 		attrs := []any{"login", login, "reason", why.reason()}
 		if why == refusedOtherAccount {

@@ -18,7 +18,7 @@ require (
 	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.38.0
 	modernc.org/sqlite v1.62.0
-	tailscale.com v1.104.5
+	tailscale.com v1.104.7
 )
 
 require (

@@ -1,7 +1,7 @@
 # Build context: this directory (apps/tailnet-connector). tailscale at the repo pin TAILSCALE_VERSION, from the official
 # static tarball (as apps/exit-node), plus a small entrypoint for Kubernetes. Used by charts/tailnet-connector (#103).
 #   docker build --build-arg TSVERSION=$(cat ../../TAILSCALE_VERSION) -t tailnet-connector .
-ARG TSVERSION=1.104.5
+ARG TSVERSION=1.104.7
 
 FROM alpine:3.24 AS tailscale
 ARG TSVERSION

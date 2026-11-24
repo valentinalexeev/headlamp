@@ -4,7 +4,7 @@
 # go.mod, so a version bump in one place cannot drift from the other. The tailscale client itself is
 # compiled into the binary (tsnet); there is no tailscaled and no start script. No volume: the node's
 # state lives in the shared Redis (see README "State").
-ARG TSVERSION=1.104.5
+ARG TSVERSION=1.104.7
 # VERSION is the headlamp release the image is built from (the repo's VERSION file, passed by CI). node-control's
 # fleet view shows it (#195).
 ARG VERSION=dev

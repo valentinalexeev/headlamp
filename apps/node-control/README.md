@@ -984,8 +984,22 @@ The counters reset when xray restarts (the agent restarts it whenever the creden
 0. JSON and SQLite exports and imports carry them.
 
 The **Traffic** column shows the counters since each bridge last restarted them (on a credential change). It is
-marked **Traffic\*** (partial) when a bridge did not answer, so an empty value means no traffic only when all
+marked **Traffic (partial)** when a bridge did not answer, so an empty value means no traffic only when all
 bridges answered (#436).
+
+Above the table, the **Bridges** strip has one line for each bridge (#438). Use it to find out if the problem of a
+user is a bridge problem. Each line shows:
+
+- The sync: in sync, or pending with the reason and the start time.
+- The agent: if it answered the traffic read of this page load, and the time of its last answer (a traffic read or a
+  push). node-control keeps this time in memory only, so it is empty after a restart until the agent answers.
+- The egress self-test (#196): OK, the error, or "not reported".
+- The class of the path check (#411): `ok`, the bad class, or "off".
+
+A line is red when the sync is pending, the agent did not answer or the egress self-test fails. A line is amber
+when the path check gives a class that is not `ok`. The strip shows no connection log and no client addresses.
+`GET /enroll/devices` gives the same data in `bridges`: one object for each bridge with `name`, `sync`, `answered`,
+`last_answer` (unix seconds, 0 = none), `egress` and `pathcheck` (`null` when the agent does not report it).
 
 The buttons of a row depend on its state, so the page shows no useless button:
 
@@ -1022,7 +1036,7 @@ Every bridge has its own sync state and gets its own credential set (the derived
 
 > **WARNING:** Do not think that a revocation is complete while a bridge is behind. A revocation never blocks on an unreachable bridge. Until that bridge is back, the revoked credential still works there. The banner and the per-bridge rows tell you which bridge.
 
-node-control merges traffic figures for each device across the bridges. When a bridge with a pending sync answered nothing, `stats_partial` is `true` and the page marks the column `Traffic*`: the numbers are a lower bound.
+node-control merges traffic figures for each device across the bridges. When a bridge with a pending sync answered nothing, `stats_partial` is `true` and the page marks the column `Traffic (partial)`: the numbers are a lower bound.
 
 ### Discovered bridges, approval and slow agents
 

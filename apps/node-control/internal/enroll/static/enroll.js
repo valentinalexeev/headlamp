@@ -282,7 +282,7 @@
     var copy = deps.copy || copyText;
     var later = deps.later || function (fn, ms) { setTimeout(fn, ms); };
     var st = {
-      devices: [], sync: null, ingresses: [], partial: false, loaded: false, failed: false,
+      devices: [], sync: null, ingresses: [], partial: false, bridges: [], loaded: false, failed: false,
       filter: plainFilter(hl.queryParam('filter')), busy: {}, open: null, tableSig: null, chipSig: null,
       chips: {}, drawer: null,
       // #287: people and invitations (null while self-enrolment is off or not read yet), the search text, and the
@@ -346,6 +346,68 @@
         links.appendChild(a);
       });
       box.appendChild(links);
+      box.hidden = false;
+    }
+
+    // ----- the bridge strip (#438): one line for each bridge, so a user problem that is a bridge problem shows here
+
+    function bridgeLine(b, t) {
+      var name = hl.plain(b.name, 63);
+      var sync = hl.obj(b.sync);
+      var when = function (sec) { return hl.relTime(new Date(sec * 1000).toISOString(), t); };
+      var level = 'ok';
+      var bits = [];
+      if (sync.pending) {
+        level = 'crit';
+        var reason = SYNC_REASON[sync.state] || 'sync pending';
+        bits.push('Pending: ' + reason.charAt(0).toLowerCase() + reason.slice(1) + (typeof sync.since === 'number' ? ' since ' + when(sync.since) : ''));
+      } else {
+        bits.push(sync.state === 'unknown' ? 'Sync not done yet' : 'In sync');
+      }
+      var last = typeof b.last_answer === 'number' && b.last_answer > 0 ? when(b.last_answer) : '';
+      if (b.answered) {
+        bits.push('agent answered ' + (last || 'just now'));
+      } else {
+        level = 'crit';
+        bits.push('agent did not answer' + (last ? ', last answer ' + last : ', no answer since the start'));
+      }
+      var eg = b.egress && typeof b.egress === 'object' ? b.egress : null;
+      if (!eg) {
+        bits.push('egress self-test not reported');
+      } else if (eg.ok) {
+        bits.push('egress self-test OK');
+      } else {
+        level = 'crit';
+        bits.push('egress self-test fails' + (eg.error ? ': ' + hl.plain(eg.error, 200) : ''));
+      }
+      var pc = b.pathcheck && typeof b.pathcheck === 'object' ? b.pathcheck : null;
+      var cls = pc ? hl.plain(pc.class, 32) : '';
+      if (!cls) {
+        bits.push('path check off');
+      } else if (cls === 'ok') {
+        bits.push('path check ok');
+      } else {
+        if (level === 'ok') { level = 'warn'; }
+        bits.push('path check ' + cls);
+      }
+      var p = hl.el('p', 'small');
+      p.appendChild(hl.status(level, name));
+      p.appendChild(document.createTextNode(' ' + bits.join(', ') + '. '));
+      var a = hl.el('a', null, 'Open bridge');
+      a.setAttribute('href', '/nodes?sel=' + encodeURIComponent(name));
+      p.appendChild(a);
+      return p;
+    }
+
+    function renderBridges() {
+      var box = els.bridges;
+      if (!box) { return; }
+      hl.clear(box);
+      var list = st.bridges.filter(function (b) { return b && typeof b.name === 'string' && b.name; });
+      if (!list.length) { box.hidden = true; return; }
+      var t = now();
+      box.appendChild(hl.el('h2', null, 'Bridges'));
+      list.forEach(function (b) { box.appendChild(bridgeLine(b, t)); });
       box.hidden = false;
     }
 
@@ -1160,10 +1222,12 @@
       st.sync = d.sync || null;
       st.ingresses = hl.arr(d.ingresses);
       st.partial = !!d.stats_partial;
-      els.traffic.textContent = st.partial ? 'Traffic*' : 'Traffic';
-      els.traffic.setAttribute('title', st.partial ? 'Partial: a bridge did not answer, so its traffic is missing.' :
+      st.bridges = hl.arr(d.bridges);
+      els.traffic.textContent = st.partial ? 'Traffic (partial)' : 'Traffic';
+      els.traffic.setAttribute('title', st.partial ? 'Partial: a bridge did not answer, so its traffic is missing. See Bridges above.' :
         'Traffic since each bridge last restarted its counters (on a credential change). Not a history.');
       renderSync();
+      renderBridges();
       checkEnrolled();
       render();
     };
@@ -1197,7 +1261,7 @@
     if (!root) { return; }
     var $ = function (id) { return document.getElementById(id); };
     var ctrl = mount({
-      sub: $('sub'), chips: $('chips'), error: $('error'), notice: $('notice'), syncnote: $('syncnote'), empty: $('empty'),
+      sub: $('sub'), chips: $('chips'), error: $('error'), notice: $('notice'), syncnote: $('syncnote'), bridges: $('bridges'), empty: $('empty'),
       tablewrap: $('tablewrap'), rows: $('rows'), foot: $('foot'), traffic: $('trafficth'), drawer: $('drawer'),
       search: $('search'), inviteSection: $('invites'), inviteEmail: $('inviteemail'), inviteDays: $('invitedays')
     });

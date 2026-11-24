@@ -45,6 +45,13 @@ func numeric(v any) (float64, bool) {
 // true when a target answered nothing while its sync is pending (the agent client answers an empty
 // map on any failure) or when an id could not be computed.
 func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, devices []Device) (map[int64]Traffic, bool) {
+	out, partial, _ := mergedStats(ctx, targets, cfg, devices)
+	return out, partial
+}
+
+// mergedStats is MergedStats that also says which targets answered (same order as targets). An
+// answer is recorded in the target's sync state as its last agent answer (#438).
+func mergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, devices []Device) (map[int64]Traffic, bool, []bool) {
 	answers := make([]map[string]any, len(targets))
 	panicked := make([]bool, len(targets))
 	var wg sync.WaitGroup
@@ -63,10 +70,14 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 	wg.Wait()
 	out := map[int64]Traffic{}
 	partial := false
+	answered := make([]bool, len(targets))
 	for i, t := range targets {
 		// nil: the bridge did not answer (#436). An empty map is a bridge with no traffic.
 		if panicked[i] || answers[i] == nil {
 			partial = true
+		} else {
+			answered[i] = true
+			t.State.Answered()
 		}
 		for _, d := range devices {
 			auto := d.UUIDs["auto"]
@@ -94,5 +105,5 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 			out[d.ID] = tr
 		}
 	}
-	return out, partial
+	return out, partial, answered
 }

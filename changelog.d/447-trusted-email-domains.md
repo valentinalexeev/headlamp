@@ -5,6 +5,7 @@ section: Added
 status: done
 title: Trusted email domains for the admin sign-in
 components: [node-control]
+pr: 471
 ---
 ## Summary
 

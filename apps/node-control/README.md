@@ -1267,9 +1267,22 @@ The Devices page (#287) shows one tree. Each row of the first level is one of th
 
 - A person who enrolled themselves through the identity provider. The row shows the email, the state, and the last sign-in. It has **Lock** or **Unlock**, and **Invite device**.
 - An owner that an operator typed when they enrolled a device. The row has no lock: the owner is only a label.
-- "Invited, not signed in yet": the waiting invitations for emails that have no person yet.
+- "Invited, not signed in yet": the waiting invitations for emails that have no person and no owner yet.
 
-Open a row to see its devices and its invitations. A device row has the same columns and actions as before (**New link**, **Extend**, **Revoke**, **Delete**). An invitation row shows its state, its end date and who made it, with **Withdraw** while it waits.
+Each person has one row (#440):
+
+- An owner that an operator typed can be the email of a person (the letter case can be different). Then its devices
+  are in the row of that person. Each of these devices shows "enrolled by an admin", because **Lock** does not revoke it.
+- A waiting invitation for the email of an owner that an operator typed is in the row of that owner.
+
+Open a row to see its devices and its invitations. A device row has the actions as before (**New link**, **Extend**, **Revoke**, **Delete**). An invitation row shows its state and its end date, with **Withdraw** while it waits. The hover text of an invitation shows who made it.
+
+- The table has no **Owner** column (#440). The row of the person or the owner gives the owner. The hover text of
+  the device name shows the stored owner.
+- The **Expires** column shows the days to the expiry, for example "in 84 days", "today" or "3 days ago". The hover
+  text shows the date.
+- Two or more devices in one row can have the same name (the letter case is not important). Then each of them
+  shows the count, for example "2 with this name". Rename or revoke the device that is not in use.
 
 - A closed row shows its counts: devices, how many need attention, and waiting invitations.
 - The filters (**Active**, **Expiring soon**, **Not set up**, **Revoked**, **All**) apply to the devices. A waiting invitation shows under **Active** and **All**. A used, expired or withdrawn invitation shows only under **All**.

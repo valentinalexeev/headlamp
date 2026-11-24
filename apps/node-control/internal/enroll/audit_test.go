@@ -181,8 +181,10 @@ func TestExportOmitsAudit(t *testing.T) {
 	// A key list, not a search for a word: a renamed field would pass a substring check. A new field has to be added here
 	// on purpose, which is the moment to ask whether it belongs in an export.
 	allowed := map[string][]string{
-		"":          {"seq", "devices", "links", "approvals"},
-		"devices":   {"id", "name", "owner", "client", "expires_at", "revoked", "epoch", "uuids", "enrolled_at", "enrol_count", "last_active"},
+		"": {"seq", "devices", "links", "approvals"},
+		"devices": {"id", "name", "owner", "client", "expires_at", "revoked", "epoch", "uuids", "enrolled_at", "enrol_count", "last_active",
+			// the profile format and the timeline of the device drawer (#437): times and a format name, no secret
+			"profile_at", "profile_last", "profile_format", "created_at", "invited_at", "extended_at", "revoked_at"},
 		"links":     {"hash", "device_id", "expires", "max_uses", "uses"},
 		"approvals": {"name", "fingerprint", "approved_at", "node_id", "machine_key"},
 	}

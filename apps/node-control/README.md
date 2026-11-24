@@ -322,8 +322,8 @@ These routes are sensitive by default:
 | Secrets | `GET` and `PUT /tasks/secrets` |
 
 `POST /policy/confirm` and `POST /policy/revert-now` are not sensitive. Thus a policy change can always be confirmed
-or reverted. To change the list, use `ADMIN_OIDC_REAUTH_ROUTES`. node-control does not start if a pattern in it is
-not an admin route, or if the route has no permission check.
+or reverted. To change the list, use `ADMIN_OIDC_REAUTH_ROUTES`. node-control does not start if a pattern in that
+setting is not an admin route. It also does not start if the route has no permission check.
 
 When the sign-in is too old:
 

@@ -1255,8 +1255,8 @@ The Devices page (#287) shows one tree. Each row of the first level is one of th
 
 Each person has one row (#440):
 
-- An owner that an operator typed is a person's email (the letter case can be different): its devices are in the row
-  of that person. Each of these devices shows "enrolled by an admin", because **Lock** does not revoke it.
+- An owner that an operator typed can be the email of a person (the letter case can be different). Then its devices
+  are in the row of that person. Each of these devices shows "enrolled by an admin", because **Lock** does not revoke it.
 - A waiting invitation for the email of an owner that an operator typed is in the row of that owner.
 
 Open a row to see its devices and its invitations. A device row has the actions as before (**New link**, **Extend**, **Revoke**, **Delete**). An invitation row shows its state and its end date, with **Withdraw** while it waits. The hover text of an invitation shows who made it.
@@ -1265,8 +1265,8 @@ Open a row to see its devices and its invitations. A device row has the actions 
   the device name shows the stored owner.
 - The **Expires** column shows the days to the expiry, for example "in 84 days", "today" or "3 days ago". The hover
   text shows the date.
-- When two or more devices in one row have the same name (the letter case is not important), each of them shows
-  "2 with this name" (or the count). Rename or revoke the device that is not in use.
+- Two or more devices in one row can have the same name (the letter case is not important). Then each of them
+  shows the count, for example "2 with this name". Rename or revoke the device that is not in use.
 
 - A closed row shows its counts: devices, how many need attention, and waiting invitations.
 - The filters (**Active**, **Expiring soon**, **Not set up**, **Revoked**, **All**) apply to the devices. A waiting invitation shows under **Active** and **All**. A used, expired or withdrawn invitation shows only under **All**.

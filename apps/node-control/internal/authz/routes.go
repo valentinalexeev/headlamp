@@ -32,9 +32,15 @@ const (
 type Rule struct {
 	Kind Kind
 	Perm Perm
+	// Sensitive marks a route that asks for a recent sign-in on the console on HTTPS when
+	// re-authentication is on (#469): a key, grant, role, secret or policy change.
+	Sensitive bool
 }
 
 func need(f Feature, l Level) Rule { return Rule{Kind: KindPerm, Perm: Perm{f, l}} }
+
+// reauth is r marked Sensitive.
+func reauth(r Rule) Rule { r.Sensitive = true; return r }
 
 var (
 	open    = Rule{Kind: KindOpen}
@@ -92,9 +98,9 @@ var Routes = map[string]Rule{
 	"POST /enroll/devices/{id}/links":         need(FeatureEnroll, LevelOperate),
 	"POST /enroll/devices/{id}/revoke":        need(FeatureEnroll, LevelOperate),
 	"POST /enroll/devices/{id}/extend":        need(FeatureEnroll, LevelOperate),
-	"POST /enroll/devices/{id}/rotate-secret": need(FeatureEnroll, LevelOperate),
+	"POST /enroll/devices/{id}/rotate-secret": reauth(need(FeatureEnroll, LevelOperate)),
 	"GET /enroll/ingresses":                   need(FeatureEnroll, LevelView),
-	"POST /enroll/ingresses/{name}/approve":   need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/ingresses/{name}/approve":   reauth(need(FeatureEnroll, LevelAdmin)),
 	"POST /enroll/ingresses/{name}/unapprove": need(FeatureEnroll, LevelAdmin),
 	"GET /enroll/tailnet-acl":                 need(FeatureEnroll, LevelView),
 	"GET /enroll/people":                      need(FeatureEnroll, LevelView),
@@ -103,23 +109,23 @@ var Routes = map[string]Rule{
 	"GET /enroll/static/invites.js":           open,
 	"GET /enroll/invites":                     need(FeatureEnroll, LevelView),
 	// An invitation lets a new person in: a relay device and a tailnet key.
-	"POST /enroll/invites":             need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/invites":             reauth(need(FeatureEnroll, LevelAdmin)),
 	"POST /enroll/invites/{id}/revoke": need(FeatureEnroll, LevelOperate),
-	"POST /enroll/tailnet-acl":         need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/tailnet-acl":         reauth(need(FeatureEnroll, LevelAdmin)),
 	// tailnet grants (#139): view to read, admin to change
 	"GET /enroll/tailnet-grants":                   need(FeatureEnroll, LevelView),
-	"POST /enroll/tailnet-grants/mode":             need(FeatureEnroll, LevelAdmin),
-	"POST /enroll/tailnet-grants/targets":          need(FeatureEnroll, LevelAdmin),
-	"DELETE /enroll/tailnet-grants/targets/{name}": need(FeatureEnroll, LevelAdmin),
-	"POST /enroll/tailnet-grants/subject":          need(FeatureEnroll, LevelAdmin),
-	"POST /enroll/tailnet-grants/convert":          need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/tailnet-grants/mode":             reauth(need(FeatureEnroll, LevelAdmin)),
+	"POST /enroll/tailnet-grants/targets":          reauth(need(FeatureEnroll, LevelAdmin)),
+	"DELETE /enroll/tailnet-grants/targets/{name}": reauth(need(FeatureEnroll, LevelAdmin)),
+	"POST /enroll/tailnet-grants/subject":          reauth(need(FeatureEnroll, LevelAdmin)),
+	"POST /enroll/tailnet-grants/convert":          reauth(need(FeatureEnroll, LevelAdmin)),
 	// bridge selection console (#314), only with ENROLL_SELECTION_UI=1
 	"GET /enroll/selection":           need(FeatureEnroll, LevelView),
 	"GET /enroll/static/selection.js": open,
 	"GET /enroll/selection/state":     need(FeatureEnroll, LevelView),
 	"GET /enroll/selection/export":    need(FeatureEnroll, LevelView),
 	"POST /enroll/selection/preview":  need(FeatureEnroll, LevelAdmin),
-	"POST /enroll/selection/apply":    need(FeatureEnroll, LevelAdmin),
+	"POST /enroll/selection/apply":    reauth(need(FeatureEnroll, LevelAdmin)),
 	"POST /enroll/selection/revert":   need(FeatureEnroll, LevelAdmin),
 
 	// tasks
@@ -133,8 +139,8 @@ var Routes = map[string]Rule{
 	"DELETE /runs/{id}":                need(FeatureTasks, LevelOperate),
 	"GET /tasks/config":                need(FeatureTasks, LevelView),
 	"PUT /tasks/config":                need(FeatureTasks, LevelAdmin),
-	"GET /tasks/secrets":               need(FeatureTasks, LevelAdmin),
-	"PUT /tasks/secrets":               need(FeatureTasks, LevelAdmin),
+	"GET /tasks/secrets":               reauth(need(FeatureTasks, LevelAdmin)),
+	"PUT /tasks/secrets":               reauth(need(FeatureTasks, LevelAdmin)),
 	"GET /sessions":                    need(FeatureTasks, LevelView),
 	"GET /sessions/static/sessions.js": open,
 	"GET /sessions.json":               need(FeatureTasks, LevelView),
@@ -147,9 +153,9 @@ var Routes = map[string]Rule{
 	"GET /policy/state":            need(FeaturePolicy, LevelView),
 	"GET /policy/api/map":          need(FeaturePolicy, LevelView),
 	"POST /policy/preview":         need(FeaturePolicy, LevelView),
-	"POST /policy/apply":           need(FeaturePolicy, LevelAdmin),
+	"POST /policy/apply":           reauth(need(FeaturePolicy, LevelAdmin)),
 	"POST /policy/confirm":         need(FeaturePolicy, LevelAdmin),
-	"POST /policy/revert/{id}":     need(FeaturePolicy, LevelAdmin),
+	"POST /policy/revert/{id}":     reauth(need(FeaturePolicy, LevelAdmin)),
 	"POST /policy/revert-now":      need(FeaturePolicy, LevelAdmin),
 
 	// funnel
@@ -159,11 +165,11 @@ var Routes = map[string]Rule{
 	"GET /funnel/state":                    need(FeatureFunnel, LevelView),
 	"GET /funnel/config":                   need(FeatureFunnel, LevelView),
 	"GET /funnel/audit":                    need(FeatureFunnel, LevelView),
-	"GET /funnel/namespaces/{name}/keys":   need(FeatureFunnel, LevelAdmin),
+	"GET /funnel/namespaces/{name}/keys":   reauth(need(FeatureFunnel, LevelAdmin)),
 	"POST /funnel/namespaces":              need(FeatureFunnel, LevelAdmin),
 	"PATCH /funnel/namespaces/{name}":      need(FeatureFunnel, LevelAdmin),
 	"DELETE /funnel/namespaces/{name}":     need(FeatureFunnel, LevelAdmin),
-	"POST /funnel/namespaces/{name}/keys":  need(FeatureFunnel, LevelAdmin),
+	"POST /funnel/namespaces/{name}/keys":  reauth(need(FeatureFunnel, LevelAdmin)),
 	"DELETE /funnel/keys/{id}":             need(FeatureFunnel, LevelAdmin),
 	"POST /funnel/routes":                  need(FeatureFunnel, LevelAdmin),
 	"DELETE /funnel/routes/{ns}/{service}": need(FeatureFunnel, LevelAdmin),
@@ -185,7 +191,7 @@ var Routes = map[string]Rule{
 	"GET /serve/state":                       need(FeatureServe, LevelView),
 	"POST /serve/services":                   need(FeatureServe, LevelAdmin),
 	"DELETE /serve/services/{id}":            need(FeatureServe, LevelAdmin),
-	"POST /serve/services/{id}/keys":         need(FeatureServe, LevelAdmin),
+	"POST /serve/services/{id}/keys":         reauth(need(FeatureServe, LevelAdmin)),
 	"DELETE /serve/services/{id}/keys/{key}": need(FeatureServe, LevelAdmin),
 	"GET /serve/ca.crt":                      open,
 	"GET /serve":                             need(FeatureServe, LevelView),
@@ -198,10 +204,45 @@ var Routes = map[string]Rule{
 	"GET /admin/state":            need(FeatureAdmin, LevelView),
 	"GET /admin/export":           need(FeatureAdmin, LevelView),
 	"GET /admin/audit":            need(FeatureAudit, LevelView),
-	"POST /admin/grants":          need(FeatureAdmin, LevelAdmin),
-	"PUT /admin/roles/{name}":     need(FeatureAdmin, LevelAdmin),
-	"DELETE /admin/roles/{name}":  need(FeatureAdmin, LevelAdmin),
-	"POST /admin/import":          need(FeatureAdmin, LevelAdmin),
+	"POST /admin/grants":          reauth(need(FeatureAdmin, LevelAdmin)),
+	"PUT /admin/roles/{name}":     reauth(need(FeatureAdmin, LevelAdmin)),
+	"DELETE /admin/roles/{name}":  reauth(need(FeatureAdmin, LevelAdmin)),
+	"POST /admin/import":          reauth(need(FeatureAdmin, LevelAdmin)),
+}
+
+// SensitivePatterns returns the routes that ask for a recent sign-in (#469): the routes marked
+// Sensitive in Routes, changed by overrides. overrides is a comma list of exact patterns: a
+// pattern adds the route, "-" before a pattern removes it. A pattern that is not in Routes, or a
+// route without a permission check (open, machine, the sign-in itself), is an error.
+func SensitivePatterns(overrides string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for p, r := range Routes {
+		if r.Sensitive {
+			out[p] = true
+		}
+	}
+	for _, f := range strings.Split(overrides, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		remove := strings.HasPrefix(f, "-")
+		p := strings.Join(strings.Fields(strings.TrimPrefix(f, "-")), " ")
+		r, ok := Routes[p]
+		if !ok {
+			return nil, fmt.Errorf("unknown admin route %q", p)
+		}
+		if r.Kind != KindPerm && r.Kind != KindAnyUser {
+			return nil, fmt.Errorf("admin route %q has no permission check: it cannot ask for a "+
+				"new sign-in", p)
+		}
+		if remove {
+			delete(out, p)
+		} else {
+			out[p] = true
+		}
+	}
+	return out, nil
 }
 
 // Authorizer is the core.Authorizer of the admin listener. Open is the transition mode of #122 decision 3: when

@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,9 @@ type Flow struct {
 	State    string
 	Nonce    string
 	Verifier string
+	// MaxAge, when above zero, asks the issuer for a new sign-in: AuthURL adds prompt=login and
+	// max_age (whole seconds, at least 1).
+	MaxAge time.Duration
 }
 
 // NewFlow returns fresh random flow values.
@@ -52,6 +56,10 @@ func (p *Provider) AuthURL(f Flow) string {
 		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
 		"code_challenge_method": {"S256"},
 	}
+	if f.MaxAge > 0 {
+		q.Set("prompt", "login")
+		q.Set("max_age", strconv.FormatInt(max(int64(f.MaxAge/time.Second), 1), 10))
+	}
 	sep := "?"
 	if strings.Contains(p.meta.AuthEndpoint, "?") {
 		sep = "&"
@@ -76,6 +84,9 @@ type Identity struct {
 	GroupsKnown  bool
 	RefreshToken string // empty when the issuer gave none
 	Expiry       time.Time
+	// AuthTime is the auth_time claim: when the person last signed in at the issuer. Zero when the
+	// ID token has no such claim.
+	AuthTime time.Time
 }
 
 // Errors of the callback. ErrState and ErrDenied are user-facing; the others are failures of the issuer or an attack.
@@ -198,6 +209,14 @@ func (p *Provider) Verify(ctx context.Context, raw, nonce, groupsClaim string) (
 	id.Name, _ = claims["name"].(string)
 	if exp, err := claims.GetExpirationTime(); err == nil && exp != nil {
 		id.Expiry = exp.Time
+	}
+	switch v := claims["auth_time"].(type) {
+	case float64:
+		id.AuthTime = time.Unix(int64(v), 0)
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			id.AuthTime = time.Unix(n, 0)
+		}
 	}
 	if groupsClaim != "" {
 		id.Groups = stringsOf(claims[groupsClaim])

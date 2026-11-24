@@ -20,7 +20,7 @@
   var CLIENTS = ['karing', 'sing-box', 'clash', 'shadowrocket', 'stash', 'happ', 'throne']; // the catalog of clients.go
   var CLIENT_KEY = 'enrollClient';
   var FILTERS = [['active', 'Active'], ['expiring', 'Expiring soon'], ['never', 'Not set up'], ['revoked', 'Revoked'], ['all', 'All']];
-  var COLUMNS = 7;
+  var COLUMNS = 6;
   var SYNC_REASON = {
     unreachable: 'Agent unreachable', unauthorized: 'Agent refused the credentials',
     rejected: 'Agent rejected the credentials', conflict: 'Agent reports a conflict', error: 'Sync ended in an error'
@@ -43,6 +43,39 @@
     if (isNaN(d.getTime())) { return ''; }
     var sameYear = d.getFullYear() === new Date().getFullYear();
     return d.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  // relExpiry (#440): an expiry as days from now ("in 84 days", "today", "3 days ago"); the date goes in the hover
+  // title. Counted like the state word: a part of a day ahead is a whole day.
+  function relExpiry(sec, nowMs) {
+    var ms = sec * 1000;
+    if (!(sec > 0) || isNaN(ms)) { return ''; }
+    if (ms >= nowMs) {
+      var ahead = Math.ceil((ms - nowMs) / DAY);
+      return ms - nowMs < DAY ? 'today' : (ahead === 1 ? 'in 1 day' : 'in ' + ahead + ' days');
+    }
+    var ago = Math.floor((nowMs - ms) / DAY);
+    return ago === 0 ? 'today' : (ago === 1 ? '1 day ago' : ago + ' days ago');
+  }
+
+  // fullDate: the date with its year, for the hover title of an expiry.
+  function fullDate(sec) {
+    var d = new Date(sec * 1000);
+    return isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  // emailKey: the lower-case form of an owner that is an email address, '' for any other owner.
+  function emailKey(s) {
+    var v = String(s || '').trim().toLowerCase();
+    return /^[^\s@]+@[^\s@]+$/.test(v) ? v : '';
+  }
+
+  // sameNames (#440): the lower-case names that two or more of the devices share, with their counts.
+  function sameNames(devices) {
+    var n = {};
+    devices.forEach(function (d) { var k = hl.plain(d.name, 100).trim().toLowerCase(); if (k) { n[k] = (n[k] || 0) + 1; } });
+    Object.keys(n).forEach(function (k) { if (n[k] < 2) { delete n[k]; } });
+    return n;
   }
 
   // setUp: an app has the device's profile (#436). A spent one-time link, a profile download (also for a device made
@@ -185,7 +218,9 @@
   // groupTree (#287) puts each device and invitation under its person or owner. people and invites are null when
   // self-enrolment is off. A self-enrolled person (owner "oidc:<subject>") is one group, with the devices of that
   // owner and the invitations it used or that name its email. An operator-made owner is one group of its devices.
-  // A waiting invitation for an email with no person yet goes to the group "Invited, not signed in yet". Used,
+  // One person is one group (#440): an operator-made owner that is the email of a person joins that person's group,
+  // and an invitation for the email of an operator-made owner goes under that owner.
+  // A waiting invitation for an email with no person or owner yet goes to the group "Invited, not signed in yet". Used,
   // expired and withdrawn invitations show only with the filter "all", waiting ones under "active" and "all". q is a search text (lower case): a group
   // shows when its label, owner or one of its device names or invitation emails contains it.
   // Each group: { key, kind: person|owner|invited, label, person, devices: [device], invites: [invite], hidden }.
@@ -202,12 +237,25 @@
       g.person = p;
       if (p.email) { byEmail[String(p.email).toLowerCase()] = g; }
     });
-    hl.arr(devices).forEach(function (d) {
-      var owner = typeof d.owner === 'string' ? d.owner : '';
-      var self = owner.indexOf(OIDC) === 0;
-      var label = self ? (hl.plain(d.owner_email, 120) || hl.plain(owner, 120)) : (hl.plain(owner, 120) || 'No owner');
-      var g = group((self ? 'p:' : 'o:') + owner, self ? 'person' : 'owner', label);
-      if (self && d.owner_email && !byEmail[String(d.owner_email).toLowerCase()]) { byEmail[String(d.owner_email).toLowerCase()] = g; }
+    var list = hl.arr(devices).filter(function (d) { return d; });
+    var ownerOf = function (d) { return typeof d.owner === 'string' ? d.owner : ''; };
+    // Self-enrolled devices first, so that every person is known before an operator-made owner looks for one.
+    list.forEach(function (d) {
+      var owner = ownerOf(d);
+      if (owner.indexOf(OIDC) !== 0) { return; }
+      var g = group('p:' + owner, 'person', hl.plain(d.owner_email, 120) || hl.plain(owner, 120));
+      if (d.owner_email && !byEmail[String(d.owner_email).toLowerCase()]) { byEmail[String(d.owner_email).toLowerCase()] = g; }
+    });
+    list.forEach(function (d) {
+      var owner = ownerOf(d);
+      var g;
+      if (owner.indexOf(OIDC) === 0) {
+        g = groups['p:' + owner];
+      } else {
+        var mail = emailKey(owner);
+        g = (mail && byEmail[mail]) || group('o:' + owner, 'owner', hl.plain(owner, 120) || 'No owner');
+        if (mail && !byEmail[mail]) { byEmail[mail] = g; }
+      }
       g.all++;
       if (matches(filter, stateOf(d, nowMs))) { g.devices.push(d); }
     });
@@ -410,7 +458,8 @@
         seen: d.last_active > 0 ? hl.relTime(new Date(d.last_active * 1000).toISOString(), t) : 'Never',
         traffic: total === null ? '-' : (hl.fmtBytes(total) || '-'),
         trafficTitle: d.traffic ? 'Up ' + (hl.fmtBytes(Number(d.traffic.up) || 0) || '0 B') + ', down ' + (hl.fmtBytes(Number(d.traffic.down) || 0) || '0 B') : '',
-        exp: s.kind === 'revoked' ? 'n/a' : fmtDate(d.expires_at),
+        exp: s.kind === 'revoked' ? 'n/a' : relExpiry(d.expires_at, t),
+        expTitle: s.kind === 'revoked' ? '' : fullDate(d.expires_at),
         actions: actionsFor(d, t).concat(rowExtras()), expiresAt: d.expires_at
       };
     }
@@ -704,7 +753,6 @@
       var open = isOpen(g.key);
       var tr = hl.el('tr', 'grp');
       var head = hl.el('td', 'name');
-      head.setAttribute('colspan', '2');
       var tog = keyed(hl.el('button', 'btn quiet sm tog'), 'grp:' + g.key);
       tog.setAttribute('type', 'button');
       tog.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -748,13 +796,26 @@
       return tr;
     }
 
-    function deviceRow(r) {
+    // deviceRow: one device under its group. The group row names the owner, so the row has no owner (#440). same is
+    // the count of the group's devices with this name (a mark from 2 on). A device that an operator made for the
+    // email of a person (in that person's group) says so, because Lock does not revoke it.
+    function deviceRow(r, g, same) {
       var d = find(r.id);
       var tr = hl.el('tr', 'leaf' + (st.open && st.open.id === r.id ? ' sel' : ''));
-      tr.appendChild(hl.el('td', 'name', r.name));
-      var oc = hl.el('td', 't2 clip', r.owner);
-      oc.setAttribute('title', r.ownerId);
-      tr.appendChild(oc);
+      var nc = hl.el('td', 'name');
+      nc.appendChild(hl.el('span', null, r.name));
+      nc.setAttribute('title', 'Owner ' + r.owner);
+      if (same > 1) {
+        var dup = hl.el('span', 't3 small', ' · ' + same + ' with this name');
+        dup.setAttribute('title', same + ' devices of ' + g.label + ' are named ' + r.name + '. Rename or revoke the one that is not in use.');
+        nc.appendChild(dup);
+      }
+      if (g.kind === 'person' && r.ownerId.indexOf(OIDC) !== 0) {
+        var adm = hl.el('span', 't3 small', ' · enrolled by an admin');
+        adm.setAttribute('title', 'Owner ' + r.owner + '. Lock does not revoke this device.');
+        nc.appendChild(adm);
+      }
+      tr.appendChild(nc);
       var state = hl.el('td');
       state.appendChild(hl.status(r.level, r.word));
       tr.appendChild(state);
@@ -762,7 +823,9 @@
       var tc = hl.el('td', 'mono t2', r.traffic);
       if (r.trafficTitle) { tc.setAttribute('title', r.trafficTitle); }
       tr.appendChild(tc);
-      tr.appendChild(hl.el('td', 'mono t2', r.exp));
+      var ec = hl.el('td', 't2', r.exp);
+      if (r.expTitle) { ec.setAttribute('title', r.expTitle); }
+      tr.appendChild(ec);
       var actCell = hl.el('td', 'act');
       var box = hl.el('div', 'rowbtns');
       r.actions.forEach(function (a) {
@@ -775,21 +838,23 @@
       return tr;
     }
 
-    function inviteRow(inv) {
+    function inviteRow(inv, t) {
       var key = 'inv' + inv.id;
       var tr = hl.el('tr', 'leaf' + (st.open && st.open.id === key ? ' sel' : ''));
       var who = hl.el('td', 'name');
       who.appendChild(hl.el('span', 't3', '✉ '));
       who.appendChild(hl.el('span', null, hl.plain(inv.email, 120)));
+      who.setAttribute('title', inv.created_by ? 'Invitation by ' + hl.plain(inv.created_by, 80) : 'Invitation');
       tr.appendChild(who);
-      tr.appendChild(hl.el('td', 't2 clip', inv.created_by ? 'Invitation by ' + hl.plain(inv.created_by, 80) : 'Invitation'));
       var w = INVITE_WORD[inv.state] || ['warn', hl.plain(inv.state, 20)];
       var stc = hl.el('td');
       stc.appendChild(hl.status(w[0], w[1]));
       tr.appendChild(stc);
       tr.appendChild(hl.el('td', 't2', ''));
       tr.appendChild(hl.el('td', 't2', ''));
-      tr.appendChild(hl.el('td', 'mono t2', inv.expires_at ? fmtDate(inv.expires_at) : ''));
+      var ec = hl.el('td', 't2', inv.expires_at ? relExpiry(inv.expires_at, t) : '');
+      if (inv.expires_at) { ec.setAttribute('title', fullDate(inv.expires_at)); }
+      tr.appendChild(ec);
       var act = hl.el('td', 'act');
       var box = hl.el('div', 'rowbtns');
       if (inv.state === 'pending') {
@@ -841,13 +906,14 @@
         els.rows.appendChild(groupRow(g, t));
         if (st.open && st.open.id === g.key) { detailRow(g.key); }
         if (!isOpen(g.key)) { return; }
+        var same = sameNames(g.devices);
         g.devices.map(rowModel).sort(function (a, b) {
           return (rank[a.level] - rank[b.level]) || (a.expiresAt - b.expiresAt) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
         }).forEach(function (r) {
-          els.rows.appendChild(deviceRow(r));
+          els.rows.appendChild(deviceRow(r, g, same[r.name.trim().toLowerCase()] || 0));
           if (st.open && st.open.id === r.id) { detailRow(r.id); }
         });
-        g.invites.forEach(function (inv) { els.rows.appendChild(inviteRow(inv)); });
+        g.invites.forEach(function (inv) { els.rows.appendChild(inviteRow(inv, t)); });
       });
       hl.refocus(els.rows, fk);
     }
@@ -1352,7 +1418,8 @@
 
   hl.devices = {
     stateOf: stateOf, actionsFor: actionsFor, supportInfo: supportInfo, mount: mount, init: init, endOfDay: endOfDay, defaultExpiry: defaultExpiry,
-    extendTo: extendTo, lastClient: lastClient, setUp: setUp, groupTree: groupTree, groupCounts: groupCounts
+    extendTo: extendTo, lastClient: lastClient, setUp: setUp, groupTree: groupTree, groupCounts: groupCounts,
+    relExpiry: relExpiry, sameNames: sameNames
   };
   init();
 })();

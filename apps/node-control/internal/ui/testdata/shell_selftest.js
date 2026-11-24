@@ -269,5 +269,28 @@ function ctl(p, api, extra) { return shell.controller(p, Object.assign({ api, no
     assert.strictEqual(on.counts[0].el.textContent, '1');
     delete global.window.location;
   }
+  // authView (#448): a sign-in link with the local page, or the login and a sign-out button
+  {
+    assert.strictEqual(shell.authView(null, '/'), null);
+    const out = shell.authView({ signed_in: false, login: 'alice@' }, '/nodes?x=1');
+    assert.strictEqual(out.link.label, 'Sign in');
+    assert.strictEqual(out.link.href, '/auth/login?next=%2Fnodes%3Fx%3D1');
+    assert.strictEqual(shell.authView({ signed_in: false }, '//evil.test').link.href, '/auth/login?next=%2F');
+    const inn = shell.authView({ signed_in: true, login: 'alice@', until: '2026-01-01T20:00:00Z' }, '/');
+    assert.ok(inn.text.startsWith('Signed in as alice@ (expires '));
+    assert.strictEqual(inn.signOut, true);
+    const slot = node('span');
+    let calls = [];
+    let reloaded = 0;
+    shell.renderAuth(slot, inn, { api: async (m, u) => { calls.push(m + ' ' + u); }, reload: () => { reloaded += 1; } });
+    assert.strictEqual(slot.hidden, false);
+    assert.ok(buttons(slot).includes('Sign out'));
+    find(slot, (x) => x.tag === 'button')[0].click();
+    await new Promise((r) => setImmediate(r));
+    assert.deepStrictEqual(calls, ['POST /auth/logout']);
+    assert.strictEqual(reloaded, 1);
+    shell.renderAuth(slot, null, {});
+    assert.strictEqual(slot.hidden, true);
+  }
   console.log('shell self-test ok');
 })().catch((e) => { console.error(e); process.exit(1); });

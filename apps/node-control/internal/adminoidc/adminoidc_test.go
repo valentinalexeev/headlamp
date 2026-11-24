@@ -53,7 +53,10 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-func newRig(t *testing.T) *rig {
+func newRig(t *testing.T) *rig { return newRigWith(t, nil) }
+
+// newRigWith is newRig with a change to the Config; the console is behind Gate.
+func newRigWith(t *testing.T, change func(*Config)) *rig {
 	r := &rig{t: t, who: &authz.Who{Login: "alice@example.test"}, log: &syncBuffer{}}
 	pol, err := authz.NewPolicy(authz.Config{Grants: []authz.Grant{{Subject: "owner@", Roles: []string{"owner"}}}})
 	if err != nil {
@@ -65,7 +68,11 @@ func newRig(t *testing.T) *rig {
 
 	tn := tailnetFunc(func() authz.Who { return *r.who })
 	mux := core.NewMux()
-	r.srv = httptest.NewUnstartedServer(mux)
+	var top http.Handler = mux
+	r.srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter,
+		req *http.Request) {
+		top.ServeHTTP(w, req)
+	}))
 	r.srv.StartTLS()
 	t.Cleanup(r.srv.Close)
 	r.is = oidctest.New(t, "nc-admin", "sec", r.srv.URL+"/auth/callback")
@@ -76,8 +83,14 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := New(Config{Provider: p, GroupsClaim: "groups", Tailnet: tn, Log: slog.New(slog.NewTextHandler(r.log, nil))})
+	cfg := Config{Provider: p, GroupsClaim: "groups", Tailnet: tn,
+		Log: slog.New(slog.NewTextHandler(r.log, nil))}
+	if change != nil {
+		change(&cfg)
+	}
+	m := New(cfg)
 	m.Register(mux)
+	top = m.Gate(mux)
 	gate := func(perm authz.Perm) http.Handler {
 		return authz.Gate(gateTailnet{f: tn}, perm, authz.Allowed{}, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)

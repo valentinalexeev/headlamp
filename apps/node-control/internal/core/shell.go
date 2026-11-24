@@ -153,6 +153,8 @@ func renderShell(items []NavItem, actions []NavAction, login, reqPath string, no
 		b.WriteString(searchBox(actions))
 	}
 	b.WriteString(`<span class="fresh mono" data-fresh></span>`)
+	// The console sign-in (#448): shell.js fills it from /auth/me on the console on HTTPS.
+	b.WriteString(`<span class="auth small" data-auth hidden></span>`)
 	for _, a := range actions {
 		b.WriteString(`<a class="btn primary" href="` + esc(a.Path) + `">` + ui.Icon(a.Icon) + `<span>` + esc(a.Label) + `</span></a>`)
 	}

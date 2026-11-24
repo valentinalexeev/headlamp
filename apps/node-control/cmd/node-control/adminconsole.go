@@ -30,6 +30,10 @@ import (
 //	ADMIN_OIDC_GROUPS_CLAIM       the groups claim (default OIDC_GROUPS_CLAIM, then "groups")
 //	ADMIN_OIDC_SCOPES             the scopes (default "openid email profile groups")
 //	ADMIN_OIDC_SESSION_HOURS      the session length, 1 to 24 (default 8)
+//	ADMIN_OIDC_REQUIRED           1 (default): the console on HTTPS needs the sign-in as a second
+//	                              factor (#448); 0: the sign-in only adds groups
+//	ADMIN_OIDC_IDLE_MINUTES       required mode: end a session after this many minutes without a
+//	                              request, 5 to 480 (default 30)
 //
 // The redirect URL is https://<ADMIN_CONSOLE_NAME>/auth/callback. It needs serve (SERVE_DB), whose
 // certificate the console uses.
@@ -49,6 +53,16 @@ type adminOIDCModule struct {
 	addrs                            func() []netip.Addr
 	cfg                              adminoidc.Config
 	issuer, clientID, secret, scopes string
+	oidc                             *adminoidc.Module // set by Register
+}
+
+// gate wraps the handler of the console on HTTPS with the required sign-in (#448). Run calls it
+// after Register, so m.oidc is set.
+func (m *adminOIDCModule) gate(next http.Handler) http.Handler {
+	if m.oidc == nil {
+		panic("adminoidc: the gate is built before Register")
+	}
+	return m.oidc.Gate(next)
 }
 
 func (m *adminOIDCModule) Name() string { return "adminoidc" }
@@ -64,7 +78,8 @@ func (m *adminOIDCModule) Register(r *core.Routes) error {
 		return fmt.Errorf("ADMIN_OIDC: issuer %s: %w", m.issuer, err)
 	}
 	m.cfg.Provider, m.cfg.Tailnet, m.cfg.Log = p, r.Tailnet, r.Log
-	adminoidc.New(m.cfg).Register(r.Admin)
+	m.oidc = adminoidc.New(m.cfg)
+	m.oidc.Register(r.Admin)
 	return nil
 }
 
@@ -103,13 +118,32 @@ func adminConsole(env core.Env, serve core.Module, addrs func() []netip.Addr) (
 		}
 		hours = n
 	}
+	required := true
+	switch v := strings.TrimSpace(env.Getenv("ADMIN_OIDC_REQUIRED")); v {
+	case "", "1":
+	case "0":
+		required = false
+	default:
+		return nil, errors.New("ADMIN_OIDC_REQUIRED must be 1 (the console needs the sign-in) " +
+			"or 0 (the sign-in only adds groups)")
+	}
+	idle := 30
+	if v := env.Getenv("ADMIN_OIDC_IDLE_MINUTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 5 || n > 480 {
+			return nil, errors.New("ADMIN_OIDC_IDLE_MINUTES must be a whole number from 5 to 480")
+		}
+		idle = n
+	}
 	m := &adminOIDCModule{env: env, serve: sm, name: name, addrs: addrs,
 		issuer: issuer, clientID: clientID, secret: env.Getenv("ADMIN_OIDC_CLIENT_SECRET"),
 		scopes: env.Default("ADMIN_OIDC_SCOPES", "openid email profile groups"),
 		cfg: adminoidc.Config{
 			GroupsClaim: env.Default("ADMIN_OIDC_GROUPS_CLAIM",
 				env.Default("OIDC_GROUPS_CLAIM", "groups")),
-			Session: time.Duration(hours) * time.Hour,
+			Session:  time.Duration(hours) * time.Hour,
+			Required: required,
+			Idle:     time.Duration(idle) * time.Minute,
 			TrustedEmailDomains: adminoidc.ParseDomains(
 				env.Getenv("ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS")),
 		}}
@@ -117,8 +151,10 @@ func adminConsole(env core.Env, serve core.Module, addrs func() []netip.Addr) (
 		slog.Warn("admin sign-in trusts email domain without email_verified", "domain", d)
 	}
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: sm.ConsoleCert}
-	slog.Info("console on https", "name", name, "session_hours", hours)
-	return &adminConsoleSetup{mod: m, opts: []core.Option{core.WithAdminTLS(tlsCfg, name)}}, nil
+	slog.Info("console on https", "name", name, "session_hours", hours, "required", required,
+		"idle_minutes", idle)
+	return &adminConsoleSetup{mod: m, opts: []core.Option{core.WithAdminTLS(tlsCfg, name),
+		core.WithAdminTLSGate(m.gate)}}, nil
 }
 
 // serveModule finds the serve module in mods (nil when it is not there).

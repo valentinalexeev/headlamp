@@ -60,9 +60,14 @@ type Config struct {
 	Provider    Provider
 	GroupsClaim string
 	Session     time.Duration
-	Tailnet     WhoIs
-	Log         *slog.Logger
-	Now         func() time.Time
+	// Required makes the sign-in a second factor of the console on HTTPS (#448): see Gate.
+	Required bool
+	// Idle ends a session after this long without a request, in required mode only. Zero there
+	// means DefaultIdle.
+	Idle    time.Duration
+	Tailnet WhoIs
+	Log     *slog.Logger
+	Now     func() time.Time
 	// TrustedEmailDomains are email domains whose addresses count as verified when the ID token
 	// has email_verified false or missing (#447). Empty: off.
 	TrustedEmailDomains []string
@@ -71,6 +76,7 @@ type Config struct {
 type session struct {
 	login string
 	until time.Time
+	last  time.Time // the last request with the cookie (the idle timeout of required mode)
 }
 
 // Module serves /auth/login, /auth/callback and /auth/logout on the console.
@@ -80,6 +86,7 @@ type Module struct {
 	sessions map[string]session   // sha256(cookie) -> session
 	flows    map[string]oidc.Flow // state -> flow, until used or expired
 	flowAt   map[string]time.Time
+	flowNext map[string]string // state -> the local path to open after the sign-in
 }
 
 // New returns the sign-in module.
@@ -93,8 +100,13 @@ func New(cfg Config) *Module {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if !cfg.Required {
+		cfg.Idle = 0
+	} else if cfg.Idle <= 0 {
+		cfg.Idle = DefaultIdle
+	}
 	return &Module{cfg: cfg, sessions: map[string]session{}, flows: map[string]oidc.Flow{},
-		flowAt: map[string]time.Time{}}
+		flowAt: map[string]time.Time{}, flowNext: map[string]string{}}
 }
 
 // Register adds the routes. They are tailnet-checked by the caller's WhoIs in the handlers, like
@@ -138,6 +150,7 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 		if now.Sub(at) > flowTTL {
 			delete(m.flows, s)
 			delete(m.flowAt, s)
+			delete(m.flowNext, s)
 		}
 	}
 	if len(m.flows) >= maxFlows {
@@ -146,6 +159,7 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.flows[f.State], m.flowAt[f.State] = f, now
+	m.flowNext[f.State] = localNext(r.URL.Query().Get("next"))
 	m.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: flowCookie, Value: f.State, Path: "/", Secure: true,
 		HttpOnly: true,
@@ -225,8 +239,10 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	f, ok := m.flows[state]
 	at := m.flowAt[state]
+	next := m.flowNext[state]
 	delete(m.flows, state)
 	delete(m.flowAt, state)
+	delete(m.flowNext, state)
 	m.mu.Unlock()
 	expire(w, flowCookie, false)
 	if !ok || m.cfg.Now().Sub(at) > flowTTL {
@@ -259,7 +275,7 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many sessions", http.StatusServiceUnavailable)
 		return
 	}
-	m.sessions[hash(sid)] = session{login: login, until: until}
+	m.sessions[hash(sid)] = session{login: login, until: until, last: m.cfg.Now()}
 	m.mu.Unlock()
 	authz.SetSessionGroups(login, id.Groups, until)
 	m.cfg.Log.Info("admin signed in", "login", login, "groups", len(id.Groups),
@@ -267,32 +283,64 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: sid, Path: "/", Secure: true,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: int(m.cfg.Session / time.Second)})
-	http.Redirect(w, r, "/", http.StatusFound)
+	if next == "" {
+		next = "/"
+	}
+	http.Redirect(w, r, next, http.StatusFound)
 }
 
 func (m *Module) dropExpired() {
 	now := m.cfg.Now()
 	for k, s := range m.sessions {
-		if !s.until.After(now) {
+		if !m.live(s, now) {
 			delete(m.sessions, k)
 		}
 	}
 }
 
-// sessionOf returns the live session of the request's cookie, bound to the caller's login.
+// live tells whether s has not expired and, in required mode, has not been idle too long.
+func (m *Module) live(s session, now time.Time) bool {
+	if !s.until.After(now) {
+		return false
+	}
+	return m.cfg.Idle <= 0 || now.Sub(s.last) < m.cfg.Idle
+}
+
+// sessionOf returns the live session of the request's cookie, bound to the caller's login. A
+// lookup is a request with the cookie: it resets the idle timer.
 func (m *Module) sessionOf(r *http.Request, login string) (string, session, bool) {
+	k, s, st := m.lookup(r, login)
+	return k, s, st == stateLive
+}
+
+// lookup finds the session of the request's cookie. A live session of login gets its idle timer
+// reset. A session that is expired or idle is removed, with the groups of its login.
+func (m *Module) lookup(r *http.Request, login string) (string, session, state) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil || c.Value == "" {
-		return "", session{}, false
+		return "", session{}, stateNone
 	}
 	k := hash(c.Value)
+	now := m.cfg.Now()
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	s, ok := m.sessions[k]
-	if !ok || !s.until.After(m.cfg.Now()) || s.login != login {
-		return "", session{}, false
+	if ok && !m.live(s, now) {
+		delete(m.sessions, k)
+		m.mu.Unlock()
+		authz.SetSessionGroups(s.login, nil, time.Time{})
+		m.cfg.Log.Info("admin session ended", "login", s.login, "idle", s.until.After(now))
+		return "", session{}, stateNone
 	}
-	return k, s, true
+	defer m.mu.Unlock()
+	if !ok {
+		return "", session{}, stateNone
+	}
+	if s.login != login {
+		return "", session{}, stateOther
+	}
+	s.last = now
+	m.sessions[k] = s
+	return k, s, stateLive
 }
 
 func (m *Module) logout(w http.ResponseWriter, r *http.Request) {
@@ -324,10 +372,13 @@ func (m *Module) me(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	out := meView{Login: login}
+	out := meView{Login: login, Required: m.cfg.Required}
 	if _, s, ok := m.sessionOf(r, login); ok {
 		out.SignedIn, out.Until = true, s.until.UTC().Format(time.RFC3339)
 		out.Groups = len(authz.SessionGroups(login))
+		if m.cfg.Idle > 0 {
+			out.IdleMinutes = int(m.cfg.Idle / time.Minute)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -339,6 +390,10 @@ type meView struct {
 	Login    string `json:"login"`
 	Until    string `json:"until,omitempty"`
 	Groups   int    `json:"groups,omitempty"`
+	// Required is true when the console needs the sign-in (#448).
+	Required bool `json:"required"`
+	// IdleMinutes is the idle timeout of the session, in required mode.
+	IdleMinutes int `json:"idle_minutes,omitempty"`
 }
 
 // expire removes a cookie, with the same attributes it was set with.

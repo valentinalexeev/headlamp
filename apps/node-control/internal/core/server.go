@@ -150,6 +150,15 @@ type runOptions struct {
 	// tlsName is the console name (ADMIN_CONSOLE_NAME): the only Host the TLS listener accepts
 	// (#445).
 	tlsName string
+	// tlsGate, when set, wraps the handler of the TLS listener only (#448: the required sign-in).
+	tlsGate func(http.Handler) http.Handler
+}
+
+// WithAdminTLSGate wraps the handler of the console on HTTPS with gate (#448). The plain admin
+// listener is not wrapped. gate is called once, when the listener opens, after every module has
+// registered and started.
+func WithAdminTLSGate(gate func(http.Handler) http.Handler) Option {
+	return func(o *runOptions) { o.tlsGate = gate }
 }
 
 // WithAdminTLS serves the admin handler also on :443 of the tailnet address with cfg (#366). The
@@ -270,7 +279,11 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 				"with no wildcard")
 		}
 		cfg := o.tlsAdmin
-		guarded := hostGuard([]string{name}, NavMiddleware(navItems, navActions, tn, admin))
+		inner := NavMiddleware(navItems, navActions, tn, admin)
+		if o.tlsGate != nil {
+			inner = o.tlsGate(inner)
+		}
+		guarded := hostGuard([]string{name}, inner)
 		if err := add("admin-tls", guarded,
 			func() (net.Listener, error) {
 				ln, err := lt.ListenAdminTLS()

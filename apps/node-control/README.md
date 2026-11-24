@@ -238,6 +238,8 @@ logs the host names of each listener (`listener hosts`).
 | `ADMIN_OIDC_GROUPS_CLAIM` | The claim with the groups. The default is `OIDC_GROUPS_CLAIM`, then `groups`. |
 | `ADMIN_OIDC_SCOPES` | The scopes. The default is `openid email profile groups`. |
 | `ADMIN_OIDC_SESSION_HOURS` | The session length, 1 to 24. The default is 8. There is no refresh: sign in again after it. |
+| `ADMIN_OIDC_REQUIRED` | `1` (the default): the console on HTTPS needs the sign-in. `0`: the sign-in only adds groups, as before 0.22.0. See "Required sign-in". |
+| `ADMIN_OIDC_IDLE_MINUTES` | With the required sign-in: a session ends after this many minutes without a request, 5 to 480. The default is 30. |
 | `ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS` | Optional. A comma list of email domains, for example `example.com,corp.example.com`. Unset: off. See "Trusted email domains". |
 
 To sign in, open `https://<ADMIN_CONSOLE_NAME>/auth/login`. `GET /auth/me` shows whether you are signed in, and until
@@ -282,6 +284,42 @@ in the field `reason`.
 | `no_email` | The ID token has no email address. | Add the `email` scope or claim to the console client at the identity provider. |
 | `email_not_verified` | The claim `email_verified` is false or missing. | Make the identity provider send `email_verified=true` for the console client. Some providers send `false` by default, for example Authentik with an external source. If you cannot, and the domain is safe, add it to `ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS` (see "Trusted email domains"). |
 | `other_account` | The verified email is not the tailnet login. | Sign out of the identity provider and sign in with the account of your tailnet login. The log line shows the other email in the field `email`. The page does not show it. |
+
+#### Required sign-in
+
+`ADMIN_OIDC_REQUIRED=1` is the default with `ADMIN_OIDC=1` (#448). Then the console on HTTPS needs two factors on
+each request. The first is the tailnet login of a person, not a tagged node. The second is a session of the same login.
+
+- Each route on port 443 needs both, except `/auth/*` (the sign-in) and `/healthz`.
+- A page load without a session goes to `/auth/login?next=<page>`. After the sign-in, the browser opens the page
+  again. `next` accepts only a path on the console. Other values open `/`.
+- An API call without a session gets `401` with a JSON body. A session of another tailnet login gets `403`.
+- A session ends at its expiry (`ADMIN_OIDC_SESSION_HOURS`) or after `ADMIN_OIDC_IDLE_MINUTES` without a request.
+  Each request with the session cookie resets the idle timer. Then the next page load goes to the sign-in again.
+- Without a session, the login has no role on port 443. This includes the logins of `ADMIN_USERS`.
+- The top bar shows "Sign in", or "Signed in as <login> (expires <time>)" and "Sign out".
+
+With `ADMIN_OIDC_REQUIRED=0`, the console works as before 0.22.0: the tailnet login alone gets its roles, and the
+sign-in only adds the groups. There is no idle timeout.
+
+#### Break-glass listener
+
+The plain admin listener on port 80 does not change. It does not ask for the sign-in. The logins of `ADMIN_USERS` and
+the other grants by login use it with one factor: the tailnet login. Use it when the identity provider is down.
+Restrict it in the tailnet policy to the owners' devices, or block port 80 for the admins and open it only in an
+emergency.
+
+#### Threat model of the console sign-in
+
+- A stolen or lost admin device that is still on the tailnet does not open the console on HTTPS. The thief also
+  needs the identity provider account. An open browser session ends after `ADMIN_OIDC_IDLE_MINUTES` without use.
+- A stolen session cookie does not work on a device with another tailnet login (`403`).
+- The session id is 256 random bits. The server keeps only its hash. The cookie is `__Host-`, `Secure`, `HttpOnly`
+  and `SameSite=Strict`. Sessions are in memory: a restart ends all of them.
+- `next` is not an open redirect: an absolute URL, `//host`, a backslash and control characters open `/`.
+- The break-glass listener on port 80 has one factor. Anyone with the tailnet login of an owner and access to port 80
+  in the tailnet policy has the console.
+- Sensitive operations do not ask for a new sign-in during the session. That is #469.
 
 ### Admin console on HTTPS: checklist
 

@@ -266,6 +266,55 @@
     return ctl;
   }
 
+  // ---- console sign-in (#448) ----
+  // authView turns the answer of GET /auth/me into what the top bar shows: a link to sign in, or
+  // the login, the end of the session and a sign-out button.
+  function authView(me, here) {
+    if (!me || typeof me !== 'object') { return null; }
+    if (!me.signed_in) {
+      return { text: '', link: { label: 'Sign in', href: '/auth/login?next=' + encodeURIComponent(localPath(here) ? here : '/') } };
+    }
+    var until = me.until ? new Date(me.until) : null;
+    var when = until && !isNaN(until.getTime())
+      ? until.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    return { text: 'Signed in as ' + (me.login || '') + (when ? ' (expires ' + when + ')' : ''), signOut: true };
+  }
+
+  function renderAuth(slot, view, opts) {
+    clear(slot);
+    if (!view) { slot.hidden = true; return; }
+    if (view.text) {
+      var t = document.createElement('span');
+      t.textContent = view.text;
+      slot.appendChild(t);
+    }
+    if (view.link) {
+      var a = document.createElement('a');
+      a.setAttribute('href', view.link.href);
+      a.textContent = view.link.label;
+      slot.appendChild(a);
+    }
+    if (view.signOut) {
+      var b = button('btn', 'Sign out');
+      b.addEventListener('click', function () {
+        // In required mode the reload goes to the sign-in page.
+        var reload = opts.reload || function () { window.location.reload(); };
+        (opts.api || hl.api)('POST', '/auth/logout').then(reload, reload);
+      });
+      slot.appendChild(b);
+    }
+    slot.hidden = false;
+  }
+
+  function initAuth() {
+    var slot = document.querySelector('[data-auth]');
+    // The sign-in cookie is Secure: the plain listener (break-glass) has no sign-in.
+    if (!slot || window.location.protocol !== 'https:') { return; }
+    hl.api('GET', '/auth/me').then(function (me) {
+      renderAuth(slot, authView(me, window.location.pathname + window.location.search), {});
+    }, function () { slot.hidden = true; });
+  }
+
   function list(sel) {
     return Array.prototype.slice.call(document.querySelectorAll(sel));
   }
@@ -315,12 +364,14 @@
     // A page that just changed something the strip shows (a confirmed change) asks for a fresh read at once.
     hl.shell.refresh = function () { poller.now(); };
     setInterval(function () { if (!document.hidden) { ctl.tick(); } }, 1000);
+    initAuth();
   }
 
   hl.shell = {
     pickTheme: pickTheme, applyTheme: applyTheme, currentTheme: currentTheme,
     syncThemeButtons: syncThemeButtons, timedItems: timedItems, countsBySource: countsBySource,
     applyCounts: applyCounts, needsReload: needsReload, loadedSeconds: loadedSeconds, countdown: countdown, controller: controller,
+    authView: authView, renderAuth: renderAuth,
     init: init,
   };
   init();

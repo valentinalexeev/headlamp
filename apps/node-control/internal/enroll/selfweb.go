@@ -145,7 +145,48 @@ type meDevice struct {
 	Active  bool
 	// CanExtend: the Extend button shows (#301).
 	CanExtend bool
+	// Seen is the later of the last traffic and the last profile download, 0 for never (#450).
+	// SeenAgo is it relative to now, SeenAt the exact UTC time.
+	Seen    int64
+	SeenAgo string
+	SeenAt  string
 }
+
+// lastSeen is the later of the device's last traffic and last profile download (#450).
+func lastSeen(d Device) int64 {
+	return max(d.LastActive, d.ProfileLast)
+}
+
+// ago is a coarse relative time, for example "3 hours ago" (#450).
+func ago(now time.Time, ts int64) string {
+	d := now.Sub(time.Unix(ts, 0))
+	unit := func(n int64, name string) string {
+		if n == 1 {
+			return "1 " + name + " ago"
+		}
+		return strconv.FormatInt(n, 10) + " " + name + "s ago"
+	}
+	switch {
+	case d < time.Hour:
+		return unit(max(1, int64(d/time.Minute)), "minute")
+	case d < day:
+		return unit(int64(d/time.Hour), "hour")
+	case d < agoDays*day:
+		return unit(int64(d/day), "day")
+	case d < 2*year:
+		return unit(int64(d/month), "month")
+	default:
+		return unit(int64(d/year), "year")
+	}
+}
+
+// The units of ago: a month is 30 days and a year 365 days, close enough for a coarse time. day is
+// in selfmodule.go.
+const (
+	agoDays = 60 // below this, ago counts days
+	month   = 30 * day
+	year    = 365 * day
+)
 
 func (s *SelfWeb) render(w http.ResponseWriter, status int, v meView) {
 	secHeaders(w)
@@ -184,11 +225,17 @@ func (s *SelfWeb) view(sub, csrf string) (meView, error) {
 	}
 	v := meView{SignedIn: true, Email: u.Email, CSRF: csrf, Max: s.self.cfg.MaxDevices,
 		InviteOnly: s.self.cfg.InviteOnly}
+	now := s.self.store.Clock()()
 	for _, d := range devs {
-		v.Devices = append(v.Devices, meDevice{
+		md := meDevice{
 			ID: d.ID, Name: d.Name, Client: d.Client, Expires: d.ExpiresAt,
-			Active: s.self.active(d), CanExtend: s.self.CanExtend(d),
-		})
+			Active: s.self.active(d), CanExtend: s.self.CanExtend(d), Seen: lastSeen(d),
+		}
+		if md.Seen > 0 {
+			md.SeenAgo = ago(now, md.Seen)
+			md.SeenAt = time.Unix(md.Seen, 0).UTC().Format("2006-01-02 15:04 UTC")
+		}
+		v.Devices = append(v.Devices, md)
 	}
 	return v, nil
 }

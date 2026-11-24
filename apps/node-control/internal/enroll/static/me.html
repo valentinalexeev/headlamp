@@ -13,8 +13,9 @@
 <section><p class="muted">Signed in as {{.Email}}.</p>
 <form method="post" action="/me/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="quiet">Sign out</button></form></section>
 <section><h2>Devices</h2>
-{{if .Devices}}<table><tr><th>Name</th><th>Until</th><th></th><th></th></tr>
+{{if .Devices}}<table><tr><th>Name</th><th>Until</th><th>Last active</th><th></th><th></th></tr>
 {{range .Devices}}<tr><td>{{.Name}}</td><td>{{if .Active}}{{date .Expires}}{{else}}<span class="muted">ended</span>{{end}}</td>
+<td>{{if .Seen}}<span title="{{.SeenAt}}">{{.SeenAgo}}</span>{{else}}<span class="muted">Never</span>{{end}}</td>
 <td>{{if .Active}}<a href="/me/devices/{{.ID}}">Add to an app</a>{{end}}</td>
 <td>{{if .CanExtend}}<form method="post" action="/me/devices/{{.ID}}/extend"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Extend</button></form>{{end}}
 {{if .Active}}<form method="post" action="/me/devices/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="quiet">Revoke</button></form>{{end}}</td></tr>{{end}}

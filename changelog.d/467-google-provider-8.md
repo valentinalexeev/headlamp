@@ -6,7 +6,7 @@ status: done
 breaking: true
 title: The GCP modules need the Google provider 8
 components: [terraform]
-pr: 0
+pr: 468
 ---
 ## Summary
 

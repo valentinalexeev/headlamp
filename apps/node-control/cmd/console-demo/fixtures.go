@@ -733,23 +733,23 @@ func (w *world) seedDevices(ctx context.Context, must mustFn) error {
 	return w.seedActivity(ctx)
 }
 
-// seedActivity gives the demo devices a history (#439), so that each filter of the Devices page has rows:
-// alice has one device connected today and one not set up, laptop-3 has been quiet for 12 days and tv-5 is set up
-// but never connected (both "Needs help"). No API sets these times, so they are written to the store.
+// seedActivity gives the demo devices a history (#439), so that each filter of the Devices
+// page has rows: alice has one device connected today and one not set up, laptop-3 has been
+// quiet for 12 days and tv-5 is set up but never connected (both "Needs help"). No API sets
+// these times, so they are written to the store. A zero lastSeen means never connected.
 func (w *world) seedActivity(ctx context.Context) error {
 	now := time.Now()
-	ago := func(d time.Duration) int64 { return now.Add(-d).Unix() }
 	day := 24 * time.Hour
 	activity := []struct {
 		name               string
-		enrolled, lastSeen int64
+		enrolled, lastSeen time.Duration
 	}{
-		{"phone-1", ago(20 * day), ago(time.Hour)},
-		{"laptop-3", ago(40 * day), ago(12 * day)},
-		{"phone-4", ago(30 * day), ago(3 * time.Hour)},
-		{"tv-5", ago(2 * day), 0},
-		{"phone-6", ago(10 * day), ago(2 * day)},
-		{"phone-7", ago(5 * day), ago(30 * time.Minute)},
+		{"phone-1", 20 * day, time.Hour},
+		{"laptop-3", 40 * day, 12 * day},
+		{"phone-4", 30 * day, 3 * time.Hour},
+		{"tv-5", 2 * day, 0},
+		{"phone-6", 10 * day, 2 * day},
+		{"phone-7", 5 * day, 30 * time.Minute},
 	}
 	dsn := "file:" + filepath.Join(w.dir, "enroll.db") + "?_pragma=busy_timeout(30000)"
 	db, err := sql.Open("sqlite", dsn)
@@ -759,7 +759,12 @@ func (w *world) seedActivity(ctx context.Context) error {
 	defer db.Close()
 	const update = `UPDATE devices SET enrolled_at=?, enrol_count=1, last_active=? WHERE name=?`
 	for _, a := range activity {
-		if _, err := db.ExecContext(ctx, update, a.enrolled, a.lastSeen, a.name); err != nil {
+		var lastSeen int64
+		if a.lastSeen > 0 {
+			lastSeen = now.Add(-a.lastSeen).Unix()
+		}
+		enrolled := now.Add(-a.enrolled).Unix()
+		if _, err := db.ExecContext(ctx, update, enrolled, lastSeen, a.name); err != nil {
 			return fmt.Errorf("setting the activity of %s: %w", a.name, err)
 		}
 	}

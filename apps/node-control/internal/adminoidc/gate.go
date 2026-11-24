@@ -45,8 +45,8 @@ func (m *Module) Gate(next http.Handler) http.Handler {
 		case stateLive:
 			next.ServeHTTP(w, r)
 		case stateOther:
-			http.Error(w, "this session belongs to another tailnet login: sign out and sign in again",
-				http.StatusForbidden)
+			http.Error(w, "this session belongs to another tailnet login: "+
+				"sign out and sign in again", http.StatusForbidden)
 		default:
 			if browserGet(r) {
 				http.Redirect(w, r, "/auth/login?next="+url.QueryEscape(r.URL.RequestURI()),

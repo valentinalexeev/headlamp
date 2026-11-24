@@ -279,7 +279,7 @@ func Run(ctx context.Context, mods []Module, env Env, tn Tailnet, opts ...Option
 				"with no wildcard")
 		}
 		cfg := o.tlsAdmin
-		var inner http.Handler = NavMiddleware(navItems, navActions, tn, admin)
+		inner := NavMiddleware(navItems, navActions, tn, admin)
 		if o.tlsGate != nil {
 			inner = o.tlsGate(inner)
 		}

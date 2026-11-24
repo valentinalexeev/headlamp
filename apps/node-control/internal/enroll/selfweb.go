@@ -169,16 +169,24 @@ func ago(now time.Time, ts int64) string {
 	switch {
 	case d < time.Hour:
 		return unit(max(1, int64(d/time.Minute)), "minute")
-	case d < 24*time.Hour:
+	case d < day:
 		return unit(int64(d/time.Hour), "hour")
-	case d < 60*24*time.Hour:
-		return unit(int64(d/(24*time.Hour)), "day")
-	case d < 730*24*time.Hour:
-		return unit(int64(d/(30*24*time.Hour)), "month")
+	case d < agoDays*day:
+		return unit(int64(d/day), "day")
+	case d < 2*year:
+		return unit(int64(d/month), "month")
 	default:
-		return unit(int64(d/(365*24*time.Hour)), "year")
+		return unit(int64(d/year), "year")
 	}
 }
+
+// The units of ago: a month is 30 days and a year 365 days, close enough for a coarse time. day is
+// in selfmodule.go.
+const (
+	agoDays = 60 // below this, ago counts days
+	month   = 30 * day
+	year    = 365 * day
+)
 
 func (s *SelfWeb) render(w http.ResponseWriter, status int, v meView) {
 	secHeaders(w)

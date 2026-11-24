@@ -22,6 +22,26 @@ func lastActiveRow(t *testing.T, page, name string) string {
 	return row
 }
 
+// lastActiveSetup records the traffic, the profile download and the revocation of a case (#450).
+func lastActiveSetup(t *testing.T, f *extendFx, traffic, prof int64, revoke bool) {
+	t.Helper()
+	if traffic > 0 {
+		if err := f.store.TouchActive(f.dev.ID, traffic); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if prof > 0 {
+		if err := f.store.TouchProfile(f.dev.ID, prof); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if revoke {
+		if err := f.store.Revoke(f.dev.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestMeLastActive(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -38,21 +58,7 @@ func TestMeLastActive(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newExtendFx(t, extendCfg)
-			if tc.traffic > 0 {
-				if err := f.store.TouchActive(f.dev.ID, tc.traffic); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if tc.prof > 0 {
-				if err := f.store.TouchProfile(f.dev.ID, tc.prof); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if tc.revoke {
-				if err := f.store.Revoke(f.dev.ID); err != nil {
-					t.Fatal(err)
-				}
-			}
+			lastActiveSetup(t, f, tc.traffic, tc.prof, tc.revoke)
 			row := lastActiveRow(t, f.page(), "Phone")
 			if !strings.Contains(row, tc.want) {
 				t.Fatalf("want %q in %s", tc.want, row)

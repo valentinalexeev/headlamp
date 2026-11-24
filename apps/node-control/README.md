@@ -1255,13 +1255,27 @@ The Devices page (#287) shows one tree. Each row of the first level is one of th
 
 Open a row to see its devices and its invitations. A device row has the same columns and actions as before (**New link**, **Extend**, **Revoke**, **Delete**). An invitation row shows its state, its end date and who made it, with **Withdraw** while it waits.
 
-- A closed row shows its counts: devices, how many need attention, and waiting invitations.
-- The filters (**Active**, **Expiring soon**, **Not set up**, **Revoked**, **All**) apply to the devices. A waiting invitation shows under **Active** and **All**. A used, expired or withdrawn invitation shows only under **All**.
-- The row of a person or an owner shows **last connected**: the newest traffic of its devices. The last sign-in to
-  the self-service page is in the hover text only, because it is not a connection.
+- The row of a person or an owner shows its counts (#439), for example `2 devices · 1 connected today · 1 not set up`.
+  The counts include all the devices of the row that are not revoked, with all filters. They also show how many
+  devices need help, expire soon or are expired, and the waiting invitations. "Connected today" means traffic in the
+  last 24 hours.
+- When no device of the row connected today, the row shows **last connected**: the newest traffic of its devices. The
+  last sign-in to the self-service page is in the hover text only, because it is not a connection.
+- Use the filters to find devices that have a problem (#439). The filters apply to the devices:
+
+  | Filter | Devices that it shows |
+  |---|---|
+  | **Needs help** | Devices that are set up but have no traffic yet. Also devices that had traffic, but not in the last 7 days. A revoked device is not included. |
+  | **Not set up** | Devices that are not expired and that no app has the profile of. |
+  | **Expiring soon** | Devices that expire in 7 days or less. |
+  | **All** (default) | All devices, also revoked devices, and all invitations. |
+
+- An invitation shows only under **All**. The old links `?filter=active` and `?filter=revoked` open **All**.
+- A device row that had no traffic for more than 7 days shows `No traffic for N days`.
 - The table has no **Client** column (#436). For a device made on the self-service page, the stored client is
   always `sing-box`: the person picks the app later.
-- The search box finds people, owners, device names and invitation emails, and opens the rows that it finds.
+- The search box finds people, the email of a person, owners, device names and invitation emails, and opens the rows
+  that it finds. To examine the devices of one person, use **All** and type the email of the person.
 - The open rows are in the URL (`?open=`). A reload and the refresh keep them.
 - Without self-enrolment, the tree has only the owners and their devices.
 

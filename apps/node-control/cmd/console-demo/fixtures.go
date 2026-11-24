@@ -727,7 +727,43 @@ func (w *world) seedDevices(ctx context.Context, must mustFn) error {
 			return err
 		}
 	}
-	return w.seedPerson(ctx, must, far)
+	if err := w.seedPerson(ctx, must, far); err != nil {
+		return err
+	}
+	return w.seedActivity(ctx)
+}
+
+// seedActivity gives the demo devices a history (#439), so that each filter of the Devices page has rows:
+// alice has one device connected today and one not set up, laptop-3 has been quiet for 12 days and tv-5 is set up
+// but never connected (both "Needs help"). No API sets these times, so they are written to the store.
+func (w *world) seedActivity(ctx context.Context) error {
+	now := time.Now()
+	ago := func(d time.Duration) int64 { return now.Add(-d).Unix() }
+	day := 24 * time.Hour
+	activity := []struct {
+		name               string
+		enrolled, lastSeen int64
+	}{
+		{"phone-1", ago(20 * day), ago(time.Hour)},
+		{"laptop-3", ago(40 * day), ago(12 * day)},
+		{"phone-4", ago(30 * day), ago(3 * time.Hour)},
+		{"tv-5", ago(2 * day), 0},
+		{"phone-6", ago(10 * day), ago(2 * day)},
+		{"phone-7", ago(5 * day), ago(30 * time.Minute)},
+	}
+	dsn := "file:" + filepath.Join(w.dir, "enroll.db") + "?_pragma=busy_timeout(30000)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("opening the enrolment store: %w", err)
+	}
+	defer db.Close()
+	const update = `UPDATE devices SET enrolled_at=?, enrol_count=1, last_active=? WHERE name=?`
+	for _, a := range activity {
+		if _, err := db.ExecContext(ctx, update, a.enrolled, a.lastSeen, a.name); err != nil {
+			return fmt.Errorf("setting the activity of %s: %w", a.name, err)
+		}
+	}
+	return nil
 }
 
 // demoSubject is an invented OIDC subject of the length real issuers give, so the console shows

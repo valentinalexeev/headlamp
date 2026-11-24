@@ -125,6 +125,7 @@ func (a *Admin) Register(mux *core.Mux) {
 	mux.HandleFunc("POST /enroll/devices/{id}/revoke", a.jsonOnly(a.revoke))
 	mux.HandleFunc("POST /enroll/devices/{id}/extend", a.jsonOnly(a.extend))
 	mux.HandleFunc("POST /enroll/devices/{id}/rotate-secret", a.jsonOnly(a.rotate))
+	mux.HandleFunc("POST /enroll/sync", a.jsonOnly(a.pushNow))
 	mux.HandleFunc("GET /enroll/ingresses", a.listIngresses)
 	mux.HandleFunc("POST /enroll/ingresses/{name}/approve", a.jsonOnly(a.approve))
 	mux.HandleFunc("POST /enroll/ingresses/{name}/unapprove", a.jsonOnly(a.unapprove))
@@ -675,6 +676,16 @@ func (a *Admin) rotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"subscription_url": SubURL(a.reg.LinkConfig(), secret)})
+}
+
+// pushNow sends the current credential set to every bridge at once (#441), so an operator does not wait for the
+// 5-minute retry of a bridge with a pending update. The answer is the same sync report as a change's.
+func (a *Admin) pushNow(w http.ResponseWriter, r *http.Request) {
+	if _, ok := readObject(w, r); !ok {
+		return
+	}
+	a.audit(r, "bridge.push", "all bridges")
+	writeJSON(w, http.StatusOK, a.syncNow(r).body(map[string]any{"ok": true}))
 }
 
 // listIngresses shows every ingress with its approval state. Unapproved ones show only a short

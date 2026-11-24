@@ -25,7 +25,7 @@
     unreachable: 'Agent unreachable', unauthorized: 'Agent refused the credentials',
     rejected: 'Agent rejected the credentials', conflict: 'Agent reports a conflict', error: 'Sync ended in an error'
   };
-  var ICON = { link: 'link', extend: 'extend', revoke: 'ban', delete: 'trash' };
+  var ICON = { link: 'link', rotate: 'key', extend: 'extend', revoke: 'ban', delete: 'trash', push: 'activity', support: 'copy' };
 
   function pad(n) { return n < 10 ? '0' + n : String(n); }
   function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -76,7 +76,7 @@
   //   revoked:                  Delete (nothing else works on it)
   //   expired:                  Extend, Revoke (a link would not work: the spend refuses an expired device)
   //   active, not set up:       New link (made by an admin only), Extend, Revoke
-  //   active, set up:           Extend, Revoke (it has its profile; a link is not needed)
+  //   active, set up:           Rotate credential (a profile may have leaked), Extend, Revoke (a link is not needed)
   // A self-enrolled device ("oidc:" owner) gets no "New link": its person adds the app from the self-service page.
   function actionsFor(d, nowMs) {
     var s = stateOf(d, nowMs);
@@ -85,9 +85,50 @@
     var out = [];
     var self = String(d.owner || '').indexOf('oidc:') === 0;
     if (s.kind === 'active' && !setUp(d) && !self) { out.push(a('link', 'New link')); }
+    if (s.kind === 'active' && setUp(d)) { out.push(a('rotate', 'Rotate credential')); }
     out.push(a('extend', 'Extend'));
     out.push(a('revoke', 'Revoke', true));
     return out;
+  }
+
+  // scrub takes out of a text anything that can be a credential: a URL, a UUID, and a long token (hex, or mixed case
+  // with digits, as a link token or a subscription secret is). It is the last step of the support info, so a device
+  // name typed with such a value in it cannot carry it out. A plain long name such as "office-laptop-of-the-desk"
+  // stays.
+  function scrub(text) {
+    return String(text)
+      .replace(/[a-z][a-z0-9+.-]*:\/\/\S*/gi, '[removed]')
+      .replace(/[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/gi, '[removed]')
+      .replace(/[A-Za-z0-9_.-]{16,}/g, function (m) {
+        var token = /^[0-9a-f]+$/i.test(m) || (/[0-9]/.test(m) && /[A-Z]/.test(m) && /[a-z]/.test(m));
+        return token ? '[removed]' : m;
+      });
+  }
+
+  // supportInfo (#441): a summary of one device to paste in a chat with its person. It has the state, the bridges and
+  // the last traffic, and no secret: no link, subscription URL, UUID, owner identifier, bridge host or device id.
+  function supportInfo(d, ingresses, nowMs) {
+    var s = stateOf(d, nowMs);
+    var when = function (sec) { return sec > 0 ? hl.relTime(new Date(sec * 1000).toISOString(), nowMs) + ' (' + ymd(new Date(sec * 1000)) + ')' : 'never'; };
+    var tr = d.traffic && typeof d.traffic === 'object' ? d.traffic : null;
+    var lines = [
+      'Device: ' + hl.plain(scrub(d.name), 100), // scrubbed before the cut: a cut token would no longer look like one
+      'App: ' + (hl.plain(d.client, 40) || 'unknown'),
+      'State: ' + s.word,
+      'Set up: ' + (setUp(d) ? 'yes' : 'no') + (d.profile_last > 0 ? ', profile last downloaded ' + when(d.profile_last) : ''),
+      'Last traffic: ' + when(d.last_active),
+      'Traffic: ' + (tr ? 'up ' + (hl.fmtBytes(Number(tr.up) || 0) || '0 B') + ', down ' + (hl.fmtBytes(Number(tr.down) || 0) || '0 B') : 'not reported'),
+      'Expires: ' + (s.kind === 'revoked' ? 'n/a' : ymd(new Date(d.expires_at * 1000)))
+    ];
+    var bridges = hl.arr(ingresses).filter(function (r) { return r && typeof r.name === 'string'; });
+    if (!bridges.length) { lines.push('Bridges: none reported'); }
+    bridges.forEach(function (r) {
+      var sync = r.sync || {};
+      var word = sync.pending ? 'update pending' + (SYNC_REASON[sync.state] ? ' (' + SYNC_REASON[sync.state].toLowerCase() + ')' : '') : 'up to date';
+      if (r.online === false) { word += ', offline'; }
+      lines.push('Bridge ' + hl.plain(r.name, 63) + ': ' + word);
+    });
+    return scrub(lines.join('\n'));
   }
 
   function matches(filter, s) {
@@ -346,6 +387,11 @@
         links.appendChild(a);
       });
       box.appendChild(links);
+      var again = hl.el('div', 'rowbtns start');
+      var push = keyed(hl.button('Push now', ICON.push, 'sm', pushNow), 'sync:push');
+      push.disabled = !!st.busy.push;
+      again.appendChild(push);
+      box.appendChild(again);
       box.hidden = false;
     }
 
@@ -365,8 +411,17 @@
         traffic: total === null ? '-' : (hl.fmtBytes(total) || '-'),
         trafficTitle: d.traffic ? 'Up ' + (hl.fmtBytes(Number(d.traffic.up) || 0) || '0 B') + ', down ' + (hl.fmtBytes(Number(d.traffic.down) || 0) || '0 B') : '',
         exp: s.kind === 'revoked' ? 'n/a' : fmtDate(d.expires_at),
-        actions: actionsFor(d, t), expiresAt: d.expires_at
+        actions: actionsFor(d, t).concat(rowExtras()), expiresAt: d.expires_at
       };
+    }
+
+    // rowExtras (#441): the fix-it actions of every row. Push now is there while a bridge has an update pending: the
+    // push goes to all bridges, so it helps whichever device the operator is looking at.
+    function rowExtras() {
+      var out = [];
+      if (st.sync && st.sync.pending) { out.push({ key: 'push', label: 'Push now', icon: ICON.push, danger: false }); }
+      out.push({ key: 'support', label: 'Copy support info', icon: ICON.support, danger: false });
+      return out;
     }
 
     function shownRows() {
@@ -440,10 +495,59 @@
       });
     }
 
+    // doRotate gives the device a new subscription URL. The URL is a secret: it goes to the panel only, never to the
+    // notice or the table.
+    function doRotate(d) {
+      runAction(d, 'Rotate credential', function () {
+        return hl.api('POST', '/enroll/devices/' + encodeURIComponent(d.id) + '/rotate-secret', {}).then(function (j) {
+          openDrawer({ mode: 'rotate', device: { id: d.id, name: hl.plain(d.name, 100), owner: ownerLabel(d), expires_at: d.expires_at },
+            subscription: String(hl.obj(j).subscription_url || '') });
+          return { notice: 'Rotated the credential of ' + hl.plain(d.name, 100) + '. The old subscription URL no longer works.' };
+        });
+      });
+    }
+
+    // pushNow sends the credentials to every bridge at once, instead of the next retry.
+    function pushNow() {
+      if (st.busy.push) { return; }
+      st.busy.push = true;
+      setError('');
+      setNotice('');
+      render();
+      hl.api('POST', '/enroll/sync', {}).then(function (j) {
+        delete st.busy.push;
+        j = hl.obj(j);
+        if (j.sync !== undefined) { st.sync = j.sync || null; st.ingresses = hl.arr(j.ingresses); renderSync(); }
+        setNotice(st.sync && st.sync.pending ? 'Pushed. A bridge is still out of sync: see the note above.' : 'Pushed. Every bridge is in sync.');
+        render();
+        if (ctrl.onAction) { ctrl.onAction(); }
+      }, function (err) {
+        delete st.busy.push;
+        setError('Push failed: ' + hl.plain(err && err.message, 200));
+        render();
+      });
+    }
+
+    // doSupport puts the support info on the clipboard; without a clipboard the notice shows it for a copy by hand.
+    function doSupport(d) {
+      var text = supportInfo(d, st.ingresses, now());
+      setError('');
+      copy(text).then(function (ok) {
+        setNotice(ok ? 'Copied the support info of ' + hl.plain(d.name, 100) + '.' : 'Copying is not available here. Copy this by hand:\n' + text);
+      });
+    }
+
     function openConfirm(d, key, td) {
       var name = hl.plain(d.name, 100);
       var panel;
-      if (key === 'revoke') {
+      if (key === 'rotate') {
+        panel = hl.confirmPanel({
+          title: 'Rotate the credential of ' + name + '?', object: name,
+          consequence: 'Its subscription URL stops working at once, and the next panel shows the new one: give it to the person to set in the app. Connection keys in a profile that was already downloaded stay valid. If the whole profile leaked, revoke the device and enrol a new one.',
+          confirmLabel: 'Rotate', cancelLabel: 'Keep', icon: 'key', into: td,
+          onConfirm: function () { doRotate(d); }, onCancel: closeOpen
+        });
+      } else if (key === 'revoke') {
         panel = hl.confirmPanel({
           title: 'Revoke ' + name + '?', object: name,
           consequence: 'It stops working on every bridge as soon as they sync. A revoked device cannot be switched back on: enrol a new one instead.',
@@ -580,7 +684,7 @@
     }
 
     function rowAction(d, a) {
-      if (a.key === 'link') { doLink(d); } else { openPanel(d, a.key); }
+      if (a.key === 'link') { doLink(d); } else if (a.key === 'push') { pushNow(); } else if (a.key === 'support') { doSupport(d); } else { openPanel(d, a.key); }
     }
 
     // ----- the tree (#287): a group row per person or owner, then its devices and its invitations
@@ -663,7 +767,7 @@
       var box = hl.el('div', 'rowbtns');
       r.actions.forEach(function (a) {
         var b = keyed(hl.button(a.label, a.icon, 'sm quiet', function () { rowAction(d, a); }), 'act:' + r.id + ':' + a.key);
-        b.disabled = !!st.busy[r.id];
+        b.disabled = !!st.busy[r.id] || (a.key === 'push' && !!st.busy.push);
         box.appendChild(b);
       });
       actCell.appendChild(box);
@@ -942,6 +1046,23 @@
       checkEnrolled();
     }
 
+    // buildRotated shows the new subscription URL after a rotation (#441). Like a link, it lives only in this panel.
+    function buildRotated(dr) {
+      var body = dr.body;
+      hl.clear(body);
+      dr.step = 'rotated';
+      body.appendChild(hl.status('ok', 'New subscription URL for ' + dr.device.name));
+      body.appendChild(hl.el('p', 't2 small', 'The old URL no longer works. Give this one to the person to paste into the app, or send a new link instead.'));
+      dr.copyNote = hl.el('p', 't2 small');
+      dr.copyNote.hidden = true;
+      var sub = secretBox(dr.subscription, 'Subscription URL');
+      body.appendChild(sub);
+      var row = hl.el('div', 'rowbtns start');
+      row.appendChild(copyButton('Copy subscription URL', dr.subscription, sub, dr.copyNote, true));
+      body.appendChild(row);
+      body.appendChild(dr.copyNote);
+    }
+
     function daysHint(value) {
       var sec = endOfDay(value);
       if (isNaN(sec)) { return 'Pick a date.'; }
@@ -1102,7 +1223,7 @@
     function openDrawer(opts) {
       opts = opts || {};
       if (st.drawer) { return st.drawer; }
-      var dr = { step: '', mode: opts.mode || 'create', device: opts.device || null, link: opts.link || '', linkError: '', subscription: '',
+      var dr = { step: '', mode: opts.mode || 'create', device: opts.device || null, link: opts.link || '', linkError: '', subscription: opts.subscription || '',
         enrolled: false, enrolledAt: 0, poller: null, creating: false, opener: typeof document !== 'undefined' ? document.activeElement : null };
       dr.root = hl.el('div');
       var scrim = hl.el('div', 'scrim');
@@ -1141,7 +1262,7 @@
       els.drawer.appendChild(dr.root);
       st.drawer = dr;
       hl.setQueryParam('enrol', '1');
-      if (dr.mode === 'link') { buildLink(dr); close.focus(); } else { buildDetails(dr); }
+      if (dr.mode === 'link') { buildLink(dr); close.focus(); } else if (dr.mode === 'rotate') { buildRotated(dr); close.focus(); } else { buildDetails(dr); }
       return dr;
     }
 
@@ -1230,7 +1351,7 @@
   }
 
   hl.devices = {
-    stateOf: stateOf, actionsFor: actionsFor, mount: mount, init: init, endOfDay: endOfDay, defaultExpiry: defaultExpiry,
+    stateOf: stateOf, actionsFor: actionsFor, supportInfo: supportInfo, mount: mount, init: init, endOfDay: endOfDay, defaultExpiry: defaultExpiry,
     extendTo: extendTo, lastClient: lastClient, setUp: setUp, groupTree: groupTree, groupCounts: groupCounts
   };
   init();

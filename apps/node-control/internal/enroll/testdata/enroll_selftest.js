@@ -307,9 +307,11 @@ const fieldValue = (els, label) => {
     assert.deepStrictEqual(labels(D.revoked), ['Delete']);
     assert.deepStrictEqual(labels(D.expired), ['Extend', 'Revoke']);
     assert.deepStrictEqual(labels(D.never), ['New link', 'Extend', 'Revoke']);
-    assert.deepStrictEqual(labels(D.active), ['Extend', 'Revoke']);
-    assert.deepStrictEqual(labels(D.expiring), ['Extend', 'Revoke']);
-    assert.ok(devices.actionsFor(D.revoked, NOW)[0].danger && devices.actionsFor(D.active, NOW)[1].danger);
+    // #441: a set-up device can get a new credential; one that is not set up cannot have leaked a profile
+    assert.deepStrictEqual(labels(D.active), ['Rotate credential', 'Extend', 'Revoke']);
+    assert.deepStrictEqual(labels(D.expiring), ['Rotate credential', 'Extend', 'Revoke']);
+    assert.ok(devices.actionsFor(D.revoked, NOW)[0].danger && devices.actionsFor(D.active, NOW)[2].danger);
+    assert.ok(!devices.actionsFor(D.active, NOW)[0].danger);
     assert.ok(devices.actionsFor(D.never, NOW).every((a) => typeof a.icon === 'string' && a.icon));
     const word = (d) => devices.stateOf(d, NOW).word;
     assert.strictEqual(word(D.active), 'Active');
@@ -810,6 +812,122 @@ const fieldValue = (els, label) => {
     // cleared
     update(ctrl, [D.active]);
     assert.strictEqual(els.syncnote.hidden, true);
+  }
+
+  // #441: Send a new link (the "New link" row action) is only on a device that is not set up
+  {
+    const { els, ctrl } = setup();
+    update(ctrl, [D.active, D.never]);
+    assert.ok(rowBtn(els, 'tablet-3', 'New link'));
+    assert.ok(!rowBtn(els, 'phone-1', 'New link'), 'a set-up device has its profile');
+  }
+
+  // #441: Rotate credential asks first, then shows the new subscription URL in the panel only
+  {
+    fetchReply = (url) => (url === '/enroll/devices/1/rotate-secret' ? json({ subscription_url: 'https://e.example.net/s/1.ROTATEDSECRET9' }) : json({}));
+    const { els, ctrl } = setup();
+    update(ctrl, [D.active, D.never]);
+    assert.ok(!rowBtn(els, 'tablet-3', 'Rotate credential'), 'a device that is not set up has no profile to leak');
+    rowBtn(els, 'phone-1', 'Rotate credential').click();
+    assert.strictEqual(sent('POST', '/rotate-secret').length, 0, 'rotating needs a second answer');
+    const panel = findAll(els.rows, (n) => hasClass(n, 'confirm'))[0];
+    assert.ok(/Rotate the credential of phone-1\?/.test(panel.textContent));
+    assert.ok(/revoke the device and enrol a new one/.test(panel.textContent), 'it says what a rotation does not cover');
+    buttonNamed(panel, 'Rotate').click();
+    await flush();
+    assert.strictEqual(sent('POST', '/enroll/devices/1/rotate-secret').length, 1);
+    const aside = drawerNode(els);
+    assert.ok(aside && /New subscription URL for phone-1/.test(aside.textContent));
+    assert.deepStrictEqual(findAll(aside, (n) => hasClass(n, 'secret')).map((n) => n.textContent), ['https://e.example.net/s/1.ROTATEDSECRET9']);
+    assert.ok(/Rotated the credential of phone-1/.test(els.notice.textContent));
+    [els.rows, els.error, els.notice, els.syncnote].forEach((n) => assert.ok(!n.textContent.includes('ROTATEDSECRET9'), 'the URL is only in the panel'));
+    buttonNamed(aside, 'Copy subscription URL').click();
+    await flush();
+    assert.deepStrictEqual(copied, ['https://e.example.net/s/1.ROTATEDSECRET9']);
+    const held = ctrl.state.drawer;
+    fire(aside, 'keydown', { key: 'Escape' });
+    assert.strictEqual(held.subscription, '', 'the URL is forgotten on close');
+    // a failure is reported on the row
+    fetchReply = () => json({ detail: 'unknown device' }, 404);
+    rowBtn(els, 'phone-1', 'Rotate credential').click();
+    buttonNamed(findAll(els.rows, (n) => hasClass(n, 'confirm'))[0], 'Rotate').click();
+    await flush();
+    assert.ok(/Rotate credential failed for phone-1: unknown device/.test(els.error.textContent));
+    assert.ok(!drawerNode(els));
+  }
+
+  // #441: Push now is on the rows and in the sync note while a bridge is pending, and reports the new state
+  {
+    const since = sec(NOW - 10 * 60000);
+    const pending = { sync: { pending: true, state: 'unreachable', since }, ingresses: [{ name: 'bridge-2', sync: { pending: true, state: 'unreachable', since } }] };
+    fetchReply = (url) => (url === '/enroll/sync' ? json({ ok: true, sync_pending: false, sync: { pending: false, state: 'ok', since: null },
+      ingresses: [{ name: 'bridge-2', sync: { pending: false, state: 'ok', since: null } }] }) : json({}));
+    const { els, ctrl } = setup();
+    update(ctrl, [D.active, D.revoked]);
+    assert.ok(!rowBtn(els, 'phone-1', 'Push now'), 'no push while every bridge is in sync');
+    update(ctrl, [D.active, D.revoked], pending);
+    assert.ok(rowBtn(els, 'phone-1', 'Push now'));
+    assert.ok(buttonNamed(els.syncnote, 'Push now'));
+    rowBtn(els, 'phone-1', 'Push now').click();
+    await flush();
+    const req = sent('POST', '/enroll/sync');
+    assert.strictEqual(req.length, 1);
+    assert.deepStrictEqual(JSON.parse(req[0].body), {});
+    assert.ok(/Every bridge is in sync/.test(els.notice.textContent), els.notice.textContent);
+    assert.strictEqual(els.syncnote.hidden, true);
+    assert.ok(!rowBtn(els, 'phone-1', 'Push now'), 'the button goes once the bridges are in sync');
+    // still pending after the push, from the note
+    fetchReply = () => json(Object.assign({ ok: true, sync_pending: true }, pending));
+    update(ctrl, [D.active], pending);
+    buttonNamed(els.syncnote, 'Push now').click();
+    await flush();
+    assert.ok(/still out of sync/.test(els.notice.textContent));
+    assert.strictEqual(els.syncnote.hidden, false);
+    // a failure
+    fetchReply = () => json({ detail: 'internal error' }, 500);
+    rowBtn(els, 'phone-1', 'Push now').click();
+    await flush();
+    assert.ok(/Push failed: internal error/.test(els.error.textContent), els.error.textContent);
+  }
+
+  // #441: Copy support info: state, bridges and last traffic, with no secret, UUID or URL
+  {
+    const uuid = '3f2c1a9e-8b7d-4c6e-9f0a-1b2c3d4e5f60';
+    const leaky = dev(7, 'phone ' + uuid + ' https://e.example.net/s/7.AbCdEf0123456789xyZ k3YtOk3nAbCdEf0123456789',
+      { owner: 'oidc:' + uuid, owner_email: 'a@example.com', profile_at: sec(NOW - DAYMS), profile_last: sec(NOW - 7200000), uuids: { auto: uuid } });
+    const ingresses = [{ name: 'bridge-1', host: 'b1.example.net', online: true, sync: { pending: false, state: 'ok', since: null } },
+      { name: 'bridge-2', host: 'b2.example.net', online: false, sync: { pending: true, state: 'unreachable', since: sec(NOW - 60000) } }];
+    const text = devices.supportInfo(leaky, ingresses, NOW);
+    assert.ok(/^Device: phone \[removed\] \[removed\] \[removed\]$/m.test(text), text);
+    assert.ok(/^App: karing$/m.test(text) && /^State: Active$/m.test(text), text);
+    assert.ok(/^Set up: yes, profile last downloaded 2 h ago/m.test(text), text);
+    assert.ok(/^Last traffic: 1 h ago/m.test(text), text);
+    assert.ok(/^Traffic: up 1(\.0)? KB, down 2(\.0)? KB$/m.test(text), text);
+    assert.ok(/^Bridge bridge-1: up to date$/m.test(text), text);
+    assert.ok(/^Bridge bridge-2: update pending \(agent unreachable\), offline$/m.test(text), text);
+    for (const bad of [uuid, uuid.replace(/-/g, ''), 'oidc:', 'http', '://', 'example.net', 'AbCdEf0123456789', 'k3YtOk3n', 'a@example.com', 'Device id']) {
+      assert.ok(!text.includes(bad), 'support info has ' + bad + ': ' + text);
+    }
+    assert.ok(/^Set up: no$/m.test(devices.supportInfo(D.never, [], NOW)));
+    assert.ok(/^Last traffic: never$/m.test(devices.supportInfo(D.never, [], NOW)));
+    assert.ok(/^Bridges: none reported$/m.test(devices.supportInfo(D.never, [], NOW)));
+    assert.ok(/^Expires: n\/a$/m.test(devices.supportInfo(D.revoked, [], NOW)));
+    assert.ok(/^Device: office-laptop-of-the-front-desk$/m.test(devices.supportInfo(dev(8, 'office-laptop-of-the-front-desk'), [], NOW)), 'a plain long name stays');
+    // the row button copies it and says so; without a clipboard the notice shows it
+    const { els, ctrl } = setup();
+    update(ctrl, [D.active], { ingresses });
+    rowBtn(els, 'phone-1', 'Copy support info').click();
+    await flush();
+    assert.strictEqual(copied.length, 1);
+    assert.strictEqual(copied[0], devices.supportInfo(D.active, ingresses, NOW));
+    assert.ok(/Copied the support info of phone-1/.test(els.notice.textContent));
+    assert.strictEqual(sent('POST', '').length, 0, 'copying changes nothing');
+    const nc = setup({ copyFails: true });
+    update(nc.ctrl, [D.revoked], { ingresses });
+    chip(nc.els, 'All').click();
+    rowBtn(nc.els, 'phone-3', 'Copy support info').click();
+    await flush();
+    assert.ok(/Copy this by hand:\nDevice: phone-3/.test(nc.els.notice.textContent), nc.els.notice.textContent);
   }
 
   // text from the network is plain text, and a failed read keeps the last data with a note

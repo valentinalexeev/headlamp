@@ -20,7 +20,7 @@ TailGuard runs its **own** in-container Tailscale as a separate node
 |---|---|---|
 | `docker-compose.yml`     | yes | the `tailguard` container + `route-health` sidecar |
 | `.env.example`           | yes | documented knobs |
-| `.env`                   | no  | real `TS_AUTHKEY`, exit-node IP |
+| `.env`                   | no  | the site settings; `TS_AUTHKEY` only until the first login |
 | `config/wg0.conf.example`| yes | server-side WG template |
 | `config/wg0.conf`        | no  | real server privkey + client peer(s) |
 | `state/`                 | no  | in-container tailscale state |
@@ -38,7 +38,13 @@ shared `./run:/tmp` socket. Every 20 s it does this:
 
 - If the selected exit node is online, the sidecar leaves it alone.
 - If not, the sidecar selects the online exit node whose name starts with
-  `EXIT_NODE_PREFIX`. There is no default, so set it. A prefix such as `my-exit` also matches `my-exit-1`.
+  `EXIT_NODE_PREFIX` and that has the tag `EXIT_NODE_TAG` (default `tag:exit`). `EXIT_NODE_PREFIX` has no
+  default, so set it. A prefix such as `my-exit` also matches `my-exit-1`.
+- If the selected exit node does not have the tag, the sidecar selects a different node. A node that uses the
+  name of an exit node without the tag does not get the traffic.
+- `TG_LAN_ACCESS` sets the LAN access through the exit node. `0` sends the private address ranges to the exit
+  node too, so a WireGuard peer cannot reach the LAN of the host. `1` lets a WireGuard peer reach the LAN of
+  the host. The variable has no default. If it is not set, the sidecar stops with a message.
 
 Compose blanks `TS_EXIT_NODE` for tailguard on purpose. The environment is fixed at container
 creation, so a stale pin would crash `tailscale up` after a reboot. After each boot, there is a
@@ -55,7 +61,8 @@ The exit-node `tx` grows, `rx` stays 0, and the `tailscale status` health
 says "could not connect to the '<region>' relay". The derp-guard drops our STUN to those regions, so tailscaled uses a
 reachable region as home. An alternative fixes this for every node: remove the region
 in the tailnet policy, `"derpMap": {"Regions": {"<region-id>": null}}`. To self-test the decision logic, run
-`printf '100.1.1.1 my-exit-1 1 0\n' | EXIT_NODE_PREFIX=my-exit sh track-exit-node.sh --decide`.
+`printf '100.1.1.1 my-exit-1 1 0 1\n' | EXIT_NODE_PREFIX=my-exit sh track-exit-node.sh --decide`. The columns are
+the IP, the name, online, selected and tagged (`0` or `1`).
 
 ## route-health watchdog
 
@@ -92,9 +99,17 @@ tunnel is down. Without it, there is no traffic until my-exit returns.
 
 - The LAN interface of the host has a **static DHCP reservation** (`<host-lan-ip>`). The
   WireGuard peer of the router uses it as its Endpoint.
-- Get a **reusable** Tailscale auth key from the admin console (Settings > Keys).
-  An untagged key that your user owns is fine. Make sure that the tailnet ACLs let `tg-node`
-  use `my-exit` as an exit node (default allow-all is fine).
+- Get a **one-time** (not reusable) pre-auth key with the tag `tag:tailguard`. The node then joins as a
+  tagged node, with no user ownership.
+- In `tagOwners` of the tailnet policy, give `tag:tailguard` only to the admin or service identities (see
+  `apps/headscale/acl.json`).
+- In the tailnet policy, give `tag:tailguard` the internet through the exit node and no tailnet
+  destinations:
+  `{"action": "accept", "src": ["tag:tailguard"], "dst": ["autogroup:internet:*"]}`
+  (see `examples/compose/control/config/acl.json`).
+
+**WARNING:** Do not use an untagged key that your user owns. The node then gets all the access of that user, and
+each WireGuard peer can reach the same tailnet addresses.
 
 ### 1. Get this directory onto the host
 
@@ -115,8 +130,20 @@ cp wg0.conf.example wg0.conf
 chmod 600 wg0.conf
 cd ..
 cp .env.example .env
-# edit .env: set TS_AUTHKEY=
+# edit .env: set TS_AUTHKEY, TG_LAN_ACCESS, TG_STATUS_PORT and TG_BIND_ADDR
+chmod 600 .env
 ```
+
+`.env` must set these variables. If a variable is missing, `docker compose up` stops with a message.
+
+| variable | value | result |
+|---|---|---|
+| `TG_LAN_ACCESS` | `0` (recommended) | WireGuard peers reach the internet through the exit node only. |
+| | `1` | WireGuard peers can also reach the LAN of the host. |
+| `TG_STATUS_PORT` | empty (recommended) | The status page is off. |
+| | `<port>`, for example `8088` | The status page is on, on `wg0` and `tailscale0`. It replaces `TG_WEBUI_PORT`. |
+| `TG_BIND_ADDR` | `<host-lan-ip>` (recommended) | The WireGuard and tailscale ports listen on that host address only. |
+| | `0.0.0.0` | The ports listen on all host addresses. |
 
 ### 3. Up
 
@@ -127,13 +154,22 @@ docker compose up -d && docker compose logs -f
 Expect: `wg0` up -> firewall rules -> `containerboot` -> tailscale auth OK ->
 healthcheck green -> delayed script sets the exit node.
 
+### 4. Remove the auth key
+
+1. Make sure that `state/` contains the node state (`docker compose exec tailguard tailscale status` shows the node).
+2. Remove the `TS_AUTHKEY` line from `.env`.
+3. Run `docker compose up -d` to create the container again without the key.
+
 ## Verify (host only, no router yet)
 
 ```bash
 # tg-node is registered, my-exit is the active exit node
 docker compose exec tailguard tailscale status
 
-# read-only status page, from any other node on your tailnet:
+# on the headscale server: tg-node has tag:tailguard and no user
+headscale nodes list
+
+# read-only status page, only with TG_STATUS_PORT=8088 and a policy rule that lets your node reach it:
 #   curl http://<tg-node-tailscale-ip>:8088
 ```
 
@@ -197,7 +233,9 @@ the host changes. If you want, delete `tg-node` from the Tailscale console.
 | symptom | cause / fix |
 |---|---|
 | `cannot resolve exit node by hostname while Tailscale is starting up` | `TS_EXIT_NODE` is a hostname — use the IP (`100.x.y.z`) or `auto:any`. |
-| `failed to auth tailscale ... tailscale up failed` | `TS_AUTHKEY` missing/expired/not reusable, or `TS_LOGIN_SERVER` wrong. |
+| `failed to auth tailscale ... tailscale up failed` | `TS_AUTHKEY` missing, expired or already used, or `TS_LOGIN_SERVER` wrong. A one-time key works once: for a new login, make a new key. |
+| `docker compose up` stops with `... is not set in .env (#390)` | Set the variable that the message names. See the table in "2. Keys and config". |
+| tracker logs `waiting: no-online-exit-node-matching-...-with-tag:exit` | The exit node does not have `EXIT_NODE_TAG`. Give it the tag, or set `EXIT_NODE_TAG`. |
 | container won't bind 41642 | something else took it — pick another `TS_PORT` and update the compose port. |
 | exit node not applied | check `docker compose exec tailguard tailscale status`; the exit node is re-set by a delayed script once the healthcheck passes — give it ~1 min. |
 | poor throughput | nested-tunnel MTU — confirm client `MTU=1280`; check `tailscale status` for a DERP vs direct path to my-exit. |
@@ -206,7 +244,8 @@ the host changes. If you want, delete `tg-node` from the Tailscale console.
 ## Using headscale instead of Tailscale's own control plane
 
 1. In `.env`, set `TS_LOGIN_SERVER=https://<your-headscale-url>`.
-   Replace `TS_AUTHKEY` with a headscale pre-auth key (`scripts/headscale-assign-host.sh` or a rotated key).
+   Replace `TS_AUTHKEY` with a one-time headscale pre-auth key with the tag `tag:tailguard`. Run
+   `headscale preauthkeys create --tags tag:tailguard` (check `--help`: the flags differ between versions).
    Set `EXIT_NODE_PREFIX` to the name of one of your headscale exit nodes.
 2. Run `rm -rf state/ && docker compose up -d` to authenticate again against the new control
    server. `config/wg0.conf` and the router config do not change.

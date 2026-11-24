@@ -10,6 +10,10 @@
     ],
     "tag:node-control": [
       "_svcs@"
+    ],
+    "tag:tailguard": [
+      "admin@",
+      "_svcs@"
     ]
   },
   "autoApprovers": {

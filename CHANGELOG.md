@@ -2,6 +2,15 @@
 
 Notable changes, per [Keep a Changelog](https://keepachangelog.com). Versions follow [VERSIONING.md](VERSIONING.md).
 
+## Unreleased
+
+### Added
+
+- node-control (#447): **Trusted email domains for the admin sign-in.** `ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS` (off by
+  default) lets an email in a listed domain count as verified when `email_verified` is false or missing. The email
+  must still be the tailnet login, and the startup log names the domains. The node-control README tells how to send
+  the claim from Authentik, Keycloak and Entra ID, and when a trusted domain is safe.
+
 ## 0.21.2 - 2026-11-23
 
 ### Added

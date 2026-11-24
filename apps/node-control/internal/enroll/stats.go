@@ -45,6 +45,28 @@ func numeric(v any) (float64, bool) {
 // true when a target answered nothing while its sync is pending (the agent client answers an empty
 // map on any failure) or when an id could not be computed.
 func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, devices []Device) (map[int64]Traffic, bool) {
+	per, answered, partial := BridgeStats(ctx, targets, cfg, devices)
+	out := map[int64]Traffic{}
+	for i := range targets {
+		if !answered[i] {
+			partial = true
+		}
+		for id, tr := range per[i] {
+			sum := out[id]
+			sum.Up = math.Min(sum.Up+tr.Up, maxTraffic)
+			sum.Down = math.Min(sum.Down+tr.Down, maxTraffic)
+			out[id] = sum
+		}
+	}
+	return out, partial
+}
+
+// BridgeStats asks every agent for its traffic and gives it per bridge (same order as targets) and per device
+// (#437: the drawer shows which bridge a person uses). answered[i] is false when target i did not answer. partial is
+// true when an id could not be computed.
+func BridgeStats(
+	ctx context.Context, targets []SyncTarget, cfg IngressConfig, devices []Device,
+) (per []map[int64]Traffic, answered []bool, partial bool) {
 	answers := make([]map[string]any, len(targets))
 	panicked := make([]bool, len(targets))
 	var wg sync.WaitGroup
@@ -61,13 +83,13 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 		}()
 	}
 	wg.Wait()
-	out := map[int64]Traffic{}
-	partial := false
+	per = make([]map[int64]Traffic, len(targets))
+	answered = make([]bool, len(targets))
 	for i, t := range targets {
 		// nil: the bridge did not answer (#436). An empty map is a bridge with no traffic.
-		if panicked[i] || answers[i] == nil {
-			partial = true
-		}
+		answered[i] = !panicked[i] && answers[i] != nil
+		out := map[int64]Traffic{}
+		per[i] = out
 		for _, d := range devices {
 			auto := d.UUIDs["auto"]
 			if auto == "" {
@@ -94,5 +116,5 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 			out[d.ID] = tr
 		}
 	}
-	return out, partial
+	return per, answered, partial
 }

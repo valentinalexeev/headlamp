@@ -330,8 +330,8 @@ func TestListShowsEnrolledAndActivityWithoutLeaking(t *testing.T) {
 func TestProfileDownloadRecorded(t *testing.T) {
 	eachBackend(t, func(t *testing.T, e contractEnv) {
 		d, _ := e.create(t, "phone", time.Hour)
-		for _, at := range []int64{5000, 7000, 6000} {
-			if err := e.b.TouchProfile(d.ID, at); err != nil {
+		for at, format := range map[int64]string{5000: "sing-box", 7000: "clash", 6000: "v2ray"} {
+			if err := e.b.TouchProfile(d.ID, at, format); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -339,15 +339,53 @@ func TestProfileDownloadRecorded(t *testing.T) {
 		if g.ProfileAt != 5000 || g.ProfileLast != 7000 {
 			t.Fatalf("profile at %d, last %d; want 5000 and 7000", g.ProfileAt, g.ProfileLast)
 		}
-		if err := e.b.TouchProfile(999, 1); err != nil {
+		// #437: the format is the one of the newest download, whatever the order of the calls.
+		if g.ProfileFormat != "clash" {
+			t.Fatalf("profile format %q, want the newest download's (clash)", g.ProfileFormat)
+		}
+		if err := e.b.TouchProfile(999, 1, "sing-box"); err != nil {
 			t.Fatal(err)
 		}
 		if devs, _ := e.b.ListDevices(); len(devs) != 1 {
 			t.Fatalf("TouchProfile on an unknown id created a device: %d devices", len(devs))
 		}
 		listed, _ := e.b.ListDevices()
-		if listed[0].ProfileAt != 5000 || listed[0].ProfileLast != 7000 {
+		if listed[0].ProfileAt != 5000 || listed[0].ProfileLast != 7000 || listed[0].ProfileFormat != "clash" {
 			t.Fatalf("ListDevices lost the profile times: %+v", listed[0])
+		}
+	})
+}
+
+// #437: the store records the timeline of a device (created, invited, extended, revoked) for SQLite and Redis. A
+// second revoke keeps the first time.
+func TestDeviceTimelineRecorded(t *testing.T) {
+	eachBackend(t, func(t *testing.T, e contractEnv) {
+		d, _ := e.create(t, "phone", time.Hour)
+		if d.CreatedAt == 0 || d.InvitedAt != 0 || d.ExtendedAt != 0 || d.RevokedAt != 0 {
+			t.Fatalf("new device timeline: %+v", d)
+		}
+		if _, err := e.b.NewLink(d.ID, time.Hour, 1); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.b.Extend(d.ID, d.ExpiresAt+3600); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.b.Revoke(d.ID); err != nil {
+			t.Fatal(err)
+		}
+		g, _ := e.b.GetDevice(d.ID)
+		if g.CreatedAt != d.CreatedAt || g.InvitedAt == 0 || g.ExtendedAt == 0 || g.RevokedAt == 0 {
+			t.Fatalf("timeline not recorded: %+v", g)
+		}
+		if g.ChangedAt() < g.RevokedAt {
+			t.Fatalf("ChangedAt %d is before the revocation %d", g.ChangedAt(), g.RevokedAt)
+		}
+		first := g.RevokedAt
+		if err := e.b.Revoke(d.ID); err != nil {
+			t.Fatal(err)
+		}
+		if g, _ = e.b.GetDevice(d.ID); g.RevokedAt != first {
+			t.Fatalf("a second revoke moved revoked_at: %d, want %d", g.RevokedAt, first)
 		}
 	})
 }

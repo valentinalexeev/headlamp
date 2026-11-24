@@ -45,7 +45,12 @@ CREATE TABLE IF NOT EXISTS devices (
     enrol_count INTEGER NOT NULL DEFAULT 0,
     last_active INTEGER NOT NULL DEFAULT 0,
     profile_at INTEGER NOT NULL DEFAULT 0,
-    profile_last INTEGER NOT NULL DEFAULT 0
+    profile_last INTEGER NOT NULL DEFAULT 0,
+    profile_format TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0,
+    invited_at INTEGER NOT NULL DEFAULT 0,
+    extended_at INTEGER NOT NULL DEFAULT 0,
+    revoked_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS device_uuids (
     device_id INTEGER NOT NULL REFERENCES devices(id),
@@ -90,7 +95,21 @@ type Device struct {
 	// user agent.
 	ProfileAt   int64
 	ProfileLast int64
+	// ProfileFormat is the format of the last profile download (#437): the app the person really
+	// uses, which can differ from Client. "" = not known.
+	ProfileFormat string
+	// The timeline of the device for the admin drawer (#437, unix seconds, 0 = never or not
+	// recorded, as for a device made before it): created, the last one-time link issued, the last
+	// extension and the revocation.
+	CreatedAt  int64
+	InvitedAt  int64
+	ExtendedAt int64
+	RevokedAt  int64
 }
+
+// ChangedAt is the time of the last change of the device that the bridges must receive (create,
+// extend or revoke); 0 when no time is recorded.
+func (d Device) ChangedAt() int64 { return max(d.CreatedAt, d.ExtendedAt, d.RevokedAt) }
 
 // Credential is one entry of the set pushed to the ingress agent (PUT /v1/credentials body
 // {"credentials": [...]}); it mirrors the rows of the Python store's credentials().
@@ -175,11 +194,15 @@ func (s *Store) init() error {
 			return err
 		}
 	}
-	activity := []string{"enrolled_at", "enrol_count", "last_active", "profile_at", "profile_last"}
+	activity := []string{"enrolled_at", "enrol_count", "last_active", "profile_at", "profile_last",
+		"created_at", "invited_at", "extended_at", "revoked_at"}
 	for _, col := range activity {
 		if err := s.addColumnIfMissing(ctx, "devices", col, "INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return err
 		}
+	}
+	if err := s.addColumnIfMissing(ctx, "devices", "profile_format", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
 	}
 	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(devices)")
 	if err != nil {
@@ -255,14 +278,15 @@ type queryer interface {
 }
 
 const deviceColsNew = "id, name, owner, client, expires_at, revoked, enrolled_at, enrol_count," +
-	" last_active, profile_at, profile_last"
+	" last_active, profile_at, profile_last, profile_format, created_at, invited_at, extended_at," +
+	" revoked_at"
 
 // deviceColumns is the column list every device query uses; a read-only copy of an old database reads the activity
 // columns as 0.
 func (s *Store) deviceColumns(prefix string) string {
 	if s.noActivity {
 		return prefix + "id, " + prefix + "name, " + prefix + "owner, " + prefix + "client, " +
-			prefix + "expires_at, " + prefix + "revoked, 0, 0, 0, 0, 0"
+			prefix + "expires_at, " + prefix + "revoked, 0, 0, 0, 0, 0, '', 0, 0, 0, 0"
 	}
 	return prefix + strings.ReplaceAll(deviceColsNew, ", ", ", "+prefix)
 }
@@ -274,7 +298,8 @@ func scanDevices(ctx context.Context, q queryer, rows *sql.Rows) ([]Device, erro
 		var d Device
 		var revoked int64
 		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked,
-			&d.EnrolledAt, &d.Enrolments, &d.LastActive, &d.ProfileAt, &d.ProfileLast); err != nil {
+			&d.EnrolledAt, &d.Enrolments, &d.LastActive, &d.ProfileAt, &d.ProfileLast,
+			&d.ProfileFormat, &d.CreatedAt, &d.InvitedAt, &d.ExtendedAt, &d.RevokedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -336,14 +361,15 @@ func (s *Store) CreateDevice(name, owner, client string, expiresAt int64) (Devic
 	}
 	defer tx.Rollback()
 	var res sql.Result
+	now := s.clock().Unix()
 	if s.legacyHash {
 		res, err = tx.ExecContext(ctx,
-			"INSERT INTO devices (name, owner, client, expires_at, secret_hash) VALUES (?,?,?,?,?)",
-			name, owner, client, expiresAt, s.secretHashFn())
+			"INSERT INTO devices (name, owner, client, expires_at, created_at, secret_hash) VALUES (?,?,?,?,?,?)",
+			name, owner, client, expiresAt, now, s.secretHashFn())
 	} else {
 		res, err = tx.ExecContext(ctx,
-			"INSERT INTO devices (name, owner, client, expires_at) VALUES (?,?,?,?)",
-			name, owner, client, expiresAt)
+			"INSERT INTO devices (name, owner, client, expires_at, created_at) VALUES (?,?,?,?,?)",
+			name, owner, client, expiresAt, now)
 	}
 	if err != nil {
 		return Device{}, "", err
@@ -399,9 +425,20 @@ func (s *Store) RotateSecret(deviceID int64) error {
 func (s *Store) NewLink(deviceID int64, ttl time.Duration, maxUses int) (string, error) {
 	token := base64.RawURLEncoding.EncodeToString(randBytes(16))
 	expires := int64(s.nowSec() + ttl.Seconds())
-	_, err := s.db.Exec("INSERT INTO tokens (device_id, token_hash, expires, max_uses) VALUES (?,?,?,?)",
-		deviceID, hashToken(token), expires, maxUses)
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "INSERT INTO tokens (device_id, token_hash, expires, max_uses) VALUES (?,?,?,?)",
+		deviceID, hashToken(token), expires, maxUses); err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE devices SET invited_at=? WHERE id=?", s.clock().Unix(), deviceID); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
 		return "", err
 	}
 	return token, nil
@@ -458,12 +495,13 @@ func (s *Store) TouchActive(deviceID, at int64) error {
 }
 
 // TouchProfile records a download of the device's profile (#436): the first time once, the
-// last time only forward. It never creates a record.
-func (s *Store) TouchProfile(deviceID, at int64) error {
+// last time only forward, with the format of the download (#437). It never creates a record.
+func (s *Store) TouchProfile(deviceID, at int64, format string) error {
 	const q = "UPDATE devices SET" +
 		" profile_at=CASE WHEN profile_at=0 THEN ? ELSE profile_at END," +
+		" profile_format=CASE WHEN profile_last<=? THEN ? ELSE profile_format END," +
 		" profile_last=CASE WHEN profile_last<? THEN ? ELSE profile_last END WHERE id=?"
-	_, err := s.db.ExecContext(context.Background(), q, at, at, at, deviceID)
+	_, err := s.db.ExecContext(context.Background(), q, at, at, format, at, at, deviceID)
 	return err
 }
 
@@ -504,7 +542,8 @@ func (s *Store) VerifySecret(secret string) (*Device, error) {
 
 // Revoke marks a device revoked.
 func (s *Store) Revoke(deviceID int64) error {
-	_, err := s.db.Exec("UPDATE devices SET revoked=1 WHERE id=?", deviceID)
+	_, err := s.db.Exec("UPDATE devices SET revoked=1,"+
+		" revoked_at=CASE WHEN revoked=0 THEN ? ELSE revoked_at END WHERE id=?", s.clock().Unix(), deviceID)
 	return err
 }
 
@@ -541,7 +580,7 @@ func (s *Store) DeleteDevice(deviceID int64) error {
 
 // Extend sets a device's expiry (unix seconds).
 func (s *Store) Extend(deviceID int64, expiresAt int64) error {
-	_, err := s.db.Exec("UPDATE devices SET expires_at=? WHERE id=?", expiresAt, deviceID)
+	_, err := s.db.Exec("UPDATE devices SET expires_at=?, extended_at=? WHERE id=?", expiresAt, s.clock().Unix(), deviceID)
 	return err
 }
 

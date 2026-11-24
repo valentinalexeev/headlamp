@@ -31,7 +31,7 @@ func lastActiveSetup(t *testing.T, f *extendFx, traffic, prof int64, revoke bool
 		}
 	}
 	if prof > 0 {
-		if err := f.store.TouchProfile(f.dev.ID, prof); err != nil {
+		if err := f.store.TouchProfile(f.dev.ID, prof, "sing-box"); err != nil {
 			t.Fatal(err)
 		}
 	}

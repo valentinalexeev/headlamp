@@ -47,6 +47,24 @@ type SyncState struct {
 	ver     uint64 // bumped on every outcome: lets a caller tell "no result yet" from "same result"
 	// groups are the grant groups the bridge reported (#139); nil: not known.
 	groups []string
+	// syncedAt is when the store was read for the last push the bridge accepted (#437, unix
+	// seconds; 0 = none since start). A device changed before it is on the bridge as it is now.
+	syncedAt int64
+}
+
+// markSynced records that the bridge accepted the set read from the store at the given time.
+func (s *SyncState) markSynced(readAt int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.syncedAt = max(s.syncedAt, readAt)
+}
+
+// SyncedAt is when the store was read for the last push the bridge accepted; 0 when none was
+// accepted since node-control started.
+func (s *SyncState) SyncedAt() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.syncedAt
 }
 
 // SetGroups records the grant groups the bridge can serve.
@@ -220,6 +238,7 @@ func syncLog(name, msg string, attrs ...any) {
 func SyncAll(ctx context.Context, store Backend, cfg IngressConfig, targets []SyncTarget) bool {
 	syncMu.Lock()
 	defer syncMu.Unlock()
+	readAt := store.Clock()().Unix() // before the read: a change in the same second may be missing
 	base, err := store.ActiveCredentials()
 	var devices []Device
 	if err == nil {
@@ -266,6 +285,9 @@ func SyncAll(ctx context.Context, store Backend, cfg IngressConfig, targets []Sy
 				}
 			}()
 			results[i] = pushTo(ctx, t, creds, cfg.TailnetDNSFor(plan.doc.EffectiveMode(t.Ingress)))
+			if results[i] {
+				t.State.markSynced(readAt)
+			}
 		}()
 	}
 	wg.Wait()

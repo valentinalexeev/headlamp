@@ -25,8 +25,9 @@ import (
 //	<prefix>:meta        hash; field seq = last device id (never reused, like SQLite AUTOINCREMENT)
 //	<prefix>:d:<id>      hash per device, no TTL: meta = sealed JSON {name, owner, client, uuids}; plain numbers
 //	                     expires_at, revoked, epoch (so revoke, extend and rotate are single atomic commands) and
-//	                     enrolled_at, enrol_count, last_active, profile_at, profile_last
-//	                     (activity times; absent in older records, read as 0)
+//	                     enrolled_at, enrol_count, last_active, profile_at, profile_last, created_at,
+//	                     invited_at, extended_at, revoked_at (activity times; absent in older records, read
+//	                     as 0) and profile_format (a format name, absent = "")
 //	<prefix>:t:<hash>    hash per one-time link, with a TTL: device_id, expires, max_uses, uses
 //	<prefix>:approvals   hash; field = ingress name, value = sealed JSON
 //	<prefix>:tailnet     hash; field doc = sealed JSON of the tailnet grant state (#139)
@@ -157,7 +158,9 @@ func (s *RedisStore) parseDevice(id int64, h map[string]string) (devRec, error) 
 		Device: Device{ID: id, Name: m.Name, Owner: m.Owner, Client: m.Client, ExpiresAt: exp, Revoked: h["revoked"] == "1", UUIDs: m.UUIDs,
 			EnrolledAt: opt("enrolled_at"), Enrolments: opt("enrol_count"),
 			LastActive: opt("last_active"),
-			ProfileAt:  opt("profile_at"), ProfileLast: opt("profile_last")},
+			ProfileAt:  opt("profile_at"), ProfileLast: opt("profile_last"),
+			ProfileFormat: h["profile_format"], CreatedAt: opt("created_at"), InvitedAt: opt("invited_at"),
+			ExtendedAt: opt("extended_at"), RevokedAt: opt("revoked_at")},
 		Epoch: epoch,
 	}, nil
 }
@@ -217,7 +220,11 @@ func (s *RedisStore) putDevice(ctx context.Context, d Device, epoch int64) error
 		"enrolled_at", strconv.FormatInt(d.EnrolledAt, 10), "enrol_count", strconv.FormatInt(d.Enrolments, 10),
 		"last_active", strconv.FormatInt(d.LastActive, 10),
 		"profile_at", strconv.FormatInt(d.ProfileAt, 10),
-		"profile_last", strconv.FormatInt(d.ProfileLast, 10)).Err(); err != nil {
+		"profile_last", strconv.FormatInt(d.ProfileLast, 10),
+		"profile_format", d.ProfileFormat,
+		"created_at", strconv.FormatInt(d.CreatedAt, 10), "invited_at", strconv.FormatInt(d.InvitedAt, 10),
+		"extended_at", strconv.FormatInt(d.ExtendedAt, 10),
+		"revoked_at", strconv.FormatInt(d.RevokedAt, 10)).Err(); err != nil {
 		return s.wrap("writing device to redis", err)
 	}
 	return nil
@@ -230,7 +237,8 @@ func (s *RedisStore) CreateDevice(name, owner, client string, expiresAt int64) (
 	if err != nil {
 		return Device{}, "", s.wrap("allocating device id in redis", err)
 	}
-	d := Device{ID: id, Name: name, Owner: owner, Client: client, ExpiresAt: expiresAt, UUIDs: map[string]string{}}
+	d := Device{ID: id, Name: name, Owner: owner, Client: client, ExpiresAt: expiresAt, UUIDs: map[string]string{},
+		CreatedAt: s.clock().Unix()}
 	for _, m := range Modes {
 		d.UUIDs[m] = newUUID()
 	}
@@ -271,8 +279,10 @@ func (s *RedisStore) SubscriptionSecret(deviceID int64) (string, error) {
 // key it returns 0 and writes nothing (a bare HSET or HINCRBY would leave a stray, half-empty device).
 var updateScript = redis.NewScript(`
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
-if ARGV[1] == 'revoke' then redis.call('HSET', KEYS[1], 'revoked', '1')
-elseif ARGV[1] == 'extend' then redis.call('HSET', KEYS[1], 'expires_at', ARGV[2])
+if ARGV[1] == 'revoke' then
+  if redis.call('HGET', KEYS[1], 'revoked') ~= '1' then redis.call('HSET', KEYS[1], 'revoked_at', ARGV[3]) end
+  redis.call('HSET', KEYS[1], 'revoked', '1')
+elseif ARGV[1] == 'extend' then redis.call('HSET', KEYS[1], 'expires_at', ARGV[2], 'extended_at', ARGV[3])
 elseif ARGV[1] == 'rotate' then redis.call('HINCRBY', KEYS[1], 'epoch', 1)
 else return redis.error_reply('unknown op') end
 return 1`)
@@ -281,7 +291,8 @@ func (s *RedisStore) update(op string, deviceID int64, arg string) error {
 	ctx, cancel := opCtx()
 	defer cancel()
 	// Eval, not Run: Run would send EVALSHA, which the shared-Redis rules do not list.
-	if err := updateScript.Eval(ctx, s.rdb, []string{s.deviceKey(deviceID)}, op, arg).Err(); err != nil {
+	if err := updateScript.Eval(ctx, s.rdb, []string{s.deviceKey(deviceID)}, op, arg,
+		strconv.FormatInt(s.clock().Unix(), 10)).Err(); err != nil {
 		return s.wrap("updating device in redis", err)
 	}
 	return nil // a missing device is a no-op, as in the SQLite store
@@ -433,6 +444,7 @@ var newLinkScript = redis.NewScript(`
 if redis.call('EXISTS', KEYS[2]) == 0 then return 0 end
 redis.call('HSET', KEYS[1], 'device_id', ARGV[1], 'expires', ARGV[2], 'max_uses', ARGV[3], 'uses', '0')
 redis.call('PEXPIRE', KEYS[1], ARGV[4])
+redis.call('HSET', KEYS[2], 'invited_at', ARGV[5])
 return 1`)
 
 func (s *RedisStore) NewLink(deviceID int64, ttl time.Duration, maxUses int) (string, error) {
@@ -442,7 +454,7 @@ func (s *RedisStore) NewLink(deviceID int64, ttl time.Duration, maxUses int) (st
 	defer cancel()
 	res, err := newLinkScript.Eval(ctx, s.rdb, []string{s.tokenKey(hashToken(token)), s.deviceKey(deviceID)},
 		strconv.FormatInt(deviceID, 10), strconv.FormatInt(expires, 10), strconv.Itoa(maxUses),
-		strconv.FormatInt((ttl+linkTTLMargin).Milliseconds(), 10)).Int()
+		strconv.FormatInt((ttl+linkTTLMargin).Milliseconds(), 10), strconv.FormatInt(s.clock().Unix(), 10)).Int()
 	if err != nil {
 		return "", s.wrap("creating link in redis", err)
 	}
@@ -535,22 +547,24 @@ func (s *RedisStore) TouchActive(deviceID, at int64) error {
 	return nil
 }
 
-// profileScript records a profile download: profile_at once, profile_last only forward, and
-// only for an existing device.
+// profileScript records a profile download: profile_at once, profile_last only forward with the
+// format of that download, and only for an existing device.
 var profileScript = redis.NewScript(`
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 local first = tonumber(redis.call('HGET', KEYS[1], 'profile_at')) or 0
 if first == 0 then redis.call('HSET', KEYS[1], 'profile_at', ARGV[1]) end
 local last = tonumber(redis.call('HGET', KEYS[1], 'profile_last')) or 0
+if last <= tonumber(ARGV[1]) then redis.call('HSET', KEYS[1], 'profile_format', ARGV[2]) end
 if last < tonumber(ARGV[1]) then redis.call('HSET', KEYS[1], 'profile_last', ARGV[1]) end
 return 1`)
 
-// TouchProfile records a download of the device's profile (#436). It never creates a record.
-func (s *RedisStore) TouchProfile(deviceID, at int64) error {
+// TouchProfile records a download of the device's profile (#436) and its format (#437). It never
+// creates a record.
+func (s *RedisStore) TouchProfile(deviceID, at int64, format string) error {
 	ctx, cancel := opCtx()
 	defer cancel()
 	keys := []string{s.deviceKey(deviceID)}
-	if err := profileScript.Eval(ctx, s.rdb, keys, strconv.FormatInt(at, 10)).Err(); err != nil {
+	if err := profileScript.Eval(ctx, s.rdb, keys, strconv.FormatInt(at, 10), format).Err(); err != nil {
 		return s.wrap("recording a profile download in redis", err)
 	}
 	return nil

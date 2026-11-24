@@ -647,7 +647,13 @@
     function deviceRow(r) {
       var d = find(r.id);
       var tr = hl.el('tr', 'leaf' + (st.open && st.open.id === r.id ? ' sel' : ''));
-      tr.appendChild(hl.el('td', 'name', r.name));
+      var nc = hl.el('td', 'name');
+      var nb = keyed(hl.el('button', 'linkbtn', r.name), 'drawer:' + r.id);
+      nb.setAttribute('type', 'button');
+      nb.setAttribute('title', 'Show bridges, traffic and timeline');
+      nb.addEventListener('click', function () { openDrawer({ mode: 'device', device: { id: r.id, name: r.name } }); });
+      nc.appendChild(nb);
+      tr.appendChild(nc);
       var oc = hl.el('td', 't2 clip', r.owner);
       oc.setAttribute('title', r.ownerId);
       tr.appendChild(oc);
@@ -1110,9 +1116,10 @@
       dr.aside = hl.el('aside', 'drawer');
       dr.aside.setAttribute('role', 'dialog');
       dr.aside.setAttribute('aria-modal', 'true');
-      dr.aside.setAttribute('aria-label', 'Enrol device');
+      var title = dr.mode === 'device' ? 'Device ' + hl.plain(dr.device && dr.device.name, 100) : 'Enrol device';
+      dr.aside.setAttribute('aria-label', title);
       var head = hl.el('div', 'panelhead');
-      head.appendChild(hl.el('h2', null, 'Enrol device'));
+      head.appendChild(hl.el('h2', null, title));
       var close = hl.el('button', 'btn quiet sm');
       close.setAttribute('type', 'button');
       close.setAttribute('aria-label', 'Close');
@@ -1140,9 +1147,94 @@
       dr.root.appendChild(dr.aside);
       els.drawer.appendChild(dr.root);
       st.drawer = dr;
+      if (dr.mode === 'device') { buildDevice(dr); close.focus(); return dr; }
       hl.setQueryParam('enrol', '1');
       if (dr.mode === 'link') { buildLink(dr); close.focus(); } else { buildDetails(dr); }
       return dr;
+    }
+
+    // ----- the device drawer (#437): profile, traffic and credential per bridge, tailnet devices, timeline
+
+    var CRED_WORD = { current: ['ok', 'Has the current credential'], pending: ['warn', 'Update pending'],
+      unknown: ['off', 'Not known yet'] };
+    var EVENT_WORD = { created: 'Created', invited: 'Link issued', link_used: 'Link used',
+      profile_downloaded: 'Profile first downloaded', last_traffic: 'Last traffic', extended: 'Extended',
+      revoked: 'Revoked' };
+
+    function bytesText(n) {
+      n = Number(n) || 0;
+      var u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return (i ? n.toFixed(1) : String(n)) + ' ' + u[i];
+    }
+    function whenText(sec) {
+      return sec ? fmtDate(sec) + ' (' + hl.relTime(new Date(sec * 1000).toISOString(), now()) + ')' : 'never';
+    }
+    function section(body, text) { body.appendChild(hl.el('h3', 'small', text)); }
+    function line(body, label, value) {
+      var p = hl.el('p', 'small');
+      p.appendChild(hl.el('span', 't2', label + ': '));
+      p.appendChild(hl.el('span', null, value));
+      body.appendChild(p);
+    }
+
+    function fillDevice(dr, j) {
+      var body = dr.body;
+      hl.clear(body);
+      var prof = hl.obj(j.profile);
+      section(body, 'Profile');
+      line(body, 'First download', whenText(prof.first));
+      line(body, 'Last download', whenText(prof.last));
+      line(body, 'Format the app asked for', prof.format ? hl.plain(prof.format, 40) : 'not known');
+      section(body, 'Bridges');
+      var bridges = hl.arr(j.bridges);
+      if (!bridges.length) { body.appendChild(hl.el('p', 't3 small', 'No bridge is configured.')); }
+      bridges.forEach(function (b) {
+        var box = hl.el('div', 'stack');
+        box.setAttribute('data-bridge', hl.plain(b.name, 63));
+        var w = CRED_WORD[b.credential] || CRED_WORD.unknown;
+        var headRow = hl.el('div', 'row');
+        headRow.appendChild(hl.el('strong', null, hl.plain(b.name, 63)));
+        headRow.appendChild(hl.status(w[0], w[1]));
+        if (b.online === false) { headRow.appendChild(hl.status('crit', 'Offline')); }
+        box.appendChild(headRow);
+        var tr = b.traffic;
+        line(box, 'Traffic', !b.answered ? 'the bridge did not answer' :
+          tr ? '↑ ' + bytesText(tr.up) + ' ↓ ' + bytesText(tr.down) : 'none');
+        body.appendChild(box);
+      });
+      section(body, 'Tailnet devices of the person');
+      if (j.tailnet === null || j.tailnet === undefined) {
+        body.appendChild(hl.el('p', 't3 small', 'Not known: the owner is not a self-enrolled person, or headscale did not answer.'));
+      } else if (!hl.arr(j.tailnet).length) {
+        body.appendChild(hl.el('p', 't3 small', 'None.'));
+      } else {
+        hl.arr(j.tailnet).forEach(function (n) {
+          var p = hl.el('div', 'row');
+          p.appendChild(hl.el('span', null, hl.plain(n.name, 63)));
+          p.appendChild(n.online ? hl.status('ok', 'Online') : hl.status('off', 'Last seen ' + whenText(n.last_seen)));
+          body.appendChild(p);
+        });
+      }
+      section(body, 'Timeline');
+      var events = hl.arr(j.timeline);
+      if (!events.length) { body.appendChild(hl.el('p', 't3 small', 'No event is recorded.')); }
+      events.forEach(function (e) {
+        line(body, EVENT_WORD[e.event] || hl.plain(e.event, 30), whenText(e.at));
+      });
+    }
+
+    function buildDevice(dr) {
+      hl.clear(dr.body);
+      dr.step = 'device';
+      dr.body.appendChild(hl.el('p', 't3 small', 'Loading…'));
+      hl.api('GET', '/enroll/devices/' + encodeURIComponent(dr.device.id)).then(function (j) {
+        if (st.drawer === dr) { fillDevice(dr, hl.obj(j)); }
+      }, function (err) {
+        if (st.drawer !== dr) { return; }
+        hl.clear(dr.body);
+        dr.body.appendChild(hl.el('div', 'note crit', 'The device could not be read: ' + hl.plain(err && err.message, 200)));
+      });
     }
 
     // ----- control surface

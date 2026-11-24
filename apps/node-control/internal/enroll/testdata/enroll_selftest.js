@@ -911,8 +911,8 @@ const fieldValue = (els, label) => {
     const text = devices.supportInfo(leaky, ingresses, NOW);
     assert.ok(/^Device: phone \[removed\] \[removed\] \[removed\]$/m.test(text), text);
     assert.ok(/^App: karing$/m.test(text) && /^State: Active$/m.test(text), text);
-    assert.ok(/^Set up: yes, profile last downloaded 2 h ago/m.test(text), text);
-    assert.ok(/^Last traffic: 1 h ago/m.test(text), text);
+    assert.ok(/^Set up: yes, profile last downloaded 2 h 0 min ago/m.test(text), text);
+    assert.ok(/^Last traffic: 1 h 0 min ago/m.test(text), text);
     assert.ok(/^Traffic: up 1(\.0)? KB, down 2(\.0)? KB$/m.test(text), text);
     assert.ok(/^Bridge bridge-1: up to date$/m.test(text), text);
     assert.ok(/^Bridge bridge-2: update pending \(agent unreachable\), offline$/m.test(text), text);

@@ -6,7 +6,7 @@ status: done
 breaking: false
 title: The self-enrolment page shows when each own device was last active
 components: [node-control]
-pr: 472
+pr: 473
 ---
 ## Summary
 

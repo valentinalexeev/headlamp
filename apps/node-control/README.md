@@ -995,9 +995,9 @@ connection log and no client address. It shows:
 
 The credential state is `current` when the bridge accepted a push read after the last create, extend or revoke of
 the device. It is `pending` when it did not, or when the sync of the bridge is pending. It is `unknown` when the bridge
-accepted no push after node-control started. node-control stores `profile_format`, `created_at`, `invited_at`,
-`extended_at` and `revoked_at` for each device, as it stores the other times. A device made before these columns has
-0 for them, and the drawer shows no time for these events.
+accepted no push after the start of node-control. Each device has the columns `profile_format`, `created_at`,
+`invited_at`, `extended_at` and `revoked_at`. A device made before these columns has 0 in them, and the drawer shows
+no time for these events.
 
 The **Traffic** column shows the counters since each bridge last restarted them (on a credential change). It is
 marked **Traffic\*** (partial) when a bridge did not answer, so an empty value means no traffic only when all

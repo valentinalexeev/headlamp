@@ -125,7 +125,7 @@ type Credential struct {
 // Store is the enrolment store.
 type Store struct {
 	db           *sql.DB
-	noActivity   bool // a read-only copy of a database from before the activity columns: they read as 0
+	missingCols  map[string]bool // a read-only copy of an older database: its missing activity columns read as 0
 	key          []byte
 	clock        func() time.Time
 	legacyHash   bool
@@ -175,11 +175,14 @@ func OpenStoreReadOnly(path string, secretKey []byte, clock func() time.Time) (*
 		return nil, fmt.Errorf("open enrolment db: %w", err)
 	}
 	s := &Store{db: db, key: append([]byte(nil), secretKey...), clock: clock, secretHashFn: func() string { return randHex(16) }}
-	if ok, err := s.hasColumn(context.Background(), "devices", "last_active"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("open enrolment db: %w", err)
-	} else {
-		s.noActivity = !ok
+	s.missingCols = map[string]bool{}
+	for col := range optionalDeviceCols {
+		ok, err := s.hasColumn(context.Background(), "devices", col)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("open enrolment db: %w", err)
+		}
+		s.missingCols[col] = !ok
 	}
 	return s, nil
 }
@@ -281,14 +284,26 @@ const deviceColsNew = "id, name, owner, client, expires_at, revoked, enrolled_at
 	" last_active, profile_at, profile_last, profile_format, created_at, invited_at, extended_at," +
 	" revoked_at"
 
+// optionalDeviceCols are the columns that a database from an older release can lack, with the
+// value they read as in a read-only copy of it.
+var optionalDeviceCols = map[string]string{
+	"enrolled_at": "0", "enrol_count": "0", "last_active": "0", "profile_at": "0",
+	"profile_last": "0", "profile_format": "''", "created_at": "0", "invited_at": "0",
+	"extended_at": "0", "revoked_at": "0",
+}
+
 // deviceColumns is the column list every device query uses; a read-only copy of an old database reads the activity
-// columns as 0.
+// columns it lacks as 0 (#437: a database of 0.21 has the profile times but not the timeline).
 func (s *Store) deviceColumns(prefix string) string {
-	if s.noActivity {
-		return prefix + "id, " + prefix + "name, " + prefix + "owner, " + prefix + "client, " +
-			prefix + "expires_at, " + prefix + "revoked, 0, 0, 0, 0, 0, '', 0, 0, 0, 0"
+	cols := strings.Split(deviceColsNew, ", ")
+	for i, c := range cols {
+		if s.missingCols[c] {
+			cols[i] = optionalDeviceCols[c]
+		} else {
+			cols[i] = prefix + c
+		}
 	}
-	return prefix + strings.ReplaceAll(deviceColsNew, ", ", ", "+prefix)
+	return strings.Join(cols, ", ")
 }
 
 // scanDevices reads device rows (deviceColumns) and attaches their UUIDs.

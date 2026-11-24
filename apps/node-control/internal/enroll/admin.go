@@ -678,8 +678,9 @@ func (a *Admin) rotate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"subscription_url": SubURL(a.reg.LinkConfig(), secret)})
 }
 
-// pushNow sends the current credential set to every bridge at once (#441), so an operator does not wait for the
-// 5-minute retry of a bridge with a pending update. The answer is the same sync report as a change's.
+// pushNow sends the current credential set to every bridge at once (#441), so an operator
+// does not wait for the 5-minute retry of a bridge with a pending update. The answer is the
+// same sync report as a change's.
 func (a *Admin) pushNow(w http.ResponseWriter, r *http.Request) {
 	if _, ok := readObject(w, r); !ok {
 		return

@@ -50,6 +50,8 @@
         return 'Bridge ' + detail + ' approved';
       case 'bridge.unapprove':
         return 'Approval of bridge ' + detail + ' withdrawn';
+      case 'bridge.push':
+        return 'Credentials pushed to ' + detail;
       case 'node.start':
       case 'node.stop':
         m = /^(.*): (ok|failed \(([^)]*)\))$/.exec(detail);

@@ -1373,7 +1373,7 @@ The page lists the person's devices. For each active device, **Add to an app** o
 
 The device table on `/me` has a "Last active" column (#450). It shows the later of two stored times: the last time the traffic counters of the device grew, and the last download of its profile. It is a relative time ("3 hours ago"), with the exact UTC time on hover. "Never" means neither happened. An ended device shows its last value too.
 
-`/me` reads only the stored values and does not ask the bridges, so the value can be up to one activity check old (about 5 minutes, see the activity section). A person sees the times of their own devices only.
+`/me` reads only the stored values and does not ask the bridges. Thus the value can be up to one activity check old, about 5 minutes. A person sees the times of their own devices only.
 
 ### Extend a device
 

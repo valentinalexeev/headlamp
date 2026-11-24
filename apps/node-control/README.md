@@ -1369,6 +1369,12 @@ Set `OIDC_ISSUER` to turn it on. It needs:
 
 The page lists the person's devices. For each active device, **Add to an app** opens the app picker again. The person can revoke an own device. The front of the link host must proxy `/me`, `/me/*`, `/oidc/*` and `/i/*` to `:8081` of node-control, as it does for `/e/` and `/sub/`. A bridge front with another name can serve these pages too: `/me`, `/oidc/login` and `/i/<token>` send the browser to `link_host`, where the sign-in runs (#270). The redirect URL at the identity provider and the cookies of the sign-in are on `link_host` only.
 
+### Last active
+
+The device table on `/me` has a "Last active" column (#450). It shows the later of two stored times: the last time the traffic counters of the device grew, and the last download of its profile. It is a relative time ("3 hours ago"), with the exact UTC time on hover. "Never" means neither happened. An ended device shows its last value too.
+
+`/me` reads only the stored values and does not ask the bridges, so the value can be up to one activity check old (about 5 minutes, see the activity section). A person sees the times of their own devices only.
+
 ### Extend a device
 
 With `OIDC_EXTEND_WINDOW_DAYS` set, a person can extend an own device on `/me` (#301). The **Extend** button shows in

@@ -70,6 +70,8 @@ func demoPolicy(sc scenario) (*authz.Policy, error) {
 
 const (
 	adminLogin = "alice"
+	// demoDay is one day, for the invented times of the demo devices.
+	demoDay = 24 * time.Hour
 	// The invented hosts of the agents that cannot be reached in the attention scenario.
 	offlineBridgeHost      = "bridge-2.demo.example.net"
 	intermittentBridgeHost = "bridge-4.demo.example.net"
@@ -739,7 +741,7 @@ func (w *world) seedDevices(ctx context.Context, must mustFn) error {
 // these times, so they are written to the store. A zero lastSeen means never connected.
 func (w *world) seedActivity(ctx context.Context) error {
 	now := time.Now()
-	day := 24 * time.Hour
+	day := demoDay
 	activity := []struct {
 		name               string
 		enrolled, lastSeen time.Duration

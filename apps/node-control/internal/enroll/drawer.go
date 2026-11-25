@@ -8,19 +8,21 @@ import (
 	"strings"
 )
 
-// The device drawer (#437): GET /enroll/devices/{id} gives what an admin needs to check the connectivity of one
-// device. No connection log and no client address: only times, byte counts, bridge names and the person's tailnet
-// devices as headscale reports them.
+// The device drawer (#437): GET /enroll/devices/{id} gives what an admin needs to check the
+// connectivity of one device. No connection log and no client address: only times, byte counts,
+// bridge names and the person's tailnet devices as headscale reports them.
 //
 //	{"device": {...deviceRow},
 //	 "profile": {"first", "last", "format"},
-//	 "bridges": [{"name", "online", "sync", "traffic": {"up", "down"} | null, "answered", "credential"}],
+//	 "bridges": [{"name", "online", "sync", "traffic": {"up", "down"} | null,
+//	              "answered", "credential"}],
 //	 "tailnet": [{"name", "online", "last_seen"}] | null,
 //	 "timeline": [{"event", "at"}]}
 //
-// credential is "current" (the bridge accepted a set read after the last change of the device), "pending" (it has
-// not, or its sync is pending) or "unknown" (no push accepted since node-control started). tailnet is null when the
-// owner is not a self-enrolled person or headscale did not answer.
+// credential is "current" (the bridge accepted a set read after the last change of the device),
+// "pending" (it has not, or its sync is pending) or "unknown" (no push accepted since node-control
+// started). tailnet is null when the owner is not a self-enrolled person or headscale did not
+// answer.
 
 type drawerBridge struct {
 	Name       string       `json:"name"`
@@ -60,8 +62,8 @@ func timelineOf(d Device) []timelineEvent {
 	out := []timelineEvent{}
 	for _, e := range []timelineEvent{
 		{"created", d.CreatedAt}, {"invited", d.InvitedAt}, {"link_used", d.EnrolledAt},
-		{"profile_downloaded", d.ProfileAt}, {"last_traffic", d.LastActive}, {"extended", d.ExtendedAt},
-		{"revoked", d.RevokedAt},
+		{"profile_downloaded", d.ProfileAt}, {"last_traffic", d.LastActive},
+		{"extended", d.ExtendedAt}, {"revoked", d.RevokedAt},
 	} {
 		if e.At != 0 {
 			out = append(out, e)
@@ -130,11 +132,13 @@ func (a *Admin) deviceDetail(w http.ResponseWriter, r *http.Request) {
 			Traffic: traffic, Answered: answered[i],
 			Credential: credentialState(d, snaps[i], t.State.SyncedAt())})
 	}
-	row := deviceRow{d.ID, d.Name, d.Owner, a.ownerEmails()[d.Owner], d.Client, d.ExpiresAt, d.Revoked, nil,
-		d.EnrolledAt, d.Enrolments, d.LastActive, d.ProfileAt, d.ProfileLast}
+	row := deviceRow{d.ID, d.Name, d.Owner, a.ownerEmails()[d.Owner], d.Client, d.ExpiresAt,
+		d.Revoked, nil, d.EnrolledAt, d.Enrolments, d.LastActive, d.ProfileAt, d.ProfileLast}
+	profile := map[string]any{
+		"first": d.ProfileAt, "last": d.ProfileLast, "format": d.ProfileFormat}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"device":   row,
-		"profile":  map[string]any{"first": d.ProfileAt, "last": d.ProfileLast, "format": d.ProfileFormat},
+		"profile":  profile,
 		"bridges":  bridges,
 		"tailnet":  a.tailnetNodesOf(r.Context(), d.Owner),
 		"timeline": timelineOf(d),

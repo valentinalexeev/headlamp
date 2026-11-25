@@ -61,9 +61,9 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 	return out, partial
 }
 
-// BridgeStats asks every agent for its traffic and gives it per bridge (same order as targets) and per device
-// (#437: the drawer shows which bridge a person uses). answered[i] is false when target i did not answer. partial is
-// true when an id could not be computed.
+// BridgeStats asks every agent for its traffic and gives it per bridge (same order as targets)
+// and per device (#437: the drawer shows which bridge a person uses). answered[i] is false when
+// target i did not answer. partial is true when an id could not be computed.
 func BridgeStats(
 	ctx context.Context, targets []SyncTarget, cfg IngressConfig, devices []Device,
 ) (per []map[int64]Traffic, answered []bool, partial bool) {

@@ -330,8 +330,13 @@ func TestListShowsEnrolledAndActivityWithoutLeaking(t *testing.T) {
 func TestProfileDownloadRecorded(t *testing.T) {
 	eachBackend(t, func(t *testing.T, e contractEnv) {
 		d, _ := e.create(t, "phone", time.Hour)
-		for at, format := range map[int64]string{5000: "sing-box", 7000: "clash", 6000: "v2ray"} {
-			if err := e.b.TouchProfile(d.ID, at, format); err != nil {
+		// A slice, not a map: the first call is the first download, and the order of the later
+		// calls checks that profile_last and the format only move forward.
+		for _, dl := range []struct {
+			at     int64
+			format string
+		}{{5000, "sing-box"}, {7000, "clash"}, {6000, "v2ray"}} {
+			if err := e.b.TouchProfile(d.ID, dl.at, dl.format); err != nil {
 				t.Fatal(err)
 			}
 		}

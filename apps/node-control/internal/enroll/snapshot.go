@@ -118,8 +118,10 @@ func (s *Store) Snapshot() (Snapshot, error) {
 	if err != nil {
 		return snap, err
 	}
-	timeline := make([]string, 0, 5)
-	for _, name := range []string{"profile_format", "created_at", "invited_at", "extended_at", "revoked_at"} {
+	timelineCols := []string{
+		"profile_format", "created_at", "invited_at", "extended_at", "revoked_at"}
+	timeline := make([]string, 0, len(timelineCols))
+	for _, name := range timelineCols {
 		c, err := col(name)
 		if err != nil {
 			return snap, err
@@ -251,7 +253,8 @@ func (s *RedisStore) Snapshot() (Snapshot, error) {
 			ExpiresAt: r.ExpiresAt, Revoked: r.Revoked, Epoch: r.Epoch, UUIDs: r.UUIDs,
 			EnrolledAt: r.EnrolledAt, Enrolments: r.Enrolments, LastActive: r.LastActive,
 			ProfileAt: r.ProfileAt, ProfileLast: r.ProfileLast, ProfileFormat: r.ProfileFormat,
-			CreatedAt: r.CreatedAt, InvitedAt: r.InvitedAt, ExtendedAt: r.ExtendedAt, RevokedAt: r.RevokedAt})
+			CreatedAt: r.CreatedAt, InvitedAt: r.InvitedAt, ExtendedAt: r.ExtendedAt,
+			RevokedAt: r.RevokedAt})
 	}
 	h, err := s.rdb.HGetAll(ctx, s.approvalsKey()).Result()
 	if err != nil {

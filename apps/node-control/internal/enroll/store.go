@@ -124,8 +124,9 @@ type Credential struct {
 
 // Store is the enrolment store.
 type Store struct {
-	db           *sql.DB
-	missingCols  map[string]bool // a read-only copy of an older database: its missing activity columns read as 0
+	db *sql.DB
+	// missingCols: a read-only copy of an older database; its missing activity columns read as 0.
+	missingCols  map[string]bool
 	key          []byte
 	clock        func() time.Time
 	legacyHash   bool
@@ -179,7 +180,7 @@ func OpenStoreReadOnly(path string, secretKey []byte, clock func() time.Time) (*
 	for col := range optionalDeviceCols {
 		ok, err := s.hasColumn(context.Background(), "devices", col)
 		if err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("open enrolment db: %w", err)
 		}
 		s.missingCols[col] = !ok
@@ -204,7 +205,8 @@ func (s *Store) init() error {
 			return err
 		}
 	}
-	if err := s.addColumnIfMissing(ctx, "devices", "profile_format", "TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := s.addColumnIfMissing(ctx, "devices", "profile_format",
+		"TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(devices)")
@@ -379,7 +381,8 @@ func (s *Store) CreateDevice(name, owner, client string, expiresAt int64) (Devic
 	now := s.clock().Unix()
 	if s.legacyHash {
 		res, err = tx.ExecContext(ctx,
-			"INSERT INTO devices (name, owner, client, expires_at, created_at, secret_hash) VALUES (?,?,?,?,?,?)",
+			"INSERT INTO devices (name, owner, client, expires_at, created_at, secret_hash)"+
+				" VALUES (?,?,?,?,?,?)",
 			name, owner, client, expiresAt, now, s.secretHashFn())
 	} else {
 		res, err = tx.ExecContext(ctx,
@@ -445,12 +448,14 @@ func (s *Store) NewLink(deviceID int64, ttl time.Duration, maxUses int) (string,
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, "INSERT INTO tokens (device_id, token_hash, expires, max_uses) VALUES (?,?,?,?)",
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		"INSERT INTO tokens (device_id, token_hash, expires, max_uses) VALUES (?,?,?,?)",
 		deviceID, hashToken(token), expires, maxUses); err != nil {
 		return "", err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE devices SET invited_at=? WHERE id=?", s.clock().Unix(), deviceID); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE devices SET invited_at=? WHERE id=?",
+		s.clock().Unix(), deviceID); err != nil {
 		return "", err
 	}
 	if err := tx.Commit(); err != nil {
@@ -557,8 +562,9 @@ func (s *Store) VerifySecret(secret string) (*Device, error) {
 
 // Revoke marks a device revoked.
 func (s *Store) Revoke(deviceID int64) error {
-	_, err := s.db.Exec("UPDATE devices SET revoked=1,"+
-		" revoked_at=CASE WHEN revoked=0 THEN ? ELSE revoked_at END WHERE id=?", s.clock().Unix(), deviceID)
+	_, err := s.db.ExecContext(context.Background(), "UPDATE devices SET revoked=1,"+
+		" revoked_at=CASE WHEN revoked=0 THEN ? ELSE revoked_at END WHERE id=?",
+		s.clock().Unix(), deviceID)
 	return err
 }
 
@@ -595,7 +601,9 @@ func (s *Store) DeleteDevice(deviceID int64) error {
 
 // Extend sets a device's expiry (unix seconds).
 func (s *Store) Extend(deviceID int64, expiresAt int64) error {
-	_, err := s.db.Exec("UPDATE devices SET expires_at=?, extended_at=? WHERE id=?", expiresAt, s.clock().Unix(), deviceID)
+	_, err := s.db.ExecContext(context.Background(),
+		"UPDATE devices SET expires_at=?, extended_at=? WHERE id=?",
+		expiresAt, s.clock().Unix(), deviceID)
 	return err
 }
 

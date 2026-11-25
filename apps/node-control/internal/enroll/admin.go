@@ -396,6 +396,7 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The traffic, the egress self-test and the path check of every bridge are read in parallel.
+	ctx := r.Context()
 	var (
 		stats    map[int64]Traffic
 		partial  bool
@@ -404,10 +405,9 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 		paths    map[string]PathCheck
 		wg       sync.WaitGroup
 	)
-	wg.Add(2)
-	go func() { defer wg.Done(); egress = egressOf(r.Context(), cur.SyncTargets) }()
-	go func() { defer wg.Done(); paths = pathcheckOf(r.Context(), cur.SyncTargets) }()
-	stats, partial, answered = mergedStats(r.Context(), cur.SyncTargets, cur.Cfg, devs)
+	wg.Go(func() { egress = egressOf(ctx, cur.SyncTargets) })
+	wg.Go(func() { paths = pathcheckOf(ctx, cur.SyncTargets) })
+	stats, partial, answered = mergedStats(ctx, cur.SyncTargets, cur.Cfg, devs)
 	wg.Wait()
 	if !partial { // partial counters would read as a reset
 		for id, at := range a.activity.Observe(devs, stats) {

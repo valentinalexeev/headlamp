@@ -415,6 +415,51 @@ func TestStatsMergedAndPartialFlag(t *testing.T) {
 	}
 }
 
+// TestDevicesBridgeStrip (#438): the device list has one health line for each bridge; a bridge
+// that goes down shows as not answered, with the time of its last answer, and the traffic is partial.
+func TestDevicesBridgeStrip(t *testing.T) {
+	f := newMultiFx(t)
+	f.register()
+	id, _ := f.create()
+	bridges := func(m map[string]any) map[string]map[string]any {
+		out := map[string]map[string]any{}
+		for _, b := range m["bridges"].([]any) {
+			row := b.(map[string]any)
+			out[row["name"].(string)] = row
+		}
+		return out
+	}
+	_, m := f.do("GET", "/enroll/devices", "")
+	got := bridges(m)
+	if len(got) != 2 || m["stats_partial"] != false {
+		t.Fatalf("%v", m["bridges"])
+	}
+	for name, b := range got {
+		if b["answered"] != true || b["last_answer"].(float64) <= 0 || b["egress"] != nil || b["pathcheck"] != nil {
+			t.Fatalf("%s: %v", name, b)
+		}
+		if s := b["sync"].(map[string]any); s["pending"] != false {
+			t.Fatalf("%s: %v", name, b)
+		}
+	}
+	last := got["ingress-2"]["last_answer"]
+
+	f.a2.srv.Close()
+	f.do("POST", fmt.Sprintf("/enroll/devices/%d/extend", id), fmt.Sprintf(`{"expires_at":%d}`, adminFuture+10))
+	_, m = f.do("GET", "/enroll/devices", "")
+	got = bridges(m)
+	if m["stats_partial"] != true || got["ingress-1"]["answered"] != true {
+		t.Fatalf("%v", m)
+	}
+	down := got["ingress-2"]
+	if down["answered"] != false || down["last_answer"].(float64) < last.(float64) {
+		t.Fatalf("%v", down)
+	}
+	if s := down["sync"].(map[string]any); s["pending"] != true || s["state"] != "unreachable" {
+		t.Fatalf("%v", down)
+	}
+}
+
 func TestOnlineFlagInTheDeviceList(t *testing.T) {
 	f := newMultiFx(t)
 	f.register()

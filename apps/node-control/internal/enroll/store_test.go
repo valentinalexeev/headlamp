@@ -145,6 +145,7 @@ func TestSecondConsumeOfSingleUseTokenIsNil(t *testing.T) {
 	got, err := e.store.ConsumeToken(tok)
 	want := dev // a spend also marks the device as enrolled, now and once
 	want.EnrolledAt, want.Enrolments = e.clock.Now().Unix(), 1
+	want.InvitedAt = e.clock.Now().Unix() // #437: NewLink records the invitation
 	if g := mustDevice(t, got, err, "first"); !reflect.DeepEqual(*g, want) {
 		t.Fatalf("got %+v want %+v", *g, want)
 	}
@@ -363,9 +364,10 @@ func TestDeviceHasNoSecretFields(t *testing.T) {
 	for i := 0; i < typ.NumField(); i++ {
 		got = append(got, typ.Field(i).Name)
 	}
-	// EnrolledAt, Enrolments, LastActive, ProfileAt and ProfileLast are activity times and a count, not secrets.
+	// EnrolledAt, Enrolments, LastActive, ProfileAt and ProfileLast are activity times and a count, not secrets; so are
+	// ProfileFormat and the timeline (#437).
 	want := []string{"ID", "Name", "Owner", "Client", "ExpiresAt", "Revoked", "UUIDs", "EnrolledAt", "Enrolments", "LastActive",
-		"ProfileAt", "ProfileLast"}
+		"ProfileAt", "ProfileLast", "ProfileFormat", "CreatedAt", "InvitedAt", "ExtendedAt", "RevokedAt"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("fields = %v", got)
 	}

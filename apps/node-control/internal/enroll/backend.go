@@ -54,8 +54,9 @@ type Backend interface {
 	TouchActive(deviceID, at int64) error
 
 	// TouchProfile records a download of the device's profile (#436): the first time once,
-	// the last time only forward. It does nothing for an unknown device.
-	TouchProfile(deviceID, at int64) error
+	// the last time only forward, with the format of the newest download (#437). It does nothing
+	// for an unknown device.
+	TouchProfile(deviceID, at int64, format string) error
 
 	ApprovalRows() (map[string]ApprovalRow, error)
 	Approvals() (map[string]string, error)

@@ -245,6 +245,51 @@ file. Do not copy the list into your Caddyfile: when a release adds a path, take
 While `ENROLL_DOMAIN` is not set, the site has the reserved name `enroll.invalid` and a local certificate. So Caddy asks
 no ACME CA for it (#216). The same is true for `funnel.invalid` while `FUNNEL_DOMAIN` is not set.
 
+## Path check test file (optional)
+
+The path check of a bridge (see the ingress-agent README, "Path check") can measure the transfer rate from the
+control host. For this, the edge can serve one file of random data at
+`https://<HEADSCALE_DOMAIN>/<PATHCHECK_BLOB_PATH>/probe.bin` (#423).
+
+While `PATHCHECK_BLOB_PATH` is not set, the edge has no route for the file. headscale gets the path and sends 404.
+
+1. Make a path that is difficult to guess. Use only letters and digits:
+
+   ```sh
+   head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'
+   ```
+
+2. Create the file in the data directory. Make it 1 MiB (`1048576` bytes) or larger. It must not be smaller than
+   `ingress_pathcheck_blob_bytes` of the bridges:
+
+   ```sh
+   mkdir -p /srv/headlamp/data/pathcheck
+   head -c 1048576 /dev/urandom > /srv/headlamp/data/pathcheck/probe.bin
+   ```
+
+3. In `.env`, set `PATHCHECK_BLOB_PATH` to the path of step 1. Do not put a `/` in the value.
+4. Start the edge again:
+
+   ```sh
+   docker compose up -d edge
+   ```
+
+5. Make sure that the edge sends 1 MiB:
+
+   ```sh
+   curl -s -o /dev/null -w '%{size_download}\n' -r 0-1048575 https://<HEADSCALE_DOMAIN>/<PATHCHECK_BLOB_PATH>/probe.bin
+   ```
+
+   The output is `1048576`.
+6. On each bridge, set `ingress_pathcheck_blob_url` to the URL of step 5, and run the `ingress-agent` role again.
+   Without the role, set `INGRESS_PATHCHECK_BLOB_URL`.
+
+Use the directory of `DATA_DIR` if it is not `/srv/headlamp/data`. The file is the same for all bridges. To stop, remove
+`PATHCHECK_BLOB_PATH` from `.env` and do step 4 again.
+
+**CAUTION:** Each transfer sends `ingress_pathcheck_blob_bytes` from this host. The daily budget of each bridge
+(`ingress_pathcheck_daily_bytes`) limits this. Keep the budget low if the uplink of this host is metered.
+
 
 ## AWS
 

@@ -210,6 +210,9 @@ For example, add this route to the TLS front of the control host:
 Create the file with `head -c 1048576 /dev/urandom > /srv/probe/<random path>/probe.bin`. The reference host must
 also serve a file of the same size or larger. The transfer uses a `Range` request, so a larger file is not read fully.
 
+The compose example of the control host has this route. Set `PATHCHECK_BLOB_PATH` to turn it on. See
+`examples/compose/control/README.md`, "Path check test file".
+
 > **CAUTION:** Keep the daily budget low on a metered uplink. Each transfer reads `INGRESS_PATHCHECK_BLOB_BYTES` from
 > the control host, and the same amount from the reference host.
 

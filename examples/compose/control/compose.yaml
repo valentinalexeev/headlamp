@@ -29,6 +29,10 @@ services:
       FUNNEL_DDNS: ${FUNNEL_DOMAIN:+${FUNNEL_DDNS:-none}}
       FUNNEL_DDNS_IP_URL: ${FUNNEL_DDNS_IP_URL:-https://api.ipify.org}
       FUNNEL_DDNS_INTERVAL: ${FUNNEL_DDNS_INTERVAL:-5m}
+      # #423: the test file of the path check, at https://<HEADSCALE_DOMAIN>/<PATHCHECK_BLOB_PATH>/probe.bin. No route
+      # while PATHCHECK_BLOB_PATH is not set.
+      PATHCHECK_BLOB_PATH: ${PATHCHECK_BLOB_PATH:-}
+      PATHCHECK: ${PATHCHECK_BLOB_PATH:+on}
     # Credentials of the DNS provider, for funnel wildcards only (see caddy/dns/). Optional.
     env_file:
       - path: ./edge.env
@@ -41,6 +45,8 @@ services:
       # Optional key files of the DNS provider (Google Cloud DNS service account). Not in git.
       - ./caddy/secrets:/etc/caddy/secrets:ro
       - ${DATA_DIR:-/srv/headlamp/data}/caddy:/data
+      # The test file of the path check (#423), probe.bin. Used only while PATHCHECK_BLOB_PATH is set.
+      - ${DATA_DIR:-/srv/headlamp/data}/pathcheck:/srv/pathcheck:ro
     depends_on:
       headscale:
         condition: service_healthy

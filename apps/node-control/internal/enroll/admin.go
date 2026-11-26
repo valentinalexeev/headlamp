@@ -739,7 +739,8 @@ func (a *Admin) pushNow(w http.ResponseWriter, r *http.Request) {
 }
 
 // listIngresses shows every ingress with its approval state. Unapproved ones show only a short
-// prefix of their key and short id.
+// prefix of their key and short id. pathcheck_text is what each path check class means, for the
+// detail of a bridge on the Nodes page (#424).
 func (a *Admin) listIngresses(w http.ResponseWriter, r *http.Request) {
 	cur := a.reg.Current(r.Context(), true)
 	pending := cur.Pending
@@ -748,7 +749,7 @@ func (a *Admin) listIngresses(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ingresses": cur.Views, "pending_ingresses": pending,
 		"discovery": cur.Discovery, "egress": egressOf(r.Context(), cur.SyncTargets),
-		"pathcheck": pathcheckOf(r.Context(), cur.SyncTargets)})
+		"pathcheck": pathcheckOf(r.Context(), cur.SyncTargets), "pathcheck_text": pathText})
 }
 
 // egressOf gives the bridge path self-test of each bridge whose agent reports one (#196), by

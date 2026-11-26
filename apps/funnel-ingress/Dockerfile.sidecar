@@ -6,7 +6,7 @@
 #
 # CI publishes it for linux/amd64 and linux/arm64. The Go build runs on the build platform and cross-compiles, so only
 # the small final stage runs under emulation.
-ARG TSVERSION=1.104.5
+ARG TSVERSION=1.104.7
 
 FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine AS build
 ARG TSVERSION

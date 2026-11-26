@@ -396,7 +396,20 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 		a.internal(w, err)
 		return
 	}
-	stats, partial := MergedStats(r.Context(), cur.SyncTargets, cur.Cfg, devs)
+	// The traffic, the egress self-test and the path check of every bridge are read in parallel.
+	ctx := r.Context()
+	var (
+		stats    map[int64]Traffic
+		partial  bool
+		answered []bool
+		egress   map[string]Egress
+		paths    map[string]PathCheck
+		wg       sync.WaitGroup
+	)
+	wg.Go(func() { egress = egressOf(ctx, cur.SyncTargets) })
+	wg.Go(func() { paths = pathcheckOf(ctx, cur.SyncTargets) })
+	stats, partial, answered = mergedStats(ctx, cur.SyncTargets, cur.Cfg, devs)
+	wg.Wait()
 	if !partial { // partial counters would read as a reset
 		for id, at := range a.activity.Observe(devs, stats) {
 			for i := range devs {
@@ -422,8 +435,43 @@ func (a *Admin) listDevices(w http.ResponseWriter, r *http.Request) {
 	if pending == nil {
 		pending = []string{}
 	}
+	bridges := bridgeHealthOf(cur.SyncTargets, snaps, answered, egress, paths)
 	writeJSON(w, http.StatusOK, map[string]any{"devices": rows, "sync": summarize(snaps),
-		"ingresses": rowsOf(cur, cur.SyncTargets, snaps), "pending_ingresses": pending, "stats_partial": partial})
+		"ingresses": rowsOf(cur, cur.SyncTargets, snaps), "pending_ingresses": pending,
+		"stats_partial": partial, "bridges": bridges})
+}
+
+// bridgeHealth is one line of the bridge strip of the Devices page (#438): the sync,
+// whether the agent answered the traffic read of this request and when it last answered,
+// the egress self-test and the path check. Egress and PathCheck are nil when the agent
+// reports none.
+type bridgeHealth struct {
+	Name       string       `json:"name"`
+	Sync       SyncSnapshot `json:"sync"`
+	Answered   bool         `json:"answered"`
+	LastAnswer int64        `json:"last_answer"`
+	Egress     *Egress      `json:"egress"`
+	PathCheck  *PathCheck   `json:"pathcheck"`
+}
+
+func bridgeHealthOf(targets []SyncTarget, snaps []SyncSnapshot, answered []bool,
+	egress map[string]Egress, paths map[string]PathCheck,
+) []bridgeHealth {
+	out := make([]bridgeHealth, 0, len(targets))
+	for i, t := range targets {
+		b := bridgeHealth{Name: t.Name, Sync: snaps[i], LastAnswer: t.State.LastAnswer()}
+		if i < len(answered) {
+			b.Answered = answered[i]
+		}
+		if e, ok := egress[t.Name]; ok {
+			b.Egress = &e
+		}
+		if p, ok := paths[t.Name]; ok {
+			b.PathCheck = &p
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 // syncResult is what a change reports about the ingresses.

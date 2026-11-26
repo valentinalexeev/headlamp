@@ -179,3 +179,37 @@ func TestAuthorizerPassesSubject(t *testing.T) {
 		t.Fatalf("subject = %q", rec.Body.String())
 	}
 }
+
+// The default sensitive routes (#469) change keys, grants, roles, secrets or the policy; overrides
+// add and remove routes by exact pattern, and refuse unknown or unchecked routes.
+func TestSensitivePatterns(t *testing.T) {
+	def, err := SensitivePatterns("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"POST /policy/apply", "POST /admin/grants", "PUT /tasks/secrets",
+		"POST /funnel/namespaces/{name}/keys", "POST /enroll/tailnet-acl"} {
+		if !def[p] {
+			t.Errorf("%s is not sensitive by default", p)
+		}
+	}
+	for _, p := range []string{"GET /nodes", "POST /nodes/{id}/start", "POST /policy/confirm",
+		"POST /policy/revert-now"} {
+		if def[p] {
+			t.Errorf("%s is sensitive by default", p)
+		}
+	}
+	got, err := SensitivePatterns(" POST /nodes/{id}/start , -POST  /policy/apply,")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["POST /nodes/{id}/start"] || got["POST /policy/apply"] || len(got) != len(def) {
+		t.Fatalf("overrides: %v", got)
+	}
+	for _, bad := range []string{"POST /nope", "GET /healthz", "GET /auth/login",
+		"POST /serve/v1/cert"} {
+		if _, err := SensitivePatterns(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}

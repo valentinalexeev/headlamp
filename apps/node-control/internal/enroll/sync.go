@@ -50,6 +50,9 @@ type SyncState struct {
 	// syncedAt is when the store was read for the last push the bridge accepted (#437, unix
 	// seconds; 0 = none since start). A device changed before it is on the bridge as it is now.
 	syncedAt int64
+	// answered is the unix time of the last answer of the agent (a push or a stats read;
+	// #438); 0: never.
+	answered int64
 }
 
 // markSynced records that the bridge accepted the set read from the store at the given time.
@@ -65,6 +68,30 @@ func (s *SyncState) SyncedAt() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.syncedAt
+}
+
+// Answered records that the agent answered now. A nil state ignores it.
+func (s *SyncState) Answered() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clock := s.clock
+	if clock == nil {
+		clock = time.Now
+	}
+	s.answered = clock().Unix()
+}
+
+// LastAnswer gives the unix time of the last answer of the agent; 0: none since the start.
+func (s *SyncState) LastAnswer() int64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.answered
 }
 
 // SetGroups records the grant groups the bridge can serve.
@@ -353,6 +380,7 @@ func pushTo(ctx context.Context, t SyncTarget, creds []Credential, dns *TailnetD
 			t.State.SetGroups(g)
 		}
 	}
+	t.State.Answered()
 	t.State.OK("ok")
 	return true
 }

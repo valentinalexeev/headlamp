@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/adminoidc"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/oidc"
 	servemod "github.com/valentinalexeev/headlamp/apps/node-control/internal/serve"
@@ -34,6 +35,14 @@ import (
 //	                              factor (#448); 0: the sign-in only adds groups
 //	ADMIN_OIDC_IDLE_MINUTES       required mode: end a session after this many minutes without a
 //	                              request, 5 to 480 (default 30)
+//	ADMIN_OIDC_REAUTH             1: sensitive routes ask for a new sign-in (#469); needs the
+//	                              required mode. 0 (default): off
+//	ADMIN_OIDC_REAUTH_MINUTES     how recent the sign-in must be, 1 to 60 (default 3)
+//	ADMIN_OIDC_REAUTH_UNPROVEN    logout (default): an IdP that does not prove a new sign-in
+//	                              (auth_time) is refused and the session ends; warn: accept it
+//	                              with a warning in the log
+//	ADMIN_OIDC_REAUTH_ROUTES      a comma list of route patterns to add, "-<pattern>" to remove,
+//	                              on top of the routes marked in authz.Routes
 //
 // The redirect URL is https://<ADMIN_CONSOLE_NAME>/auth/callback. It needs serve (SERVE_DB), whose
 // certificate the console uses.
@@ -135,6 +144,10 @@ func adminConsole(env core.Env, serve core.Module, addrs func() []netip.Addr) (
 		}
 		idle = n
 	}
+	reauth, err := adminReauth(env, required)
+	if err != nil {
+		return nil, err
+	}
 	m := &adminOIDCModule{env: env, serve: sm, name: name, addrs: addrs,
 		issuer: issuer, clientID: clientID, secret: env.Getenv("ADMIN_OIDC_CLIENT_SECRET"),
 		scopes: env.Default("ADMIN_OIDC_SCOPES", "openid email profile groups"),
@@ -146,15 +159,67 @@ func adminConsole(env core.Env, serve core.Module, addrs func() []netip.Addr) (
 			Idle:     time.Duration(idle) * time.Minute,
 			TrustedEmailDomains: adminoidc.ParseDomains(
 				env.Getenv("ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS")),
+			Reauth:     reauth.minutes,
+			Sensitive:  reauth.routes,
+			ReauthWarn: reauth.warn,
 		}}
 	for _, d := range m.cfg.TrustedEmailDomains {
 		slog.Warn("admin sign-in trusts email domain without email_verified", "domain", d)
 	}
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: sm.ConsoleCert}
 	slog.Info("console on https", "name", name, "session_hours", hours, "required", required,
-		"idle_minutes", idle)
+		"idle_minutes", idle, "reauth_minutes", int(reauth.minutes/time.Minute),
+		"reauth_routes", len(reauth.routes))
 	return &adminConsoleSetup{mod: m, opts: []core.Option{core.WithAdminTLS(tlsCfg, name),
 		core.WithAdminTLSGate(m.gate)}}, nil
+}
+
+// reauthSettings are the re-authentication settings of the console (#469).
+type reauthSettings struct {
+	minutes time.Duration // zero: off
+	routes  map[string]bool
+	warn    bool
+}
+
+// adminReauth reads ADMIN_OIDC_REAUTH and its settings. It needs the required sign-in.
+func adminReauth(env core.Env, required bool) (reauthSettings, error) {
+	var out reauthSettings
+	switch v := strings.TrimSpace(env.Getenv("ADMIN_OIDC_REAUTH")); v {
+	case "", "0":
+		return out, nil
+	case "1":
+	default:
+		return out, errors.New("ADMIN_OIDC_REAUTH must be 1 (sensitive routes ask for a new " +
+			"sign-in) or 0 (off)")
+	}
+	if !required {
+		return out, errors.New("ADMIN_OIDC_REAUTH=1 needs ADMIN_OIDC_REQUIRED=1: the new " +
+			"sign-in is checked against the console session")
+	}
+	minutes := 3
+	if v := env.Getenv("ADMIN_OIDC_REAUTH_MINUTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 60 {
+			return out, errors.New("ADMIN_OIDC_REAUTH_MINUTES must be a whole number from 1 to 60")
+		}
+		minutes = n
+	}
+	switch v := strings.TrimSpace(env.Getenv("ADMIN_OIDC_REAUTH_UNPROVEN")); v {
+	case "", "logout":
+	case "warn":
+		out.warn = true
+		slog.Warn("admin re-authentication accepts a sign-in that the IdP does not prove recent",
+			"setting", "ADMIN_OIDC_REAUTH_UNPROVEN=warn")
+	default:
+		return out, errors.New("ADMIN_OIDC_REAUTH_UNPROVEN must be logout (refuse the sign-in " +
+			"and end the session) or warn (accept it with a warning in the log)")
+	}
+	routes, err := authz.SensitivePatterns(env.Getenv("ADMIN_OIDC_REAUTH_ROUTES"))
+	if err != nil {
+		return out, fmt.Errorf("ADMIN_OIDC_REAUTH_ROUTES: %w", err)
+	}
+	out.minutes, out.routes = time.Duration(minutes)*time.Minute, routes
+	return out, nil
 }
 
 // serveModule finds the serve module in mods (nil when it is not there).

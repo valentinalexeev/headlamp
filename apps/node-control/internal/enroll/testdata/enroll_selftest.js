@@ -265,9 +265,9 @@ const fieldValue = (els, label) => {
   };
   const mk = (tag) => { const n = new FakeNode(tag); n.isRoot = true; return n; };
   function pageEls() {
-    const els = { sub: mk('p'), chips: mk('div'), error: mk('div'), notice: mk('div'), syncnote: mk('section'), empty: mk('div'), tablewrap: mk('div'),
+    const els = { sub: mk('p'), chips: mk('div'), error: mk('div'), notice: mk('div'), syncnote: mk('section'), bridges: mk('section'), empty: mk('div'), tablewrap: mk('div'),
       rows: mk('tbody'), foot: mk('p'), traffic: mk('th'), drawer: mk('div'), search: mk('div'), inviteSection: mk('section'), inviteEmail: mk('input'), inviteDays: mk('input') };
-    ['error', 'notice', 'syncnote', 'empty', 'chips'].forEach((k) => { els[k].hidden = true; });
+    ['error', 'notice', 'syncnote', 'bridges', 'empty', 'chips'].forEach((k) => { els[k].hidden = true; });
     return els;
   }
   const polls = [];
@@ -377,7 +377,7 @@ const fieldValue = (els, label) => {
     assert.strictEqual(chip(els, 'Active').getAttribute('aria-pressed'), 'true');
     assert.strictEqual(chip(els, 'All').getAttribute('aria-pressed'), 'false');
     update(ctrl, [D.active], { stats_partial: true });
-    assert.strictEqual(els.traffic.textContent, 'Traffic*');
+    assert.strictEqual(els.traffic.textContent, 'Traffic (partial)');
     assert.ok(els.traffic.getAttribute('title'));
     chip(els, 'Not set up').click();
     assert.ok(/No devices match/.test(els.rows.textContent));
@@ -821,6 +821,43 @@ const fieldValue = (els, label) => {
     // cleared
     update(ctrl, [D.active]);
     assert.strictEqual(els.syncnote.hidden, true);
+  }
+
+  // bridgeStripShowsADownBridge (#438): one line for each bridge; a bridge that is down shows, and Traffic is partial
+  {
+    const { els, ctrl } = setup();
+    update(ctrl, [D.active]);
+    assert.strictEqual(els.bridges.hidden, true, 'no bridges: no strip');
+    const since = sec(NOW - 38 * 60000);
+    update(ctrl, [D.active], {
+      stats_partial: true,
+      bridges: [
+        { name: 'bridge-1', sync: { pending: false, state: 'ok', since: null }, answered: true, last_answer: sec(NOW),
+          egress: { ok: true, checked: sec(NOW) }, pathcheck: { class: 'ok', streak: 3, checked: sec(NOW) } },
+        { name: 'bridge-2', sync: { pending: true, state: 'unreachable', since }, answered: false, last_answer: since,
+          egress: null, pathcheck: { class: 'sni-blocked', streak: 2, checked: sec(NOW) } },
+        { name: 'bridge-3', sync: { pending: false, state: 'ok', since: null }, answered: true, last_answer: sec(NOW),
+          egress: { ok: false, error: 'SOCKS port <b>unreachable</b>', checked: sec(NOW) }, pathcheck: null },
+      ],
+    });
+    assert.strictEqual(els.bridges.hidden, false);
+    assert.strictEqual(els.traffic.textContent, 'Traffic (partial)');
+    const lines = findAll(els.bridges, (n) => n.tag === 'p').map((p) => p.textContent);
+    assert.strictEqual(lines.length, 3);
+    assert.ok(/^bridge-1 In sync, agent answered just now, egress self-test OK, path check ok\./.test(lines[0]), lines[0]);
+    assert.ok(/^bridge-2 Pending: agent unreachable since 38 min ago, agent did not answer, last answer 38 min ago, egress self-test not reported, path check sni-blocked\./.test(lines[1]), lines[1]);
+    assert.ok(/egress self-test fails: SOCKS port <b>unreachable<\/b>, path check off\./.test(lines[2]), lines[2]);
+    const levels = findAll(els.bridges, (n) => n.tag === 'span' && hasClass(n, 'st')).map((s) => s.className);
+    assert.deepStrictEqual(levels, ['st ok', 'st crit', 'st crit']);
+    assert.deepStrictEqual(findAll(els.bridges, (n) => n.tag === 'a').map((a) => a.getAttribute('href')),
+      ['/nodes?sel=bridge-1', '/nodes?sel=bridge-2', '/nodes?sel=bridge-3']);
+    // a bad path class alone is a warning; an agent that never answered says so
+    update(ctrl, [D.active], { bridges: [{ name: 'bridge-4', sync: { pending: false, state: 'unknown', since: null }, answered: false,
+      last_answer: 0, pathcheck: { class: 'throttled' } }, { name: 'bridge-5', sync: { pending: false, state: 'ok' }, answered: true,
+      last_answer: sec(NOW), pathcheck: { class: 'udp-blocked' } }] });
+    const again = findAll(els.bridges, (n) => n.tag === 'p').map((p) => p.textContent);
+    assert.ok(/Sync not done yet, agent did not answer, no answer since the start/.test(again[0]), again[0]);
+    assert.deepStrictEqual(findAll(els.bridges, (n) => n.tag === 'span' && hasClass(n, 'st')).map((s) => s.className), ['st crit', 'st warn']);
   }
 
   // text from the network is plain text, and a failed read keeps the last data with a note

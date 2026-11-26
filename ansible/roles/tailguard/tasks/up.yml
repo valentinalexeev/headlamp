@@ -1,0 +1,16 @@
+---
+# Start the services. tailguard_force_recreate: also recreate the containers that compose thinks are current (wg0.conf
+# and the key file are mounted files, so compose does not see their changes).
+# rc is kept, not failed on: `up` waits for the healthcheck of tailguard, which fails while the node needs a login.
+# The state checks after this give the cause.
+- name: Start tailguard with Docker Compose
+  ansible.builtin.command:
+    argv: "{{ ['docker', 'compose', 'up', '--detach', '--remove-orphans'] + (['--force-recreate'] if tailguard_force_recreate | default(false) | bool else []) }}"
+    chdir: "{{ tailguard_dir }}"
+  become: true
+  register: tailguard_up
+  changed_when: true
+  failed_when: false
+
+- name: Wait for the tailscale state of tailguard
+  ansible.builtin.include_tasks: status.yml

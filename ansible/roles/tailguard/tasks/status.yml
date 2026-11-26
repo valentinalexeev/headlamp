@@ -1,0 +1,22 @@
+---
+# Reads `tailscale status --json` from the tailscaled of tailguard, and waits until the node is up or needs a login.
+# The tailscaled socket is in run/, which tailguard and exit-node-tracker mount at /tmp.
+- name: Read the tailscale state of tailguard
+  ansible.builtin.command: docker exec tailguard tailscale --socket=/tmp/tailscaled.sock status --json
+  become: true
+  register: tailguard_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  retries: "{{ tailguard_status_retries | default(30) }}"
+  delay: 4
+  until: >-
+    (tailguard_status.stdout | default('') | regex_findall('"BackendState":[ ]*"([A-Za-z]+)"') | first | default(''))
+    in (tailguard_status_want | default(['Running', 'NeedsLogin', 'NeedsMachineAuth']))
+
+# Regex instead of from_json: tolerates empty or non-JSON output.
+- name: Record the backend state
+  ansible.builtin.set_fact:
+    tailguard_backend: >-
+      {{ tailguard_status.stdout | default('') | regex_findall('"BackendState":[ ]*"([A-Za-z]+)"') | first
+         | default('Unknown') }}

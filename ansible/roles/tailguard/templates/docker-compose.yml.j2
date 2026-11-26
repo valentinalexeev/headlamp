@@ -1,0 +1,79 @@
+# {{ ansible_managed }}
+# The compose file of apps/tailguard/docker-compose.yml, with the values of the tailguard role. The settings are in
+# .env (0600). Change them in the role variables, not here.
+name: tailguard
+services:
+  tailguard:
+    image: {{ tailguard_image }}
+    container_name: tailguard
+    env_file: .env
+    environment:
+      # Never pin the exit node at boot: exit-node-tracker selects it at runtime (see track-exit-node.sh).
+      - TS_EXIT_NODE=
+      - "TG_WEBUI_PORT={{ tailguard_status_port }}"
+    volumes:
+      - ./config:/etc/wireguard
+      - ./state:/tailguard/state
+      - ./run:/tmp
+    cap_add: [NET_ADMIN]
+    devices:
+      - /dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    networks: [tgnet]
+    ports:
+      - "{{ tailguard_bind_addr }}:{{ tailguard_wg_port }}:{{ tailguard_wg_port }}/udp"
+      - "{{ tailguard_bind_addr }}:{{ tailguard_ts_port }}:{{ tailguard_ts_port }}/udp"
+    restart: unless-stopped
+
+  route-health:
+    image: {{ tailguard_image }}
+    container_name: tailguard-route-health
+    network_mode: "service:tailguard"
+    cap_add: [NET_ADMIN]
+    depends_on:
+      tailguard:
+        condition: service_healthy
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/usr/local/bin/route-health.sh"]
+    environment:
+      - "WG_PORT={{ tailguard_wg_port }}"
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f route-health.sh >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  exit-node-tracker:
+    image: {{ tailguard_image }}
+    container_name: tailguard-exit-node-tracker
+    network_mode: "service:tailguard"
+    env_file: .env
+    cap_add: [NET_ADMIN]
+    depends_on:
+      tailguard:
+        condition: service_healthy
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/usr/local/bin/track-exit-node.sh"]
+    volumes:
+      - ./run:/tmp
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f track-exit-node.sh >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  tgnet:
+{% if tailguard_ipv6_subnet | length > 0 %}
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: "{{ tailguard_ipv6_subnet }}"
+{% else %}
+    enable_ipv6: false
+{% endif %}

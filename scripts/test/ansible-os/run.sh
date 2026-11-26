@@ -21,7 +21,7 @@ case "$os" in
   *) echo "unknown OS '$os'"; exit 2 ;;
 esac
 roles=("$@")
-[ $# -gt 0 ] || roles=(tailscale route-provisioner tailscale-userspace-socks reality-ingress ingress-agent task-runner)
+[ $# -gt 0 ] || roles=(tailscale route-provisioner tailscale-userspace-socks reality-ingress ingress-agent task-runner tailguard)
 for c in docker ansible-playbook go curl python3; do command -v "$c" >/dev/null || { echo "SKIP: $c is not installed"; exit 0; }; done
 platform="${ANSIBLE_OS_PLATFORM:-linux/$(docker version -f '{{.Server.Arch}}')}"
 echo "platform $platform"
@@ -43,7 +43,7 @@ docker build -q --platform "$platform" -t "$img" --build-arg BASE="$base" --buil
 docker network create "$net" >/dev/null || die "network"
 
 # headscale over plain HTTP on the test network. Tagged keys: tag:exit (the node of the tailscale role, auto-approved as
-# an exit node) and tag:socks (the second node of tailscale-userspace-socks).
+# an exit node), tag:socks (the second node of tailscale-userspace-socks) and tag:tailguard (the node of tailguard).
 hsv="$(tr -d '[:space:]' < "$root/HEADSCALE_VERSION")"
 mkdir -p "$T/hs"
 cat > "$T/hs/config.yaml" <<YAML
@@ -85,17 +85,21 @@ docker run -d --name "$hs" --network "$net" -v "$T/hs:/etc/headscale:ro" "ghcr.i
 hx() { docker exec -i "$hs" headscale "$@"; }
 for _ in $(seq 40); do hx users list >/dev/null 2>&1 && break; sleep 1; done
 hx users create svc >/dev/null || die "headscale not ready"
-printf '%s' '{"tagOwners":{"tag:exit":["svc@"],"tag:socks":["svc@"]},"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}],"autoApprovers":{"exitNode":["tag:exit"]}}' \
+printf '%s' '{"tagOwners":{"tag:exit":["svc@"],"tag:socks":["svc@"],"tag:tailguard":["svc@"]},"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}],"autoApprovers":{"exitNode":["tag:exit"]}}' \
   | hx policy set -f /dev/stdin >/dev/null || die "policy"
 svc_id="$(hx users list -o json | python3 -c 'import json,sys;print([u["id"] for u in json.load(sys.stdin) if u["name"]=="svc"][0])')"
 key() { hx preauthkeys create -u "$svc_id" -e 1h --tags "$1" -o json | python3 -c 'import json,sys;print(json.load(sys.stdin)["key"])'; }
-k_exit="$(key tag:exit)"; k_socks="$(key tag:socks)"
+k_exit="$(key tag:exit)"; k_socks="$(key tag:socks)"; k_tg="$(key tag:tailguard)"
+# The containers of tailguard run in the docker engine inside the host container: they cannot use the name resolver
+# of this network, so they reach headscale by its address.
+hs_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$hs")"
 
 # The host: systemd as PID 1. Privileged for /dev/net/tun, nftables and the nested rootless podman.
 # /var/lib/task-runner is an anonymous volume: Ansible does not report the overlay root of a container in its mount
 # facts, so the free-disk preflight of task-runner finds no mount. A VM has a real root mount (#178).
+# /var/lib/docker is an anonymous volume too: the docker engine of tailguard cannot use overlay2 on the overlay root.
 docker run -d --platform "$platform" --name "$host" --hostname "$host" --network "$net" --privileged --cgroupns=host \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock -v /var/lib/task-runner "$img" >/dev/null || die "host"
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock -v /var/lib/task-runner -v /var/lib/docker "$img" >/dev/null || die "host"
 for _ in $(seq 60); do
   s="$(docker exec "$host" systemctl is-system-running 2>/dev/null)"; case "$s" in running|degraded) break ;; esac; sleep 1
 done
@@ -130,6 +134,20 @@ task_runner_min_free_mb: 64
 task_runner_min_free_disk_mb: 64
 # ssh-ca (#345): a throwaway user CA made for this run; its private key is deleted with the run directory.
 ssh_ca_user_ca_keys: ["$(cat "$T/user_ca.pub")"]
+# tailguard (#392): the image built from this checkout, loaded from an archive; the exit node is the tailscale node.
+tailguard_image: "headlamp-test/tailguard:0.0.0-matrix"
+tailguard_image_archive: "$T/tailguard-image.tar"
+tailguard_hostname: "tg-$os"
+tailguard_authkey: "$k_tg"
+tailguard_login_server: "http://$hs_ip:8080"
+tailguard_exit_node_prefix: "exit-$os"
+tailguard_lan_access: "0"
+tailguard_bind_addr: "0.0.0.0"
+tailguard_peers:
+  - name: test-peer
+    public_key: "$(python3 -c 'import base64,os;print(base64.b64encode(os.urandom(32)).decode())')"
+    allowed_ips: ["10.99.0.2/32"]
+    preshared_key: "$(python3 -c 'import base64,os;print(base64.b64encode(os.urandom(32)).decode())')"
 YAML
 # BRIDGE=1 (#235): the host is a bridge, as in the exit-node-vm/openstack README "Bridge node". It joins with no exit
 # routes, and the run checks that headscale shows none for it. The matrix has no second exit node, and the socks role
@@ -137,6 +155,11 @@ YAML
 [ "${BRIDGE:-}" = 1 ] && echo "tailscale_advertise_exit_node: false" >> "$T/vars.yml"
 # A tiny stand-in run image: the matrix checks the install, not Chromium.
 docker pull -q --platform "$platform" busybox:1.37 >/dev/null && docker save -o "$T/run-image.tar" busybox:1.37 || die "run image"
+if printf ' %s ' "${roles[*]}" | grep -q ' tailguard '; then
+  docker build -q --platform "$platform" --build-arg TSVERSION="$(tr -d '[:space:]' < "$root/TAILSCALE_VERSION")" \
+    -t headlamp-test/tailguard:0.0.0-matrix "$root/apps/tailguard" >/dev/null \
+    && docker save -o "$T/tailguard-image.tar" headlamp-test/tailguard:0.0.0-matrix || die "tailguard image"
+fi
 
 # The connection settings go in the inventory, so tasks delegated to localhost keep the local connection.
 printf 'all:\n  hosts:\n    %s:\n      ansible_connection: community.docker.docker\n      ansible_python_interpreter: /usr/bin/python3\n' "$host" > "$T/hosts.yml"
@@ -185,6 +208,18 @@ for r in "${roles[@]}"; do
       ingress-agent) docker exec "$host" systemctl is-active --quiet ingress-agent || a=fail ;;
       task-runner) docker exec "$host" systemctl is-active --quiet task-runner || a=fail ;;
       route-provisioner) docker exec "$host" sh -c 'command -v bgpq4 && command -v dig' >/dev/null || a=fail ;;
+      # tailguard (#392): three running services; a second apply changes nothing; the join key is in no log, no file
+      # and no container setting (ps cannot show it: it was only ever in a 0600 file).
+      tailguard)
+        [ "$(docker exec "$host" sh -c 'cd /opt/tailguard && docker compose ps --status running --services' | sort | tr '\n' ' ')" \
+          = "exit-node-tracker route-health tailguard " ] || { echo "tailguard: not all services run"; a=fail; }
+        play "$r" apply2 && grep -qE 'changed=0 +unreachable=0 +failed=0' "$T/$r-apply2.log" \
+          || { echo "tailguard: the second apply changed something or failed"; tail -n 25 "$T/$r-apply2.log"; a=fail; }
+        if grep -qF "$k_tg" "$T/$r-check.log" "$T/$r-apply.log" "$T/$r-apply2.log" \
+          || docker exec "$host" sh -c 'grep -rqF "$1" /opt/tailguard || docker inspect tailguard tailguard-exit-node-tracker | grep -qF "$1"' sh "$k_tg"; then
+          echo "tailguard: the join key is in a log, a file or a container setting"; a=fail
+        fi
+        docker exec "$host" sh -c 'ls /opt/tailguard/run' | grep -q '^authkey' && { echo "tailguard: a key file is left"; a=fail; } ;;
     esac
   fi
   for m in check apply; do

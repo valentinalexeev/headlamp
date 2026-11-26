@@ -1,0 +1,83 @@
+---
+# exit-node-tracker selects the exit node a short time after the start. Wait for it, then check the selected peer:
+# online, tailguard_exit_node_tag, and a name with tailguard_exit_node_prefix. Without that, peers would leave from
+# this host, or through a node that only copies the name of an exit node.
+- name: Wait for the tracker to select an exit node
+  ansible.builtin.command: docker exec tailguard tailscale --socket=/tmp/tailscaled.sock status --json
+  become: true
+  register: tailguard_exit_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  retries: "{{ (tailguard_exit_node_wait | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  until: >-
+    tailguard_exit_status.rc == 0 and
+    ((tailguard_exit_status.stdout | from_json).Peer | default({}, true) | dict2items | map(attribute='value')
+     | selectattr('ExitNode', 'defined') | selectattr('ExitNode') | list | length) == 1
+
+- name: Work out the selected exit node
+  ansible.builtin.set_fact:
+    tailguard_exit_selected: >-
+      {{ ((tailguard_exit_status.stdout | from_json).Peer | default({}, true)) | dict2items | map(attribute='value')
+         | selectattr('ExitNode', 'defined') | selectattr('ExitNode') | list }}
+  when: tailguard_exit_status.rc == 0 and tailguard_exit_status.stdout is regex('^\s*\{')
+
+- name: Assert that the selected exit node is online and tagged
+  ansible.builtin.assert:
+    that:
+      - tailguard_exit_selected | default([]) | length == 1
+      - tailguard_exit_selected[0].Online | default(false) | bool
+      - tailguard_exit_node_tag in (tailguard_exit_selected[0].Tags | default([], true))
+      - (tailguard_exit_selected[0].HostName | default('') | lower).startswith(tailguard_exit_node_prefix | lower)
+        or (tailguard_exit_selected[0].DNSName | default('') | lower).startswith(tailguard_exit_node_prefix | lower)
+    fail_msg: >-
+      tailguard: after {{ tailguard_exit_node_wait }} s, '{{ tailguard_hostname }}' has no online exit node
+      '{{ tailguard_exit_node_prefix }}*' with {{ tailguard_exit_node_tag }} selected
+      (selected: {{ tailguard_exit_selected | default([]) | map(attribute='HostName') | list }},
+      online: {{ tailguard_exit_selected | default([]) | map(attribute='Online', default=false) | list }},
+      tags: {{ tailguard_exit_selected | default([]) | map(attribute='Tags', default=[]) | list }}). Check that the exit
+      node is online, has the tag and advertises 0.0.0.0/0 (routes approved), and that the policy lets tag:tailguard
+      use it. Logs: `docker logs tailguard-exit-node-tracker`.
+    quiet: true
+
+# Like the egress check of tailscale-userspace-socks (#259): a policy without autogroup:internet for tag:tailguard
+# lets the node select the exit node, but drops each request. The image has curl (route-health uses it).
+- name: Fetch the egress check URL from the container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - tailguard
+      - curl
+      - --silent
+      - --show-error
+      - --head
+      - --output
+      - /dev/null
+      - --max-time
+      - "15"
+      - --write-out
+      - "%{http_code}"
+      - "{{ tailguard_egress_check_url }}"
+  become: true
+  register: tailguard_egress
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  retries: 4
+  delay: 5
+  until: tailguard_egress.rc == 0 and tailguard_egress.stdout is regex('^[23][0-9][0-9]$')
+  when: tailguard_egress_check | bool
+
+- name: Assert that traffic leaves through the exit node
+  ansible.builtin.assert:
+    that: tailguard_egress.rc == 0 and tailguard_egress.stdout is regex('^[23][0-9][0-9]$')
+    fail_msg: >-
+      tailguard: a request from the container to {{ tailguard_egress_check_url }} through the exit node
+      '{{ tailguard_exit_selected[0].HostName }}' failed (HTTP {{ tailguard_egress.stdout | default('none') }},
+      {{ (tailguard_egress.stderr | default('') | trim).splitlines() | last | default('no output') }}). Most often the
+      headscale policy lacks {"action": "accept", "src": ["tag:tailguard"], "dst": ["autogroup:internet:*"]}. To skip
+      this check, set tailguard_egress_check: false.
+    quiet: true
+  when: tailguard_egress_check | bool

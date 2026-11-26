@@ -1,2 +1,5 @@
 # Encrypt with sops, rename to vault.sops.yaml. Never commit it unencrypted.
 tailscale_authkey_node1: "<headscale pre-auth key>"
+# tailguard (#392): the one-time join key and the preshared key of each WireGuard peer.
+tailguard_authkey_tg1: "<headscale pre-auth key with tag:tailguard>"
+tailguard_psk_router1: "<output of wg genpsk>"

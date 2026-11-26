@@ -1,6 +1,7 @@
 # TailGuard — WireGuard server bridged to a Tailscale exit node. See README.md.
 #
-# Operator-run on the Docker host: `docker compose up -d`. Not Ansible/Terraform managed.
+# Operator-run on the Docker host: `docker compose up -d`. The Ansible role ansible/roles/tailguard renders the same
+# services from its own template (#392): keep the two in step.
 services:
   tailguard:
     # The headlamp image (#391): upstream tailguard at a pinned digest, tailscale at TAILSCALE_VERSION, and the

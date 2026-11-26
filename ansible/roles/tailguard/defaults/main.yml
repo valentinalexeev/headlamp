@@ -1,0 +1,61 @@
+---
+# tailguard (#392): a WireGuard server on a Docker host whose peers leave through a tailnet exit node. The role runs
+# apps/tailguard (the image of #391 and its compose file) with Docker Compose. See README.md.
+
+# The image. Pin a release X.Y.Z or a digest (@sha256:...): preflight refuses an untagged image, latest and main.
+tailguard_image: ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0
+# Optional: a `docker save` archive of tailguard_image on the controller. The role loads it instead of a pull (for a
+# host without registry access, and the OS matrix).
+tailguard_image_archive: ""
+# The directory on the host: docker-compose.yml, .env, config/ (wg0.conf, server key), state/ (tailscale), run/.
+tailguard_dir: /opt/tailguard
+
+# Docker Engine with the Compose v2 plugin. When `docker compose version` fails, the role installs these distribution
+# packages. false = do not install; the role then fails when Docker Compose is missing.
+tailguard_install_docker: true
+tailguard_docker_packages: "{{ ['docker.io', 'docker-compose'] if ansible_facts['distribution'] | default('') == 'Debian' else ['docker.io', 'docker-compose-v2'] }}"
+
+# --- The tailnet side -----------------------------------------------------------------------------------------------
+# The tailnet name of the tailguard node (REQUIRED).
+tailguard_hostname: ""
+# One-time pre-auth key with tag:tailguard (REQUIRED until the node is logged in). Supply it from a vault. The role
+# writes it to a 0600 file for the first login only, then removes the file; it never puts it on a command line.
+tailguard_authkey: ""
+# headscale_login_server comes from the caller (no fallback). Empty login server is refused.
+tailguard_login_server: "{{ headscale_login_server | default('') }}"
+# The UDP port of the tailscaled in the container (the tailscaled of the host uses 41641).
+tailguard_ts_port: 41642
+# The tracker selects the online exit node whose name starts with this prefix and that has the tag (REQUIRED).
+tailguard_exit_node_prefix: ""
+tailguard_exit_node_tag: "tag:exit"
+# DERP region codes that the tracker must never let tailscaled use as home (space-separated). Empty = none.
+tailguard_block_derp_regions: ""
+
+# --- Access (#390): no defaults, preflight names each one when it is missing -----------------------------------------
+# "0" = peers reach the internet through the exit node only. "1" = peers can also reach the LAN of the host.
+tailguard_lan_access: ""
+# The host address that the WireGuard and tailscale ports listen on: <host-lan-ip>, or 0.0.0.0 for all addresses.
+tailguard_bind_addr: ""
+# The read-only status page on wg0 and tailscale0. Empty = off (recommended); a port number = on.
+tailguard_status_port: ""
+# DNS servers that the container uses (TG_NAMESERVERS). Empty = the image default.
+tailguard_nameservers: ""
+
+# --- The WireGuard side ---------------------------------------------------------------------------------------------
+tailguard_wg_port: 51820
+tailguard_wg_address: ["10.99.0.1/24", "fd99:7461:6c67::1/64"]
+# The peers, until node-control manages them (#393). Each entry:
+#   - name: router1                       # a label in wg0.conf only
+#     public_key: "<44-character base64>" # the public key of the peer
+#     allowed_ips: ["10.99.0.2/32", "fd99:7461:6c67::2/128"]
+#     preshared_key: "{{ vault_tailguard_psk_router1 }}"   # optional, a secret: keep it in a vault
+tailguard_peers: []
+# The IPv6 subnet of the compose network. Empty = IPv4 only.
+tailguard_ipv6_subnet: "fd99:7461:6c68::/64"
+
+# --- Checks after the start -----------------------------------------------------------------------------------------
+# Time for the tracker to select the exit node, in seconds.
+tailguard_exit_node_wait: 180
+# One request from the container through the exit node must succeed. false = skip it.
+tailguard_egress_check: true
+tailguard_egress_check_url: "https://www.gstatic.com/generate_204"

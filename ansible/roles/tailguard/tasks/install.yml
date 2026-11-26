@@ -1,0 +1,104 @@
+---
+# Docker Compose, the directories and the image.
+- name: Look for Docker Compose
+  ansible.builtin.command: docker compose version
+  become: true
+  register: tailguard_compose
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install Docker Engine and the Compose plugin
+  ansible.builtin.apt:
+    name: "{{ tailguard_docker_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+  when: tailguard_compose.rc != 0 and tailguard_install_docker | bool
+
+- name: Look for Docker Compose after the install
+  ansible.builtin.command: docker compose version
+  become: true
+  register: tailguard_compose_new
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: tailguard_compose.rc != 0 and not ansible_check_mode
+
+# tailguard_docker: Docker Compose works now. In check mode without Docker, the later tasks that need it are skipped.
+- name: Record whether Docker Compose works
+  ansible.builtin.set_fact:
+    tailguard_docker: "{{ tailguard_compose.rc == 0 or tailguard_compose_new.rc | default(1) == 0 }}"
+
+- name: Fail when Docker Compose is missing
+  ansible.builtin.fail:
+    msg: >-
+      tailguard: `docker compose version` fails on this host. Install Docker Engine with the Compose v2 plugin, or set
+      tailguard_install_docker: true (packages: {{ tailguard_docker_packages | join(', ') }}).
+  when: not tailguard_docker | bool and not (ansible_check_mode and tailguard_install_docker | bool)
+
+- name: Start Docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+  become: true
+  when: tailguard_docker | bool
+
+- name: Create the directories (only root can read them)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  loop:
+    - "{{ tailguard_dir }}"
+    - "{{ tailguard_dir }}/config"
+    - "{{ tailguard_dir }}/state"
+    - "{{ tailguard_dir }}/run"
+
+- name: Look for the image
+  ansible.builtin.command: docker image inspect --format '{{ "{{" }}.Id{{ "}}" }}' {{ tailguard_image | quote }}
+  become: true
+  register: tailguard_image_present
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: tailguard_docker | bool
+
+- name: Load the image from the archive
+  when: tailguard_image_archive | length > 0 and tailguard_image_present.rc | default(1) != 0
+  block:
+    - name: Copy the image archive
+      ansible.builtin.copy:
+        src: "{{ tailguard_image_archive }}"
+        dest: "{{ tailguard_dir }}/image.tar"
+        mode: "0600"
+      become: true
+
+    - name: Load the image archive
+      ansible.builtin.command: docker load -i {{ (tailguard_dir ~ '/image.tar') | quote }}
+      become: true
+      changed_when: true
+      when: not ansible_check_mode
+  always:
+    - name: Remove the copy of the image archive
+      ansible.builtin.file:
+        path: "{{ tailguard_dir }}/image.tar"
+        state: absent
+      become: true
+
+- name: Pull the image
+  ansible.builtin.command: docker pull --quiet {{ tailguard_image | quote }}
+  become: true
+  changed_when: true
+  when: tailguard_image_archive | length == 0 and tailguard_image_present.rc | default(1) != 0 and not ansible_check_mode
+
+- name: Check that the archive holds the image
+  ansible.builtin.command: docker image inspect --format '{{ "{{" }}.Id{{ "}}" }}' {{ tailguard_image | quote }}
+  become: true
+  changed_when: false
+  when: tailguard_image_present.rc | default(1) != 0 and not ansible_check_mode

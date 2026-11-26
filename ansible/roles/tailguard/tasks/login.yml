@@ -1,0 +1,87 @@
+---
+# The first login (or a login again after the node lost its state). The key goes to a 0600 file in run/, which the
+# container mounts at /tmp; .env holds only TS_AUTHKEY=file:/tmp/<name>, so `tailscale up` in the container gets the
+# path, never the key. The always part removes the file and the TS_AUTHKEY line, and recreates the containers.
+- name: Require the join key for the login
+  ansible.builtin.assert:
+    that: tailguard_authkey | length > 0
+    fail_msg: >-
+      tailguard: the node '{{ tailguard_hostname }}' is not logged in and tailguard_authkey is empty. Supply a one-time
+      pre-auth key with tag:tailguard from a vault.
+    quiet: true
+  no_log: true
+
+- name: Log in with the join key
+  block:
+    - name: Create the key file in run/
+      ansible.builtin.tempfile:
+        state: file
+        path: "{{ tailguard_dir }}/run"
+        prefix: authkey.
+      become: true
+      register: tailguard_keyfile
+      no_log: true
+
+    - name: Write the join key
+      ansible.builtin.copy:
+        content: "{{ tailguard_authkey }}"
+        dest: "{{ tailguard_keyfile.path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      become: true
+      no_log: true
+
+    - name: Write .env with the path of the key file
+      ansible.builtin.template:
+        src: env.j2
+        dest: "{{ tailguard_dir }}/.env"
+        owner: root
+        group: root
+        mode: "0600"
+      become: true
+      vars:
+        tailguard_login_key_file: "{{ tailguard_keyfile.path | basename }}"
+
+    - name: Start tailguard for the login
+      ansible.builtin.include_tasks: up.yml
+      vars:
+        tailguard_force_recreate: true
+        tailguard_status_want: [Running]
+
+    - name: Assert the login
+      ansible.builtin.assert:
+        that: tailguard_backend == 'Running'
+        fail_msg: >-
+          tailguard: the login of '{{ tailguard_hostname }}' to {{ tailguard_login_server }} did not complete (state
+          {{ tailguard_backend }}). Check that the key is valid and not used, and that it has tag:tailguard. Logs:
+          `docker logs tailguard`.
+          {{ (tailguard_up.stderr | default('') | trim).splitlines() | last | default('') }}
+        quiet: true
+  always:
+    - name: Remove the key file
+      ansible.builtin.file:
+        path: "{{ tailguard_keyfile.path }}"
+        state: absent
+      become: true
+      no_log: true
+      when: tailguard_keyfile.path is defined
+
+    - name: Write .env without the key file
+      ansible.builtin.template:
+        src: env.j2
+        dest: "{{ tailguard_dir }}/.env"
+        owner: root
+        group: root
+        mode: "0600"
+      become: true
+      register: tailguard_env
+
+    - name: Start tailguard without the key file
+      ansible.builtin.include_tasks: up.yml
+      vars:
+        tailguard_force_recreate: true
+
+    - name: Record that the containers are current
+      ansible.builtin.set_fact:
+        tailguard_applied: true

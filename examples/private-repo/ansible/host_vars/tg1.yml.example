@@ -1,0 +1,15 @@
+# A tailguard WireGuard server (#392). Rename to tg1.yml and add tg1 to the tailguard group of the inventory. Keep the
+# secrets in a sops file (group_vars/all/vault.sops.yaml), never here in plain text.
+tailguard_hostname: tg1
+tailguard_authkey: "{{ tailguard_authkey_tg1 }}"   # one-time key with tag:tailguard, needed until the first login
+tailguard_exit_node_prefix: node1                  # the exit node (name prefix) for the WireGuard peers
+tailguard_lan_access: "0"                          # "0": the internet only; "1": also the LAN of the host
+tailguard_bind_addr: 192.0.2.10                    # <host-lan-ip>; 0.0.0.0 = all host addresses
+# tailguard_status_port: 8088                      # the status page; off when not set
+
+# The WireGuard peers. The public key of the server is printed at the end of each run.
+tailguard_peers:
+  - name: router1
+    public_key: "<public key of the router>"
+    allowed_ips: ["10.99.0.2/32", "fd99:7461:6c67::2/128"]
+    preshared_key: "{{ tailguard_psk_router1 }}"

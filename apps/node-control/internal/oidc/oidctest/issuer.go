@@ -48,6 +48,15 @@ type Issuer struct {
 	Now        func() time.Time
 	TokenCalls int
 	jwksCalls  int
+	// lastAuthorize is the query of the last /authorize request.
+	lastAuthorize url.Values
+}
+
+// LastAuthorize returns the query of the last /authorize request (prompt, max_age, ...).
+func (is *Issuer) LastAuthorize() url.Values {
+	is.mu.Lock()
+	defer is.mu.Unlock()
+	return is.lastAuthorize
 }
 
 type codeGrant struct {
@@ -135,6 +144,7 @@ func (is *Issuer) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	code := randStr()
 	is.mu.Lock()
+	is.lastAuthorize = q
 	is.codes[code] = codeGrant{challenge: q.Get("code_challenge"), nonce: q.Get("nonce"), redirect: target}
 	is.mu.Unlock()
 	u, err := url.Parse(target)

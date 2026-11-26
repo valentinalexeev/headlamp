@@ -70,6 +70,8 @@ func demoPolicy(sc scenario) (*authz.Policy, error) {
 
 const (
 	adminLogin = "alice"
+	// demoDay is one day, for the invented times of the demo devices.
+	demoDay = 24 * time.Hour
 	// The invented hosts of the agents that cannot be reached in the attention scenario.
 	offlineBridgeHost      = "bridge-2.demo.example.net"
 	intermittentBridgeHost = "bridge-4.demo.example.net"
@@ -727,7 +729,48 @@ func (w *world) seedDevices(ctx context.Context, must mustFn) error {
 			return err
 		}
 	}
-	return w.seedPerson(ctx, must, far)
+	if err := w.seedPerson(ctx, must, far); err != nil {
+		return err
+	}
+	return w.seedActivity(ctx)
+}
+
+// seedActivity gives the demo devices a history (#439), so that each filter of the Devices
+// page has rows: alice has one device connected today and one not set up, laptop-3 has been
+// quiet for 12 days and tv-5 is set up but never connected (both "Needs help"). No API sets
+// these times, so they are written to the store. A zero lastSeen means never connected.
+func (w *world) seedActivity(ctx context.Context) error {
+	now := time.Now()
+	day := demoDay
+	activity := []struct {
+		name               string
+		enrolled, lastSeen time.Duration
+	}{
+		{"phone-1", 20 * day, time.Hour},
+		{"laptop-3", 40 * day, 12 * day},
+		{"phone-4", 30 * day, 3 * time.Hour},
+		{"tv-5", 2 * day, 0},
+		{"phone-6", 10 * day, 2 * day},
+		{"phone-7", 5 * day, 30 * time.Minute},
+	}
+	dsn := "file:" + filepath.Join(w.dir, "enroll.db") + "?_pragma=busy_timeout(30000)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("opening the enrolment store: %w", err)
+	}
+	defer db.Close()
+	const update = `UPDATE devices SET enrolled_at=?, enrol_count=1, last_active=? WHERE name=?`
+	for _, a := range activity {
+		var lastSeen int64
+		if a.lastSeen > 0 {
+			lastSeen = now.Add(-a.lastSeen).Unix()
+		}
+		enrolled := now.Add(-a.enrolled).Unix()
+		if _, err := db.ExecContext(ctx, update, enrolled, lastSeen, a.name); err != nil {
+			return fmt.Errorf("setting the activity of %s: %w", a.name, err)
+		}
+	}
+	return nil
 }
 
 // demoSubject is an invented OIDC subject of the length real issuers give, so the console shows

@@ -276,9 +276,11 @@ const fieldValue = (els, label) => {
   function setup(opts) {
     opts = opts || {};
     // Every device test runs with its groups open (#287): the owners of these tests are "sam", "jo" and a long one.
-    const open = 'open=o:sam,o:jo,o:' + 'o'.repeat(300);
+    // They see every device (filter "all") unless they name a filter or ask for the page default ("Needs help").
+    let open = 'open=o:sam,o:jo,o:' + 'o'.repeat(300);
+    if (!opts.defaultFilter && !/filter=/.test(opts.search || '')) { open += '&filter=all'; }
     const search = opts.search ? opts.search + '&' + open : '?' + open;
-    global.window.location.search = opts.closed ? (opts.search || '') : search;
+    global.window.location.search = opts.closed ? (opts.search || (opts.defaultFilter ? '' : '?filter=all')) : search;
     global.window.location.href = 'http://localhost/enroll' + global.window.location.search;
     polls.length = 0; copied.length = 0; laters.length = 0; fetches.length = 0; replaced.length = 0;
     const els = pageEls();
@@ -334,15 +336,35 @@ const fieldValue = (els, label) => {
     assert.strictEqual(word(dev(9, 'x', { expires_at: sec(NOW + 3600000) })), 'Expires today');
     assert.strictEqual(word(dev(9, 'x', { expires_at: sec(NOW + 20 * 3600000) })), 'Expires today');
     assert.strictEqual(word(dev(9, 'x', { expires_at: sec(NOW + 30 * 3600000) })), 'Expires in 2 days');
+    // #439: needs help = set up but never connected, or quiet for more than 7 days after it had traffic
+    const help = (d) => devices.stateOf(d, NOW).help;
+    assert.strictEqual(help(D.active), false);
+    assert.strictEqual(help(D.never), false, 'not set up is its own filter');
+    assert.strictEqual(help(D.revoked), false);
+    assert.strictEqual(help(dev(12, 'y', { last_active: 0 })), true, 'set up, never connected');
+    assert.strictEqual(help(dev(13, 'q', { last_active: sec(NOW - 7 * DAYMS + 60000) })), false, 'quiet for 7 days is not yet');
+    const quiet = dev(13, 'q', { last_active: sec(NOW - 12 * DAYMS) });
+    assert.strictEqual(help(quiet), true);
+    assert.strictEqual(word(quiet), 'No traffic for 12 days');
+    assert.strictEqual(devices.stateOf(quiet, NOW).level, 'warn');
+    assert.strictEqual(help(dev(14, 'q', { last_active: sec(NOW - 12 * DAYMS), revoked: true })), false, 'a revoked device needs no help');
   }
 
-  // revokedHiddenByDefault, filters, filterInURL, summary
+  // needsHelpByDefault, filters, filterInURL, summary
   {
-    const { els, ctrl } = setup();
-    update(ctrl, Object.values(D), { stats_partial: false });
+    const { els, ctrl } = setup({ defaultFilter: true });
+    const quiet = dev(6, 'laptop-5', { last_active: sec(NOW - 12 * DAYMS) });
+    const silent = dev(7, 'phone-8', { last_active: 0, traffic: null });
+    update(ctrl, Object.values(D).concat([quiet, silent]), { stats_partial: false });
     const names = () => rowTexts(els).map((r) => r[0]).sort();
-    assert.deepStrictEqual(names(), ['laptop-2', 'phone-1', 'phone-4', 'tablet-3'], 'revoked is hidden by default');
-    assert.strictEqual(els.sub.textContent, '3 active, 2 seen today');
+    assert.deepStrictEqual(names(), ['laptop-5', 'phone-8'], 'Needs help is the default (#439)');
+    assert.deepStrictEqual(findAll(els.chips, (n) => n.tag === 'button').map((b) => b.textContent),
+      ['Needs help', 'Active', 'Expiring soon', 'Not set up', 'Revoked', 'All']);
+    assert.strictEqual(chip(els, 'Needs help').getAttribute('aria-pressed'), 'true');
+    chip(els, 'All').click();
+    assert.ok(/filter=all/.test(replaced[replaced.length - 1]), 'filter is in the URL: ' + replaced);
+    assert.deepStrictEqual(names(), ['laptop-2', 'laptop-5', 'phone-1', 'phone-3', 'phone-4', 'phone-8', 'tablet-3'], 'All, with revoked');
+    assert.strictEqual(els.sub.textContent, '5 active, 2 seen today');
     assert.strictEqual(els.traffic.textContent, 'Traffic');
     const first = rowTexts(els)[0];
     assert.strictEqual(first[0], 'laptop-2', 'the expired device is listed first');
@@ -362,19 +384,22 @@ const fieldValue = (els, label) => {
     assert.strictEqual(devices.relExpiry(sec(NOW - 3600000), NOW), 'today');
     assert.strictEqual(devices.relExpiry(sec(NOW - 3 * DAYMS), NOW), '3 days ago');
     assert.strictEqual(devices.relExpiry(0, NOW), '');
+    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'phone-3')[4], 'n/a');
+    assert.ok(groupRows(els)[0].textContent.includes('6 devices · 3 connected today · 1 not set up · 2 need help · 1 expiring soon · 1 expired'),
+      groupRows(els)[0].textContent);
+    chip(els, 'Active').click();
+    assert.deepStrictEqual(names(), ['laptop-2', 'laptop-5', 'phone-1', 'phone-4', 'phone-8', 'tablet-3'], 'Active hides the revoked device');
     chip(els, 'Revoked').click();
     assert.deepStrictEqual(names(), ['phone-3']);
-    assert.strictEqual(rowTexts(els)[0][4], 'n/a');
-    assert.ok(/filter=revoked/.test(replaced[replaced.length - 1]), 'filter is in the URL: ' + replaced);
     chip(els, 'Expiring soon').click();
     assert.deepStrictEqual(names(), ['phone-4']);
     chip(els, 'Not set up').click();
     assert.deepStrictEqual(names(), ['tablet-3']);
-    chip(els, 'All').click();
-    assert.strictEqual(names().length, 5);
-    chip(els, 'Active').click();
+    chip(els, 'Needs help').click();
+    assert.deepStrictEqual(names(), ['laptop-5', 'phone-8']);
+    assert.ok(groupRows(els)[0].textContent.includes('6 devices · 3 connected today'),'the group line counts every device, not only the shown ones');
     assert.ok(!/filter=/.test(replaced[replaced.length - 1]), 'the default filter leaves the URL: ' + replaced[replaced.length - 1]);
-    assert.strictEqual(chip(els, 'Active').getAttribute('aria-pressed'), 'true');
+    assert.strictEqual(chip(els, 'Needs help').getAttribute('aria-pressed'), 'true');
     assert.strictEqual(chip(els, 'All').getAttribute('aria-pressed'), 'false');
     update(ctrl, [D.active], { stats_partial: true });
     assert.strictEqual(els.traffic.textContent, 'Traffic (partial)');
@@ -388,7 +413,11 @@ const fieldValue = (els, label) => {
     assert.deepStrictEqual(rowTexts(els).map((r) => r[0]), ['phone-4'], 'the link from Attention opens the filter');
     const bad = setup({ search: '?filter=nonsense' });
     update(bad.ctrl, Object.values(D));
-    assert.strictEqual(chip(bad.els, 'Active').getAttribute('aria-pressed'), 'true');
+    assert.strictEqual(chip(bad.els, 'Needs help').getAttribute('aria-pressed'), 'true', 'an unknown filter opens the default');
+    const rev = setup({ search: '?filter=revoked' });
+    update(rev.ctrl, Object.values(D));
+    assert.strictEqual(chip(rev.els, 'Revoked').getAttribute('aria-pressed'), 'true', 'a link to the Revoked filter of #440 still works');
+    assert.deepStrictEqual(rowTexts(rev.els).map((r) => r[0]), ['phone-3']);
   }
 
   // emptyState
@@ -892,33 +921,45 @@ const fieldValue = (els, label) => {
       dev(23, 'kiosk-1', { owner: 'kiosk team', enrol_count: 0, enrolled_at: 0, last_active: 0 }),
     ];
     // grouping, without the page
-    const g = devices.groupTree(devs, people, invites, 'active', NOW, '');
+    const g = devices.groupTree(devs, people, invites, 'all', NOW, '');
     assert.deepStrictEqual(g.map((x) => [x.kind, x.label]), [['person', 'anna@example.test'], ['person', 'bob@example.test'], ['owner', 'kiosk team'], ['invited', 'Invited, not signed in yet']]);
-    assert.deepStrictEqual(g[0].devices.map((d) => d.name), ['anna-phone'], 'the revoked device is filtered out by default');
-    assert.deepStrictEqual(g[0].invites.map((i) => i.id), [7], 'the waiting invitation for her email is under her; the used one only with All');
+    assert.deepStrictEqual(g[0].devices.map((d) => d.name).sort(), ['anna-old', 'anna-phone']);
+    assert.deepStrictEqual(g[0].invites.map((i) => i.id).sort(), [7, 9], 'the used invitation goes under the person who used it');
     assert.deepStrictEqual(g[3].invites.map((i) => i.id), [8]);
-    assert.strictEqual(devices.groupCounts(g[0], NOW), '1 device, 1 invitation waiting');
-    assert.strictEqual(devices.groupCounts(g[2], NOW), '1 device, 1 need attention', 'a never-used device needs attention');
-    const all = devices.groupTree(devs, people, invites, 'all', NOW, '');
-    assert.deepStrictEqual(all[0].invites.map((i) => i.id).sort(), [7, 9], 'the used invitation goes under the person who used it');
-    assert.deepStrictEqual(all[0].devices.map((d) => d.name).sort(), ['anna-old', 'anna-phone']);
-    const rev = devices.groupTree(devs, people, invites, 'revoked', NOW, '');
-    assert.deepStrictEqual(rev.map((x) => x.label), ['anna@example.test'], 'a filter drops groups with nothing that matches');
-    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'active', NOW, 'kiosk').map((x) => x.label), ['kiosk team']);
-    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'active', NOW, 'carol').map((x) => x.kind), ['invited']);
-    assert.deepStrictEqual(devices.groupTree(devs, null, null, 'active', NOW, '').map((x) => x.label), ['anna@example.test', 'kiosk team'],
+    // #439: the group line counts the devices that are not revoked
+    assert.strictEqual(devices.groupCounts(g[0], NOW), '1 device · 1 connected today · 1 invitation waiting');
+    assert.strictEqual(devices.groupCounts(g[2], NOW), '1 device · 1 not set up · last connected never');
+    assert.strictEqual(devices.groupCounts(g[3], NOW), '1 invitation waiting');
+    const notSetUp = devices.groupTree(devs, people, invites, 'never', NOW, '');
+    assert.deepStrictEqual(notSetUp.map((x) => x.label), ['kiosk team'], 'a filter drops groups with nothing that matches, people and invitations too');
+    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'help', NOW, ''), []);
+    const act = devices.groupTree(devs, people, invites, 'active', NOW, '');
+    assert.deepStrictEqual(act.map((x) => x.label), ['anna@example.test', 'bob@example.test', 'kiosk team', 'Invited, not signed in yet'],
+      'Active (#440) keeps the people and the waiting invitations');
+    assert.deepStrictEqual(act[0].devices.map((d) => d.name), ['anna-phone'], 'Active hides the revoked device');
+    assert.deepStrictEqual(act[0].invites.map((i) => i.id), [7], 'only the waiting invitation');
+    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'revoked', NOW, '').map((x) => x.label), ['anna@example.test']);
+    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'all', NOW, 'kiosk').map((x) => x.label), ['kiosk team']);
+    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'all', NOW, 'carol').map((x) => x.kind), ['invited']);
+    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'all', NOW, 'anna-phone').map((x) => x.label), ['anna@example.test'], 'a device name');
+    // the email of the device's person, also when the group label is not that email
+    const other = [dev(31, 'tv-1', { owner: 'oidc:s9', owner_email: 'zed@example.test' })];
+    const pz = [{ subject: 's9', owner: 'oidc:s9', email: 'zed@example.test' }];
+    assert.deepStrictEqual(devices.groupTree(other, null, null, 'all', NOW, 'zed@').map((x) => x.key), ['p:oidc:s9']);
+    assert.deepStrictEqual(devices.groupTree(other, pz, null, 'all', NOW, 'zed@example').map((x) => x.key), ['p:oidc:s9']);
+    assert.deepStrictEqual(devices.groupTree(devs, null, null, 'all', NOW, '').map((x) => x.label), ['anna@example.test', 'kiosk team'],
       'with self-enrolment off the tree is the devices by owner');
 
     // #440: one group for each person. An operator-made owner that is a person's email joins that person, and a
     // waiting invitation for the email of an operator-made owner goes under that owner, not under "Invited".
-    const merged = devices.groupTree(devs.concat([dev(24, 'anna-laptop', { owner: 'Anna@Example.test' })]), people, invites, 'active', NOW, '');
+    const merged = devices.groupTree(devs.concat([dev(24, 'anna-laptop', { owner: 'Anna@Example.test' })]), people, invites, 'all', NOW, '');
     assert.deepStrictEqual(merged.map((x) => x.label), ['anna@example.test', 'bob@example.test', 'kiosk team', 'Invited, not signed in yet']);
-    assert.deepStrictEqual(merged[0].devices.map((d) => d.name).sort(), ['anna-laptop', 'anna-phone']);
+    assert.deepStrictEqual(merged[0].devices.map((d) => d.name).sort(), ['anna-laptop', 'anna-old', 'anna-phone']);
     const byOwner = devices.groupTree([dev(25, 'dan-phone', { owner: 'dan@example.test' })], [],
-      [{ id: 10, email: 'DAN@example.test', state: 'pending', expires_at: sec(NOW + 6 * DAYMS) }], 'active', NOW, '');
+      [{ id: 10, email: 'DAN@example.test', state: 'pending', expires_at: sec(NOW + 6 * DAYMS) }], 'all', NOW, '');
     assert.deepStrictEqual(byOwner.map((x) => [x.kind, x.label]), [['owner', 'dan@example.test']]);
     assert.deepStrictEqual(byOwner[0].invites.map((i) => i.id), [10]);
-    const noPeople = devices.groupTree([dev(26, 'eve-phone', { owner: 'eve@example.test' }), dev(27, 'eve-tab', { owner: 'oidc:s9', owner_email: 'eve@example.test' })], null, null, 'active', NOW, '');
+    const noPeople = devices.groupTree([dev(26, 'eve-phone', { owner: 'eve@example.test' }), dev(27, 'eve-tab', { owner: 'oidc:s9', owner_email: 'eve@example.test' })], null, null, 'all', NOW, '');
     assert.deepStrictEqual(noPeople.map((x) => [x.kind, x.devices.length]), [['person', 2]], 'also when the person is known only from a device');
     assert.deepStrictEqual(devices.sameNames([{ name: 'Phone' }, { name: 'phone ' }, { name: 'tab' }]), { phone: 2 });
 
@@ -940,11 +981,11 @@ const fieldValue = (els, label) => {
     assert.strictEqual(rowTexts(els).length, 0, 'groups start closed');
     assert.ok(/1 person|2 people/.test(els.sub.textContent) && /2 invitations waiting/.test(els.sub.textContent), els.sub.textContent);
     const anna = groupRows(els)[0];
-    assert.ok(textOf(anna).includes('anna@example.test') && textOf(anna).includes('Active') && textOf(anna).includes('1 device, 1 invitation waiting'));
-    // The newest traffic of her devices, not the web sign-in; that moved to the hover title.
-    assert.ok(textOf(anna).includes('last connected 1 h 0 min ago'), textOf(anna));
+    assert.ok(textOf(anna).includes('anna@example.test') && textOf(anna).includes('Active') && textOf(anna).includes('1 device · 1 connected today · 1 invitation waiting'), textOf(anna));
+    // The traffic of her devices, not the web sign-in; that is in the hover title.
     assert.ok(!textOf(anna).includes('sign-in'), 'no web sign-in in the row: ' + textOf(anna));
-    const annaInfo = findAll(anna, (n) => n.tag === 'td' && /last connected/.test(n.textContent || ''))[0];
+    assert.ok(textOf(groupRows(els)[2]).includes('last connected never'), textOf(groupRows(els)[2]));
+    const annaInfo = findAll(anna, (n) => n.tag === 'td' && /connected today/.test(n.textContent || ''))[0];
     assert.ok(/self-service page: 2 h 0 min ago/.test(annaInfo.getAttribute('title')), annaInfo.getAttribute('title'));
     assert.ok(textOf(groupRows(els)[1]).includes('Locked: left') && buttonNamed(groupRows(els)[1], 'Unlock'));
     assert.ok(!buttonNamed(groupRows(els)[2], 'Lock'), 'an operator-made owner has no lock');
@@ -952,12 +993,12 @@ const fieldValue = (els, label) => {
     // open anna: her device and her invitation, and the URL keeps it
     const tog = findAll(anna, (n) => n.tag === 'button' && n.getAttribute('aria-expanded') === 'false')[0];
     tog.click();
-    assert.deepStrictEqual(rowTexts(els).map((r) => r[0]), ['anna-phone', '✉ anna@example.test']);
+    assert.deepStrictEqual(rowTexts(els).map((r) => r[0]), ['anna-phone', 'anna-old', '✉ anna@example.test', '✉ ANNA@example.test']);
     assert.ok(/open=p%3Aoidc%3As1|open=p:oidc:s1/.test(replaced[replaced.length - 1]), replaced[replaced.length - 1]);
     assert.ok(buttonNamed(rowOf(els, '✉ anna@example.test'), 'Withdraw'));
     // the 15 s refresh keeps it open
     update(ctrl, devs);
-    assert.strictEqual(rowTexts(els).length, 2);
+    assert.strictEqual(rowTexts(els).length, 4);
     // withdraw
     buttonNamed(rowOf(els, '✉ anna@example.test'), 'Withdraw').click();
     await flush();

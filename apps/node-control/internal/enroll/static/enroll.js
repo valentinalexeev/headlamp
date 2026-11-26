@@ -15,11 +15,16 @@
   var DAY = 86400000;
   var EXPIRING_MS = 7 * DAY;
   var SEEN_MS = DAY;
+  var QUIET_DAYS = 7; // a device that had traffic and then none for longer than this needs help (#439)
+  var QUIET_MS = QUIET_DAYS * DAY;
   var DEFAULT_DAYS = 90;
   var LINK_TTL = 86400;
   var CLIENTS = ['karing', 'sing-box', 'clash', 'shadowrocket', 'stash', 'happ', 'throne']; // the catalog of clients.go
   var CLIENT_KEY = 'enrollClient';
-  var FILTERS = [['active', 'Active'], ['expiring', 'Expiring soon'], ['never', 'Not set up'], ['revoked', 'Revoked'], ['all', 'All']];
+  // #439: "Needs help" is the default, so the page opens on the devices to troubleshoot. The filters of #440 stay.
+  var FILTERS = [['help', 'Needs help'], ['active', 'Active'], ['expiring', 'Expiring soon'], ['never', 'Not set up'],
+    ['revoked', 'Revoked'], ['all', 'All']];
+  var DEFAULT_FILTER = 'help';
   var COLUMNS = 6;
   var SYNC_REASON = {
     unreachable: 'Agent unreachable', unauthorized: 'Agent refused the credentials',
@@ -82,16 +87,26 @@
   // on the self-service page, which has no link) or traffic each show it; older data has only the first and the last.
   function setUp(d) { return d.enrol_count > 0 || d.profile_at > 0 || d.last_active > 0; }
 
-  // stateOf: where a device stands now. level and word are what the row shows; kind, expiring and neverUsed are
-  // what the filters and the actions go by. A device that is both near its expiry and unused reads as expiring.
+  // quietDays: whole days since the device's last traffic, when that is more than QUIET_DAYS ago; 0 otherwise.
+  function quietDays(d, nowMs) {
+    if (!(d.last_active > 0)) { return 0; }
+    var gap = nowMs - d.last_active * 1000;
+    return gap > QUIET_MS ? Math.floor(gap / DAY) : 0;
+  }
+
+  // stateOf: where a device stands now. level and word are what the row shows; kind, expiring, neverUsed and help
+  // are what the filters and the actions go by. A device that is both near its expiry and unused reads as expiring.
+  // help (#439): set up but never connected, or quiet for more than QUIET_DAYS after it had traffic.
   function stateOf(d, nowMs) {
     var used = setUp(d);
     var exp = d.expires_at * 1000;
-    if (d.revoked) { return { kind: 'revoked', level: 'off', word: 'Revoked', expiring: false, neverUsed: false }; }
-    if (exp < nowMs) { return { kind: 'expired', level: 'warn', word: 'Expired', expiring: false, neverUsed: false }; }
+    if (d.revoked) { return { kind: 'revoked', level: 'off', word: 'Revoked', expiring: false, neverUsed: false, help: false }; }
+    var quiet = quietDays(d, nowMs);
+    var help = used && (!(d.last_active > 0) || quiet > 0);
+    if (exp < nowMs) { return { kind: 'expired', level: 'warn', word: 'Expired', expiring: false, neverUsed: false, help: help }; }
     var left = exp - nowMs;
     var expiring = left <= EXPIRING_MS;
-    var out = { kind: 'active', level: 'ok', word: 'Active', expiring: expiring, neverUsed: !used };
+    var out = { kind: 'active', level: 'ok', word: 'Active', expiring: expiring, neverUsed: !used, help: help };
     if (expiring) {
       var days = Math.ceil(left / DAY);
       out.level = 'warn';
@@ -101,6 +116,9 @@
       out.word = 'Not set up';
     } else if (!(d.last_active > 0)) {
       out.word = 'Set up, no traffic yet';
+    } else if (quiet > 0) {
+      out.level = 'warn';
+      out.word = 'No traffic for ' + quiet + ' days';
     }
     return out;
   }
@@ -125,6 +143,7 @@
 
   function matches(filter, s) {
     switch (filter) {
+      case 'help': return s.help;
       case 'expiring': return s.expiring;
       case 'never': return s.neverUsed;
       case 'revoked': return s.kind === 'revoked';
@@ -133,9 +152,10 @@
     }
   }
 
+  // plainFilter: a known filter, else the default.
   function plainFilter(f) {
     for (var i = 0; i < FILTERS.length; i++) { if (FILTERS[i][0] === f) { return f; } }
-    return 'active';
+    return DEFAULT_FILTER;
   }
 
   // lastClient: the client used for the last device made in this browser. A storage that is missing or throws
@@ -179,15 +199,17 @@
   // owner and the invitations it used or that name its email. An operator-made owner is one group of its devices.
   // One person is one group (#440): an operator-made owner that is the email of a person joins that person's group,
   // and an invitation for the email of an operator-made owner goes under that owner.
-  // A waiting invitation for an email with no person or owner yet goes to the group "Invited, not signed in yet". Used,
-  // expired and withdrawn invitations show only with the filter "all", waiting ones under "active" and "all". q is a search text (lower case): a group
-  // shows when its label, owner or one of its device names or invitation emails contains it.
-  // Each group: { key, kind: person|owner|invited, label, person, devices: [device], invites: [invite], hidden }.
+  // A waiting invitation for an email with no person or owner yet goes to the group "Invited, not signed in yet".
+  // Used, expired and withdrawn invitations show only with the filter "all", waiting ones under "active" and "all":
+  // the other filters are about devices. q is a search text (lower case): a group shows when its label, owner, the
+  // person's email, or one of its device names, owner emails or invitation emails contains it.
+  // Each group: { key, kind: person|owner|invited, label, person, devices: [device that matches the filter],
+  // every: [every device of the group], invites: [invite] }.
   function groupTree(devices, people, invites, filter, nowMs, q) {
     var groups = {};
     var byEmail = {};
     function group(key, kind, label) {
-      if (!groups[key]) { groups[key] = { key: key, kind: kind, label: label, person: null, devices: [], invites: [], all: 0 }; }
+      if (!groups[key]) { groups[key] = { key: key, kind: kind, label: label, person: null, devices: [], every: [], invites: [] }; }
       return groups[key];
     }
     hl.arr(people).forEach(function (p) {
@@ -215,13 +237,11 @@
         g = (mail && byEmail[mail]) || group('o:' + owner, 'owner', hl.plain(owner, 120) || 'No owner');
         if (mail && !byEmail[mail]) { byEmail[mail] = g; }
       }
-      g.all++;
+      g.every.push(d);
       if (matches(filter, stateOf(d, nowMs))) { g.devices.push(d); }
     });
     hl.arr(invites).forEach(function (inv) {
       if (!inv) { return; }
-      // A waiting invitation is open work: it shows under Active and All. The other filters are about devices.
-      // Used, expired and withdrawn invitations are history: only under All.
       if (filter !== 'all' && !(filter === 'active' && inv.state === 'pending')) { return; }
       var email = String(inv.email || '').toLowerCase();
       var g = (typeof inv.used_by === 'string' && inv.used_by && groups['p:' + inv.used_by]) || byEmail[email];
@@ -230,11 +250,15 @@
     });
     var rank = { person: 0, owner: 0, invited: 1 };
     return Object.keys(groups).map(function (k) { return groups[k]; }).filter(function (g) {
-      // A group with nothing that matches the filter is left out, except a person under the default and "all"
-      // filters: that row is where the person is locked.
-      if (!g.devices.length && !g.invites.length && !(g.person && (filter === 'active' || filter === 'all'))) { return false; }
+      // A group with nothing that matches the filter is left out, except a person under "active" and "all": that row
+      // is where the person is locked.
+      if (!g.devices.length && !g.invites.length && !(g.person && (filter === 'active' || filter === 'all'))) {
+        return false;
+      }
       if (!q) { return true; }
-      var hay = [g.label, g.person ? g.person.owner : ''].concat(g.devices.map(function (d) { return d.name + ' ' + d.owner; }),
+      var hay = [g.label, g.person ? g.person.owner + ' ' + (g.person.email || '') : ''].concat(g.devices.map(function (d) {
+        return d.name + ' ' + d.owner + ' ' + (d.owner_email || '');
+      }),
         g.invites.map(function (i) { return i.email; })).join(' ').toLowerCase();
       return hay.indexOf(q) >= 0;
     }).sort(function (a, b) {
@@ -242,21 +266,35 @@
     });
   }
 
-  // lastConnected: the newest last_active of the group's devices (unix seconds), 0 when none had traffic.
-  function lastConnected(g) {
-    return g.devices.reduce(function (m, d) { return Math.max(m, Number(d.last_active) || 0); }, 0);
-  }
-
-  // groupCounts: the short summary of a group, so that a closed group hides nothing that needs attention.
+  // groupCounts: the group line (#439), for example "2 devices · 1 connected today · 1 not set up". It counts every
+  // device of the group that is not revoked, whatever the filter, so that a closed group hides nothing that needs
+  // attention. With no device connected today it says when one last connected.
   function groupCounts(g, nowMs) {
     var parts = [];
-    var n = g.devices.length;
+    var live = hl.arr(g.every || g.devices).filter(function (d) { return !d.revoked; });
+    var n = live.length;
+    var today = 0, never = 0, help = 0, expiring = 0, expired = 0, last = 0;
+    live.forEach(function (d) {
+      var s = stateOf(d, nowMs);
+      var at = Number(d.last_active) || 0;
+      last = Math.max(last, at);
+      if (at > 0 && at * 1000 >= nowMs - SEEN_MS) { today++; }
+      if (s.neverUsed) { never++; }
+      if (s.help) { help++; }
+      if (s.expiring) { expiring++; }
+      if (s.kind === 'expired') { expired++; }
+    });
     if (g.kind !== 'invited') { parts.push(n === 1 ? '1 device' : n + ' devices'); }
-    var attention = g.devices.filter(function (d) { var l = stateOf(d, nowMs).level; return l === 'warn' || l === 'crit'; }).length;
-    if (attention) { parts.push(attention + ' need attention'); }
+    if (today) { parts.push(today + ' connected today'); }
+    if (never) { parts.push(never + ' not set up'); }
+    if (help) { parts.push(help + (help === 1 ? ' needs help' : ' need help')); }
+    if (expiring) { parts.push(expiring + ' expiring soon'); }
+    if (expired) { parts.push(expired + ' expired'); }
     var waiting = g.invites.filter(function (i) { return i.state === 'pending'; }).length;
     if (waiting) { parts.push(waiting === 1 ? '1 invitation waiting' : waiting + ' invitations waiting'); }
-    return parts.join(', ');
+    // The sign-in to the self-service page is not a connection: the group row has it only in its hover title.
+    if (n && !today) { parts.push('last connected ' + (last ? hl.relTime(new Date(last * 1000).toISOString(), nowMs) : 'never')); }
+    return parts.join(' · ');
   }
 
   // personState: the state word of a self-enrolled person.
@@ -725,12 +763,7 @@
       tr.appendChild(stc);
       var info = hl.el('td', 't2');
       info.setAttribute('colspan', '3');
-      var bits = [groupCounts(g, t)];
-      // The newest traffic of any device of the group: when the person last used the VPN. The sign-in to the
-      // self-service page is not a connection, so it is only in the hover title.
-      var seen = lastConnected(g);
-      if (g.devices.length) { bits.push('last connected ' + (seen ? hl.relTime(new Date(seen * 1000).toISOString(), t) : 'never')); }
-      info.textContent = bits.join(' · ');
+      info.textContent = groupCounts(g, t);
       if (g.person) {
         info.setAttribute('title', 'Last sign-in to the self-service page: ' +
           (g.person.last_login ? hl.relTime(new Date(g.person.last_login * 1000).toISOString(), t) : 'never'));
@@ -1367,7 +1400,7 @@
 
     ctrl.setFilter = function (f) {
       st.filter = plainFilter(f);
-      hl.setQueryParam('filter', st.filter === 'active' ? null : st.filter);
+      hl.setQueryParam('filter', st.filter === DEFAULT_FILTER ? null : st.filter);
       st.open = null;
       render(true);
     };

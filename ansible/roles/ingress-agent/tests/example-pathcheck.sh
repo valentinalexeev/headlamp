@@ -2,7 +2,7 @@
 # Checks that the commented path check settings in the private repo example (#425) pass the "Check the path check
 # settings" preflight of the ingress-agent role, with real ansible, once they are uncommented.
 # Usage: ansible/roles/ingress-agent/tests/example-pathcheck.sh
-set -u
+set -euo pipefail
 if ! command -v ansible-playbook >/dev/null 2>&1; then
   echo "SKIP: ansible-playbook is not installed"
   exit 0

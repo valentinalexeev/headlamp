@@ -27,3 +27,6 @@ RUN set -e; \
   tailscale version | head -n1 | grep -qx "$TSVERSION"; \
   tailscaled --version | head -n1 | grep -qx "$TSVERSION"
 COPY route-health.sh track-exit-node.sh verify.sh /usr/local/bin/
+# Unsets an empty TG_WEBUI_PORT before the upstream entrypoint, which exits on it (see entrypoint.sh).
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/headlamp-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/headlamp-entrypoint.sh"]

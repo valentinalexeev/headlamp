@@ -241,6 +241,10 @@ logs the host names of each listener (`listener hosts`).
 | `ADMIN_OIDC_REQUIRED` | `1` (the default): the console on HTTPS needs the sign-in. `0`: the sign-in only adds groups, as before 0.22.0. See "Required sign-in". |
 | `ADMIN_OIDC_IDLE_MINUTES` | With the required sign-in: a session ends after this many minutes without a request, 5 to 480. The default is 30. |
 | `ADMIN_OIDC_TRUSTED_EMAIL_DOMAINS` | Optional. A comma list of email domains, for example `example.com,corp.example.com`. Unset: off. See "Trusted email domains". |
+| `ADMIN_OIDC_REAUTH` | `1`: a sensitive route asks for a new sign-in. It needs `ADMIN_OIDC_REQUIRED=1`. `0` or unset (the default): off. See "Re-authentication for sensitive operations". |
+| `ADMIN_OIDC_REAUTH_MINUTES` | With `ADMIN_OIDC_REAUTH=1`: the maximum age of the sign-in for a sensitive route, 1 to 60 minutes. The default is 3. |
+| `ADMIN_OIDC_REAUTH_UNPROVEN` | With `ADMIN_OIDC_REAUTH=1`: what node-control does when the identity provider does not prove the new sign-in. `logout` (the default): refuse the sign-in and end the session. `warn`: accept the sign-in and write a warning in the log. |
+| `ADMIN_OIDC_REAUTH_ROUTES` | Optional. A comma list of route patterns that changes the sensitive routes. A pattern adds a route. A pattern with `-` before it removes a route. Example: `POST /nodes/{id}/start,-POST /policy/apply`. |
 
 To sign in, open `https://<ADMIN_CONSOLE_NAME>/auth/login`. `GET /auth/me` shows whether you are signed in, and until
 when. `POST /auth/logout` signs you out at once.
@@ -302,6 +306,49 @@ each request. The first is the tailnet login of a person, not a tagged node. The
 With `ADMIN_OIDC_REQUIRED=0`, the console works as before 0.22.0: the tailnet login alone gets its roles, and the
 sign-in only adds the groups. There is no idle timeout.
 
+#### Re-authentication for sensitive operations
+
+With `ADMIN_OIDC_REAUTH=1` (#469), a sensitive route on port 443 needs a recent sign-in, not only a session. Recent
+means not older than `ADMIN_OIDC_REAUTH_MINUTES` (default 3). The time of the sign-in is the claim `auth_time` of the
+ID token.
+
+These routes are sensitive by default:
+
+| Area | Routes |
+|---|---|
+| Keys | `POST /enroll/devices/{id}/rotate-secret`, `GET` and `POST /funnel/namespaces/{name}/keys`, `POST /serve/services/{id}/keys` |
+| Grants and roles | `POST /admin/grants`, `PUT` and `DELETE /admin/roles/{name}`, `POST /admin/import`, `POST /enroll/tailnet-grants/*` (mode, targets, subject, convert), `DELETE /enroll/tailnet-grants/targets/{name}`, `POST /enroll/ingresses/{name}/approve`, `POST /enroll/invites` |
+| Policy | `POST /policy/apply`, `POST /policy/revert/{id}`, `POST /enroll/tailnet-acl`, `POST /enroll/selection/apply` |
+| Secrets | `GET` and `PUT /tasks/secrets` |
+
+`POST /policy/confirm` and `POST /policy/revert-now` are not sensitive. Thus a policy change can always be confirmed
+or reverted. To change the list, use `ADMIN_OIDC_REAUTH_ROUTES`. node-control does not start if a pattern in that
+setting is not an admin route. It also does not start if the route has no permission check.
+
+When the sign-in is too old:
+
+- A page load goes to `/auth/login?reauth=1&next=<page>`.
+- An API call gets `401` with a JSON body. The body has `"reauth": true` and the sign-in link in `login`. node-control
+  does not do the operation. After the sign-in, do the operation again.
+- The log has `admin re-authentication required`.
+
+The new sign-in sends `prompt=login` and `max_age` to the identity provider. A correct identity provider then asks for
+the password (or other factor) again, and sends a new `auth_time`. Then node-control replaces the session.
+
+Some identity providers do not obey `max_age`, or do not send `auth_time`. Then the new sign-in is not proven.
+`ADMIN_OIDC_REAUTH_UNPROVEN` sets what node-control does:
+
+| Value | Result | Log line (`reason` field) |
+|---|---|---|
+| `logout` (the default) | The sign-in gets `403`. The session ends and you are signed out. | `admin re-authentication refused` (`no_auth_time` or `auth_time_old`) |
+| `warn` | The sign-in is accepted as recent. | `admin re-authentication not proven by the IdP, accepted` (the same reasons) |
+
+**Warning:** with `warn`, a sensitive route does not get a new sign-in from such an identity provider. Use `warn` only
+for a short time, until the identity provider sends `auth_time`.
+
+`GET /auth/me` shows `reauth_minutes`, and `fresh_until`: the time when a sensitive route asks for a new sign-in
+again. The break-glass listener on port 80 does not ask for re-authentication.
+
 #### Break-glass listener
 
 The plain admin listener on port 80 does not change. It does not ask for the sign-in. The logins of `ADMIN_USERS` and
@@ -319,7 +366,9 @@ emergency.
 - `next` is not an open redirect: an absolute URL, `//host`, a backslash and control characters open `/`.
 - The break-glass listener on port 80 has one factor. Anyone with the tailnet login of an owner and access to port 80
   in the tailnet policy has the console.
-- Sensitive operations do not ask for a new sign-in during the session. That is #469.
+- Without `ADMIN_OIDC_REAUTH=1`, sensitive operations do not ask for a new sign-in during the session. With it, a
+  person who gets an open browser session still needs the identity provider account for a sensitive operation (see
+  "Re-authentication for sensitive operations").
 
 ### Admin console on HTTPS: checklist
 

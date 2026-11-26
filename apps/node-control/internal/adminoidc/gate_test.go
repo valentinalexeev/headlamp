@@ -1,12 +1,16 @@
 package adminoidc
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 )
@@ -201,6 +205,161 @@ func TestRequiredMe(t *testing.T) {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("me %s: want %s", b, want)
 		}
+	}
+}
+
+// reauthRig is requiredRig with re-authentication (#469) on POST /nodes/start, 3 minutes. The
+// issuer sends auth_time = now - authAge seconds; authAge < 0 sends no auth_time.
+func reauthRig(t *testing.T, warn bool) (*rig, *clock, *atomic.Int64) {
+	c := &clock{t: time.Now()}
+	r := newRigWith(t, func(cfg *Config) {
+		cfg.Required, cfg.Idle, cfg.Session, cfg.Now = true, 30*time.Minute, 8*time.Hour, c.now
+		cfg.Reauth, cfg.ReauthWarn = 3*time.Minute, warn
+		cfg.Sensitive = map[string]bool{"POST /nodes/start": true}
+	})
+	if err := r.pol.SetDynamic(authz.Config{Grants: []authz.Grant{
+		{Subject: "alice@example.test", Roles: []string{"owner"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	authAge := &atomic.Int64{}
+	r.is.Tamper = func(cl jwt.MapClaims) {
+		cl["email_verified"] = true
+		if age := authAge.Load(); age >= 0 {
+			cl["auth_time"] = c.now().Add(-time.Duration(age) * time.Second).Unix()
+		}
+	}
+	return r, c, authAge
+}
+
+// reauth runs the new sign-in of a sensitive route and returns the status and the text of the
+// last page.
+func (r *rig) reauth() (int, string) {
+	r.t.Helper()
+	resp, err := r.client.Get(r.srv.URL + "/auth/login?reauth=1")
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.Request.URL.Path == "/" {
+		return http.StatusOK, string(b)
+	}
+	return resp.StatusCode, string(b)
+}
+
+// A sensitive route needs a sign-in of the last Reauth; other routes do not. The new sign-in asks
+// the IdP for prompt=login and max_age.
+func TestReauthSensitiveRoute(t *testing.T) {
+	r, c, _ := reauthRig(t, false)
+	if code := r.signIn(); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+	if q := r.is.LastAuthorize(); q.Get("prompt") != "" || q.Get("max_age") != "" {
+		t.Fatalf("a plain sign-in asks for a new one: %v", q)
+	}
+	if code := r.do(http.MethodPost, "/nodes/start", nil).StatusCode; code != http.StatusOK {
+		t.Fatalf("fresh sign-in: %d", code)
+	}
+	c.add(4 * time.Minute)
+	if code := r.do(http.MethodGet, "/nodes", nil).StatusCode; code != http.StatusOK {
+		t.Fatalf("not sensitive: %d", code)
+	}
+	resp := r.do(http.MethodPost, "/nodes/start", nil)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("old sign-in: %d", resp.StatusCode)
+	}
+	if !strings.Contains(r.log.String(), "admin re-authentication required") {
+		t.Fatalf("log: %s", r.log.String())
+	}
+	if code, page := r.reauth(); code != http.StatusOK {
+		t.Fatalf("re-authentication: %d %s", code, page)
+	}
+	if q := r.is.LastAuthorize(); q.Get("prompt") != "login" || q.Get("max_age") != "180" {
+		t.Fatalf("re-authentication query: %v", q)
+	}
+	if code := r.do(http.MethodPost, "/nodes/start", nil).StatusCode; code != http.StatusOK {
+		t.Fatalf("after re-authentication: %d", code)
+	}
+}
+
+// The API answer of a sensitive route without a recent sign-in links the new sign-in.
+func TestReauthAPIAnswer(t *testing.T) {
+	r, c, _ := reauthRig(t, false)
+	if code := r.signIn(); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+	c.add(4 * time.Minute)
+	req, _ := http.NewRequest(http.MethodPost, r.srv.URL+"/nodes/start", nil)
+	req.Header.Set("Referer", r.srv.URL+"/nodes?x=1")
+	resp, err := r.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Reauth bool   `json:"reauth"`
+		Login  string `json:"login"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	if err != nil || resp.StatusCode != http.StatusUnauthorized || !out.Reauth ||
+		out.Login != "/auth/login?reauth=1&next=%2Fnodes%3Fx%3D1" {
+		t.Fatalf("answer %d %+v %v", resp.StatusCode, out, err)
+	}
+}
+
+// An IdP that sends no auth_time, or an old one, does not prove the new sign-in. By default the
+// sign-in is refused and the session ends.
+func TestReauthUnprovenLogout(t *testing.T) {
+	for name, age := range map[string]int64{"no_auth_time": -1, "auth_time_old": 3600} {
+		t.Run(name, func(t *testing.T) {
+			r, _, authAge := reauthRig(t, false)
+			authAge.Store(age)
+			if code := r.signIn(); code != http.StatusOK {
+				t.Fatalf("sign-in: %d", code)
+			}
+			if code := r.do(http.MethodPost, "/nodes/start", nil).StatusCode; code != http.StatusUnauthorized {
+				t.Fatalf("unproven sign-in on a sensitive route: %d", code)
+			}
+			if code, _ := r.reauth(); code != http.StatusForbidden {
+				t.Fatalf("re-authentication: %d", code)
+			}
+			if code := r.do(http.MethodGet, "/nodes", nil).StatusCode; code != http.StatusUnauthorized {
+				t.Fatalf("the session stays: %d", code)
+			}
+			if authz.SessionGroups("alice@example.test") != nil {
+				t.Fatal("the groups of the ended session stay")
+			}
+			if l := r.log.String(); !strings.Contains(l, "admin re-authentication refused") ||
+				!strings.Contains(l, "reason="+name) {
+				t.Fatalf("log: %s", l)
+			}
+		})
+	}
+}
+
+// With ReauthWarn, an unproven new sign-in is accepted with a warning in the log.
+func TestReauthUnprovenWarn(t *testing.T) {
+	r, _, authAge := reauthRig(t, true)
+	authAge.Store(-1)
+	if code := r.signIn(); code != http.StatusOK {
+		t.Fatalf("sign-in: %d", code)
+	}
+	if code, page := r.reauth(); code != http.StatusOK {
+		t.Fatalf("re-authentication: %d %s", code, page)
+	}
+	if code := r.do(http.MethodPost, "/nodes/start", nil).StatusCode; code != http.StatusOK {
+		t.Fatalf("after accepted re-authentication: %d", code)
+	}
+	if !strings.Contains(r.log.String(), "admin re-authentication not proven by the IdP, accepted") {
+		t.Fatalf("log: %s", r.log.String())
+	}
+}
+
+// Re-authentication needs the required mode: New turns it off without it.
+func TestReauthNeedsRequired(t *testing.T) {
+	m := New(Config{Reauth: time.Minute})
+	if m.cfg.Reauth != 0 {
+		t.Fatalf("reauth on without the required mode: %v", m.cfg.Reauth)
 	}
 }
 

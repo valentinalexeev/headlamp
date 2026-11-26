@@ -42,7 +42,10 @@ wait_for() { n=$1; shift; i=0; while [ "$i" -lt "$n" ]; do "$@" >/dev/null 2>&1 
 
 # the example as a user copies it, with the placeholders filled in
 cp -R "$src" "$T/app"
-mkdir -p "$T/data"
+mkdir -p "$T/data/pathcheck"
+# #423: the test file of the path check, larger than one probe, made as the README says
+pc_path=pc$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+head -c 2097152 /dev/urandom > "$T/data/pathcheck/probe.bin"
 sed -e "s#^server_url: .*#server_url: https://$domain#" "$src/config/headscale.yaml" > "$T/app/config/headscale.yaml"
 printf '%s\n' '{"tagOwners":{"tag:node-control":["e2e@"]},"acls":[{"action":"accept","src":["*"],"dst":["*:*"]}]}' \
   > "$T/app/config/acl.json"
@@ -54,6 +57,7 @@ ACME_EMAIL=test@example.com
 ENROLL_DOMAIN=enroll.compose.test
 DATA_DIR=$T/data
 EDGE_SUBNET=172.30.77.0/24
+PATHCHECK_BLOB_PATH=$pc_path
 EOF
 : > "$T/app/node-control.env"
 
@@ -73,6 +77,7 @@ services:
       - ./caddy/dns:/etc/caddy/dns:ro
       - ./caddy/tls:/etc/caddy/tls:ro
       - $T/data/caddy:/data
+      - $T/data/pathcheck:/srv/pathcheck:ro
     networks:
       default:
         ipv4_address: 172.30.77.10
@@ -109,6 +114,15 @@ for v in "ondemand|" "none|" "route53|github.com/caddy-dns/route53@v1.6.0" "goog
     ok "the edge builds and validates with FUNNEL_DNS=$dns"
   else nok "the edge builds and validates with FUNNEL_DNS=$dns"; fi
 done
+# #423: the path check route on and off. Without PATHCHECK_BLOB_PATH, compose passes both values empty.
+for pc in "on|abc123" "|"; do
+  if docker run --rm -e PATHCHECK="${pc%%|*}" -e PATHCHECK_BLOB_PATH="${pc#*|}" -e HEADSCALE_DOMAIN=h.example.test \
+       -e ACME_EMAIL=a@example.test -v "$src/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" -v "$src/caddy/dns:/etc/caddy/dns:ro" \
+       -v "$src/caddy/tls:/etc/caddy/tls:ro" -v "$src/caddy/enroll-paths.caddy:/etc/caddy/enroll-paths.caddy:ro" \
+       hl-compose-edge-ondemand:local caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+    ok "the edge validates with PATHCHECK='${pc%%|*}'"
+  else nok "the edge validates with PATHCHECK='${pc%%|*}'"; fi
+done
 
 dc config -q || die "compose config"
 ok "compose.yaml is valid with the example settings"
@@ -123,6 +137,15 @@ if wait_for 30 curl -fsS --cacert "$T/ca/root.crt" --resolve "$domain:$edge_port
 else nok "headscale answers over HTTPS through the edge"; fi
 code=$(curl -s -o /dev/null -w '%{http_code}' -k --resolve "other.compose.test:$edge_port:127.0.0.1" "https://other.compose.test:$edge_port/" || true)
 case "$code" in 000|404|421) ok "the edge serves no unknown name ($code)";; *) nok "the edge serves no unknown name ($code)";; esac
+
+# #423: the test file of the path check. A range of 1 MiB, as the agent reads it. Other paths go to headscale (404).
+pcurl() { curl -s -k --resolve "$domain:$edge_port:127.0.0.1" "$@" || true; }
+n=$(pcurl -o /dev/null -w '%{size_download} %{http_code}' -r 0-1048575 "https://$domain:$edge_port/$pc_path/probe.bin")
+[ "$n" = "1048576 206" ] && ok "the edge serves 1 MiB of the path check file" || nok "the edge serves the path check file ($n)"
+for p in "/$pc_path/" "/$pc_path/other.bin" /probe.bin "/x$pc_path/probe.bin"; do
+  c=$(pcurl -o /dev/null -w '%{http_code}' "https://$domain:$edge_port$p")
+  [ "$c" = 404 ] && ok "the edge does not serve $p" || nok "the edge serves $p ($c)"
+done
 
 # #260: the enrolment name uses the shared path file. node-control is not up yet, so a proxied path gets 502 from
 # Caddy, and any other path gets the edge's own 404.

@@ -16,8 +16,23 @@
 	import ddns/{$FUNNEL_DDNS:none}.caddy
 }
 
+# Optional (#423): the test file of the path check of the bridges (INGRESS_PATHCHECK_BLOB_URL), at
+# /<PATHCHECK_BLOB_PATH>/probe.bin. PATHCHECK (set by compose) is "on" only while PATHCHECK_BLOB_PATH is set; else
+# the "off" snippet adds no route, and the path goes to headscale like any other path (404).
+(pathcheck-off) {
+}
+(pathcheck-on) {
+	@pathcheck path /{$PATHCHECK_BLOB_PATH}/probe.bin
+	handle @pathcheck {
+		root * /srv/pathcheck
+		rewrite * /probe.bin
+		file_server
+	}
+}
+
 # headscale: the control API, the noise protocol and DERP over HTTPS (all on one name).
 {$HEADSCALE_DOMAIN} {
+	import pathcheck-{$PATHCHECK:off}
 	reverse_proxy headscale:8080
 }
 

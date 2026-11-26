@@ -2,7 +2,7 @@
 issue: 437
 type: feature
 section: Added
-status: in-progress
+status: done
 breaking: false
 title: A device drawer on the Devices page for diagnosis
 components: [node-control]

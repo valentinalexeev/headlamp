@@ -238,7 +238,7 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 	for _, p := range nodes.Providers {
 		providers[p] = w.prov
 	}
-	nm, ok := nodes.New(cfg, src, providers).(interface {
+	nm, ok := nodes.New(cfg, src, providers, nodes.WithExpirer(client)).(interface {
 		core.Module
 		Targets(context.Context) []nodes.Target
 	})
@@ -363,6 +363,12 @@ func (f *fakeHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(v)
 	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/node/")
+	if id, ok := strings.CutSuffix(path, "/expire"); ok && r.Method == http.MethodPost {
+		code, v := f.expire(id)
+		reply(code, v)
+		return
+	}
 	switch r.Method + " " + r.URL.Path {
 	case "GET /api/v1/node":
 		reply(200, map[string]any{"nodes": f.nodes})
@@ -418,6 +424,21 @@ func (f *fakeHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(404, map[string]any{"code": 5, "message": "not found"})
 	}
 }
+
+// expire answers POST /api/v1/node/{id}/expire (#401): an expired node drops off the tailnet.
+func (f *fakeHeadscale) expire(id string) (int, any) {
+	for _, n := range f.nodes {
+		if fmt.Sprint(n["id"]) == id {
+			n["online"] = false
+			n["expiry"] = time.Now().UTC().Format(time.RFC3339)
+			return http.StatusOK, map[string]any{"node": n}
+		}
+	}
+	return http.StatusNotFound, map[string]any{"code": grpcNotFound, "message": "node not found"}
+}
+
+// grpcNotFound is the gRPC status code headscale's API returns for an unknown id.
+const grpcNotFound = 5
 
 // ---- provider ----
 

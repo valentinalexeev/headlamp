@@ -694,6 +694,44 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
     await flaky.refresh(); await flaky.refresh();
     assert.strictEqual(calls2.filter((u) => u === '/enroll/ingresses').length, 2);
   }
+
+  // expireAsksThenPostsTheNameItShows (#401)
+  {
+    const mk = (tag) => document.createElement(tag);
+    const els = { section: mk('section'), rows: mk('tbody'), confirm: mk('div'), error: mk('div'), done: mk('div') };
+    els.section.hidden = true;
+    const posts = [];
+    let list = [{ id: '5', name: 'relay-1', tags: ['tag:exit'], online: true, consequence: 'Clients lose that route.' },
+      { id: '9', name: 'phone', tags: [], online: false, consequence: 'This is a device of a person.' }];
+    const api = async (m, u, b) => {
+      if (m === 'GET' && u === '/nodes/tailnet.json') return { nodes: list };
+      if (m === 'POST') { posts.push({ u, b }); list = list.map((n) => Object.assign({}, n, { online: false })); return { ok: true, node: 'relay-1' }; }
+      throw new Error('unexpected ' + u);
+    };
+    const exp = nodes.mountExpire(els, api);
+    await exp.load();
+    assert.strictEqual(els.section.hidden, false);
+    assert.strictEqual(els.rows.children.length, 2);
+    buttonNamed(els.rows, 'Expire node').click();
+    assert.strictEqual(posts.length, 0, 'no expire before the confirmation');
+    assert.ok(els.confirm.textContent.includes('Clients lose that route.'), 'the confirmation says what stops');
+    buttonNamed(els.confirm, 'Expire relay-1').click();
+    await flush(); await flush(); await flush();
+    assert.deepStrictEqual(posts, [{ u: '/nodes/tailnet/5/expire', b: { name: 'relay-1' } }]);
+    assert.strictEqual(els.done.hidden, false);
+    assert.ok(els.done.textContent.includes('new one-time key'));
+    assert.strictEqual(els.confirm.children.length, 0);
+    // cancel posts nothing
+    buttonNamed(els.rows, 'Expire node').click();
+    buttonNamed(els.confirm, 'Keep it').click();
+    assert.strictEqual(posts.length, 1);
+    // a caller who is not an admin never sees the section
+    const hidden = { section: mk('section'), rows: mk('tbody'), confirm: mk('div'), error: mk('div'), done: mk('div') };
+    hidden.section.hidden = true;
+    await nodes.mountExpire(hidden, async () => { const e = new Error('forbidden'); e.status = 403; throw e; }).load();
+    assert.strictEqual(hidden.section.hidden, true);
+    assert.strictEqual(hidden.error.textContent, '');
+  }
   console.log('ok');
 
   function mkEls() {

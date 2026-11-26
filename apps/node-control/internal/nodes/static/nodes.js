@@ -659,15 +659,100 @@
     return { refresh: refresh };
   }
 
+  // mountExpire: the "Tailnet nodes" section (#401), every headscale node with "Expire node". /nodes/tailnet.json
+  // answers only an admin (403 to anyone else) and only when node-control has the headscale API (404 without): the
+  // section stays hidden otherwise. An expire names the node by id and by the name the page shows, so a page that is
+  // out of date cannot expire a different node.
+  function mountExpire(els, api) {
+    var st = { nodes: [], confirming: null, busy: false };
+
+    function note(box, msg) { box.textContent = msg; box.hidden = !msg; }
+
+    function nodeOf(v) {
+      var n = hl.obj(v);
+      return {
+        id: str(n.id), name: hl.plain(n.name, 100), online: n.online === true, consequence: hl.plain(n.consequence, 500),
+        tags: hl.arr(n.tags).filter(function (t) { return typeof t === 'string'; }).map(function (t) { return hl.plain(t, 100); })
+      };
+    }
+
+    function confirm() {
+      hl.clear(els.confirm);
+      var n = null;
+      st.nodes.forEach(function (x) { if (x.id === st.confirming) { n = x; } });
+      if (!n) { st.confirming = null; return; }
+      hl.confirmPanel({
+        title: 'Expire ' + n.name + '?', object: n.tags.length ? n.tags.join(' ') : 'A device of a person',
+        consequence: n.consequence, confirmLabel: 'Expire ' + n.name, cancelLabel: 'Keep it', icon: 'stop', into: els.confirm,
+        onConfirm: function () { st.confirming = null; expire(n); },
+        onCancel: function () { st.confirming = null; render(); }
+      });
+    }
+
+    function render() {
+      els.section.hidden = false;
+      hl.clear(els.rows);
+      st.nodes.forEach(function (n) {
+        var tr = hl.el('tr');
+        tr.appendChild(hl.el('td', 'name', n.name));
+        tr.appendChild(hl.el('td', 'mono t3 wrap', n.tags.length ? n.tags.join(' ') : 'none'));
+        tr.appendChild(hl.el('td', 't2', n.online ? 'Online' : 'Offline'));
+        var cell = hl.el('td', 'act');
+        var b = hl.button('Expire node', null, 'sm', function () { st.confirming = n.id; note(els.done, ''); confirm(); });
+        b.disabled = st.busy;
+        cell.appendChild(b);
+        tr.appendChild(cell);
+        els.rows.appendChild(tr);
+      });
+      if (!st.confirming) { hl.clear(els.confirm); }
+    }
+
+    function load() {
+      return api('GET', '/nodes/tailnet.json').then(function (v) {
+        st.nodes = hl.arr(hl.obj(v).nodes).map(nodeOf).filter(function (n) { return n.id && n.name; });
+        note(els.error, '');
+        render();
+      }, function (e) {
+        if (e && (e.status === 403 || e.status === 404)) { els.section.hidden = true; return; }
+        note(els.error, 'Could not read the tailnet nodes: ' + hl.plain(e && e.message, 300));
+      });
+    }
+
+    function expire(n) {
+      st.busy = true;
+      note(els.error, '');
+      render();
+      return api('POST', '/nodes/tailnet/' + encodeURIComponent(n.id) + '/expire', { name: n.name }).then(function (v) {
+        var r = hl.obj(v);
+        if (r.ok === true) {
+          note(els.done, n.name + ' is expired. To bring it back, register it again with a new one-time key from "Add a node".');
+        } else {
+          note(els.error, n.name + ' is expired, but: ' + hl.plain(r.detail, 300));
+        }
+      }, function (e) {
+        note(els.error, 'Could not expire ' + n.name + ': ' + hl.plain(e && e.message, 300));
+      }).then(function () {
+        st.busy = false;
+        return load();
+      });
+    }
+
+    return { load: load, expire: expire, state: st };
+  }
+
   function init() {
     var root = document.getElementById('nodes');
     if (!root) { return; }
     var $ = function (id) { return document.getElementById(id); };
+    var exp = $('expire') ? mountExpire({
+      section: $('expire'), rows: $('expire-rows'), confirm: $('expire-confirm'), error: $('expire-error'), done: $('expire-done')
+    }, hl.api) : null;
+    if (exp) { exp.load(); }
     var ctrl = mount({
       sub: $('sub'), chips: $('chips'), error: $('error'), empty: $('empty'), cols: $('cols'), rows: $('rows'), panel: $('panel')
     });
     var refreshBtn = $('refresh');
-    if (refreshBtn) { refreshBtn.addEventListener('click', function () { ctrl.refresh(); }); }
+    if (refreshBtn) { refreshBtn.addEventListener('click', function () { ctrl.refresh(); if (exp) { exp.load(); } }); }
     var reader = makeReader(hl.api, ctrl);
     var refresh = reader.refresh;
 
@@ -681,6 +766,6 @@
     setInterval(function () { if (!document.hidden && ctrl.isBusy()) { poller.now(); } }, BUSY_MS);
   }
 
-  hl.nodes = { mergeNodes: mergeNodes, summary: summary, plainRole: plainRole, mount: mount, makeReader: makeReader, init: init };
+  hl.nodes = { mergeNodes: mergeNodes, summary: summary, plainRole: plainRole, mount: mount, makeReader: makeReader, mountExpire: mountExpire, init: init };
   init();
 })();

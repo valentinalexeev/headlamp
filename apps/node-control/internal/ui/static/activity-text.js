@@ -61,6 +61,11 @@
           return (stopped ? 'Stopping ' : 'Starting ') + m[1] + ' failed (' + m[3] + ')';
         }
         break;
+      case 'node.expire':
+        m = /^(.*): (?:(ok)(?:, (key \d+ expired|key not expired) ?(?:\(([^)]*)\))?)?|failed \(([^)]*)\))$/.exec(detail);
+        if (m && m[2]) { return m[1] + ' expired' + (m[3] ? ' (' + m[3] + ')' : ''); }
+        if (m) { return 'Expiring ' + m[1] + ' failed (' + m[5] + ')'; }
+        break;
       case 'namespace.create':
         m = /^(\S+) ports (.+)$/.exec(detail);
         return m ? 'Namespace ' + m[1] + ' created, ports ' + m[2] : 'Namespace ' + detail + ' created';

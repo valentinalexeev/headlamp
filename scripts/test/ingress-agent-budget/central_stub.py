@@ -53,6 +53,7 @@ def stun():
 threading.Thread(target=stun, daemon=True).start()
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.minimum_version = ssl.TLSVersion.TLSv1_2
 ctx.load_cert_chain(cert, key)
 srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
 srv.serve_forever()

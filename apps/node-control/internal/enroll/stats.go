@@ -45,6 +45,15 @@ func numeric(v any) (float64, bool) {
 // true when a target answered nothing while its sync is pending (the agent client answers an empty
 // map on any failure) or when an id could not be computed.
 func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, devices []Device) (map[int64]Traffic, bool) {
+	out, partial, _ := mergedStats(ctx, targets, cfg, devices)
+	return out, partial
+}
+
+// mergedStats is MergedStats that also says which targets answered (same order as targets). An
+// answer is recorded in the target's sync state as its last agent answer (#438).
+func mergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig,
+	devices []Device,
+) (map[int64]Traffic, bool, []bool) {
 	answers := make([]map[string]any, len(targets))
 	panicked := make([]bool, len(targets))
 	var wg sync.WaitGroup
@@ -63,36 +72,52 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 	wg.Wait()
 	out := map[int64]Traffic{}
 	partial := false
+	answered := make([]bool, len(targets))
 	for i, t := range targets {
 		// nil: the bridge did not answer (#436). An empty map is a bridge with no traffic.
 		if panicked[i] || answers[i] == nil {
 			partial = true
+		} else {
+			answered[i] = true
+			t.State.Answered()
 		}
-		for _, d := range devices {
-			auto := d.UUIDs["auto"]
-			if auto == "" {
-				continue
-			}
-			u, err := cfg.UUIDFor(t.Ingress, "auto", auto)
-			if err != nil {
-				partial = true
-				continue
-			}
-			sum := sha256.Sum256([]byte(u))
-			entry, ok := answers[i][hex.EncodeToString(sum[:])[:8]].(map[string]any)
-			if !ok {
-				continue
-			}
-			up, ok1 := numeric(entry["up"])
-			down, ok2 := numeric(entry["down"])
-			if !ok1 || !ok2 {
-				continue
-			}
-			tr := out[d.ID]
-			tr.Up = math.Min(tr.Up+up, maxTraffic)
-			tr.Down = math.Min(tr.Down+down, maxTraffic)
-			out[d.ID] = tr
+		if !addTraffic(out, cfg, t.Ingress, answers[i], devices) {
+			partial = true
 		}
 	}
-	return out, partial
+	return out, partial, answered
+}
+
+// addTraffic adds the answer of one target to out, per device. It returns false when an id could
+// not be computed.
+func addTraffic(out map[int64]Traffic, cfg IngressConfig, ing Ingress, answer map[string]any,
+	devices []Device,
+) bool {
+	complete := true
+	for _, d := range devices {
+		auto := d.UUIDs["auto"]
+		if auto == "" {
+			continue
+		}
+		u, err := cfg.UUIDFor(ing, "auto", auto)
+		if err != nil {
+			complete = false
+			continue
+		}
+		sum := sha256.Sum256([]byte(u))
+		entry, ok := answer[hex.EncodeToString(sum[:])[:8]].(map[string]any)
+		if !ok {
+			continue
+		}
+		up, ok1 := numeric(entry["up"])
+		down, ok2 := numeric(entry["down"])
+		if !ok1 || !ok2 {
+			continue
+		}
+		tr := out[d.ID]
+		tr.Up = math.Min(tr.Up+up, maxTraffic)
+		tr.Down = math.Min(tr.Down+down, maxTraffic)
+		out[d.ID] = tr
+	}
+	return complete
 }

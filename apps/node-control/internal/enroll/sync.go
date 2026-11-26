@@ -47,6 +47,33 @@ type SyncState struct {
 	ver     uint64 // bumped on every outcome: lets a caller tell "no result yet" from "same result"
 	// groups are the grant groups the bridge reported (#139); nil: not known.
 	groups []string
+	// answered is the unix time of the last answer of the agent (a push or a stats read;
+	// #438); 0: never.
+	answered int64
+}
+
+// Answered records that the agent answered now. A nil state ignores it.
+func (s *SyncState) Answered() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clock := s.clock
+	if clock == nil {
+		clock = time.Now
+	}
+	s.answered = clock().Unix()
+}
+
+// LastAnswer gives the unix time of the last answer of the agent; 0: none since the start.
+func (s *SyncState) LastAnswer() int64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.answered
 }
 
 // SetGroups records the grant groups the bridge can serve.
@@ -331,6 +358,7 @@ func pushTo(ctx context.Context, t SyncTarget, creds []Credential, dns *TailnetD
 			t.State.SetGroups(g)
 		}
 	}
+	t.State.Answered()
 	t.State.OK("ok")
 	return true
 }

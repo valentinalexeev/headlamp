@@ -14,19 +14,33 @@ manage it. Key material lives only on the host, never in the repo (`.env`,
 TailGuard runs its **own** in-container Tailscale as a separate node
 (`tg-node`). The Tailscale node of the host, if it has one, does not change.
 
+## Image
+
+All three services use the image `ghcr.io/valentinalexeev/headlamp/tailguard`. CI builds it from `Dockerfile`:
+
+- The base is the upstream tailguard image at a pinned digest.
+- tailscale and tailscaled are the version in `TAILSCALE_VERSION` of this repository.
+- `route-health.sh`, `track-exit-node.sh` and `verify.sh` are in `/usr/local/bin`.
+
+`docker-compose.yml` pins a release `X.Y.Z`. Do not use `main` or `latest`. To update, change the three `image:`
+lines to the new release, then run `docker compose up -d`.
+
+To run the image tests, run `make test-tailguard` (needs docker).
+
 ## Layout
 
 | file | committed | purpose |
 |---|---|---|
-| `docker-compose.yml`     | yes | the `tailguard` container + `route-health` sidecar |
+| `Dockerfile`             | yes | the image: upstream tailguard at a pinned digest, tailscale at `TAILSCALE_VERSION`, and the three scripts below in `/usr/local/bin` |
+| `docker-compose.yml`     | yes | the `tailguard` container + `route-health` and `exit-node-tracker` sidecars, all from the pinned image |
 | `.env.example`           | yes | documented knobs |
 | `.env`                   | no  | the site settings; `TS_AUTHKEY` only until the first login |
 | `config/wg0.conf.example`| yes | server-side WG template |
 | `config/wg0.conf`        | no  | real server privkey + client peer(s) |
 | `state/`                 | no  | in-container tailscale state |
-| `verify.sh`              | yes | egress-proof test (throwaway in-tunnel WG client) |
-| `route-health.sh`        | yes | watchdog: closes WG when the exit node stops forwarding |
-| `track-exit-node.sh`     | yes | sidecar: re-selects the exit node when my-exit re-registers (new IP / suffixed name) |
+| `verify.sh`              | yes | egress-proof test, run on the host (throwaway in-tunnel WG client) |
+| `route-health.sh`        | yes | watchdog: closes WG when the exit node stops forwarding (in the image) |
+| `track-exit-node.sh`     | yes | sidecar: re-selects the exit node when my-exit re-registers (new IP / suffixed name) (in the image) |
 | `run/`                   | no  | tailscaled socket dir, bind-mounted at `/tmp` in tailguard + tracker |
 
 ## exit-node-tracker
@@ -62,7 +76,7 @@ says "could not connect to the '<region>' relay". The derp-guard drops our STUN 
 reachable region as home. An alternative fixes this for every node: remove the region
 in the tailnet policy, `"derpMap": {"Regions": {"<region-id>": null}}`. To self-test the decision logic, run
 `printf '100.1.1.1 my-exit-1 1 0 1\n' | EXIT_NODE_PREFIX=my-exit sh track-exit-node.sh --decide`. The columns are
-the IP, the name, online, selected and tagged (`0` or `1`).
+the IP, the name, online, selected and tagged (`0` or `1`). The test cases are in `test/scripts/tailguard.bats`.
 
 ## route-health watchdog
 
@@ -120,11 +134,11 @@ Put `apps/tailguard/` at `~/apps-tailguard` (sparse checkout or `scp -r`), then
 
 ```bash
 cd config
-docker run --rm --entrypoint wg ghcr.io/juhovh/tailguard:latest genkey | tee srv.key | \
-  docker run --rm -i --entrypoint wg ghcr.io/juhovh/tailguard:latest pubkey > srv.pub
-docker run --rm --entrypoint wg ghcr.io/juhovh/tailguard:latest genkey | tee cli.key | \
-  docker run --rm -i --entrypoint wg ghcr.io/juhovh/tailguard:latest pubkey > cli.pub
-docker run --rm --entrypoint wg ghcr.io/juhovh/tailguard:latest genpsk > psk.key
+docker run --rm --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 genkey | tee srv.key | \
+  docker run --rm -i --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 pubkey > srv.pub
+docker run --rm --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 genkey | tee cli.key | \
+  docker run --rm -i --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 pubkey > cli.pub
+docker run --rm --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 genpsk > psk.key
 cp wg0.conf.example wg0.conf
 # edit wg0.conf: PrivateKey=<srv.key>, [Peer] PublicKey=<cli.pub>, PresharedKey=<psk.key>
 chmod 600 wg0.conf
@@ -239,7 +253,7 @@ the host changes. If you want, delete `tg-node` from the Tailscale console.
 | container won't bind 41642 | something else took it — pick another `TS_PORT` and update the compose port. |
 | exit node not applied | check `docker compose exec tailguard tailscale status`; the exit node is re-set by a delayed script once the healthcheck passes — give it ~1 min. |
 | poor throughput | nested-tunnel MTU — confirm client `MTU=1280`; check `tailscale status` for a DERP vs direct path to my-exit. |
-| container replaced unexpectedly | watchtower auto-updated `:latest`; set the `watchtower.enable=false` label in `docker-compose.yml`. |
+| container replaced unexpectedly | Compose pins the image by version. Make sure that nothing (for example watchtower) changes the `image:` lines in `docker-compose.yml`. |
 
 ## Using headscale instead of Tailscale's own control plane
 

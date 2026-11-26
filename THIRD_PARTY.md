@@ -6,5 +6,5 @@
   writing; if you are its author and want this attributed differently or removed, please open
   an issue.
 - `apps/exit-node/install.sh` is the Tailscale install script (BSD-3-Clause, see its header).
-- `apps/tailguard/` runs the container image from [juhovh/tailguard](https://github.com/juhovh/tailguard)
-  (not vendored here; see that project for its license).
+- `apps/tailguard/Dockerfile` builds on the container image from [juhovh/tailguard](https://github.com/juhovh/tailguard)
+  at a pinned digest (not vendored here; see that project for its license).

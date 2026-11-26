@@ -59,6 +59,14 @@
     "test": "make test-k8s-connector"
   },
   {
+    "image": "tailguard",
+    "context": "apps/tailguard",
+    "dockerfile": "Dockerfile",
+    "paths": ["apps/tailguard", "TAILSCALE_VERSION"],
+    "args_from_files": {"TSVERSION": "TAILSCALE_VERSION"},
+    "test": "make test-tailguard"
+  },
+  {
     "image": "gateway-controller",
     "context": "apps/gateway-controller",
     "dockerfile": "Dockerfile",

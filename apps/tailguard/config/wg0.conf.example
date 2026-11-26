@@ -2,11 +2,11 @@
 # Copy to wg0.conf and fill in real keys. wg0.conf is gitignored.
 #
 # Generate keys on the host with the tailguard image (it ships `wg`):
-#   docker run --rm --entrypoint wg ghcr.io/juhovh/tailguard:latest genkey | tee srv.key | \
-#     docker run --rm -i --entrypoint wg ghcr.io/juhovh/tailguard:latest pubkey > srv.pub
-#   docker run --rm --entrypoint wg ghcr.io/juhovh/tailguard:latest genkey | tee cli.key | \
-#     docker run --rm -i --entrypoint wg ghcr.io/juhovh/tailguard:latest pubkey > cli.pub
-#   docker run --rm --entrypoint wg ghcr.io/juhovh/tailguard:latest genpsk > psk.key
+#   docker run --rm --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 genkey | tee srv.key | \
+#     docker run --rm -i --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 pubkey > srv.pub
+#   docker run --rm --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 genkey | tee cli.key | \
+#     docker run --rm -i --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 pubkey > cli.pub
+#   docker run --rm --entrypoint wg ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0 genpsk > psk.key
 
 [Interface]
 PrivateKey = <contents of srv.key>

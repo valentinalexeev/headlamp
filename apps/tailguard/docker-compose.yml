@@ -3,7 +3,9 @@
 # Operator-run on the Docker host: `docker compose up -d`. Not Ansible/Terraform managed.
 services:
   tailguard:
-    image: ghcr.io/juhovh/tailguard:latest
+    # The headlamp image (#391): upstream tailguard at a pinned digest, tailscale at TAILSCALE_VERSION, and the
+    # sidecar scripts. Pin a release X.Y.Z (or a digest), never main or latest.
+    image: ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0
     container_name: tailguard
     env_file: .env
     environment:
@@ -31,17 +33,13 @@ services:
       - "${TG_BIND_ADDR:?TG_BIND_ADDR is not set in .env (#390). Set TG_BIND_ADDR=<host-lan-ip> to publish the WireGuard and tailscale ports on that address only, or TG_BIND_ADDR=0.0.0.0 to publish them on all host addresses (the behaviour before #390)}:51820:51820/udp"  # WireGuard: clients hit <host-lan-ip>:51820
       - "${TG_BIND_ADDR:?TG_BIND_ADDR is not set in .env}:41642:41642/udp"  # in-container tailscale (host tailscaled owns 41641)
     restart: unless-stopped
-    # If the host runs watchtower it auto-updates :latest. To pin this container instead,
-    # uncomment:
-    # labels:
-    #   com.centurylinklabs.watchtower.enable: "false"
 
   # Watchdog: probes real egress through the exit node; closes the WireGuard
   # listener (udp/51820) when the exit node stops forwarding, reopens it when it
   # returns. Shares tailguard's netns so probes go via the exit node and
   # iptables edits land in the same namespace. See route-health.sh.
   route-health:
-    image: ghcr.io/juhovh/tailguard:latest      # already ships curl + iptables
+    image: ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0      # ships curl + iptables + the script
     container_name: tailguard-route-health
     network_mode: "service:tailguard"
     cap_add: [NET_ADMIN]
@@ -49,9 +47,7 @@ services:
       tailguard:
         condition: service_healthy
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "/route-health.sh"]
-    volumes:
-      - ./route-health.sh:/route-health.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/route-health.sh"]
     # Override the image's HEALTHCHECK (it's /tailguard/healthcheck.sh, which is
     # for the main container and mutates the shared-netns firewall here).
     healthcheck:
@@ -69,7 +65,7 @@ services:
   # online exit node named $EXIT_NODE_PREFIX* with $EXIT_NODE_TAG (default tag:exit) whenever the selected one is gone.
   # Talks to tailguard's own tailscaled through the shared ./run:/tmp socket.
   exit-node-tracker:
-    image: ghcr.io/juhovh/tailguard:latest
+    image: ghcr.io/valentinalexeev/headlamp/tailguard:0.22.0
     container_name: tailguard-exit-node-tracker
     network_mode: "service:tailguard"      # so the post-pin egress probe goes via the exit node
     env_file: .env
@@ -78,12 +74,11 @@ services:
       tailguard:
         condition: service_healthy
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "/track-exit-node.sh"]
+    entrypoint: ["/bin/sh", "/usr/local/bin/track-exit-node.sh"]
     environment:
       # LAN access through the exit node (#390). No default: compose stops with this message if it is missing.
       - "TG_LAN_ACCESS=${TG_LAN_ACCESS:?TG_LAN_ACCESS is not set in .env (#390). Set TG_LAN_ACCESS=0 so that WireGuard peers reach the internet through the exit node only, or TG_LAN_ACCESS=1 so that they can also reach the LAN of the host (the behaviour before #390)}"
     volumes:
-      - ./track-exit-node.sh:/track-exit-node.sh:ro
       - ./run:/tmp
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f track-exit-node.sh >/dev/null || exit 1"]

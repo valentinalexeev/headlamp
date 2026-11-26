@@ -41,6 +41,7 @@ type Module struct {
 	audit func() core.AuditLog // nil, or returning nil, when there is no audit log
 	tn    core.Tailnet         // names the caller in audit entries
 	log   *slog.Logger
+	hs    Expirer // nil: no "Expire node" action (#401)
 
 	mu       sync.Mutex
 	lastGood []headscale.Node // last node list headscale returned successfully
@@ -77,6 +78,10 @@ func (m *Module) Register(r *core.Routes) error {
 	r.Admin.HandleFunc("GET /nodes/{id}/status", m.nodeStatus)
 	r.Admin.HandleFunc("POST /nodes/{id}/start", m.act("start"))
 	r.Admin.HandleFunc("POST /nodes/{id}/stop", m.act("stop"))
+	if m.hs != nil {
+		r.Admin.HandleFunc("GET /nodes/tailnet.json", m.tailnetNodes)
+		r.Admin.HandleFunc("POST /nodes/tailnet/{hsid}/expire", m.expireNode)
+	}
 	return nil
 }
 

@@ -643,10 +643,44 @@ The file is optional. Files from the Python version continue to work. Start from
 - `aliases`: `{"old-id": "node-name"}`, so that bookmarks and scripts with an old id continue to work.
 - `tailnetTrack`: extra headscale names to include in `/tailnet/status`.
 
+## Expire a node
+
+Use this action when the identity of a node is possibly compromised (#401). The section "Tailnet nodes" on the Nodes
+page lists every headscale node: its name, its tags and its tailnet state. Only a caller with the nodes admin level
+sees the section. A tagged caller gets 403.
+
+When you expire a node, node-control does these steps:
+
+1. It expires the node in headscale. The node goes off the tailnet at once.
+2. If the node registered with a reusable pre-auth key that is still valid, it expires that key too. Thus that key
+   cannot register the node again.
+3. It writes the admin, the node and the time in the audit log (action `node.expire`). The Activity page shows the
+   entry.
+
+After this, the node can join the tailnet again only with a new one-time key ("Add a node"). node-control does not
+delete the node record. To delete it, use headscale.
+
+To expire a node, do these steps:
+
+1. Open the Nodes page.
+2. In "Tailnet nodes", find the node and click **Expire node**.
+3. Read what stops. For example, the WireGuard peers of a tailguard node or the clients of a bridge stop.
+4. Click the button with the name of the node, for example **Expire relay-1**.
+
+> **CAUTION:** Do not expire the node of node-control (`tag:node-control`). If you do, the console stops until you
+> register node-control again.
+
+If headscale does not expire the reusable key, the page shows an error with the key id. Expire that key in headscale.
+
+API: `GET /nodes/tailnet.json` lists the nodes, with `id` (a string), `name`, `tags`, `online`, `last_seen` and
+`consequence`. `POST /nodes/tailnet/{hsid}/expire` with the body `{"name": "<name>"}` expires one node. The name must
+be the current name of the node with that id, else the answer is 409. Both routes need nodes admin.
+
 ## API
 
 - Pages: `GET /` (Overview) · `GET /nodes` · `GET /activity` · `GET /fleet`.
 - Nodes: `GET /nodes.json` · `GET /status` · `GET /nodes/{id}/status` · `POST /nodes/{id}/start` · `POST /nodes/{id}/stop`.
+- Tailnet nodes (admin): `GET /nodes/tailnet.json` · `POST /nodes/tailnet/{hsid}/expire` (see "Expire a node").
 - Other: `GET /fleet.json` · `GET /tailnet/status` · `GET /healthz`.
 
 With `ENROLL_DB` or `ENROLL_REDIS=1`, these are also available: the `/enroll` admin pages and API on `:80`, and the public `/e/<token>` and `/sub/<secret>` on `:8081`.

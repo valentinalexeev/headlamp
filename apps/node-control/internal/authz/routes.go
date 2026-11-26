@@ -84,6 +84,9 @@ var Routes = map[string]Rule{
 	"GET /nodes/{id}/status": need(FeatureNodes, LevelView),
 	"POST /nodes/{id}/start": need(FeatureNodes, LevelOperate),
 	"POST /nodes/{id}/stop":  need(FeatureNodes, LevelOperate),
+	// #401: every headscale node, and expiring one. Admin only: the list names the devices of people too.
+	"GET /nodes/tailnet.json":           need(FeatureNodes, LevelAdmin),
+	"POST /nodes/tailnet/{hsid}/expire": need(FeatureNodes, LevelAdmin),
 
 	// enroll
 	"GET /enroll":                             need(FeatureEnroll, LevelView),

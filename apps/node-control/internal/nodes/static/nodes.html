@@ -39,6 +39,20 @@
         <div class="panel" id="panel"></div>
       </aside>
     </div>
+
+    <section id="expire" aria-labelledby="expire-h" hidden>
+      <h2 id="expire-h">Tailnet nodes</h2>
+      <p class="t2">Expire a node when its identity may be compromised. The node leaves the tailnet and can join again only with a new one-time key.</p>
+      <div class="note crit" id="expire-error" role="alert" hidden></div>
+      <div class="note" id="expire-done" role="status" hidden></div>
+      <div id="expire-confirm"></div>
+      <div class="tw">
+        <table>
+          <thead><tr><th>Name</th><th>Tags</th><th>Tailnet</th><th><span class="sr">Action</span></th></tr></thead>
+          <tbody id="expire-rows"></tbody>
+        </table>
+      </div>
+    </section>
   </div>
 </div>
 <script src="/nodes/nodes.js" defer></script>

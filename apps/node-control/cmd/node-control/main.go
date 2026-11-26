@@ -109,7 +109,7 @@ func buildModules(env core.Env, hc *http.Client) ([]core.Module, error) {
 		return nil
 	}
 	var ok bool
-	nm, ok = nodes.New(cfg, src, providers, nodes.WithAudit(audit)).(interface {
+	nm, ok = nodes.New(cfg, src, providers, nodes.WithAudit(audit), nodes.WithExpirer(hsClient)).(interface {
 		core.Module
 		Targets(context.Context) []nodes.Target
 		StoppedNames(context.Context) map[string]bool

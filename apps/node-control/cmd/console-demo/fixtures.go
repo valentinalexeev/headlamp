@@ -238,7 +238,7 @@ func (w *world) modules() ([]core.Module, core.Env, error) {
 	for _, p := range nodes.Providers {
 		providers[p] = w.prov
 	}
-	nm, ok := nodes.New(cfg, src, providers).(interface {
+	nm, ok := nodes.New(cfg, src, providers, nodes.WithExpirer(client)).(interface {
 		core.Module
 		Targets(context.Context) []nodes.Target
 	})
@@ -362,6 +362,19 @@ func (f *fakeHeadscale) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(v)
+	}
+	if id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/node/"), "/expire"); ok && r.Method == http.MethodPost {
+		// #401: an expired node drops off the tailnet.
+		for _, n := range f.nodes {
+			if fmt.Sprint(n["id"]) == id {
+				n["online"] = false
+				n["expiry"] = time.Now().UTC().Format(time.RFC3339)
+				reply(200, map[string]any{"node": n})
+				return
+			}
+		}
+		reply(404, map[string]any{"code": 5, "message": "node not found"})
+		return
 	}
 	switch r.Method + " " + r.URL.Path {
 	case "GET /api/v1/node":

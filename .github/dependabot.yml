@@ -33,6 +33,7 @@ updates:
       - /apps/headscale
       - /apps/node-control
       - /apps/tailnet-connector
+      - /apps/tailguard
       - /examples/compose/control/caddy
       - /scripts/test/hysteria
     schedule:

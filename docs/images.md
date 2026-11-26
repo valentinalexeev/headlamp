@@ -1,6 +1,6 @@
 # Container images and how they fit together
 
-CI publishes six images to `ghcr.io/valentinalexeev/headlamp/<image>`. A few more parts run directly on hosts. Together they make up a self-hosted tailnet: a control server, exit nodes, an admin console and optional public ingress. This page says what each image does, where it runs and what it needs from you.
+CI publishes nine images to `ghcr.io/valentinalexeev/headlamp/<image>`. A few more parts run directly on hosts. Together they make up a self-hosted tailnet: a control server, exit nodes, an admin console and optional public ingress. This page says what each image does, where it runs and what it needs from you.
 
 For tags and release rules, see [`VERSIONING.md`](../VERSIONING.md). The list CI builds from is [`.github/components.json`](../.github/components.json).
 
@@ -21,7 +21,7 @@ flowchart TB
         runner[task-runner on a VM<br/>not an image]
         browser[task-runner-browser<br/>one container per run]
         agent[ingress-agent and xray on a bridge host<br/>not an image]
-        guard[tailguard<br/>upstream image]
+        guard[tailguard]
     end
 
     clients -->|join and get their policy from| headscale
@@ -53,6 +53,7 @@ Every node, image or not, joins the tailnet through headscale. `exit-node`, `nod
 | `task-runner-browser` | The Chromium and Playwright container each scheduled browser check runs in | On a VM, started by task-runner under rootless podman | Only for tasks and browser sessions |
 | `tailnet-connector` | tailscale at the repo pin, for the Helm chart `charts/tailnet-connector`: a subnet router for a Kubernetes cluster. Published for `linux/amd64` and `linux/arm64` | A Deployment in the cluster, in userspace mode, with no special privileges | Only for Kubernetes clusters that the tailnet must reach |
 | `gateway-controller` | A Kubernetes controller for the Helm chart `charts/gateway-controller`. It reads Gateway API resources and runs one `funnel-sidecar` for each `Gateway`. Published for `linux/amd64` and `linux/arm64` | A Deployment in the cluster, with no special privileges | Only to publish Kubernetes Services from Gateway API resources |
+| `tailguard` | A WireGuard server for plain WireGuard devices, such as a home router. Their traffic leaves through a tailnet exit node. It is the upstream tailguard image at a pinned digest, with tailscale at the repo pin and the sidecar scripts of `apps/tailguard` | A container with `NET_ADMIN`, `/dev/net/tun` and forwarding on, on a Docker host. You run it with `apps/tailguard/docker-compose.yml` | Only for plain WireGuard devices |
 
 ### What each one needs
 
@@ -68,6 +69,7 @@ The images are generic. Where a site's settings belong they hold placeholders, o
 | `task-runner-browser` | Nothing: the caller sends each script | None: each container is thrown away |
 | `tailnet-connector` | A tagged ephemeral pre-auth key in a Secret, and the routes in the chart values | Its tailscale identity, in a Kubernetes Secret |
 | `gateway-controller` | The chart values. Each `Gateway` names a Secret with a key that you make in node-control | None: the state is in the Kubernetes objects |
+| `tailguard` | `.env` and `config/wg0.conf` (see `apps/tailguard/README.md`) | Its tailscale identity, in `state/` on the host |
 
 Each app's README has the full settings.
 
@@ -78,7 +80,6 @@ Each app's README has the full settings.
 | VM exit nodes | Terraform creates them, and the Ansible roles configure them | They are machines, not containers |
 | `ingress-agent` | A systemd service, installed by Ansible on a bridge host | It restarts xray through systemd and owns xray's config on the host |
 | `task-runner` | A binary on a VM, installed by Ansible | It starts containers itself, under its own locked-down user |
-| `tailguard` | Docker Compose, run by you | It uses the upstream `ghcr.io/juhovh/tailguard` image plus scripts from this repo |
 
 CI still runs the tests for `ingress-agent` and `task-runner`.
 

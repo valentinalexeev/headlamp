@@ -1,6 +1,6 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
-.PHONY: test-sh bats-init test-control-host-gcp test-exit-node-gcp test-gateway-controller test-gateway-controller-e2e test-ssh-ca test-ssh-ca-e2e test-fleet-run test-fleet-check check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-serve-acme-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-edge-ddns-e2e test-exit-node-key-e2e test-relogin-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
+.PHONY: test-sh bats-init test-control-host-gcp test-exit-node-gcp test-gateway-controller test-gateway-controller-e2e test-ssh-ca test-ssh-ca-e2e test-fleet-run test-fleet-check test-tailguard check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-serve-acme-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-edge-ddns-e2e test-exit-node-key-e2e test-relogin-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
   test-tasks-cli test-bridge-selection test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
 
 hooks:
@@ -25,6 +25,11 @@ test-check-compat:
 	bash scripts/test/check-compat/run_tests.sh
 
 # #195: scripts/fleet-check.sh with a fake curl (no network).
+# #391: the tailguard image (built from this checkout, tailscale at the pin) and its exit-node tracker. Needs docker.
+test-tailguard: bats-init
+	docker build -q --build-arg TSVERSION="$$(cat TAILSCALE_VERSION)" -t headlamp-test/tailguard apps/tailguard >/dev/null
+	TAILGUARD_IMAGE=headlamp-test/tailguard $(BATS) test/scripts/tailguard.bats
+
 test-fleet-check: bats-init
 	$(BATS) test/scripts/fleet-check.bats
 

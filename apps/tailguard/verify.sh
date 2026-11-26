@@ -13,7 +13,9 @@ CONF=config/cli-test.conf
 [ -f "$CONF" ] || { echo "missing $CONF — see README"; exit 1; }
 
 bytes="${1:-20000000}"
-img=ghcr.io/juhovh/tailguard:latest
+# The image that compose runs (docker-compose.yml), so the test client has the same tools (#391).
+img="${TAILGUARD_IMAGE:-$(docker compose config --images | head -n1)}"
+[ -n "$img" ] || { echo "no image in docker-compose.yml; set TAILGUARD_IMAGE"; exit 1; }
 
 echo "=== exit-node counters BEFORE ==="
 docker compose exec -T tailguard tailscale status | grep -E "exit node" || true

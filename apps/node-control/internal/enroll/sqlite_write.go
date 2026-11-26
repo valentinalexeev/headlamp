@@ -48,10 +48,12 @@ func WriteSQLite(snap Snapshot, path string, secretKey []byte) error {
 		}
 		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO devices (id, name, owner, client, expires_at, revoked, secret_epoch,"+
-				" enrolled_at, enrol_count, last_active, profile_at, profile_last)"+
-				" VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+				" enrolled_at, enrol_count, last_active, profile_at, profile_last, profile_format,"+
+				" created_at, invited_at, extended_at, revoked_at)"+
+				" VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 			d.ID, d.Name, d.Owner, d.Client, d.ExpiresAt, revoked, d.Epoch,
-			d.EnrolledAt, d.Enrolments, d.LastActive, d.ProfileAt, d.ProfileLast); err != nil {
+			d.EnrolledAt, d.Enrolments, d.LastActive, d.ProfileAt, d.ProfileLast, d.ProfileFormat,
+			d.CreatedAt, d.InvitedAt, d.ExtendedAt, d.RevokedAt); err != nil {
 			return fmt.Errorf("writing device %d: %w", d.ID, err)
 		}
 		for mode, u := range d.UUIDs {

@@ -42,6 +42,12 @@ type SnapDevice struct {
 	LastActive  int64 `json:"last_active,omitempty"`
 	ProfileAt   int64 `json:"profile_at,omitempty"`
 	ProfileLast int64 `json:"profile_last,omitempty"`
+	// The profile format and the timeline (#437); absent in older exports.
+	ProfileFormat string `json:"profile_format,omitempty"`
+	CreatedAt     int64  `json:"created_at,omitempty"`
+	InvitedAt     int64  `json:"invited_at,omitempty"`
+	ExtendedAt    int64  `json:"extended_at,omitempty"`
+	RevokedAt     int64  `json:"revoked_at,omitempty"`
 }
 
 type SnapLink struct {
@@ -112,9 +118,22 @@ func (s *Store) Snapshot() (Snapshot, error) {
 	if err != nil {
 		return snap, err
 	}
+	timelineCols := []string{
+		"profile_format", "created_at", "invited_at", "extended_at", "revoked_at"}
+	timeline := make([]string, 0, len(timelineCols))
+	for _, name := range timelineCols {
+		c, err := col(name)
+		if err != nil {
+			return snap, err
+		}
+		if c == "0" && name == "profile_format" {
+			c = "''"
+		}
+		timeline = append(timeline, c)
+	}
 	// The column names come from col (PRAGMA table_info), never from input.
-	cols := strings.Join([]string{epochCol, enrolledCol, countCol, activeCol, profileCol,
-		profileLastCol}, ", ")
+	cols := strings.Join(append([]string{epochCol, enrolledCol, countCol, activeCol, profileCol,
+		profileLastCol}, timeline...), ", ")
 	//nolint:gosec // G202: column names from PRAGMA table_info, not input
 	q := "SELECT id, name, owner, client, expires_at, revoked, " + cols +
 		" FROM devices ORDER BY id"
@@ -126,7 +145,8 @@ func (s *Store) Snapshot() (Snapshot, error) {
 		var d SnapDevice
 		var revoked int64
 		if err := rows.Scan(&d.ID, &d.Name, &d.Owner, &d.Client, &d.ExpiresAt, &revoked, &d.Epoch,
-			&d.EnrolledAt, &d.Enrolments, &d.LastActive, &d.ProfileAt, &d.ProfileLast); err != nil {
+			&d.EnrolledAt, &d.Enrolments, &d.LastActive, &d.ProfileAt, &d.ProfileLast,
+			&d.ProfileFormat, &d.CreatedAt, &d.InvitedAt, &d.ExtendedAt, &d.RevokedAt); err != nil {
 			rows.Close()
 			return snap, err
 		}
@@ -232,7 +252,9 @@ func (s *RedisStore) Snapshot() (Snapshot, error) {
 		snap.Devices = append(snap.Devices, SnapDevice{ID: r.ID, Name: r.Name, Owner: r.Owner, Client: r.Client,
 			ExpiresAt: r.ExpiresAt, Revoked: r.Revoked, Epoch: r.Epoch, UUIDs: r.UUIDs,
 			EnrolledAt: r.EnrolledAt, Enrolments: r.Enrolments, LastActive: r.LastActive,
-			ProfileAt: r.ProfileAt, ProfileLast: r.ProfileLast})
+			ProfileAt: r.ProfileAt, ProfileLast: r.ProfileLast, ProfileFormat: r.ProfileFormat,
+			CreatedAt: r.CreatedAt, InvitedAt: r.InvitedAt, ExtendedAt: r.ExtendedAt,
+			RevokedAt: r.RevokedAt})
 	}
 	h, err := s.rdb.HGetAll(ctx, s.approvalsKey()).Result()
 	if err != nil {
@@ -287,7 +309,9 @@ func (s *RedisStore) Restore(snap Snapshot, force bool) (devices, links, approva
 		}
 		if err := s.putDevice(ctx, Device{ID: d.ID, Name: d.Name, Owner: d.Owner, Client: d.Client, ExpiresAt: d.ExpiresAt, Revoked: d.Revoked, UUIDs: uu,
 			EnrolledAt: d.EnrolledAt, Enrolments: d.Enrolments, LastActive: d.LastActive,
-			ProfileAt: d.ProfileAt, ProfileLast: d.ProfileLast}, d.Epoch); err != nil {
+			ProfileAt: d.ProfileAt, ProfileLast: d.ProfileLast, ProfileFormat: d.ProfileFormat,
+			CreatedAt: d.CreatedAt, InvitedAt: d.InvitedAt, ExtendedAt: d.ExtendedAt,
+			RevokedAt: d.RevokedAt}, d.Epoch); err != nil {
 			return 0, 0, 0, err
 		}
 		devices++

@@ -63,7 +63,7 @@ type publicStore interface {
 
 // profileToucher is the optional part of a store that records profile downloads (#436).
 type profileToucher interface {
-	TouchProfile(deviceID, at int64) error
+	TouchProfile(deviceID, at int64, format string) error
 	Clock() func() time.Time
 }
 
@@ -209,7 +209,7 @@ func (p *Public) subscription(w http.ResponseWriter, r *http.Request, secret str
 	// #436: the download shows that an app is set up. A failed write only loses that note;
 	// the profile is served anyway.
 	if t, ok := p.store.(profileToucher); ok {
-		if err := t.TouchProfile(d.ID, t.Clock()().Unix()); err != nil {
+		if err := t.TouchProfile(d.ID, t.Clock()().Unix(), format); err != nil {
 			slog.Warn("recording a profile download failed", "error_type", typeName(err))
 		}
 	}

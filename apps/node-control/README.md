@@ -1032,6 +1032,22 @@ The counters reset when xray restarts (the agent restarts it whenever the creden
 (unix seconds, 0 = never). SQLite databases get the columns on open. Redis device records without them read as
 0. JSON and SQLite exports and imports carry them.
 
+The device drawer: click a device name on the Devices page. `GET /enroll/devices/{id}` gives the data. It has no
+connection log and no client address. It shows:
+
+| Part | Contents |
+|---|---|
+| Profile | The first and the last download, and the format of the last download (`profile_format`) |
+| Bridges | For each bridge: the traffic of the device, and the credential state |
+| Tailnet devices | For a self-enrolled person only: the headscale nodes of the person (name, online, last seen) |
+| Timeline | Created, link issued, link used, profile downloaded, last traffic, extended, revoked |
+
+The credential state is `current` when the bridge accepted a push read after the last create, extend or revoke of
+the device. It is `pending` when it did not, or when the sync of the bridge is pending. It is `unknown` when the bridge
+accepted no push after the start of node-control. Each device has the columns `profile_format`, `created_at`,
+`invited_at`, `extended_at` and `revoked_at`. A device made before these columns has 0 in them, and the drawer shows
+no time for these events.
+
 The **Traffic** column shows the counters since each bridge last restarted them (on a credential change). It is
 marked **Traffic (partial)** when a bridge did not answer, so an empty value means no traffic only when all
 bridges answered (#436).

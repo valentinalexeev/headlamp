@@ -120,6 +120,7 @@ func (a *Admin) Register(mux *core.Mux) {
 		asset("text/javascript; charset=utf-8", tailnetJS))
 	mux.HandleFunc("GET /enroll/devices", a.listDevices)
 	mux.HandleFunc("POST /enroll/devices", a.jsonOnly(a.createDevice))
+	mux.HandleFunc("GET /enroll/devices/{id}", a.deviceDetail)
 	mux.HandleFunc("DELETE /enroll/devices/{id}", a.jsonOnly(a.deleteDevice))
 	mux.HandleFunc("POST /enroll/devices/{id}/links", a.jsonOnly(a.newLink))
 	mux.HandleFunc("POST /enroll/devices/{id}/revoke", a.jsonOnly(a.revoke))

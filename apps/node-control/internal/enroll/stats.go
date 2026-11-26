@@ -49,11 +49,33 @@ func MergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig, d
 	return out, partial
 }
 
-// mergedStats is MergedStats that also says which targets answered (same order as targets). An
-// answer is recorded in the target's sync state as its last agent answer (#438).
+// mergedStats is MergedStats that also says which targets answered (same order as targets).
 func mergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig,
 	devices []Device,
 ) (map[int64]Traffic, bool, []bool) {
+	per, answered, partial := BridgeStats(ctx, targets, cfg, devices)
+	out := map[int64]Traffic{}
+	for i := range targets {
+		if !answered[i] {
+			partial = true
+		}
+		for id, tr := range per[i] {
+			sum := out[id]
+			sum.Up = math.Min(sum.Up+tr.Up, maxTraffic)
+			sum.Down = math.Min(sum.Down+tr.Down, maxTraffic)
+			out[id] = sum
+		}
+	}
+	return out, partial, answered
+}
+
+// BridgeStats asks every agent for its traffic and gives it per bridge (same order as targets)
+// and per device (#437: the drawer shows which bridge a person uses). answered[i] is false when
+// target i did not answer. partial is true when an id could not be computed. An answer is
+// recorded in the target's sync state as its last agent answer (#438).
+func BridgeStats(
+	ctx context.Context, targets []SyncTarget, cfg IngressConfig, devices []Device,
+) (per []map[int64]Traffic, answered []bool, partial bool) {
 	answers := make([]map[string]any, len(targets))
 	panicked := make([]bool, len(targets))
 	var wg sync.WaitGroup
@@ -70,22 +92,20 @@ func mergedStats(ctx context.Context, targets []SyncTarget, cfg IngressConfig,
 		}()
 	}
 	wg.Wait()
-	out := map[int64]Traffic{}
-	partial := false
-	answered := make([]bool, len(targets))
+	per = make([]map[int64]Traffic, len(targets))
+	answered = make([]bool, len(targets))
 	for i, t := range targets {
 		// nil: the bridge did not answer (#436). An empty map is a bridge with no traffic.
-		if panicked[i] || answers[i] == nil {
-			partial = true
-		} else {
+		if !panicked[i] && answers[i] != nil {
 			answered[i] = true
 			t.State.Answered()
 		}
-		if !addTraffic(out, cfg, t.Ingress, answers[i], devices) {
+		per[i] = map[int64]Traffic{}
+		if !addTraffic(per[i], cfg, t.Ingress, answers[i], devices) {
 			partial = true
 		}
 	}
-	return out, partial, answered
+	return per, answered, partial
 }
 
 // addTraffic adds the answer of one target to out, per device. It returns false when an id could

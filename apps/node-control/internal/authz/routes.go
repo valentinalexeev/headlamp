@@ -94,6 +94,7 @@ var Routes = map[string]Rule{
 	"GET /enroll/static/tailnet.js":           open,
 	"GET /enroll/devices":                     need(FeatureEnroll, LevelView),
 	"POST /enroll/devices":                    need(FeatureEnroll, LevelOperate),
+	"GET /enroll/devices/{id}":                need(FeatureEnroll, LevelView),
 	"DELETE /enroll/devices/{id}":             need(FeatureEnroll, LevelOperate),
 	"POST /enroll/devices/{id}/links":         need(FeatureEnroll, LevelOperate),
 	"POST /enroll/devices/{id}/revoke":        need(FeatureEnroll, LevelOperate),

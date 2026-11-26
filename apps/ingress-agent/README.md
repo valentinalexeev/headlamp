@@ -254,6 +254,10 @@ environment and the same files, so node-control and a running xray see no change
 | Start to the first `/v1/info` answer | not measured | about 60 ms | less than 200 ms |
 | On disk | about 79 MB (Python and packages) | about 6 MB (one binary) | |
 
+The script then starts the agent again with the path check on. A local stub of the control host answers the health,
+DERP and STUN probes and serves a 1 MiB file for the transfer. The script checks the same budget. It also prints the
+peak memory (`VmHWM`) and the CPU time of the process to the end of the first check, which includes the transfer.
+
 ## Tests
 
     go test -race ./...

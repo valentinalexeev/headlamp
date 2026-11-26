@@ -363,11 +363,22 @@ const fieldValue = (els, label) => {
     const first = rowTexts(els)[0];
     assert.strictEqual(first[0], 'laptop-2', 'the expired device is listed first');
     const r1 = rowTexts(els).find((r) => r[0] === 'phone-1');
-    assert.deepStrictEqual(r1.slice(1, 3), ['sam', 'Active'], 'no Client column (#436)');
-    assert.strictEqual(r1[4], '3.0 KB');
-    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'tablet-3')[3], 'Never');
-    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'tablet-3')[4], '-');
-    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'phone-3')[5], 'n/a');
+    assert.deepStrictEqual(r1.slice(1, 2), ['Active'], 'no Client column (#436) and no Owner column (#440)');
+    assert.strictEqual(r1[3], '3.0 KB');
+    assert.strictEqual(r1[4], 'in 60 days', 'the expiry is days from now (#440)');
+    assert.strictEqual(rowOf(els, 'phone-1').children[4].getAttribute('title'), new Date((NOW + 60 * DAYMS)).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }),
+      'the date is the hover title');
+    assert.strictEqual(rowOf(els, 'phone-1').children[0].getAttribute('title'), 'Owner sam');
+    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'laptop-2')[4], '1 day ago');
+    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'tablet-3')[2], 'Never');
+    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'tablet-3')[3], '-');
+    assert.strictEqual(devices.relExpiry(sec(NOW + 3600000), NOW), 'today');
+    assert.strictEqual(devices.relExpiry(sec(NOW + 30 * 3600000), NOW), 'in 2 days', 'counted like the state word');
+    assert.strictEqual(devices.relExpiry(sec(NOW + DAYMS), NOW), 'in 1 day');
+    assert.strictEqual(devices.relExpiry(sec(NOW - 3600000), NOW), 'today');
+    assert.strictEqual(devices.relExpiry(sec(NOW - 3 * DAYMS), NOW), '3 days ago');
+    assert.strictEqual(devices.relExpiry(0, NOW), '');
+    assert.strictEqual(rowTexts(els).find((r) => r[0] === 'phone-3')[4], 'n/a');
     assert.ok(groupRows(els)[0].textContent.includes('6 devices · 3 connected today · 1 not set up · 2 need help · 1 expiring soon · 1 expired'),
       groupRows(els)[0].textContent);
     chip(els, 'Needs help').click();
@@ -838,7 +849,7 @@ const fieldValue = (els, label) => {
     const { els, ctrl } = setup();
     update(ctrl, [dev(1, 'bad‮name\u0007', { owner: 'o'.repeat(300) })]);
     assert.strictEqual(rowTexts(els)[0][0], 'badname');
-    assert.strictEqual(rowTexts(els)[0][1].length, 100);
+    assert.strictEqual(groupRows(els)[0].children[0].textContent.length, 121, 'the caret and the owner, cut to 120');
     ctrl.setFailed(true);
     assert.ok(/may be out of date/.test(els.sub.textContent));
     assert.strictEqual(rowTexts(els).length, 1);
@@ -887,6 +898,19 @@ const fieldValue = (els, label) => {
     assert.deepStrictEqual(devices.groupTree(other, pz, null, 'all', NOW, 'zed@example').map((x) => x.key), ['p:oidc:s9']);
     assert.deepStrictEqual(devices.groupTree(devs, null, null, 'all', NOW, '').map((x) => x.label), ['anna@example.test', 'kiosk team'],
       'with self-enrolment off the tree is the devices by owner');
+
+    // #440: one group for each person. An operator-made owner that is a person's email joins that person, and a
+    // waiting invitation for the email of an operator-made owner goes under that owner, not under "Invited".
+    const merged = devices.groupTree(devs.concat([dev(24, 'anna-laptop', { owner: 'Anna@Example.test' })]), people, invites, 'all', NOW, '');
+    assert.deepStrictEqual(merged.map((x) => x.label), ['anna@example.test', 'bob@example.test', 'kiosk team', 'Invited, not signed in yet']);
+    assert.deepStrictEqual(merged[0].devices.map((d) => d.name).sort(), ['anna-laptop', 'anna-old', 'anna-phone']);
+    const byOwner = devices.groupTree([dev(25, 'dan-phone', { owner: 'dan@example.test' })], [],
+      [{ id: 10, email: 'DAN@example.test', state: 'pending', expires_at: sec(NOW + 6 * DAYMS) }], 'all', NOW, '');
+    assert.deepStrictEqual(byOwner.map((x) => [x.kind, x.label]), [['owner', 'dan@example.test']]);
+    assert.deepStrictEqual(byOwner[0].invites.map((i) => i.id), [10]);
+    const noPeople = devices.groupTree([dev(26, 'eve-phone', { owner: 'eve@example.test' }), dev(27, 'eve-tab', { owner: 'oidc:s9', owner_email: 'eve@example.test' })], null, null, 'all', NOW, '');
+    assert.deepStrictEqual(noPeople.map((x) => [x.kind, x.devices.length]), [['person', 2]], 'also when the person is known only from a device');
+    assert.deepStrictEqual(devices.sameNames([{ name: 'Phone' }, { name: 'phone ' }, { name: 'tab' }]), { phone: 2 });
 
     // the page: closed groups, open one, actions
     const { els, ctrl } = setup({ closed: true });
@@ -960,6 +984,22 @@ const fieldValue = (els, label) => {
     ctrl.updatePeople(null);
     ctrl.updateInvites(null);
     assert.ok(groupRows(els).every((r) => !buttonNamed(r, 'Lock')));
+  }
+
+  // #440: a mark on two devices of one owner with the same name, and on an operator-made device in a person's group
+  {
+    const { els, ctrl } = setup();
+    update(ctrl, [dev(31, 'phone', {}), dev(32, 'Phone', { last_active: sec(NOW - 7200000) }), dev(33, 'tab', {}),
+      dev(34, 'anna-phone', { owner: 'oidc:s1', owner_email: 'anna@example.test' }), dev(35, 'anna-laptop', { owner: 'anna@example.test' })]);
+    const annaRow = groupRows(els).find((r) => textOf(r).includes('anna@example.test'));
+    findAll(annaRow, (n) => n.tag === 'button' && n.getAttribute('aria-expanded') === 'false')[0].click();
+    const name = (n) => rowTexts(els).map((r) => r[0]).find((t) => t.indexOf(n) === 0);
+    assert.strictEqual(name('phone'), 'phone · 2 with this name');
+    assert.strictEqual(name('Phone'), 'Phone · 2 with this name');
+    assert.strictEqual(name('tab'), 'tab');
+    assert.strictEqual(name('anna-phone'), 'anna-phone');
+    assert.strictEqual(name('anna-laptop'), 'anna-laptop · enrolled by an admin', 'Lock does not revoke it, so the row says so');
+    assert.strictEqual(groupRows(els).length, 2, 'sam, and anna with both devices');
   }
 
   if (process.argv[5]) {

@@ -71,12 +71,22 @@ type Config struct {
 	// TrustedEmailDomains are email domains whose addresses count as verified when the ID token
 	// has email_verified false or missing (#447). Empty: off.
 	TrustedEmailDomains []string
+	// Reauth, in required mode, is how recent the sign-in must be for a route in Sensitive (#469).
+	// Zero: off.
+	Reauth time.Duration
+	// Sensitive is the set of route patterns (core.Mux patterns) that ask for a recent sign-in.
+	Sensitive map[string]bool
+	// ReauthWarn accepts a new sign-in that the IdP does not prove recent (no auth_time, or an old
+	// one) with a warning in the log. False: the sign-in is refused and the session ends.
+	ReauthWarn bool
 }
 
 type session struct {
 	login string
 	until time.Time
 	last  time.Time // the last request with the cookie (the idle timeout of required mode)
+	// authAt is when the person last signed in at the IdP, as proven by auth_time. Zero: unknown.
+	authAt time.Time
 }
 
 // Module serves /auth/login, /auth/callback and /auth/logout on the console.
@@ -87,6 +97,7 @@ type Module struct {
 	flows    map[string]oidc.Flow // state -> flow, until used or expired
 	flowAt   map[string]time.Time
 	flowNext map[string]string // state -> the local path to open after the sign-in
+	mux      *core.Mux         // set by Register: Gate finds the route pattern of a request
 }
 
 // New returns the sign-in module.
@@ -101,7 +112,7 @@ func New(cfg Config) *Module {
 		cfg.Now = time.Now
 	}
 	if !cfg.Required {
-		cfg.Idle = 0
+		cfg.Idle, cfg.Reauth = 0, 0
 	} else if cfg.Idle <= 0 {
 		cfg.Idle = DefaultIdle
 	}
@@ -112,6 +123,7 @@ func New(cfg Config) *Module {
 // Register adds the routes. They are tailnet-checked by the caller's WhoIs in the handlers, like
 // every admin route: a tagged node or an unknown caller cannot sign in.
 func (m *Module) Register(mux *core.Mux) {
+	m.mux = mux
 	mux.HandleFunc("GET /auth/login", m.login)
 	mux.HandleFunc("GET /auth/callback", m.callback)
 	mux.HandleFunc("POST /auth/logout", m.logout)
@@ -144,6 +156,9 @@ func (m *Module) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := oidc.NewFlow()
+	if m.cfg.Reauth > 0 && r.URL.Query().Get("reauth") == "1" {
+		f.MaxAge = m.cfg.Reauth // prompt=login and max_age (#469)
+	}
 	now := m.cfg.Now()
 	m.mu.Lock()
 	for s, at := range m.flowAt {
@@ -266,16 +281,31 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, why.page(), http.StatusForbidden)
 		return
 	}
+	authAt, ok := m.authTime(login, f, id)
+	if !ok {
+		m.endSession(w, r, login)
+		http.Error(w, "re-authentication refused: the identity provider did not confirm a new "+
+			"sign-in (auth_time). You are signed out. Ask the IdP administrator to honour "+
+			"prompt=login and max_age and to send auth_time for the console client.",
+			http.StatusForbidden)
+		return
+	}
 	sid := random()
 	until := m.cfg.Now().Add(m.cfg.Session)
 	m.mu.Lock()
 	m.dropExpired()
+	// The new session replaces the one of the request's cookie (a re-authentication).
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		if s, ok := m.sessions[hash(c.Value)]; ok && s.login == login {
+			delete(m.sessions, hash(c.Value))
+		}
+	}
 	if len(m.sessions) >= maxSessions {
 		m.mu.Unlock()
 		http.Error(w, "too many sessions", http.StatusServiceUnavailable)
 		return
 	}
-	m.sessions[hash(sid)] = session{login: login, until: until, last: m.cfg.Now()}
+	m.sessions[hash(sid)] = session{login: login, until: until, last: m.cfg.Now(), authAt: authAt}
 	m.mu.Unlock()
 	authz.SetSessionGroups(login, id.Groups, until)
 	m.cfg.Log.Info("admin signed in", "login", login, "groups", len(id.Groups),
@@ -287,6 +317,58 @@ func (m *Module) callback(w http.ResponseWriter, r *http.Request) {
 		next = "/"
 	}
 	http.Redirect(w, r, next, http.StatusFound)
+}
+
+// reauthLeeway is the clock skew allowed between node-control and the IdP for auth_time.
+const reauthLeeway = time.Minute
+
+// authTime is the sign-in time to keep in the session: auth_time, or zero when the ID token has
+// none. A sign-in that asked for a new one (f.MaxAge, #469) must have an auth_time within MaxAge.
+// If not, ReauthWarn decides: accept it as now with a warning, or refuse it (ok false).
+func (m *Module) authTime(login string, f oidc.Flow, id oidc.Identity) (time.Time, bool) {
+	now := m.cfg.Now()
+	at := id.AuthTime
+	if at.After(now) {
+		at = now
+	}
+	if f.MaxAge <= 0 {
+		return at, true
+	}
+	var reason string
+	switch {
+	case at.IsZero():
+		reason = "no_auth_time"
+	case now.Sub(at) > f.MaxAge+reauthLeeway:
+		reason = "auth_time_old"
+	default:
+		return at, true
+	}
+	if m.cfg.ReauthWarn {
+		m.cfg.Log.Warn("admin re-authentication not proven by the IdP, accepted", "login", login,
+			"reason", reason)
+		return now, true
+	}
+	m.cfg.Log.Warn("admin re-authentication refused", "login", login, "reason", reason)
+	return time.Time{}, false
+}
+
+// endSession ends the session of the request's cookie, if it is one of login, and removes the
+// cookie.
+func (m *Module) endSession(w http.ResponseWriter, r *http.Request, login string) {
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		k := hash(c.Value)
+		m.mu.Lock()
+		s, ok := m.sessions[k]
+		if ok && s.login == login {
+			delete(m.sessions, k)
+		}
+		m.mu.Unlock()
+		if ok && s.login == login {
+			authz.SetSessionGroups(login, nil, time.Time{})
+			m.cfg.Log.Info("admin signed out", "login", login, "reason", "reauth_refused")
+		}
+	}
+	expire(w, sessionCookie, true)
 }
 
 func (m *Module) dropExpired() {
@@ -379,6 +461,12 @@ func (m *Module) me(w http.ResponseWriter, r *http.Request) {
 		if m.cfg.Idle > 0 {
 			out.IdleMinutes = int(m.cfg.Idle / time.Minute)
 		}
+		if m.cfg.Reauth > 0 {
+			out.ReauthMinutes = int(m.cfg.Reauth / time.Minute)
+			if !s.authAt.IsZero() {
+				out.FreshUntil = s.authAt.Add(m.cfg.Reauth).UTC().Format(time.RFC3339)
+			}
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -394,6 +482,10 @@ type meView struct {
 	Required bool `json:"required"`
 	// IdleMinutes is the idle timeout of the session, in required mode.
 	IdleMinutes int `json:"idle_minutes,omitempty"`
+	// ReauthMinutes is how recent the sign-in must be for a sensitive route (#469), when on.
+	ReauthMinutes int `json:"reauth_minutes,omitempty"`
+	// FreshUntil is when a sensitive route starts to ask for a new sign-in again.
+	FreshUntil string `json:"fresh_until,omitempty"`
 }
 
 // expire removes a cookie, with the same attributes it was set with.

@@ -41,8 +41,12 @@ func (m *Module) Gate(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		switch _, _, st := m.lookup(r, login); st {
+		switch _, s, st := m.lookup(r, login); st {
 		case stateLive:
+			if m.sensitive(r) && !m.fresh(s) {
+				m.askReauth(w, r, login)
+				return
+			}
 			next.ServeHTTP(w, r)
 		case stateOther:
 			http.Error(w, "this session belongs to another tailnet login: "+
@@ -59,6 +63,45 @@ func (m *Module) Gate(next http.Handler) http.Handler {
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "sign-in required",
 				"login": "/auth/login"})
 		}
+	})
+}
+
+// sensitive tells whether r goes to a route that asks for a recent sign-in (#469).
+func (m *Module) sensitive(r *http.Request) bool {
+	if m.cfg.Reauth <= 0 || m.mux == nil || len(m.cfg.Sensitive) == 0 {
+		return false
+	}
+	_, pattern := m.mux.Handler(r)
+	return m.cfg.Sensitive[pattern]
+}
+
+// fresh tells whether the sign-in of s is recent enough for a sensitive route.
+func (m *Module) fresh(s session) bool {
+	return !s.authAt.IsZero() && m.cfg.Now().Sub(s.authAt) <= m.cfg.Reauth
+}
+
+// askReauth sends a page load to a new sign-in (prompt=login, max_age), and gives an API call 401
+// with the sign-in link. The request is not run: after the sign-in, the person repeats it.
+func (m *Module) askReauth(w http.ResponseWriter, r *http.Request, login string) {
+	m.cfg.Log.Info("admin re-authentication required", "login", login,
+		"method", r.Method, "path", r.URL.Path)
+	if browserGet(r) {
+		http.Redirect(w, r, "/auth/login?reauth=1&next="+url.QueryEscape(r.URL.RequestURI()),
+			http.StatusFound)
+		return
+	}
+	// An API call returns to the page it came from, when that is a page of this console.
+	next := "/"
+	if ref, err := url.Parse(r.Referer()); err == nil && ref.Host == r.Host {
+		next = localNext(ref.RequestURI())
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":  "re-authentication required: sign in again, then repeat the action",
+		"reauth": true,
+		"login":  "/auth/login?reauth=1&next=" + url.QueryEscape(next),
 	})
 }
 

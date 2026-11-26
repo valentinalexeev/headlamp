@@ -3,12 +3,13 @@
   // Tags (each is the tag of a pre-auth key):
   //   tag:node-control  node-control                     tag:exit     exit nodes
   //   tag:ingress       bridges (reality-ingress, ingress-agent, tailscale-userspace-socks)
-  //   tag:gateway       subnet routers (optional)
+  //   tag:gateway       subnet routers (optional)       tag:tailguard  tailguard WireGuard servers (optional)
   "tagOwners": {
     "tag:exit": ["admin@", "_svcs@"],
     "tag:gateway": ["admin@", "_svcs@"],
     "tag:node-control": ["_svcs@"],
-    "tag:ingress": ["admin@", "_svcs@"]
+    "tag:ingress": ["admin@", "_svcs@"],
+    "tag:tailguard": ["admin@", "_svcs@"]
   },
   "autoApprovers": {
     "exitNode": ["tag:exit"],
@@ -28,6 +29,8 @@
     {"action": "accept", "src": ["tag:ingress"], "dst": ["autogroup:internet:*"]},
     // node-control pushes credentials to the agent of each bridge (ingress_agent_port).
     {"action": "accept", "src": ["tag:node-control"], "dst": ["tag:ingress:9000"]},
+    // tailguard (#390): its WireGuard peers reach the internet through the exit node, and no tailnet address.
+    {"action": "accept", "src": ["tag:tailguard"], "dst": ["autogroup:internet:*"]},
     // The admin console on HTTPS (ADMIN_OIDC=1, #449). Admins reach node-control on 443 (the console) and on 53 (its
     // DNS server: split DNS sends the serve zone there). Without port 53 the console name times out on every device.
     // Change admin@ to your admin group, for example group:admins, here and in the tests.
@@ -44,6 +47,8 @@
     // The console rule is for people only: a bridge or an exit node does not reach 443 or 53 of node-control.
     {"src": "admin@", "accept": ["tag:node-control:443", "tag:node-control:53"]},
     {"src": "tag:ingress", "deny": ["tag:node-control:443"]},
-    {"src": "tag:exit", "deny": ["tag:node-control:443", "tag:node-control:53"]}
+    {"src": "tag:exit", "deny": ["tag:node-control:443", "tag:node-control:53"]},
+    // tailguard reaches no tailnet node.
+    {"src": "tag:tailguard", "deny": ["tag:exit:22", "tag:node-control:80", "tag:node-control:443", "tag:ingress:9000"]}
   ]
 }

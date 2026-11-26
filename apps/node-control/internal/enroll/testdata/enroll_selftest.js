@@ -276,9 +276,11 @@ const fieldValue = (els, label) => {
   function setup(opts) {
     opts = opts || {};
     // Every device test runs with its groups open (#287): the owners of these tests are "sam", "jo" and a long one.
-    const open = 'open=o:sam,o:jo,o:' + 'o'.repeat(300);
+    // They see every device (filter "all") unless they name a filter or ask for the page default ("Needs help").
+    let open = 'open=o:sam,o:jo,o:' + 'o'.repeat(300);
+    if (!opts.defaultFilter && !/filter=/.test(opts.search || '')) { open += '&filter=all'; }
     const search = opts.search ? opts.search + '&' + open : '?' + open;
-    global.window.location.search = opts.closed ? (opts.search || '') : search;
+    global.window.location.search = opts.closed ? (opts.search || (opts.defaultFilter ? '' : '?filter=all')) : search;
     global.window.location.href = 'http://localhost/enroll' + global.window.location.search;
     polls.length = 0; copied.length = 0; laters.length = 0; fetches.length = 0; replaced.length = 0;
     const els = pageEls();
@@ -348,16 +350,20 @@ const fieldValue = (els, label) => {
     assert.strictEqual(help(dev(14, 'q', { last_active: sec(NOW - 12 * DAYMS), revoked: true })), false, 'a revoked device needs no help');
   }
 
-  // allByDefault, filters, filterInURL, summary
+  // needsHelpByDefault, filters, filterInURL, summary
   {
-    const { els, ctrl } = setup();
+    const { els, ctrl } = setup({ defaultFilter: true });
     const quiet = dev(6, 'laptop-5', { last_active: sec(NOW - 12 * DAYMS) });
     const silent = dev(7, 'phone-8', { last_active: 0, traffic: null });
     update(ctrl, Object.values(D).concat([quiet, silent]), { stats_partial: false });
     const names = () => rowTexts(els).map((r) => r[0]).sort();
-    assert.deepStrictEqual(names(), ['laptop-2', 'laptop-5', 'phone-1', 'phone-3', 'phone-4', 'phone-8', 'tablet-3'], 'All is the default, with revoked');
-    assert.deepStrictEqual(findAll(els.chips, (n) => n.tag === 'button').map((b) => b.textContent), ['Needs help', 'Not set up', 'Expiring soon', 'All']);
-    assert.strictEqual(chip(els, 'All').getAttribute('aria-pressed'), 'true');
+    assert.deepStrictEqual(names(), ['laptop-5', 'phone-8'], 'Needs help is the default (#439)');
+    assert.deepStrictEqual(findAll(els.chips, (n) => n.tag === 'button').map((b) => b.textContent),
+      ['Needs help', 'Active', 'Expiring soon', 'Not set up', 'Revoked', 'All']);
+    assert.strictEqual(chip(els, 'Needs help').getAttribute('aria-pressed'), 'true');
+    chip(els, 'All').click();
+    assert.ok(/filter=all/.test(replaced[replaced.length - 1]), 'filter is in the URL: ' + replaced);
+    assert.deepStrictEqual(names(), ['laptop-2', 'laptop-5', 'phone-1', 'phone-3', 'phone-4', 'phone-8', 'tablet-3'], 'All, with revoked');
     assert.strictEqual(els.sub.textContent, '5 active, 2 seen today');
     assert.strictEqual(els.traffic.textContent, 'Traffic');
     const first = rowTexts(els)[0];
@@ -381,19 +387,20 @@ const fieldValue = (els, label) => {
     assert.strictEqual(rowTexts(els).find((r) => r[0] === 'phone-3')[4], 'n/a');
     assert.ok(groupRows(els)[0].textContent.includes('6 devices · 3 connected today · 1 not set up · 2 need help · 1 expiring soon · 1 expired'),
       groupRows(els)[0].textContent);
-    chip(els, 'Needs help').click();
-    assert.deepStrictEqual(names(), ['laptop-5', 'phone-8']);
-    assert.ok(/filter=help/.test(replaced[replaced.length - 1]), 'filter is in the URL: ' + replaced);
-    assert.ok(groupRows(els)[0].textContent.includes('6 devices · 3 connected today'),'the group line counts every device, not only the shown ones');
+    chip(els, 'Active').click();
+    assert.deepStrictEqual(names(), ['laptop-2', 'laptop-5', 'phone-1', 'phone-4', 'phone-8', 'tablet-3'], 'Active hides the revoked device');
+    chip(els, 'Revoked').click();
+    assert.deepStrictEqual(names(), ['phone-3']);
     chip(els, 'Expiring soon').click();
     assert.deepStrictEqual(names(), ['phone-4']);
     chip(els, 'Not set up').click();
     assert.deepStrictEqual(names(), ['tablet-3']);
-    chip(els, 'All').click();
-    assert.strictEqual(names().length, 7);
+    chip(els, 'Needs help').click();
+    assert.deepStrictEqual(names(), ['laptop-5', 'phone-8']);
+    assert.ok(groupRows(els)[0].textContent.includes('6 devices · 3 connected today'),'the group line counts every device, not only the shown ones');
     assert.ok(!/filter=/.test(replaced[replaced.length - 1]), 'the default filter leaves the URL: ' + replaced[replaced.length - 1]);
-    assert.strictEqual(chip(els, 'All').getAttribute('aria-pressed'), 'true');
-    assert.strictEqual(chip(els, 'Needs help').getAttribute('aria-pressed'), 'false');
+    assert.strictEqual(chip(els, 'Needs help').getAttribute('aria-pressed'), 'true');
+    assert.strictEqual(chip(els, 'All').getAttribute('aria-pressed'), 'false');
     update(ctrl, [D.active], { stats_partial: true });
     assert.strictEqual(els.traffic.textContent, 'Traffic*');
     assert.ok(els.traffic.getAttribute('title'));
@@ -406,10 +413,11 @@ const fieldValue = (els, label) => {
     assert.deepStrictEqual(rowTexts(els).map((r) => r[0]), ['phone-4'], 'the link from Attention opens the filter');
     const bad = setup({ search: '?filter=nonsense' });
     update(bad.ctrl, Object.values(D));
-    assert.strictEqual(chip(bad.els, 'All').getAttribute('aria-pressed'), 'true');
-    const old = setup({ search: '?filter=revoked' });
-    update(old.ctrl, Object.values(D));
-    assert.strictEqual(chip(old.els, 'All').getAttribute('aria-pressed'), 'true', 'an old filter link opens All');
+    assert.strictEqual(chip(bad.els, 'Needs help').getAttribute('aria-pressed'), 'true', 'an unknown filter opens the default');
+    const rev = setup({ search: '?filter=revoked' });
+    update(rev.ctrl, Object.values(D));
+    assert.strictEqual(chip(rev.els, 'Revoked').getAttribute('aria-pressed'), 'true', 'a link to the Revoked filter of #440 still works');
+    assert.deepStrictEqual(rowTexts(rev.els).map((r) => r[0]), ['phone-3']);
   }
 
   // emptyState
@@ -888,6 +896,12 @@ const fieldValue = (els, label) => {
     const notSetUp = devices.groupTree(devs, people, invites, 'never', NOW, '');
     assert.deepStrictEqual(notSetUp.map((x) => x.label), ['kiosk team'], 'a filter drops groups with nothing that matches, people and invitations too');
     assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'help', NOW, ''), []);
+    const act = devices.groupTree(devs, people, invites, 'active', NOW, '');
+    assert.deepStrictEqual(act.map((x) => x.label), ['anna@example.test', 'bob@example.test', 'kiosk team', 'Invited, not signed in yet'],
+      'Active (#440) keeps the people and the waiting invitations');
+    assert.deepStrictEqual(act[0].devices.map((d) => d.name), ['anna-phone'], 'Active hides the revoked device');
+    assert.deepStrictEqual(act[0].invites.map((i) => i.id), [7], 'only the waiting invitation');
+    assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'revoked', NOW, '').map((x) => x.label), ['anna@example.test']);
     assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'all', NOW, 'kiosk').map((x) => x.label), ['kiosk team']);
     assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'all', NOW, 'carol').map((x) => x.kind), ['invited']);
     assert.deepStrictEqual(devices.groupTree(devs, people, invites, 'all', NOW, 'anna-phone').map((x) => x.label), ['anna@example.test'], 'a device name');

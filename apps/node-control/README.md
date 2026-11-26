@@ -1327,12 +1327,16 @@ Open a row to see its devices and its invitations. A device row has the actions 
 
   | Filter | Devices that it shows |
   |---|---|
-  | **Needs help** | Devices that are set up but have no traffic yet. Also devices that had traffic, but not in the last 7 days. A revoked device is not included. |
-  | **Not set up** | Devices that are not expired and that no app has the profile of. |
+  | **Needs help** (default) | Devices that are set up but have no traffic yet. Also devices that had traffic, but not in the last 7 days. A revoked device is not included. |
+  | **Active** | All devices that are not revoked (#440). |
   | **Expiring soon** | Devices that expire in 7 days or less. |
-  | **All** (default) | All devices, also revoked devices, and all invitations. |
+  | **Not set up** | Devices that are not expired and that no app has the profile of. |
+  | **Revoked** | Revoked devices. |
+  | **All** | All devices, also revoked devices, and all invitations. |
 
-- An invitation shows only under **All**. The old links `?filter=active` and `?filter=revoked` open **All**.
+- A waiting invitation shows under **Active** and **All**. A used, expired or withdrawn invitation shows only under
+  **All**. The other filters show no invitations.
+- A link with an unknown filter opens **Needs help**.
 - A device row that had no traffic for more than 7 days shows `No traffic for N days`.
 - The table has no **Client** column (#436). For a device made on the self-service page, the stored client is
   always `sing-box`: the person picks the app later.

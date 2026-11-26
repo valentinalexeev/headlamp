@@ -21,10 +21,10 @@
   var LINK_TTL = 86400;
   var CLIENTS = ['karing', 'sing-box', 'clash', 'shadowrocket', 'stash', 'happ', 'throne']; // the catalog of clients.go
   var CLIENT_KEY = 'enrollClient';
-  // #439: the filters are for troubleshooting. "All" is the default: a search for one person then shows all of
-  // that person's devices.
-  var FILTERS = [['help', 'Needs help'], ['never', 'Not set up'], ['expiring', 'Expiring soon'], ['all', 'All']];
-  var DEFAULT_FILTER = 'all';
+  // #439: "Needs help" is the default, so the page opens on the devices to troubleshoot. The filters of #440 stay.
+  var FILTERS = [['help', 'Needs help'], ['active', 'Active'], ['expiring', 'Expiring soon'], ['never', 'Not set up'],
+    ['revoked', 'Revoked'], ['all', 'All']];
+  var DEFAULT_FILTER = 'help';
   var COLUMNS = 6;
   var SYNC_REASON = {
     unreachable: 'Agent unreachable', unauthorized: 'Agent refused the credentials',
@@ -146,11 +146,13 @@
       case 'help': return s.help;
       case 'expiring': return s.expiring;
       case 'never': return s.neverUsed;
-      default: return true;
+      case 'revoked': return s.kind === 'revoked';
+      case 'all': return true;
+      default: return s.kind !== 'revoked';
     }
   }
 
-  // plainFilter: a known filter, else the default (also for the old "active" and "revoked" links).
+  // plainFilter: a known filter, else the default.
   function plainFilter(f) {
     for (var i = 0; i < FILTERS.length; i++) { if (FILTERS[i][0] === f) { return f; } }
     return DEFAULT_FILTER;
@@ -198,9 +200,9 @@
   // One person is one group (#440): an operator-made owner that is the email of a person joins that person's group,
   // and an invitation for the email of an operator-made owner goes under that owner.
   // A waiting invitation for an email with no person or owner yet goes to the group "Invited, not signed in yet".
-  // Invitations show only with the filter "all": the other filters are about devices. q is a search text (lower
-  // case): a group shows when its label, owner, the person's email, or one of its device names, owner emails or
-  // invitation emails contains it.
+  // Used, expired and withdrawn invitations show only with the filter "all", waiting ones under "active" and "all":
+  // the other filters are about devices. q is a search text (lower case): a group shows when its label, owner, the
+  // person's email, or one of its device names, owner emails or invitation emails contains it.
   // Each group: { key, kind: person|owner|invited, label, person, devices: [device that matches the filter],
   // every: [every device of the group], invites: [invite] }.
   function groupTree(devices, people, invites, filter, nowMs, q) {
@@ -240,7 +242,7 @@
     });
     hl.arr(invites).forEach(function (inv) {
       if (!inv) { return; }
-      if (filter !== 'all') { return; }
+      if (filter !== 'all' && !(filter === 'active' && inv.state === 'pending')) { return; }
       var email = String(inv.email || '').toLowerCase();
       var g = (typeof inv.used_by === 'string' && inv.used_by && groups['p:' + inv.used_by]) || byEmail[email];
       if (!g) { g = group(INVITED, 'invited', 'Invited, not signed in yet'); }
@@ -248,9 +250,11 @@
     });
     var rank = { person: 0, owner: 0, invited: 1 };
     return Object.keys(groups).map(function (k) { return groups[k]; }).filter(function (g) {
-      // A group with nothing that matches the filter is left out, except a person under "all": that row is where
-      // the person is locked.
-      if (!g.devices.length && !g.invites.length && !(g.person && filter === 'all')) { return false; }
+      // A group with nothing that matches the filter is left out, except a person under "active" and "all": that row
+      // is where the person is locked.
+      if (!g.devices.length && !g.invites.length && !(g.person && (filter === 'active' || filter === 'all'))) {
+        return false;
+      }
       if (!q) { return true; }
       var hay = [g.label, g.person ? g.person.owner + ' ' + (g.person.email || '') : ''].concat(g.devices.map(function (d) {
         return d.name + ' ' + d.owner + ' ' + (d.owner_email || '');

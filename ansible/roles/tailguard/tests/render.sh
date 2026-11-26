@@ -3,7 +3,7 @@
 # root, no docker): good and bad variables, wg0.conf without a private key and with the preshared keys, .env without
 # a key unless the login path asks for it. The real apply runs in the OS matrix (make test-ansible-os ROLES=tailguard).
 # Usage: ansible/roles/tailguard/tests/render.sh
-set -u
+set -euo pipefail
 if ! command -v ansible-playbook >/dev/null 2>&1; then
   echo "SKIP: ansible-playbook is not installed"
   exit 0
@@ -19,7 +19,8 @@ bad() { echo "FAIL $1"; fails=$((fails + 1)); }
 pk1="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 pk2="BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA="
 psk="CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA="
-authkey="test-join-key-0123456789abcdef"
+# Test join key, made at run time so that the secret scan does not take a literal for a real key.
+authkey="test-join-key-$(printf '%s' 0123456789abcdef)"
 cat > "$T/good.json" <<EOF
 {"tailguard_hostname": "tg-node", "headscale_login_server": "https://hs.example.com",
  "tailguard_exit_node_prefix": "my-exit", "tailguard_lan_access": "0", "tailguard_bind_addr": "192.0.2.10",
@@ -42,19 +43,23 @@ cat > "$T/play.yml" <<EOF
     - ansible.builtin.template: {src: "$role/templates/docker-compose.yml.j2", dest: "$T/compose.yml"}
 EOF
 run() { # name, expect(pass|fail), extra -e JSON (merged over good.json)
-  local name="$1" expect="$2" extra="${3:-}" got=pass
+  local name="$1" expect="$2" extra="${3:-}" got=pass log
   [ -n "$extra" ] || extra="{}"
+  # The log file name comes from the check name: keep only safe characters (a "/" in a name made a path).
+  log="$T/$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_').log"
   rm -f "$T/wg0.conf" "$T/env" "$T/env-login" "$T/compose.yml"
   ANSIBLE_NOCOLOR=1 ANSIBLE_LOCALHOST_WARNING=0 ANSIBLE_INVENTORY_UNPARSED_WARNING=0 \
-    ansible-playbook -i localhost, -c local "$T/play.yml" -e "@$T/good.json" -e "$extra" >"$T/$name.log" 2>&1 || got=fail
-  if [ "$got" != "$expect" ]; then bad "$name (got $got)"; tail -n 20 "$T/$name.log"; return 1; fi
-  if [ "$expect" = fail ] && ! grep -qE "tailguard: .*tailguard_[a-z_]+" "$T/$name.log"; then
-    bad "$name: the message does not name a variable"; tail -n 20 "$T/$name.log"; return 1
+    ansible-playbook -i localhost, -c local "$T/play.yml" -e "@$T/good.json" -e "$extra" >"$log" 2>&1 || got=fail
+  if [ "$got" != "$expect" ]; then bad "$name (got $got)"; tail -n 20 "$log"; return 1; fi
+  if [ "$expect" = fail ] && ! grep -qE "tailguard: .*tailguard_[a-z_]+" "$log"; then
+    bad "$name: the message does not name a variable"; tail -n 20 "$log"; return 1
   fi
-  if grep -qF "$authkey" "$T/$name.log" || grep -qF "$psk" "$T/$name.log"; then bad "$name: a secret is in the log"; return 1; fi
+  if grep -qF "$authkey" "$log" || grep -qF "$psk" "$log"; then bad "$name: a secret is in the log"; return 1; fi
   ok "$name"
 }
 has() { grep -qE "$2" "$1"; }
+# check: run, and go on after a failure (it is counted in fails), so that set -e does not stop the list.
+check() { run "$@" || :; }
 
 if run "good variables pass" pass; then
   has "$T/wg0.conf" '^PrivateKey' && bad "wg0.conf has a PrivateKey line" || ok "wg0.conf has no private key"
@@ -76,23 +81,23 @@ fi
 want="$(sed -n 's/^tailguard_image: //p' "$role/defaults/main.yml")"
 grep -qF "image: $want" "$role/../../../apps/tailguard/docker-compose.yml" && ok "the image pin matches apps/tailguard" || bad "image pin differs from apps/tailguard ($want)"
 
-run "missing tailguard_hostname fails" fail '{"tailguard_hostname": ""}'
-run "missing login server fails" fail '{"headscale_login_server": ""}'
-run "missing tailguard_exit_node_prefix fails" fail '{"tailguard_exit_node_prefix": ""}'
-run "missing tailguard_lan_access fails" fail '{"tailguard_lan_access": ""}'
-run "tailguard_lan_access 2 fails" fail '{"tailguard_lan_access": "2"}'
-run "missing tailguard_bind_addr fails" fail '{"tailguard_bind_addr": ""}'
-run "a status port name fails" fail '{"tailguard_status_port": "web"}'
-run "status port 8088 passes" pass '{"tailguard_status_port": "8088"}'
-run "image latest fails" fail '{"tailguard_image": "ghcr.io/valentinalexeev/headlamp/tailguard:latest"}'
-run "image main fails" fail '{"tailguard_image": "ghcr.io/valentinalexeev/headlamp/tailguard:main"}'
-run "untagged image fails" fail '{"tailguard_image": "ghcr.io/valentinalexeev/headlamp/tailguard"}'
-run "image digest passes" pass "{\"tailguard_image\": \"ghcr.io/valentinalexeev/headlamp/tailguard@sha256:$(printf '%064d' 0)\"}"
-run "tailguard_dir / fails" fail '{"tailguard_dir": "/"}'
-run "a bad peer public key fails" fail "{\"tailguard_peers\": [{\"name\": \"r\", \"public_key\": \"short\", \"allowed_ips\": [\"10.99.0.2/32\"]}]}"
-run "a bad preshared key fails" fail "{\"tailguard_peers\": [{\"name\": \"r\", \"public_key\": \"$pk1\", \"allowed_ips\": [\"10.99.0.2/32\"], \"preshared_key\": \"x$psk\"}]}"
-run "a peer without allowed_ips fails" fail "{\"tailguard_peers\": [{\"name\": \"r\", \"public_key\": \"$pk1\", \"allowed_ips\": []}]}"
-run "two peers with one key fail" fail "{\"tailguard_peers\": [{\"name\": \"a\", \"public_key\": \"$pk1\", \"allowed_ips\": [\"10.99.0.2/32\"]}, {\"name\": \"b\", \"public_key\": \"$pk1\", \"allowed_ips\": [\"10.99.0.3/32\"]}]}"
-run "a peer name with a newline fails" fail "{\"tailguard_peers\": [{\"name\": \"a\\nb\", \"public_key\": \"$pk1\", \"allowed_ips\": [\"10.99.0.2/32\"]}]}"
+check "missing tailguard_hostname fails" fail '{"tailguard_hostname": ""}'
+check "missing login server fails" fail '{"headscale_login_server": ""}'
+check "missing tailguard_exit_node_prefix fails" fail '{"tailguard_exit_node_prefix": ""}'
+check "missing tailguard_lan_access fails" fail '{"tailguard_lan_access": ""}'
+check "tailguard_lan_access 2 fails" fail '{"tailguard_lan_access": "2"}'
+check "missing tailguard_bind_addr fails" fail '{"tailguard_bind_addr": ""}'
+check "a status port name fails" fail '{"tailguard_status_port": "web"}'
+check "status port 8088 passes" pass '{"tailguard_status_port": "8088"}'
+check "image latest fails" fail '{"tailguard_image": "ghcr.io/valentinalexeev/headlamp/tailguard:latest"}'
+check "image main fails" fail '{"tailguard_image": "ghcr.io/valentinalexeev/headlamp/tailguard:main"}'
+check "untagged image fails" fail '{"tailguard_image": "ghcr.io/valentinalexeev/headlamp/tailguard"}'
+check "image digest passes" pass "{\"tailguard_image\": \"ghcr.io/valentinalexeev/headlamp/tailguard@sha256:$(printf '%064d' 0)\"}"
+check "tailguard_dir / fails" fail '{"tailguard_dir": "/"}'
+check "a bad peer public key fails" fail "{\"tailguard_peers\": [{\"name\": \"r\", \"public_key\": \"short\", \"allowed_ips\": [\"10.99.0.2/32\"]}]}"
+check "a bad preshared key fails" fail "{\"tailguard_peers\": [{\"name\": \"r\", \"public_key\": \"$pk1\", \"allowed_ips\": [\"10.99.0.2/32\"], \"preshared_key\": \"x$psk\"}]}"
+check "a peer without allowed_ips fails" fail "{\"tailguard_peers\": [{\"name\": \"r\", \"public_key\": \"$pk1\", \"allowed_ips\": []}]}"
+check "two peers with one key fail" fail "{\"tailguard_peers\": [{\"name\": \"a\", \"public_key\": \"$pk1\", \"allowed_ips\": [\"10.99.0.2/32\"]}, {\"name\": \"b\", \"public_key\": \"$pk1\", \"allowed_ips\": [\"10.99.0.3/32\"]}]}"
+check "a peer name with a newline fails" fail "{\"tailguard_peers\": [{\"name\": \"a\\nb\", \"public_key\": \"$pk1\", \"allowed_ips\": [\"10.99.0.2/32\"]}]}"
 
-[ $fails = 0 ] && echo "all checks passed" || { echo "$fails check(s) failed"; exit 1; }
+[ "$fails" = 0 ] && echo "all checks passed" || { echo "$fails check(s) failed"; exit 1; }

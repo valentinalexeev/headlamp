@@ -1481,7 +1481,7 @@ The command palette (`Ctrl/Cmd+K`, or the search button) filters these in the br
 
 ### The enrolment audit log
 
-With enrolment on, the app records device and node actions as `core.AuditEntry` (`at`, `actor`, `action`, `detail`) in the enrolment backend. The actions are `device.create`, `device.link`, `device.revoke`, `device.delete`, `device.extend`, `device.rotate_secret`, `bridge.approve`, `bridge.unapprove`, `selection.preview`, `selection.apply`, `selection.revert`, and node start and stop. The backend location is the `audit` table in SQLite, or the list `<prefix>:audit` in Redis.
+With enrolment on, the app records device and node actions as `core.AuditEntry` (`at`, `actor`, `action`, `detail`) in the enrolment backend. The actions are `device.create`, `device.link`, `device.revoke`, `device.delete`, `device.extend`, `device.rotate_secret`, `bridge.approve`, `bridge.unapprove`, `bridge.push`, `selection.preview`, `selection.apply`, `selection.revert`, and node start and stop. The backend location is the `audit` table in SQLite, or the list `<prefix>:audit` in Redis.
 
 The log has a limit of **1000** entries, newest first. The app drops older entries when it writes new ones. It also records acknowledgements here (`attention.acknowledge`, `attention.unacknowledge`). The detail holds names and dates only, never a link, key or subscription URL. The app cuts each field to a fixed length. A failure to write an entry goes to the log and never fails the action.
 

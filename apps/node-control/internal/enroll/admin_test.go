@@ -333,6 +333,38 @@ func TestAdminRotateSecret(t *testing.T) {
 	}
 }
 
+// #441: Push now retries a bridge with a pending update at once and reports the new sync state.
+func TestAdminPushNow(t *testing.T) {
+	f := newAdminFx(t)
+	f.agent.down = true
+	id := f.createID()
+	if r := decode(t, f.do("GET", "/enroll/devices", "", "")); syncOf(t, r)["pending"] != true {
+		t.Fatalf("the bridge must be pending while its agent is down: %v", r)
+	}
+	f.agent.down = false
+	if rec := f.do("POST", "/enroll/sync", "text/plain", "{}"); rec.Code != 422 || len(f.agent.pushes) != 0 {
+		t.Fatalf("a push needs a JSON body: %d, pushes=%d", rec.Code, len(f.agent.pushes))
+	}
+	rec := f.post("/enroll/sync", map[string]any{})
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	r := decode(t, rec)
+	if r["ok"] != true || r["sync_pending"] != false {
+		t.Fatalf("%v", r)
+	}
+	if n := len(f.agent.pushes); n != 1 || len(f.agent.last().creds) == 0 {
+		t.Fatalf("pushes=%d", n)
+	}
+	if d, _ := f.store.GetDevice(id); d.Revoked {
+		t.Fatal("a push must not change the device")
+	}
+	log, err := f.store.AuditLog(1)
+	if err != nil || len(log) != 1 || log[0].Action != "bridge.push" {
+		t.Fatalf("%+v %v", log, err)
+	}
+}
+
 func TestListLeaksNothingAndHasTraffic(t *testing.T) {
 	f := newAdminFx(t)
 	id := f.createID()

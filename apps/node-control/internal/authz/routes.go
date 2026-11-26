@@ -100,6 +100,7 @@ var Routes = map[string]Rule{
 	"POST /enroll/devices/{id}/revoke":        need(FeatureEnroll, LevelOperate),
 	"POST /enroll/devices/{id}/extend":        need(FeatureEnroll, LevelOperate),
 	"POST /enroll/devices/{id}/rotate-secret": reauth(need(FeatureEnroll, LevelOperate)),
+	"POST /enroll/sync":                       need(FeatureEnroll, LevelOperate),
 	"GET /enroll/ingresses":                   need(FeatureEnroll, LevelView),
 	"POST /enroll/ingresses/{name}/approve":   reauth(need(FeatureEnroll, LevelAdmin)),
 	"POST /enroll/ingresses/{name}/unapprove": need(FeatureEnroll, LevelAdmin),

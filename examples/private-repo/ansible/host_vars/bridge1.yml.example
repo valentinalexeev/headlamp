@@ -19,3 +19,11 @@ hy2_obfs_password: "{{ hy2_obfs_password_bridge1 }}"      # Hysteria 2 is on by 
 # ingress-agent: the token that node-control uses to reach the agent.
 ingress_agent_token: "{{ ingress_agent_token_bridge1 }}"
 ingress_agent_src: "{{ playbook_dir }}/../vendor/headlamp/apps/ingress-agent"   # built on the control host
+
+# ingress-agent path check (off by default): tests the path from this bridge's own network to the control host and
+# shows the result in node-control ("Bridge paths"). Remove the "# " to turn it on. See "Path check" in
+# vendor/headlamp/apps/ingress-agent/README.md for the probes and how to serve the test file.
+# ingress_pathcheck_target: headscale.example.com          # host[:port] of headscale (server_url)
+# ingress_pathcheck_addrs: ["203.0.113.10"]                # optional: the addresses the name must resolve to
+# ingress_pathcheck_blob_url: "https://headscale.example.com/<random-path>/probe.bin"   # optional: timed transfer
+# ingress_pathcheck_ref_url: "https://www.example.com/probe.bin"                         # optional: neutral reference

@@ -11,9 +11,9 @@ WORKDIR /app
 RUN wget -q "https://pkgs.tailscale.com/stable/tailscale_${TSVERSION}_${TARGETARCH}.tgz" \
   && tar xzf "tailscale_${TSVERSION}_${TARGETARCH}.tgz" --strip-components=1
 
-# Upstream: https://github.com/juhovh/tailguard. Bump the digest by hand or through dependabot, then run the image test
-# (make test-tailguard).
-FROM ghcr.io/juhovh/tailguard@sha256:<upstream-digest>
+# Upstream: https://github.com/juhovh/tailguard (digest of its latest image on 2026-11-26). Bump the digest by hand, then
+# run the image test (make test-tailguard).
+FROM ghcr.io/juhovh/tailguard@sha256:51f5406131eef1fd213a0fb5e5e5aeb1232ae2719920f261217459be27eae02b
 ARG TSVERSION
 COPY --from=tailscale /app/tailscaled /app/tailscale /tmp/ts/
 # Replace the binaries where the upstream image has them, so its entrypoint runs the pinned version. rm first: one of

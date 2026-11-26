@@ -874,6 +874,17 @@ path from the bridge network to the control host (`GET /v1/pathcheck`, "Path che
 agent reports it, the overview shows the system line "Bridge paths". The line counts the bridges that reach the control
 host cleanly, and the bridges of each other class. `GET /enroll/ingresses` has the result of each bridge in `pathcheck`.
 
+On the Nodes page, the detail of a bridge shows its path check under "Path to the control host" (#424):
+
+- The class of the last run and, for a bad class, what it means.
+- Since when the class has been the same, and the number of runs in a row with this class.
+- The count of each class over the history of the agent (24 hours).
+- The findings of the last run, each with what it means.
+
+`GET /enroll/ingresses` gives the text of each class in `pathcheck_text`. The page shows a class only when its name
+has 1 to 32 lowercase letters and hyphens and starts with a letter. It gets the text of the class from node-control. Thus a bridge host
+cannot put text into the console. A class that node-control does not know shows by name only.
+
 A bridge with the same bad class in two runs in a row gets an Attention item. The title is "`<bridge>`: path to the
 control host is `<class>`". A class that cuts the bridge from the tailnet gives a critical item. `throttled`,
 `stalled`, `transfer-failed`, `udp-blocked`, `derp-only` and `edge-uplink-bad` give an info item.

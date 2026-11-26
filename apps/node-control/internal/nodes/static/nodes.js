@@ -24,6 +24,11 @@
     Runner: 'Tasks and sessions on it stop until you start it again.'
   };
 
+  // The path check of a bridge (#424): class names are checked as on the server, so a bridge host cannot put text
+  // into the console. The text of a class comes from node-control, never from the bridge.
+  var PATH_CLASS = /^[a-z][a-z-]{0,31}$/;
+  var PATH_MAX = 16;
+
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
   function str(v) { return typeof v === 'string' ? v : ''; }
   function up(v) { return str(v).toUpperCase(); }
@@ -75,6 +80,40 @@
     if (typeof sec !== 'number' || !isFinite(sec)) { return ''; }
     var d = new Date(sec * 1000);
     return isNaN(d.getTime()) ? '' : d.toISOString();
+  }
+
+  function runWord(n) { return n + (n === 1 ? ' run' : ' runs'); }
+  function count(v) { return typeof v === 'number' && isFinite(v) && v > 0 ? Math.floor(v) : 0; }
+
+  // pathOf: the path check of a bridge as shown, or null when it has none or its class is not valid. pc is one value
+  // of the "pathcheck" map of /enroll/ingresses, text its "pathcheck_text" map.
+  function pathOf(pc, text, now) {
+    if (!pc || typeof pc !== 'object' || !PATH_CLASS.test(str(pc.class))) { return null; }
+    text = text && typeof text === 'object' ? text : {};
+    function describe(c) { return has(text, c) ? hl.plain(str(text[c]), 200) : ''; }
+    var since = count(pc.since) ? unixIso(pc.since) : '', checked = count(pc.checked) ? unixIso(pc.checked) : '';
+    var counts = [];
+    var total = 0;
+    if (pc.counts && typeof pc.counts === 'object') {
+      Object.keys(pc.counts).forEach(function (c) {
+        var n = count(pc.counts[c]);
+        if (PATH_CLASS.test(c) && n > 0 && counts.length < PATH_MAX) { counts.push([c, n]); total += n; }
+      });
+    }
+    counts.sort(function (a, b) { return b[1] - a[1] || (a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0)); });
+    var findings = [];
+    hl.arr(pc.findings).forEach(function (c) {
+      if (typeof c === 'string' && PATH_CLASS.test(c) && c !== 'ok' && findings.length < PATH_MAX) {
+        findings.push({ cls: c, text: describe(c) });
+      }
+    });
+    return {
+      cls: pc.class, ok: pc.class === 'ok', text: describe(pc.class),
+      since: since ? hl.relTime(since, now) : '', checked: checked ? hl.relTime(checked, now) : '',
+      streak: count(pc.streak),
+      counts: counts.map(function (p) { return p[1] + ' ' + p[0]; }).join(', '), total: total,
+      findings: findings
+    };
   }
 
   function routeWord(n) { return n + (n === 1 ? ' route' : ' routes'); }
@@ -190,6 +229,7 @@
       cloud: cloud, tailnet: tailnet, routes: tn && role === 'Exit' ? (Number(tn.approved_route_count) || 0) + ' of ' + routes + ' approved' : 'n/a',
       addr: hl.plain(addr, 60) || 'Not known', explain: explain,
       bridge: ing ? hl.plain(ing.name, 100) : '',
+      path: ing ? pathOf(s.path, s.pathText, now) : null,
       reached: { start: kind === 'running' || kind === 'notconfigured' || kind === 'unmanaged', stop: kind === 'stopped' || kind === 'notconfigured' || kind === 'unmanaged' }
     };
   }
@@ -204,9 +244,12 @@
   // (null when it could not be read), ingresses the list from /enroll/ingresses (null when enrolment is
   // off) and sessions the "nodes" list of /sessions.json (null when there are no runners). A bridge joins
   // the node its entry names or, without one, the node whose tailnet name its given_name or name equals; one
-  // without such a node is a row of its own that cannot be powered. opts.now is for tests.
+  // without such a node is a row of its own that cannot be powered. opts.paths is the "pathcheck" map of
+  // /enroll/ingresses (by bridge name) and opts.pathText its "pathcheck_text"; opts.now is for tests.
   function mergeNodes(nodes, status, tailnet, ingresses, sessions, opts) {
     var now = opts && typeof opts.now === 'number' ? opts.now : Date.now();
+    var paths = hl.obj(opts && opts.paths), pathText = hl.obj(opts && opts.pathText);
+    function pathFor(ing) { return ing && str(ing.name) && has(paths, ing.name) ? paths[ing.name] : null; }
     nodes = hl.obj(nodes); status = hl.obj(status);
     var usable = tailnetUsable(tailnet);
     var ings = hl.arr(ingresses).filter(function (i) { return i && typeof i === 'object'; });
@@ -236,10 +279,11 @@
       for (var j = 0; j < runs.length && !run; j++) {
         if (!usedRun[j] && (runs[j].id === tname || runs[j].name === tname || runs[j].id === id)) { usedRun[j] = true; run = runs[j]; }
       }
-      rows.push(buildRow({ id: id, cfg: cfg, st: pick(status, id) || {}, tn: usable ? pick(tailnet, tname) : null, ing: ing, run: run }, now));
+      rows.push(buildRow({ id: id, cfg: cfg, st: pick(status, id) || {}, tn: usable ? pick(tailnet, tname) : null, ing: ing, run: run,
+        path: pathFor(ing), pathText: pathText }, now));
     });
     ings.forEach(function (ing, i) {
-      if (!usedIng[i] && str(ing.name)) { rows.push(buildRow({ id: uniq(ing.name, 'bridge'), cfg: null, st: null, tn: null, ing: ing, run: null }, now)); }
+      if (!usedIng[i] && str(ing.name)) { rows.push(buildRow({ id: uniq(ing.name, 'bridge'), cfg: null, st: null, tn: null, ing: ing, run: null, path: pathFor(ing), pathText: pathText }, now)); }
     });
     runs.forEach(function (run, j) {
       var id = str(run.id) || str(run.name);
@@ -436,6 +480,7 @@
         kv.appendChild(hl.el('dd', p[2], p[1]));
       });
       panel.appendChild(kv);
+      if (row.path) { renderPath(panel, row.path); }
 
       var busy = st.busy[row.id] || null;
       if (row.canPower) {
@@ -487,6 +532,41 @@
       hl.refocus(panel, fk, fk && fk.indexOf('panel:') === 0 ? 'panel:title' : null);
     }
 
+    // renderPath: the path check of a bridge (#424): the class of the last run, since when and how many runs in a
+    // row, the counts of each class over the history of the agent, and the findings of the last run.
+    function renderPath(panel, p) {
+      panel.appendChild(hl.el('hr', 'divider'));
+      var box = hl.el('section', 'stack');
+      box.appendChild(hl.el('h3', null, 'Path to the control host'));
+      var head = hl.el('div', 'row');
+      head.appendChild(hl.status(p.ok ? 'ok' : 'warn', p.cls));
+      box.appendChild(head);
+      if (!p.ok && p.text) { box.appendChild(hl.el('p', 't2', 'From the network of the bridge, ' + p.text + '.')); }
+      var kv = hl.el('dl', 'kv');
+      var lines = [];
+      if (p.since) { lines.push(['Since', p.since]); }
+      if (p.streak) { lines.push(['In a row', runWord(p.streak)]); }
+      if (p.checked) { lines.push(['Checked', p.checked]); }
+      lines.push(['Last 24 hours', p.total ? p.counts + ' (' + runWord(p.total) + ')' : 'No history']);
+      lines.forEach(function (l) {
+        kv.appendChild(hl.el('dt', null, l[0]));
+        kv.appendChild(hl.el('dd', null, l[1]));
+      });
+      box.appendChild(kv);
+      if (p.findings.length) {
+        box.appendChild(hl.el('p', 't3 small', 'Findings of the last run'));
+        var ul = hl.el('ul', 'small');
+        p.findings.forEach(function (f) {
+          var li = hl.el('li');
+          li.appendChild(hl.el('span', 'mono', f.cls));
+          if (f.text) { li.appendChild(document.createTextNode(': ' + f.text)); }
+          ul.appendChild(li);
+        });
+        box.appendChild(ul);
+      }
+      panel.appendChild(box);
+    }
+
     function render() {
       var rows = st.rows;
       var text = summary(rows);
@@ -502,7 +582,9 @@
     // update takes one round of reads. A status that failed (statusFresh false) never settles busy.
     ctrl.update = function (d) {
       st.loaded = true;
-      st.rows = mergeNodes(d.nodes, d.status, d.tailnet, d.ingresses, d.sessions, typeof d.now === 'number' ? { now: d.now } : undefined);
+      var opts = { paths: d.pathcheck, pathText: d.pathText };
+      if (typeof d.now === 'number') { opts.now = d.now; }
+      st.rows = mergeNodes(d.nodes, d.status, d.tailnet, d.ingresses, d.sessions, opts);
       // An Attention item links by the bridge's name; the row of the machine it runs on has the machine's.
       if (st.sel && !find(st.sel)) {
         st.rows.forEach(function (r) { if (r.bridge && r.bridge === st.sel) { st.sel = r.id; } });
@@ -542,7 +624,7 @@
   // means there are no rows of that kind, and the page does not ask again for as long as it stays open; any
   // other failure keeps what was last read.
   function makeReader(api, ctrl) {
-    var last = { nodes: null, status: {}, tailnet: null, ingresses: null, sessions: null };
+    var last = { nodes: null, status: {}, tailnet: null, ingresses: null, sessions: null, pathcheck: null, pathText: null };
     var skip = { ingresses: false, sessions: false };
 
     function gone(err) { return err && (err.status === 404 || err.status === 403); }
@@ -560,12 +642,16 @@
         api('GET', '/nodes.json').then(function (v) { last.nodes = hl.obj(hl.obj(v).nodes); }, function () { failed = true; }),
         api('GET', '/status').then(function (v) { last.status = hl.obj(v); fresh = true; }, function () { failed = true; }),
         api('GET', '/tailnet/status').then(function (v) { last.tailnet = v; }, function () { last.tailnet = null; }),
-        optional('ingresses', '/enroll/ingresses', 'ingresses', function (v) { return v.ingresses; }),
+        optional('ingresses', '/enroll/ingresses', 'ingresses', function (v) {
+          last.pathcheck = hl.obj(v.pathcheck); last.pathText = hl.obj(v.pathcheck_text);
+          return v.ingresses;
+        }),
         optional('sessions', '/sessions.json?links=0', 'sessions', function (v) { return v.nodes; })
       ];
       return Promise.all(reads).then(function () {
         if (last.nodes) {
-          ctrl.update({ nodes: last.nodes, status: last.status, tailnet: last.tailnet, ingresses: last.ingresses, sessions: last.sessions, statusFresh: fresh });
+          ctrl.update({ nodes: last.nodes, status: last.status, tailnet: last.tailnet, ingresses: last.ingresses, sessions: last.sessions,
+            pathcheck: last.ingresses ? last.pathcheck : null, pathText: last.pathText, statusFresh: fresh });
         }
         ctrl.setFailed(failed);
       });

@@ -159,6 +159,25 @@ func TestAttentionScenarioSeedsEveryProblem(t *testing.T) {
 		t.Errorf("bridge-2 should be out of sync: %v", pending)
 	}
 
+	// The Nodes page shows the path check of each bridge (#424): bridge-1 is throttled, with its
+	// counts over the history of the agent and the text of the class.
+	var paths struct {
+		PathCheck map[string]struct {
+			Class  string         `json:"class"`
+			Streak int            `json:"streak"`
+			Counts map[string]int `json:"counts"`
+		} `json:"pathcheck"`
+		Text map[string]string `json:"pathcheck_text"`
+	}
+	if err := json.Unmarshal(body, &paths); err != nil {
+		t.Fatalf("pathcheck: %v", err)
+	}
+	b1 := paths.PathCheck["bridge-1"]
+	if b1.Class != "throttled" || b1.Streak < 2 || b1.Counts["throttled"] != b1.Streak || b1.Counts["ok"] == 0 ||
+		paths.Text["throttled"] == "" {
+		t.Errorf("bridge-1 should be throttled with its counts: %+v, text %q", b1, paths.Text["throttled"])
+	}
+
 	_, body = get(t, addr, "/tasks.json")
 	var tasks []struct {
 		ID     string `json:"id"`

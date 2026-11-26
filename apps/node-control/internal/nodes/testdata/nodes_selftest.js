@@ -593,6 +593,72 @@ const ing = (name, extra) => Object.assign({ name, host: name + '.example.net', 
   assert.strictEqual(nodes.plainRole('Bridge'), 'Bridge');
   assert.strictEqual(nodes.plainRole('<x>'), 'All');
 
+  // the path check of a bridge (#424): class, since, streak, counts and findings; names that are not class names
+  // never reach the row
+  {
+    const sec = (ms) => Math.floor(ms / 1000);
+    const text = { throttled: 'a transfer from the control host is much slower than from the reference', 'udp-blocked': 'STUN over UDP gets no answer while TCP works' };
+    const paths = {
+      'bridge-1': { class: 'throttled', findings: ['throttled', 'udp-blocked', '<b>x</b>', 'new-class'], streak: 6, since: sec(NOW) - 5400, checked: sec(NOW),
+        counts: { ok: 90, throttled: 6, 'bad key!': 3, zero: 0, neg: -1, str: '4' } },
+      'bridge-2': { class: 'ok', findings: ['ok'], streak: 96, checked: sec(NOW), counts: { ok: 96 } },
+      'bridge-3': { class: '<img src=x>', streak: 2, checked: sec(NOW) },
+    };
+    const rows = nodes.mergeNodes({ 'vm-7': cfg() }, { 'vm-7': { status: 'RUNNING' } }, null,
+      [ing('bridge-1', { node: 'vm-7' }), ing('bridge-2'), ing('bridge-3'), ing('bridge-4')], null, { now: NOW, paths, pathText: text });
+    const p1 = one(rows, 'vm-7').path;
+    assert.strictEqual(p1.cls, 'throttled');
+    assert.strictEqual(p1.ok, false);
+    assert.strictEqual(p1.text, text.throttled);
+    assert.strictEqual(p1.since, '1 h 30 min ago');
+    assert.strictEqual(p1.streak, 6);
+    assert.strictEqual(p1.counts, '90 ok, 6 throttled');
+    assert.strictEqual(p1.total, 96);
+    assert.deepStrictEqual(p1.findings, [{ cls: 'throttled', text: text.throttled }, { cls: 'udp-blocked', text: text['udp-blocked'] }, { cls: 'new-class', text: '' }]);
+    const p2 = one(rows, 'bridge-2').path;
+    assert.ok(p2.ok && p2.counts === '96 ok' && p2.findings.length === 0 && p2.since === '', JSON.stringify(p2));
+    assert.strictEqual(one(rows, 'bridge-3').path, null, 'a class that is not a class name is dropped');
+    assert.strictEqual(one(rows, 'bridge-4').path, null, 'no check: no path');
+    // an exit node has no path check, even when a bridge of the same name has one
+    assert.strictEqual(nodes.mergeNodes({ 'bridge-9': cfg() }, {}, null, null, null, { now: NOW, paths: { 'bridge-9': paths['bridge-1'] } })[0].path, null);
+
+    // the panel of the bridge shows it
+    const els = mkEls();
+    const ctrl = nodes.mount(els);
+    ctrl.update({ nodes: { 'vm-7': cfg() }, status: { 'vm-7': { status: 'RUNNING' } }, tailnet: null,
+      ingresses: [ing('bridge-1', { node: 'vm-7' }), ing('bridge-3')], sessions: null, pathcheck: paths, pathText: text, now: NOW, statusFresh: true });
+    ctrl.select('vm-7');
+    const t = els.panel.textContent;
+    assert.ok(/Path to the control host/.test(t), t);
+    assert.ok(/From the network of the bridge, a transfer from the control host is much slower than from the reference\./.test(t), t);
+    assert.ok(/Since1 h 30 min ago/.test(t), t);
+    assert.ok(/In a row6 runs/.test(t), t);
+    assert.ok(/Last 24 hours90 ok, 6 throttled \(96 runs\)/.test(t), t);
+    assert.ok(/Findings of the last run/.test(t), t);
+    assert.ok(/udp-blocked: STUN over UDP gets no answer while TCP works/.test(t), t);
+    assert.ok(!/<b>|bad key|str|neg/.test(t), t);
+    assert.ok(findAll(els.panel, (n) => n.tag === 'span' && hasClass(n, 'st') && hasClass(n, 'warn') && n.textContent === 'throttled').length === 1);
+    // a bridge whose class is not valid, and an exit node, have no path section
+    ctrl.select('bridge-3');
+    assert.ok(!/Path to the control host/.test(els.panel.textContent));
+    assert.ok(!/img/.test(els.panel.textContent));
+  }
+
+  // the reader hands the path check and its text to the page
+  {
+    const updates = [];
+    const reader = nodes.makeReader(async (m, u) => {
+      if (u === '/nodes.json') return { nodes: {} };
+      if (u === '/status') return {};
+      if (u === '/tailnet/status') return null;
+      if (u === '/enroll/ingresses') return { ingresses: [ing('bridge-1')], pathcheck: { 'bridge-1': { class: 'ok' } }, pathcheck_text: { ok: 'x' } };
+      return { nodes: [] };
+    }, { update: (d) => updates.push(d), setFailed() {} });
+    await reader.refresh();
+    assert.deepStrictEqual(updates[0].pathcheck, { 'bridge-1': { class: 'ok' } });
+    assert.deepStrictEqual(updates[0].pathText, { ok: 'x' });
+  }
+
   // a 404 or 403 on the optional reads is remembered for the page session
   {
     const calls = [];

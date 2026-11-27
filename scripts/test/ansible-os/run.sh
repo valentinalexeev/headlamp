@@ -230,6 +230,12 @@ for r in "${roles[@]}"; do
     # The failed task first: the last lines are often the cleanup of an always block after it.
     { echo "---- $r $m (failed tasks)"; grep -E '^(fatal|failed): ' "$T/$r-$m.log" | cut -c1-2000 || :
       echo "---- $r $m (last 25 lines)"; tail -n 25 "$T/$r-$m.log"; }
+    # tailguard: the cause is in its container log, which the task message only points to.
+    if [ "$r" = tailguard ] && [ "$m" = apply ]; then
+      echo "---- tailguard containers and logs"
+      docker exec "$host" sh -c 'cd /opt/tailguard 2>/dev/null && docker compose ps -a; docker logs --tail 40 tailguard 2>&1' \
+        | grep -vF "$k_tg" || :
+    fi
   done
   echo "RESULT $os $r check=$c apply=$a"
   case "$c$a" in okok|okskip) ;; *) fails=$((fails + 1)) ;; esac

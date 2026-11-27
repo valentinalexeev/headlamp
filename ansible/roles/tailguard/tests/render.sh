@@ -75,6 +75,8 @@ if run "good variables pass" pass; then
     grep -qxF "$l" "$T/env" && ok ".env $l" || bad ".env $l"
   done
   has "$T/compose.yml" '"192.0.2.10:51820:51820/udp"' && ok "compose binds the WireGuard port to tailguard_bind_addr" || bad "compose port"
+  # Strict rp_filter (the Ubuntu default) drops the peer UDP: tailscale routes the peers through tailscale0.
+  has "$T/compose.yml" '^ +- net\.ipv4\.conf\.all\.rp_filter=2$' && ok "compose sets a loose rp_filter" || bad "compose rp_filter"
   [ "$(grep -c 'image: ghcr.io/valentinalexeev/headlamp/tailguard:' "$T/compose.yml")" = 3 ] && ok "compose uses the image three times" || bad "compose image"
 fi
 # The role default pins the same image as apps/tailguard/docker-compose.yml.

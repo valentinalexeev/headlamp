@@ -15,15 +15,16 @@ RUN wget -q "https://pkgs.tailscale.com/stable/tailscale_${TSVERSION}_${TARGETAR
 # run the image test (make test-tailguard).
 FROM ghcr.io/juhovh/tailguard@sha256:51f5406131eef1fd213a0fb5e5e5aeb1232ae2719920f261217459be27eae02b
 ARG TSVERSION
-COPY --from=tailscale /app/tailscaled /app/tailscale /tmp/ts/
 # Replace the binaries where the upstream image has them, so its entrypoint runs the pinned version. rm first: one of
-# them can be a link to the other. The build fails if a binary is missing or the version is not the pin.
-RUN set -e; \
+# them can be a link to the other. The build fails if a binary is missing or the version is not the pin. The binaries
+# come in through a bind mount, not a COPY to /tmp and an rm: a deleted path leaves a whiteout file in the layer, and
+# the docker engine inside the Ansible OS matrix host cannot extract it ("failed to convert whiteout file").
+RUN --mount=type=bind,from=tailscale,source=/app,target=/mnt/ts \
+  set -e; \
   for b in tailscale tailscaled; do \
     p=$(command -v "$b") || { echo "upstream image has no $b on PATH" >&2; exit 1; }; \
-    rm -f "$p"; cp "/tmp/ts/$b" "$p"; chmod 0755 "$p"; \
+    rm -f "$p"; cp "/mnt/ts/$b" "$p"; chmod 0755 "$p"; \
   done; \
-  rm -rf /tmp/ts; \
   tailscale version | head -n1 | grep -qx "$TSVERSION"; \
   tailscaled --version | head -n1 | grep -qx "$TSVERSION"
 COPY route-health.sh track-exit-node.sh verify.sh /usr/local/bin/

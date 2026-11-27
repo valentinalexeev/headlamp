@@ -28,6 +28,13 @@ RUN --mount=type=bind,from=tailscale,source=/app,target=/mnt/ts \
   tailscale version | head -n1 | grep -qx "$TSVERSION"; \
   tailscaled --version | head -n1 | grep -qx "$TSVERSION"
 COPY route-health.sh track-exit-node.sh verify.sh /usr/local/bin/
+# Ubuntu 24.04 and later ship an AppArmor profile for /usr/bin/wg-quick. It applies to a process at that path in a
+# container that the host runs unconfined (a privileged container, or the engine inside it), and it does not allow
+# the busybox readlink of this Alpine image: "readlink: Permission denied", and the container restarts. AppArmor
+# matches the resolved path, so the script moves out of /usr/bin and a link keeps the old name.
+RUN mkdir -p /usr/local/libexec \
+  && mv /usr/bin/wg-quick /usr/local/libexec/wg-quick \
+  && ln -s /usr/local/libexec/wg-quick /usr/bin/wg-quick
 # Unsets an empty TG_WEBUI_PORT before the upstream entrypoint, which exits on it (see entrypoint.sh).
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/headlamp-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/headlamp-entrypoint.sh"]

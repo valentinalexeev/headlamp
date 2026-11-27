@@ -98,8 +98,10 @@ hs_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{e
 # /var/lib/task-runner is an anonymous volume: Ansible does not report the overlay root of a container in its mount
 # facts, so the free-disk preflight of task-runner finds no mount. A VM has a real root mount (#178).
 # /var/lib/docker is an anonymous volume too: the docker engine of tailguard cannot use overlay2 on the overlay root.
+# /var/lib/containerd as well: docker.io on Ubuntu keeps its images in the containerd image store there.
 docker run -d --platform "$platform" --name "$host" --hostname "$host" --network "$net" --privileged --cgroupns=host \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock -v /var/lib/task-runner -v /var/lib/docker "$img" >/dev/null || die "host"
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock -v /var/lib/task-runner -v /var/lib/docker \
+  -v /var/lib/containerd "$img" >/dev/null || die "host"
 for _ in $(seq 60); do
   s="$(docker exec "$host" systemctl is-system-running 2>/dev/null)"; case "$s" in running|degraded) break ;; esac; sleep 1
 done
@@ -224,7 +226,10 @@ for r in "${roles[@]}"; do
   fi
   for m in check apply; do
     v=$c; [ $m = apply ] && v=$a
-    case "$v" in ok|skip) continue ;; esac; { echo "---- $r $m (last 25 lines)"; tail -n 25 "$T/$r-$m.log"; }
+    case "$v" in ok|skip) continue ;; esac
+    # The failed task first: the last lines are often the cleanup of an always block after it.
+    { echo "---- $r $m (failed tasks)"; grep -E '^(fatal|failed): ' "$T/$r-$m.log" | cut -c1-2000 || :
+      echo "---- $r $m (last 25 lines)"; tail -n 25 "$T/$r-$m.log"; }
   done
   echo "RESULT $os $r check=$c apply=$a"
   case "$c$a" in okok|okskip) ;; *) fails=$((fails + 1)) ;; esac

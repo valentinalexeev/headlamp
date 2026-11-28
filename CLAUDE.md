@@ -103,7 +103,7 @@ commits on top of it or attempt a rewrite on your own.
 |---|---|
 | `.github/components.json`, `.github/workflows/`, `VERSIONING.md`, `docs/images.md` | images CI publishes to GHCR, rebuilt per component; the release rules and their checks (`scripts/check-release.sh`); what each image is and how they fit together |
 | `terraform/modules/exit-node-vm/{yandex,oci,aws,cloudru,openstack}` | reusable VM exit-node modules (root stacks live in YOUR repo); `openstack` serves Selectel and other OpenStack clouds, and `selectel` is its old name, kept as a wrapper |
-| `ansible/roles/{tailscale,route-provisioner,task-runner}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; the task runner on a VM node (rootless podman, nftables guard for its user; see the role README); version bump / key rotation playbooks |
+| `ansible/roles/{tailscale,route-provisioner,task-runner,tailguard}`, `ansible/playbooks/`, `ansible/templates/` | install/join the tailnet; split-tunnel routes; the task runner on a VM node (rootless podman, nftables guard for its user; see the role README); tailguard on a Docker host (Docker Compose, one-time join key through a 0600 file); version bump / key rotation playbooks |
 | `apps/headscale` | headscale server image: the stock, distroless `ghcr.io/juanfont/headscale` (pin in `HEADSCALE_VERSION`, checked by `make check-headscale-pin`) plus the config; `headscale.yaml`, `acl.json`, `fly.toml` are **placeholders**. Routes are approved by the policy (`autoApprovers.routes` in `acl.json`, tested by `make test-route-approval`); there is no approver script and no shell in the image |
 | `apps/exit-node` | tailscale exit node image (any container host; a `fly.toml` for Fly.io); `fly.toml`, `direct-hosts.txt` are **placeholders** |
 | `apps/node-control` | Go service (embedded tailscale): start/stop UI and API for the exit nodes (discovered from headscale), tailnet status, optional device enrolment, optional policy console, optional scheduled browser-script tasks (`internal/tasks`, see its README section "Tasks module"); `fly.toml` is a **placeholder**, `app/nodes.json` is an optional overlay |
@@ -665,7 +665,9 @@ below show Fly.io. On another host, run the same images with the same variables.
 
 ### 2.9 tailguard (optional, operator-run)
 
-Use this for a Docker host that must offer a WireGuard server routed through an exit node. Do these steps:
+Use this for a Docker host that must offer a WireGuard server routed through an exit node. To install it with Ansible,
+put the host in the `tailguard` group and use the role `ansible/roles/tailguard` (see its README and
+`examples/private-repo/ansible/host_vars/tg1.yml.example`). To install it by hand, do these steps:
 
 1. Copy `vendor/headlamp/apps/tailguard/` to the host.
 2. Create `.env` from `.env.example`.

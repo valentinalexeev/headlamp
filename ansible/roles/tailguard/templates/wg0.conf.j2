@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+# The WireGuard server of tailguard (mounted at /etc/wireguard/wg0.conf). The private key is not in this file:
+# PostUp loads it from server.key, which the role made on this host.
+[Interface]
+Address = {{ tailguard_wg_address | join(', ') }}
+ListenPort = {{ tailguard_wg_port }}
+PostUp = wg set %i private-key /etc/wireguard/server.key
+{% for peer in tailguard_peers %}
+
+# {{ peer.name }}
+[Peer]
+PublicKey = {{ peer.public_key }}
+{% if peer.preshared_key | default('') | length > 0 %}
+PresharedKey = {{ peer.preshared_key }}
+{% endif %}
+AllowedIPs = {{ peer.allowed_ips | join(', ') }}
+{% endfor %}

@@ -1,0 +1,101 @@
+---
+# tailguard (#392): see README.md. Order: preflight, Docker and the image, WireGuard, compose, login, checks.
+- name: Preflight checks
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Install Docker Compose and the image
+  ansible.builtin.include_tasks: install.yml
+
+- name: Write the WireGuard server config
+  ansible.builtin.include_tasks: wireguard.yml
+
+- name: Write docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ tailguard_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  register: tailguard_compose_file
+
+# No file in state/ = the node never logged in: start it with the key at once.
+- name: Look for the tailscale state
+  ansible.builtin.find:
+    paths: "{{ tailguard_dir }}/state"
+    hidden: true
+    file_type: any
+  become: true
+  register: tailguard_state
+
+- name: Log in for the first time
+  ansible.builtin.include_tasks: login.yml
+  when: tailguard_docker | bool and not ansible_check_mode and tailguard_state.matched | default(0) == 0
+
+- name: Write .env
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ tailguard_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  register: tailguard_env
+
+- name: List the running services
+  ansible.builtin.command: docker compose ps --status running --services
+  args:
+    chdir: "{{ tailguard_dir }}"
+  become: true
+  register: tailguard_running
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: tailguard_docker | bool and not ansible_check_mode
+
+# A changed file creates the containers again (the login did that already, if it ran); a stopped service is started.
+- name: Work out what to start
+  ansible.builtin.set_fact:
+    tailguard_recreate: >-
+      {{ not (tailguard_applied | default(false) | bool) and
+         (tailguard_compose_file is changed or tailguard_env is changed or tailguard_wg_conf is changed) }}
+    tailguard_all_running: >-
+      {{ (tailguard_running.stdout_lines | default([]) | sort) == ['exit-node-tracker', 'route-health', 'tailguard'] }}
+
+- name: Start tailguard
+  ansible.builtin.include_tasks: up.yml
+  vars:
+    tailguard_force_recreate: "{{ tailguard_recreate }}"
+  when: >-
+    not ansible_check_mode and tailguard_docker | bool and
+    (tailguard_recreate | bool or not tailguard_all_running | bool)
+
+- name: Read the tailscale state of tailguard
+  ansible.builtin.include_tasks: status.yml
+  when: not ansible_check_mode and tailguard_docker | bool and tailguard_backend is not defined
+
+# The node had state, but the control server does not know it any more (for example, the node was deleted).
+- name: Log in again
+  ansible.builtin.include_tasks: login.yml
+  when: not ansible_check_mode and tailguard_docker | bool and tailguard_backend in ['NeedsLogin', 'NeedsMachineAuth']
+
+- name: Assert that the node is up
+  ansible.builtin.assert:
+    that: tailguard_backend == 'Running'
+    fail_msg: >-
+      tailguard: the tailscale state of '{{ tailguard_hostname }}' is {{ tailguard_backend }}, not Running. Check
+      `docker compose -f {{ tailguard_dir }}/docker-compose.yml logs tailguard`.
+      {{ (tailguard_up.stderr | default('') | trim).splitlines() | last | default('') }}
+    quiet: true
+  when: not ansible_check_mode and tailguard_docker | bool
+
+- name: Check the exit node and the egress
+  ansible.builtin.include_tasks: exit-node.yml
+  when: not ansible_check_mode and tailguard_docker | bool
+
+- name: Show the WireGuard server public key
+  ansible.builtin.debug:
+    msg: >-
+      tailguard: the WireGuard server public key is
+      {{ (tailguard_pub.content | b64decode | trim) if tailguard_pub.content is defined else '(made on the first real run)' }}.
+      Peers connect to {{ tailguard_bind_addr }}:{{ tailguard_wg_port }}/udp.

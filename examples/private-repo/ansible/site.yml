@@ -24,3 +24,11 @@
       tags: [reality-ingress]
     - role: ingress-agent
       tags: [ingress-agent]
+
+# tailguard (#392): a WireGuard server whose peers leave through an exit node. Off until you put a host in the
+# tailguard group. See vendor/headlamp/ansible/roles/tailguard/README.md.
+- name: Configure tailguard WireGuard servers
+  hosts: tailguard
+  roles:
+    - role: tailguard
+      tags: [tailguard]

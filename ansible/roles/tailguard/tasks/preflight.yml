@@ -1,0 +1,85 @@
+---
+# Variables only, no command on the host: tests/preflight.sh runs this file on localhost.
+- name: Check the required tailnet variables
+  ansible.builtin.assert:
+    that:
+      - tailguard_hostname is regex('^[A-Za-z0-9][A-Za-z0-9-]{0,62}\Z')
+      - tailguard_login_server is regex('^https?://[^\s]+\Z')
+      - tailguard_exit_node_prefix is regex('^[A-Za-z0-9][A-Za-z0-9.-]*\Z')
+      - tailguard_exit_node_tag is regex('^tag:[A-Za-z0-9-]+\Z')
+      - tailguard_ts_port | int > 0 and tailguard_ts_port | int < 65536
+    fail_msg: >-
+      tailguard: tailguard_hostname (a host name), tailguard_login_server (or headscale_login_server, an http(s) URL),
+      tailguard_exit_node_prefix (the name prefix of the exit node), tailguard_exit_node_tag (tag:<name>) and
+      tailguard_ts_port (a UDP port) must be set.
+    quiet: true
+
+- name: Check tailguard_lan_access (#390, no default)
+  ansible.builtin.assert:
+    that: tailguard_lan_access | string in ['0', '1']
+    fail_msg: >-
+      tailguard: tailguard_lan_access is not set. Set "0" so that WireGuard peers reach the internet through the exit
+      node only, or "1" so that they can also reach the LAN of the host.
+    quiet: true
+
+- name: Check tailguard_bind_addr (#390, no default)
+  ansible.builtin.assert:
+    that: tailguard_bind_addr | string is regex('^([0-9]{1,3}\.){3}[0-9]{1,3}\Z')
+    fail_msg: >-
+      tailguard: tailguard_bind_addr is not an IPv4 address. Set <host-lan-ip> to publish the WireGuard and tailscale
+      ports on that address only, or 0.0.0.0 to publish them on all host addresses.
+    quiet: true
+
+- name: Check tailguard_status_port
+  ansible.builtin.assert:
+    that: tailguard_status_port | string == '' or (tailguard_status_port | string is regex('^[0-9]{1,5}\Z') and tailguard_status_port | int < 65536)
+    fail_msg: >-
+      tailguard: tailguard_status_port must be empty (the status page is off) or a port number (the status page is on,
+      on wg0 and tailscale0).
+    quiet: true
+
+- name: Check the image pin
+  ansible.builtin.assert:
+    that:
+      - tailguard_image is regex('^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?\Z')
+      - tailguard_image is regex('(@sha256:[0-9a-f]{64}|:[A-Za-z0-9._-]+)\Z')
+      - tailguard_image is not regex(':(latest|main)\Z')
+    fail_msg: >-
+      tailguard: tailguard_image must name a release (<image>:X.Y.Z) or a digest (<image>@sha256:...), not latest,
+      main or no tag. Got '{{ tailguard_image }}'.
+    quiet: true
+
+- name: Check the directory and the WireGuard settings
+  ansible.builtin.assert:
+    that:
+      - tailguard_dir is regex('^/[A-Za-z0-9._/-]+\Z')
+      - tailguard_dir not in ['/', '/etc', '/var', '/opt', '/root', '/home', '/tmp']
+      - tailguard_wg_port | int > 0 and tailguard_wg_port | int < 65536
+      - tailguard_wg_address | length > 0
+      - tailguard_wg_address | select('match', '^[0-9A-Fa-f:.]+/[0-9]{1,3}\Z') | list | length == tailguard_wg_address | length
+      - tailguard_ipv6_subnet == '' or tailguard_ipv6_subnet is regex('^[0-9A-Fa-f:]+/[0-9]{1,3}\Z')
+      - tailguard_block_derp_regions is regex('^[A-Za-z0-9 -]*\Z')
+      - tailguard_nameservers is regex('^[0-9A-Fa-f:., ]*\Z')
+    fail_msg: >-
+      tailguard: tailguard_dir must be an absolute path of its own (not / or a system directory), tailguard_wg_port a
+      UDP port, tailguard_wg_address a list of address/prefix entries, tailguard_ipv6_subnet empty or a prefix,
+      tailguard_block_derp_regions region codes and tailguard_nameservers IP addresses.
+    quiet: true
+
+# A WireGuard key is 32 bytes in base64: 43 characters and "=". The last character before "=" has 4 free bits.
+- name: Check the peers
+  ansible.builtin.assert:
+    that:
+      - tailguard_peers | map(attribute='name', default='') | select('match', '^[A-Za-z0-9._-]+\Z') | list | length == tailguard_peers | length
+      - tailguard_peers | map(attribute='name') | unique | list | length == tailguard_peers | length
+      - tailguard_peers | map(attribute='public_key', default='') | select('match', '^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw480]=\Z') | list | length == tailguard_peers | length
+      - tailguard_peers | map(attribute='public_key') | unique | list | length == tailguard_peers | length
+      - tailguard_peers | map(attribute='preshared_key', default='') | reject('equalto', '') | reject('match', '^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw480]=\Z') | list | length == 0
+      - tailguard_peers | map(attribute='allowed_ips', default=[]) | map('length') | select('equalto', 0) | list | length == 0
+      - tailguard_peers | map(attribute='allowed_ips', default=[]) | flatten | reject('match', '^[0-9A-Fa-f:.]+/[0-9]{1,3}\Z') | list | length == 0
+    fail_msg: >-
+      tailguard: each entry of tailguard_peers needs a unique name ([A-Za-z0-9._-]), a unique public_key (a WireGuard
+      key, 44 characters of base64), allowed_ips (a list of address/prefix entries, not empty) and, optionally, a
+      preshared_key (a WireGuard key).
+    # quiet: a failed assert shows the condition text and this message, never the values (preshared keys are secret).
+    quiet: true

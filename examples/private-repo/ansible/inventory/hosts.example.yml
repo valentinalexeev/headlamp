@@ -16,3 +16,9 @@ all:
         bridge1:
           ansible_host: bridge1.tailnet.example.com   # the floating IP for the first run
           ansible_user: debian                        # Debian 13; "ubuntu" on an Ubuntu image
+    # A tailguard WireGuard server (#392). Empty: no host runs it. Add a host, for example a home server:
+    #   tg1:
+    #     ansible_host: tg1.tailnet.example.com
+    #     ansible_user: ubuntu
+    tailguard:
+      hosts: {}

@@ -1,0 +1,60 @@
+---
+# The WireGuard server key is made on the host and stays there: wg0.conf loads it with PostUp, so Ansible never reads
+# it. Only the public key comes back, to print it.
+- name: Create the WireGuard server key when it does not exist
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=none
+      - --entrypoint=sh
+      - "--volume={{ tailguard_dir }}/config:/k"
+      - "{{ tailguard_image }}"
+      - -c
+      - umask 077 && wg genkey > /k/server.key.new && mv /k/server.key.new /k/server.key
+    creates: "{{ tailguard_dir }}/config/server.key"
+  become: true
+  when: tailguard_docker | bool
+
+- name: Write the WireGuard server public key
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=none
+      - --entrypoint=sh
+      - "--volume={{ tailguard_dir }}/config:/k"
+      - "{{ tailguard_image }}"
+      - -c
+      - umask 022 && wg pubkey < /k/server.key > /k/server.pub.new && mv /k/server.pub.new /k/server.pub
+    creates: "{{ tailguard_dir }}/config/server.pub"
+  become: true
+  when: tailguard_docker | bool
+
+- name: Look for the server public key
+  ansible.builtin.stat:
+    path: "{{ tailguard_dir }}/config/server.pub"
+  become: true
+  register: tailguard_pub_stat
+
+- name: Read the server public key
+  ansible.builtin.slurp:
+    src: "{{ tailguard_dir }}/config/server.pub"
+  become: true
+  register: tailguard_pub
+  when: tailguard_pub_stat.stat.exists
+
+# wg0.conf holds the preshared keys of the peers: no log and no diff.
+- name: Write wg0.conf
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: "{{ tailguard_dir }}/config/wg0.conf"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  no_log: true
+  diff: false
+  register: tailguard_wg_conf

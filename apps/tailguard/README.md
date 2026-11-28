@@ -7,8 +7,13 @@ leaves through a Tailscale exit node.
 It works against the control plane of Tailscale or a headscale server (see the end of this
 file). The examples below call the exit node `my-exit`.
 
-This is an **operator-run** unit (like `apps/*`). Ansible and Terraform do not
-manage it. Key material lives only on the host, never in the repo (`.env`,
+You can install it in two ways:
+
+- With the Ansible role `ansible/roles/tailguard` (#392). The role does the "Deploy" procedure below. Its README
+  gives the variables.
+- By hand, with the "Deploy" procedure below.
+
+Key material lives only on the host, never in the repo (`.env`,
 `config/wg0.conf`, and `state/` are gitignored).
 
 TailGuard runs its **own** in-container Tailscale as a separate node

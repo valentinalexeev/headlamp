@@ -1,6 +1,7 @@
 # TailGuard — WireGuard server bridged to a Tailscale exit node. See README.md.
 #
-# Operator-run on the Docker host: `docker compose up -d`. Not Ansible/Terraform managed.
+# Operator-run on the Docker host: `docker compose up -d`. The Ansible role ansible/roles/tailguard renders the same
+# services from its own template (#392): keep the two in step.
 services:
   tailguard:
     # The headlamp image (#391): upstream tailguard at a pinned digest, tailscale at TAILSCALE_VERSION, and the
@@ -27,6 +28,11 @@ services:
       - net.ipv4.ip_forward=1
       - net.ipv6.conf.all.forwarding=1
       - net.ipv4.conf.all.src_valid_mark=1
+      # Loose reverse-path filter, as tailscaled wants on a node that uses an exit node. With an exit node,
+      # tailscale routes almost every address through tailscale0 (table 52), so a strict filter (1, as the
+      # container got on Ubuntu) drops the WireGuard UDP that the peers send to eth0.
+      - net.ipv4.conf.all.rp_filter=2
+      - net.ipv4.conf.default.rp_filter=2
     networks: [ip6net]
     # TG_BIND_ADDR (#390): the host address that the ports listen on, normally <host-lan-ip>. 0.0.0.0 = all addresses.
     ports:

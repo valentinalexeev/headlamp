@@ -88,3 +88,30 @@ in_image() {
   assert_failure 64
   assert_output --partial "TG_LAN_ACCESS is not set"
 }
+
+# The upstream entrypoint exits on an empty TG_WEBUI_PORT; the compose file sets it empty when TG_STATUS_PORT is
+# empty (the default). The headlamp entrypoint unsets it first. The fake upstream entrypoint prints what it gets.
+@test "image: an empty TG_WEBUI_PORT is unset before the upstream entrypoint" {
+  in_image 'true'
+  run docker run --rm -e TG_WEBUI_PORT= --entrypoint sh "$TAILGUARD_IMAGE" -c \
+    'printf "#!/bin/sh\necho \"port=\${TG_WEBUI_PORT-unset} args=\$*\"\n" > /tailguard/entrypoint.sh &&
+     /usr/local/bin/headlamp-entrypoint.sh a b'
+  assert_success
+  assert_output "port=unset args=a b"
+}
+
+@test "image: a set TG_WEBUI_PORT reaches the upstream entrypoint" {
+  in_image 'true'
+  run docker run --rm -e TG_WEBUI_PORT=8088 --entrypoint sh "$TAILGUARD_IMAGE" -c \
+    'printf "#!/bin/sh\necho \"port=\${TG_WEBUI_PORT-unset}\"\n" > /tailguard/entrypoint.sh &&
+     /usr/local/bin/headlamp-entrypoint.sh'
+  assert_success
+  assert_output "port=8088"
+}
+
+@test "image: the entrypoint is the headlamp wrapper" {
+  [ -n "${TAILGUARD_IMAGE:-}" ] || skip "TAILGUARD_IMAGE is not set (make test-tailguard builds it)"
+  run docker image inspect -f '{{json .Config.Entrypoint}}' "$TAILGUARD_IMAGE"
+  assert_success
+  assert_output '["/usr/local/bin/headlamp-entrypoint.sh"]'
+}

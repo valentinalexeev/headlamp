@@ -1,0 +1,3 @@
+# Known false positive: a test join key literal in the first commit of #492 (tailguard role). The test now builds it
+# at run time. Format: <commit>:<file>:<rule>:<line>.
+81eda646f6609b3a7c20e0c0124f6b72739d6e68:ansible/roles/tailguard/tests/render.sh:generic-api-key:22

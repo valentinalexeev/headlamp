@@ -3,20 +3,25 @@ package policy
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/authz"
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/policymap"
 )
 
 // historyScan is how many history rows Attention reads to find the pending change's apply time.
 const historyScan = 20
 
-// Attention reports the change that waits for confirmation (timed) and a revert that is stuck (critical).
+// Attention reports the change that waits for confirmation (timed), a revert that is stuck (critical), and the tags,
+// groups and users of the live policy that match no headscale node (info, #432).
 // Only POLICY_ADMIN_USERS see it. An inactive console reports nothing. A store that cannot be read is an
 // error, which the core shows as "unknown".
-func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionItem, []core.SystemLine, error) {
+func (m *Module) Attention(ctx context.Context, login string) ([]core.AttentionItem, []core.SystemLine, error) {
 	if m.store == nil {
 		return nil, nil, nil
 	}
@@ -39,8 +44,17 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 	if len(hist) > 0 {
 		line.Summary = fmt.Sprintf("Last change #%d, %s", hist[0].ID, hist[0].State)
 	}
+	unmatched, err := m.unmatchedItems(ctx)
+	if err != nil {
+		// The pending change still shows. With nothing pending, the line says that the check could not look, so an
+		// unmatched item that is missing now has not cleared.
+		slog.Warn("policy attention cannot check the selectors", "cause", errCause(err))
+		if !pending {
+			line.State, line.Summary = "unknown", "Cannot check which nodes the policy selectors match"
+		}
+	}
 	if !pending {
-		return nil, []core.SystemLine{line}, nil
+		return unmatched, []core.SystemLine{line}, nil
 	}
 
 	since := p.AppliedAt
@@ -59,7 +73,7 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 		it.Detail = fmt.Sprintf("The automatic revert is failing and keeps retrying (failed attempts: %d). Open the policy page to revert it or confirm it.", p.Attempts)
 		it.ActionLabel = "Open policy"
 		line.State, line.Summary = "critical", fmt.Sprintf("Change #%d is stuck", p.ID)
-		return []core.AttentionItem{it}, []core.SystemLine{line}, nil
+		return append([]core.AttentionItem{it}, unmatched...), []core.SystemLine{line}, nil
 	}
 	it.Level = core.LevelTimed
 	it.Title = fmt.Sprintf("Policy change #%d is waiting for confirmation", p.ID)
@@ -69,7 +83,93 @@ func (m *Module) Attention(_ context.Context, login string) ([]core.AttentionIte
 	}
 	it.ActionLabel = "Review and confirm"
 	line.State, line.Summary = "waiting", fmt.Sprintf("Change #%d waits for confirmation", p.ID)
-	return []core.AttentionItem{it}, []core.SystemLine{line}, nil
+	return append([]core.AttentionItem{it}, unmatched...), []core.SystemLine{line}, nil
+}
+
+// unmatchedMax caps the unmatched-selector items of one answer; the rest are on the policy map.
+const unmatchedMax = 20
+
+// NodeLister is the optional part of the headscale client that lets Attention find the policy selectors that match
+// no node.
+type NodeLister interface {
+	ListNodes(ctx context.Context) ([]headscale.Node, error)
+}
+
+// unmatchedItems returns one info item for each tag, group or user of the live policy that matches no headscale node
+// (#432, ADR 0005). It returns nothing when the client cannot list nodes and users. The items never carry policy
+// text other than the selector names.
+func (m *Module) unmatchedItems(ctx context.Context) ([]core.AttentionItem, error) {
+	if m.svc == nil {
+		return nil, nil
+	}
+	nodes, okNodes := m.svc.api.(NodeLister)
+	users, okUsers := m.svc.api.(UserLister)
+	if !okNodes || !okUsers {
+		return nil, nil
+	}
+	text, _, err := m.svc.Current(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read the policy: %w", err)
+	}
+	if len(text) > m.svc.maxBytes {
+		return nil, ErrTooLarge
+	}
+	g, err := policymap.Build(text)
+	if err != nil {
+		return nil, err
+	}
+	hn, err := nodes.ListNodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list nodes: %w", err)
+	}
+	hu, err := users.ListUsers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	var out []core.AttentionItem
+	for _, n := range policymap.Unmatched(g, devices(hn, hu)) {
+		if len(out) == unmatchedMax {
+			break
+		}
+		it := core.AttentionItem{
+			ID: "policy-unmatched-" + n.ID, Source: "policy", Level: core.LevelInfo,
+			ActionLabel: "Open policy map", ActionPath: "/policy/map?select=" + url.QueryEscape(n.ID),
+		}
+		switch n.Kind {
+		case policymap.KindTag:
+			it.Title = fmt.Sprintf("No node has the policy tag %s", n.ID)
+			it.Detail = "The rules that name this tag apply to no node."
+		case policymap.KindGroup:
+			it.Title = fmt.Sprintf("The policy group %s matches no node", n.ID)
+			it.Detail = "No member of this group has a node without a tag. The rules that name this group apply to no node."
+		default:
+			it.Title = fmt.Sprintf("The policy user %s matches no node", n.ID)
+			it.Detail = "This user has no node without a tag. The rules that name this user apply to no node."
+		}
+		out = append(out, it)
+	}
+	return out, nil
+}
+
+// devices converts the headscale nodes for policymap.Unmatched. A tagged node belongs to its tags only.
+func devices(nodes []headscale.Node, users []headscale.User) []policymap.Device {
+	byID := make(map[uint64]headscale.User, len(users))
+	for _, u := range users {
+		byID[u.ID] = u
+	}
+	out := make([]policymap.Device, 0, len(nodes))
+	for _, n := range nodes {
+		d := policymap.Device{Tags: n.Tags}
+		if u, ok := byID[n.UserID]; ok && len(n.Tags) == 0 && n.UserID != 0 {
+			for _, form := range []string{u.Name + "@", u.Name, u.Email} {
+				if form != "" && form != "@" {
+					d.Owner = append(d.Owner, form)
+				}
+			}
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // HasActivity reports whether the module keeps a change history, which is when the console is active.

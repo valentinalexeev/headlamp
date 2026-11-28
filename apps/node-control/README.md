@@ -1805,6 +1805,23 @@ The map gives these errors:
 
 The map never logs policy text.
 
+#### Selectors that match no node
+
+The Overview shows one `info` attention item for each tag, group and user of the live policy that matches no headscale
+node (#432). The rules that name such a selector apply to no node. The items obey these rules:
+
+- A tag matches a node that has the tag (both tag models).
+- A user matches a node of that user that has no tag. A user that is only a tag owner or a group member gets no item.
+- A group matches when one of its members matches.
+- The item goes away when a node matches the selector.
+- The item links to `/policy/map?select=<selector>`. The page comes with #429. Until then, the link gives 404.
+- You can acknowledge the item, as all attention items.
+- The Overview shows 20 items at most. The policy map shows all of them.
+- Only users with `policy.view` see the items.
+
+To find the items, node-control reads the policy, the nodes and the users from headscale each time the Overview loads.
+If one of these reads fails, the "Policy" line shows `unknown`.
+
 ## Funnel module (optional)
 
 Set `FUNNEL_DB` to make node-control the single admin surface of the `funnel-ingress` app (`apps/funnel-ingress`). The ingress has no admin page of its own. It **pulls** its configuration from here and **reports** what it observes. Without `FUNNEL_DB`, the app registers nothing. The module needs the policy console (`POLICY_DB`), because every ACL change that it makes goes through the confirm-or-revert of the console. The same `ENROLL_ALLOWED_HOSTS` rule (no bare `*`) applies.

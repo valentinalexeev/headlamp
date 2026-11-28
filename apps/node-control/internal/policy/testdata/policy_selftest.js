@@ -92,8 +92,8 @@ function pageEls() {
   const mk = (tag) => { const n = new FakeNode(tag); n.isRoot = true; return n; };
   const els = { sub: mk('p'), error: mk('div'), notice: mk('div'), pending: mk('section'), pendtitle: mk('div'), pendtext: mk('p'), pendbtns: mk('div'),
     diffbox: mk('section'), difftitle: mk('h2'), diffmeta: mk('span'), diff: mk('pre'), lockrow: mk('div'), editlock: mk('button'), lockhint: mk('span'),
-    editbox: mk('section'), editor: mk('textarea'), editbtns: mk('div'), message: mk('p'), prevdiff: mk('pre'), warnings: mk('ul'), rows: mk('tbody') };
-  [els.error, els.notice, els.pending, els.diffbox, els.lockrow, els.editbox, els.prevdiff].forEach((n) => { n.hidden = true; });
+    editbox: mk('section'), editor: mk('textarea'), editbtns: mk('div'), message: mk('p'), prevdiff: mk('pre'), warnings: mk('ul'), mapsum: mk('p'), mapedges: mk('ul'), rows: mk('tbody') };
+  [els.error, els.notice, els.pending, els.diffbox, els.lockrow, els.editbox, els.prevdiff, els.mapsum].forEach((n) => { n.hidden = true; });
   return els;
 }
 let loadedAt = appliedSec + 30;
@@ -252,6 +252,43 @@ const historyButtons = (els) => findAll(els.rows, (n) => n.tag === 'button');
     await ctrl.preview();
     assert.strictEqual(els.message.textContent, 'Invalid: bad rule');
     assert.ok(els.prevdiff.textContent.includes('(no differences)'));
+  }
+
+  // previewShowsTheReachabilitySummary: the map preview gets the same draft, and its edges are text
+  {
+    const { els, ctrl } = mountPage();
+    ctrl.update(quiet());
+    els.editor.value = '{"acls":[9]}';
+    const edge = (from, to) => ({ from, to, proto: 'tcp', ports: '443', refs: [{ section: 'acls', index: 0, line: 5 }] });
+    const mapDiff = { added: [edge('group:a', '<b>autogroup:internet</b>')], removed: [edge('carol@', 'tag:web')], changed: [],
+      members_added: [{ group: 'group:a', member: 'bob@' }], members_removed: [], new_paths: 3, removed_paths: 1, paths_truncated: false };
+    fetchReply = (url) => (url === '/policy/api/map/preview'
+      ? json({ nodes: [], edges: [], warnings: [], truncated: false, live_truncated: false, diff: mapDiff })
+      : json({ valid: true, error: '', diff: DIFF, warnings: [] }));
+    const before = sent('POST', '/policy/api/map/preview').length;
+    await ctrl.preview();
+    const calls = sent('POST', '/policy/api/map/preview');
+    assert.strictEqual(calls.length, before + 1, 'one map preview');
+    assert.strictEqual(JSON.parse(calls[calls.length - 1].body).policy, '{"acls":[9]}');
+    assert.strictEqual(els.mapsum.hidden, false);
+    assert.strictEqual(els.mapsum.textContent, 'Reachability: 3 new paths, 1 removed path');
+    const items = els.mapedges.children;
+    assert.strictEqual(items.length, 3);
+    assert.ok(hasClass(items[0], 'add') && items[0].textContent.includes('group:a \u2192 <b>autogroup:internet</b> tcp 443 (acls[0] line 5)'));
+    assert.ok(hasClass(items[1], 'add') && items[1].textContent === '+ bob@ in group:a');
+    assert.ok(hasClass(items[2], 'rem') && items[2].textContent.startsWith('- carol@'));
+    assert.ok(findAll(els.mapedges, (n) => n.tag === 'b').length === 0, 'no markup');
+    // no change, a cut map, and a failed map preview that keeps the text diff
+    assert.strictEqual(policy.pathSummary({ new_paths: 0, removed_paths: 0, changed: [] }), 'No change of reachability.');
+    assert.strictEqual(policy.pathSummary({ new_paths: 1, removed_paths: 0, changed: [{}], paths_truncated: true }),
+      '1 new path, 0 removed paths, 1 changed access. The map is cut, so the numbers can be too low.');
+    fetchReply = (url) => (url === '/policy/api/map/preview' ? json({ detail: 'the draft is not a JSON or HuJSON object' }, 422)
+      : json({ valid: false, error: 'bad', diff: DIFF, warnings: [] }));
+    await ctrl.preview();
+    assert.strictEqual(els.prevdiff.hidden, false);
+    assert.ok(els.mapsum.textContent.startsWith('Reachability: not available'));
+    assert.strictEqual(els.mapedges.children.length, 0);
+    assert.strictEqual(els.error.hidden, true, 'a failed map preview is not a page error');
   }
 
   // historyRevertDisabledWhilePending

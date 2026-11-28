@@ -136,6 +136,7 @@ var allRoutes = []struct{ method, path string }{
 	{"GET", "/policy/static/policy.js"},
 	{"GET", "/policy/state"},
 	{"GET", "/policy/api/map"},
+	{"POST", "/policy/api/map/preview"},
 	{"POST", "/policy/preview"},
 	{"POST", "/policy/apply"},
 	{"POST", "/policy/confirm"},
@@ -228,7 +229,7 @@ func TestEveryRoute403ForNonAdminTaggedAndWhoIsError(t *testing.T) {
 
 func TestPostRequiresJSON(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
-	for _, p := range []string{"/policy/preview", "/policy/apply", "/policy/confirm", "/policy/revert/1", "/policy/revert-now"} {
+	for _, p := range []string{"/policy/preview", "/policy/api/map/preview", "/policy/apply", "/policy/confirm", "/policy/revert/1", "/policy/revert-now"} {
 		rec := h.do("POST", p, adminAddr, "policy=x", false)
 		if rec.Code != 422 {
 			t.Errorf("%s: %d", p, rec.Code)

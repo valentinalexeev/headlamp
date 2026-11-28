@@ -37,6 +37,56 @@
     });
   }
 
+  function plural(n, one) { return n + ' ' + one + (n === 1 ? '' : 's'); }
+
+  // pathSummary is the one-line reachability summary of a map preview diff (#431): the paths, with groups expanded
+  // to their members, that the draft adds and removes.
+  function pathSummary(d, cut) {
+    d = hl.obj(d);
+    var added = Number(d.new_paths) || 0;
+    var removed = Number(d.removed_paths) || 0;
+    var changed = hl.arr(d.changed).length;
+    var text = added || removed || changed
+      ? plural(added, 'new path') + ', ' + plural(removed, 'removed path')
+      : 'No change of reachability.';
+    if (changed) { text += ', ' + plural(changed, 'changed access'); }
+    if (cut || d.paths_truncated) { text += '. The map is cut, so the numbers can be too low.'; }
+    return text;
+  }
+
+  // edgeLine is one added or removed edge as text: ends, access and rule references.
+  function edgeLine(e) {
+    e = hl.obj(e);
+    var access = [e.proto, e.ports].filter(Boolean).join(' ');
+    var refs = hl.arr(e.refs).slice(0, 3).map(function (r) {
+      r = hl.obj(r);
+      return label(r.section, 20) + '[' + Number(r.index) + '] line ' + Number(r.line);
+    }).join(', ');
+    return label(e.from, 100) + ' \u2192 ' + label(e.to, 100) + (access ? ' ' + label(access, 100) : '') +
+      (refs ? ' (' + refs + ')' : '');
+  }
+
+  // drawMapDiff writes the summary and up to MAP_LINES lines of added and removed edges and group members, as text.
+  var MAP_LINES = 50;
+  function drawMapDiff(sum, list, m) {
+    m = hl.obj(m);
+    var d = hl.obj(m.diff);
+    hl.clear(list);
+    sum.hidden = false;
+    sum.textContent = 'Reachability: ' + pathSummary(d, m.truncated || m.live_truncated);
+    var lines = [];
+    hl.arr(d.added).forEach(function (e) { lines.push(['add', '+ ' + edgeLine(e)]); });
+    hl.arr(d.members_added).forEach(function (x) {
+      lines.push(['add', '+ ' + label(hl.obj(x).member, 100) + ' in ' + label(hl.obj(x).group, 100)]);
+    });
+    hl.arr(d.removed).forEach(function (e) { lines.push(['rem', '- ' + edgeLine(e)]); });
+    hl.arr(d.members_removed).forEach(function (x) {
+      lines.push(['rem', '- ' + label(hl.obj(x).member, 100) + ' in ' + label(hl.obj(x).group, 100)]);
+    });
+    lines.slice(0, MAP_LINES).forEach(function (l) { list.appendChild(hl.el('li', l[0], l[1])); });
+    if (lines.length > MAP_LINES) { list.appendChild(hl.el('li', 't3', 'and ' + (lines.length - MAP_LINES) + ' more')); }
+  }
+
   var STATE_STATUS = { pending: ['warn', 'Pending'], confirmed: ['ok', 'Confirmed'], reverted: ['off', 'Reverted'] };
 
   // mount wires the page's elements to the data. deps (all optional): now() for the clock, reload() to reload the
@@ -53,7 +103,7 @@
     var st = {
       state: null, pending: null, history: [], loaded: false, failed: false, busy: false, receivedAt: 0,
       loadedText: null, base: '', baseSeen: '', lastPoll: 0, loading: false, loadErr: false,
-      pendSig: null, editSig: null, histSig: null, countEl: null, diffText: null, gen: 0, loadSeq: 0, errKind: ''
+      pendSig: null, editSig: null, histSig: null, countEl: null, diffText: null, gen: 0, loadSeq: 0, previewSeq: 0, errKind: ''
     };
     var ctrl = {};
 
@@ -325,6 +375,7 @@
       setNotice('');
       els.prevdiff.hidden = true;
       hl.clear(els.warnings);
+      clearMap();
       return load(true);
     };
 
@@ -396,17 +447,43 @@
       }, 'Revert of #' + hid, true);
     };
 
+    function clearMap() {
+      if (!els.mapsum) { return; }
+      els.mapsum.hidden = true;
+      els.mapsum.textContent = '';
+      hl.clear(els.mapedges);
+    }
+
+    // previewMap asks for the reachability diff of the draft. It only adds to the preview: when it fails, the
+    // summary says so and the text diff stays.
+    function previewMap(text, seq) {
+      if (!els.mapsum) { return Promise.resolve(); }
+      return hl.api('POST', '/policy/api/map/preview', { policy: text }).then(function (m) {
+        if (seq !== st.previewSeq) { return; }
+        drawMapDiff(els.mapsum, els.mapedges, m);
+      }, function (err) {
+        if (seq !== st.previewSeq) { return; }
+        clearMap();
+        els.mapsum.hidden = false;
+        els.mapsum.textContent = 'Reachability: not available (' + label(err && err.message, 200) + ').';
+      });
+    }
+
     ctrl.preview = function () {
       if (st.busy || st.pending) { return Promise.resolve(); }
       setError('');
       setMessage('');
-      return hl.api('POST', '/policy/preview', { policy: els.editor.value }).then(function (p) {
+      var text = els.editor.value;
+      var seq = ++st.previewSeq;
+      clearMap();
+      return hl.api('POST', '/policy/preview', { policy: text }).then(function (p) {
         p = hl.obj(p);
         setMessage(p.valid ? 'Valid.' : 'Invalid: ' + label(p.error, 300));
         els.prevdiff.hidden = false;
         drawDiff(els.prevdiff, p.diff || '(no differences)');
         hl.clear(els.warnings);
         hl.arr(p.warnings).slice(0, 50).forEach(function (w) { els.warnings.appendChild(hl.el('li', null, label(w, 300))); });
+        return previewMap(text, seq);
       }, function (err) { fail(err, 'Preview'); });
     };
 
@@ -422,6 +499,7 @@
         st.busy = false;
         els.prevdiff.hidden = true;
         hl.clear(els.warnings);
+        clearMap();
         setMessage('');
         if (hl.obj(d).uncertain) { setError('The outcome is unknown. An automatic revert is armed; reload and check the policy.'); }
         else { setNotice('Applied as change #' + Number(hl.obj(d).change_id) + '. Confirm it to keep it.'); }
@@ -450,13 +528,13 @@
       pendtext: $('pendtext'), pendbtns: $('pendbtns'), diffbox: $('diffbox'), difftitle: $('difftitle'),
       diffmeta: $('diffmeta'), diff: $('diff'), lockrow: $('lockrow'), editlock: $('editlock'), lockhint: $('lockhint'),
       editbox: $('editbox'), editor: $('editor'), editbtns: $('editbtns'), message: $('message'),
-      prevdiff: $('prevdiff'), warnings: $('warnings'), rows: $('rows')
+      prevdiff: $('prevdiff'), warnings: $('warnings'), mapsum: $('mapsum'), mapedges: $('mapedges'), rows: $('rows')
     });
     var poller = hl.poll(ctrl.reload, POLL_MS);
     setInterval(function () { if (!document.hidden) { ctrl.tick(); } }, 1000);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) { poller.now(); } });
   }
 
-  hl.policy = { mount: mount, drawDiff: drawDiff, clock: clock, init: init };
+  hl.policy = { mount: mount, drawDiff: drawDiff, clock: clock, pathSummary: pathSummary, init: init };
   init();
 })();

@@ -51,6 +51,7 @@ func (c *console) register(mux *core.Mux, gate func(http.Handler) http.Handler) 
 	get("GET /policy/static/policy.js", asset("text/javascript; charset=utf-8", pageJS))
 	get("GET /policy/state", c.state)
 	get("GET /policy/api/map", c.policyMap)
+	post("POST /policy/api/map/preview", c.mapPreview)
 	post("POST /policy/preview", c.preview)
 	post("POST /policy/apply", c.apply)
 	post("POST /policy/confirm", c.confirm)
@@ -315,4 +316,58 @@ func (c *console) policyMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, mapJSON{Graph: g, UpdatedAt: updated})
+}
+
+// mapPreviewJSON is the answer of POST /policy/api/map/preview: the graph of the draft, its diff
+// against the live policy, and whether the live graph was cut (then the diff can be wrong).
+type mapPreviewJSON struct {
+	policymap.Graph
+	Diff          policymap.EdgeDiff `json:"diff"`
+	LiveTruncated bool               `json:"live_truncated"`
+	UpdatedAt     string             `json:"updated_at"`
+}
+
+// mapPreview serves the graph of a draft policy and its reachability diff against the live
+// policy (#431, ADR 0005). It takes the body of the preview, changes nothing and never logs
+// policy text.
+func (c *console) mapPreview(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Policy *string `json:"policy"`
+	}
+	if !c.readJSON(w, r, &in) {
+		return
+	}
+	if in.Policy == nil {
+		detail(w, http.StatusUnprocessableEntity, "policy is required")
+		return
+	}
+	if len(*in.Policy) > c.maxBytes {
+		fail(w, ErrTooLarge, 0, time.Time{})
+		return
+	}
+	if isBlank(*in.Policy) {
+		fail(w, ErrEmpty, 0, time.Time{})
+		return
+	}
+	text, updated, err := c.svc.Current(r.Context())
+	if err != nil {
+		fail(w, err, 0, time.Time{})
+		return
+	}
+	if len(text) > c.maxBytes {
+		fail(w, ErrTooLarge, 0, time.Time{})
+		return
+	}
+	live, err := policymap.Build(text)
+	if err != nil {
+		detail(w, http.StatusUnprocessableEntity, "the live policy is not a JSON or HuJSON object")
+		return
+	}
+	draft, err := policymap.Build(*in.Policy)
+	if err != nil {
+		detail(w, http.StatusUnprocessableEntity, "the draft is not a JSON or HuJSON object")
+		return
+	}
+	writeJSON(w, http.StatusOK, mapPreviewJSON{Graph: draft, Diff: policymap.Diff(live, draft),
+		LiveTruncated: live.Truncated, UpdatedAt: updated})
 }

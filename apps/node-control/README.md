@@ -1805,6 +1805,42 @@ The map gives these errors:
 
 The map never logs policy text.
 
+#### Reachability diff of a draft
+
+`POST /policy/api/map/preview` compares a draft policy with the live policy (#431). It needs `policy.view`. It changes
+nothing. The body is the same as the body of the preview: `{"policy": "<text>"}`. The answer has the fields of the
+graph of the draft, and these fields:
+
+| Field | Content |
+|---|---|
+| `diff.added` | The edges of the draft that the live policy does not have. Each edge has the rule references of the draft. |
+| `diff.removed` | The edges of the live policy that the draft does not have. Each edge has the rule references of the live policy. |
+| `diff.changed` | The `from` and `to` pairs that have an added and a removed edge, for example new ports. |
+| `diff.removed_nodes` | The nodes of the removed edges that the draft does not have. |
+| `diff.members_added`, `diff.members_removed` | The group members (`group`, `member`) that the draft adds or removes. |
+| `diff.new_paths`, `diff.removed_paths` | The number of paths that the draft adds or removes. A path is an edge with each group replaced by its members. Thus a new group member gives new paths, but no new edge. |
+| `diff.paths_truncated` | `true` when a policy has more than 100000 paths. The numbers of paths are then too low. |
+| `live_truncated` | `true` when the map of the live policy is cut. The diff can then show edges that are not changes. |
+| `updated_at` | The version of the live policy. |
+
+An edge is the same in the two policies when all its fields are the same, but not its rule references. Thus a rule
+that only moves is not a change.
+
+When you push **Preview** in the console, the console also sends the draft to this API. Under the text diff, it shows
+a summary, for example "Reachability: 3 new paths, 1 removed path". Under the summary, it shows the added edges and
+members (`+`) and the removed edges and members (`-`), with their rule references. It shows 50 lines at most. If the
+API fails, the summary says "not available" and the text diff stays. The summary does not replace the check of
+headscale.
+
+The API gives the same errors as the map. These errors are also possible:
+
+| Status | Cause |
+|---|---|
+| 413 | The draft is larger than `POLICY_MAX_BYTES`. |
+| 422 | The body has no `policy`, the draft is empty, or the draft is not a JSON or HuJSON object. |
+
+The API never logs policy text.
+
 ## Funnel module (optional)
 
 Set `FUNNEL_DB` to make node-control the single admin surface of the `funnel-ingress` app (`apps/funnel-ingress`). The ingress has no admin page of its own. It **pulls** its configuration from here and **reports** what it observes. Without `FUNNEL_DB`, the app registers nothing. The module needs the policy console (`POLICY_DB`), because every ACL change that it makes goes through the confirm-or-revert of the console. The same `ENROLL_ALLOWED_HOSTS` rule (no bare `*`) applies.

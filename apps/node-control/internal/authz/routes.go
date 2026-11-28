@@ -154,15 +154,19 @@ var Routes = map[string]Rule{
 	"POST /sessions/{node}/stop":       need(FeatureTasks, LevelOperate),
 
 	// policy
-	"GET /policy":                  need(FeaturePolicy, LevelView),
-	"GET /policy/static/policy.js": open,
-	"GET /policy/state":            need(FeaturePolicy, LevelView),
-	"GET /policy/api/map":          need(FeaturePolicy, LevelView),
-	"POST /policy/preview":         need(FeaturePolicy, LevelView),
-	"POST /policy/apply":           reauth(need(FeaturePolicy, LevelAdmin)),
-	"POST /policy/confirm":         need(FeaturePolicy, LevelAdmin),
-	"POST /policy/revert/{id}":     reauth(need(FeaturePolicy, LevelAdmin)),
-	"POST /policy/revert-now":      need(FeaturePolicy, LevelAdmin),
+	"GET /policy":                                need(FeaturePolicy, LevelView),
+	"GET /policy/static/policy.js":               open,
+	"GET /policy/map":                            need(FeaturePolicy, LevelView),
+	"GET /policy/static/map.js":                  open,
+	"GET /policy/static/map.css":                 open,
+	"GET /policy/static/vendor/cytoscape.min.js": open,
+	"GET /policy/state":                          need(FeaturePolicy, LevelView),
+	"GET /policy/api/map":                        need(FeaturePolicy, LevelView),
+	"POST /policy/preview":                       need(FeaturePolicy, LevelView),
+	"POST /policy/apply":                         reauth(need(FeaturePolicy, LevelAdmin)),
+	"POST /policy/confirm":                       need(FeaturePolicy, LevelAdmin),
+	"POST /policy/revert/{id}":                   reauth(need(FeaturePolicy, LevelAdmin)),
+	"POST /policy/revert-now":                    need(FeaturePolicy, LevelAdmin),
 
 	// funnel
 	"GET /funnel":                          need(FeatureFunnel, LevelView),

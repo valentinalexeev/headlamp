@@ -134,6 +134,10 @@ func (h *harness) apply(t *testing.T, policy string) *httptest.ResponseRecorder 
 var allRoutes = []struct{ method, path string }{
 	{"GET", "/policy"},
 	{"GET", "/policy/static/policy.js"},
+	{"GET", "/policy/map"},
+	{"GET", "/policy/static/map.js"},
+	{"GET", "/policy/static/map.css"},
+	{"GET", "/policy/static/vendor/cytoscape.min.js"},
 	{"GET", "/policy/state"},
 	{"GET", "/policy/api/map"},
 	{"POST", "/policy/preview"},
@@ -584,7 +588,8 @@ func TestStateShowsPendingSecondsLeft(t *testing.T) {
 
 func TestPageAndAssetsHaveSecurityHeaders(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
-	for _, p := range []string{"/policy", "/policy/static/policy.js"} {
+	for _, p := range []string{"/policy", "/policy/static/policy.js", "/policy/map", "/policy/static/map.js",
+		"/policy/static/map.css", "/policy/static/vendor/cytoscape.min.js"} {
 		rec := h.do("GET", p, adminAddr, "", false)
 		if rec.Code != 200 || rec.Body.Len() == 0 {
 			t.Fatalf("%s: %d", p, rec.Code)
@@ -611,22 +616,24 @@ func TestPageAndAssetsHaveSecurityHeaders(t *testing.T) {
 
 func TestPageHasNoInlineScriptOrExternalReferences(t *testing.T) {
 	h := newHarness(t, baseEnv(t))
-	for _, p := range []string{"/policy", "/policy/static/policy.js"} {
+	for _, p := range []string{"/policy", "/policy/static/policy.js", "/policy/map", "/policy/static/map.js", "/policy/static/map.css"} {
 		body := strings.ToLower(h.do("GET", p, adminAddr, "", false).Body.String())
 		for _, bad := range []string{"http://", "https://", "style=", "<style", "innerhtml"} {
 			if strings.Contains(body, bad) {
 				t.Errorf("%s contains %q", p, bad)
 			}
 		}
-		if p == "/policy" {
+		if p == "/policy" || p == "/policy/map" {
 			for _, part := range strings.Split(body, "<script")[1:] {
 				tag, _, _ := strings.Cut(part, ">")
 				if !strings.Contains(tag, "src=") || !strings.Contains(tag, "defer") {
 					t.Errorf("script tag must be a deferred file: <script%s>", tag)
 				}
 			}
+			// The map's one sheet holds the id that stops Cytoscape.js from inserting an inline style element.
+			page := strings.Replace(body, `<link rel="stylesheet" id="__________cytoscape_stylesheet" href="/policy/static/map.css">`, "", 1)
 			for _, bad := range []string{"<link", "<template"} {
-				if strings.Contains(body, bad) {
+				if strings.Contains(page, bad) {
 					t.Errorf("page contains %q", bad)
 				}
 			}

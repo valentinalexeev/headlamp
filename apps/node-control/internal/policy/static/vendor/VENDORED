@@ -1,0 +1,7 @@
+# Vendored third-party files of this directory, checked by scripts/check-vendored.sh (make check-vendored, in
+# make lint). One line for each file: <file> <version or -> <sha256> <source>. A file of the directory that is not
+# listed, a hash that differs, or a version that the file does not declare (version="X.Y.Z") fails the check.
+# To update: take the files from the npm tarball of the new release, verify the tarball against the registry
+# integrity value (npm view cytoscape@X.Y.Z dist.integrity), then change the version and hashes here.
+cytoscape.min.js 3.35.0 71fa9ebec21a7ca2c40cff6aacc30d1f6464e363662ad4b2c197e1adc770cd94 https://registry.npmjs.org/cytoscape/-/cytoscape-3.35.0.tgz#package/dist/cytoscape.min.js
+LICENSE - eb319c6e6f233607f71e8e2f450391751883cfc0eeb3ca7ef574c13d1d9c2203 https://registry.npmjs.org/cytoscape/-/cytoscape-3.35.0.tgz#package/LICENSE

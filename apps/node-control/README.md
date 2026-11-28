@@ -1763,7 +1763,61 @@ The policy map shows the live policy as a graph: who can reach what. The idea co
 (Apache-2.0). node-control copies no code from that project. The design is in ADR 0005
 (`docs/adr/0005-policy-map-in-node-control.md`).
 
-At this time, only the API is available (#428). The page comes with #429.
+The map has a page, the "Map" tab of the console (#429), and an API (#428).
+
+#### The Map tab
+
+The Map tab is `/policy/map`. The "Editor" and "Map" links at the top of the console change between the two tabs.
+The tab needs `policy.view`, the same as the console. It is read-only and available when the console is active
+(`POLICY_DB`). It needs no other variable.
+
+The tab shows the graph of `GET /policy/api/map`. Each selector is a node. Each path ("source can reach destination")
+is an arrow. These are the functions of the tab:
+
+| Function | How to use it |
+|---|---|
+| Pan, zoom and drag | Drag the background to pan. Use the mouse wheel or pinch to zoom. Drag a node to move it. |
+| Layout | Select "Force (cose)" (the default) or "Who → what (breadthfirst)". The page keeps the choice in the URL (`?layout=breadthfirst`). |
+| Search | Type a part of a name, a port or a protocol. The page highlights the nodes and paths that match and dims the other ones. |
+| Neighbours | Click a node. The page highlights the node, its paths and the nodes at their other ends. Click an arrow to highlight the path and its two ends. Click the background to stop the highlight. |
+| Tooltip | Put the pointer on a node or an arrow, or click it. A node shows its kind, members, owners, address, approvals and the number of paths. An arrow shows the access (protocol, ports, apps, SSH users), `via`, posture, and the rules with their line numbers (for example `acls[3], line 42`). |
+| Filter by kind | Click a kind (group, tag, user, host and so on) to hide or show its nodes. A hidden node also hides its paths. |
+| Fit | Click "Fit" to show the full graph. |
+| Table | Click "Table" to show the same paths as rows: source, destination, access and rules. Click a column head to sort. The search filters the rows. |
+
+The legend shows the colour of each kind. A dashed arrow is an SSH path. A node with a dashed border is a group, tag or
+host that no rule uses.
+
+The table view shows the same paths as the graph. Use it with a screen reader, because a screen reader cannot read the
+graph. The page opens in the table view on a narrow screen (760 px or less).
+
+If `truncated` is `true`, the page tells
+you that the map is cut. Then filter by kind, or use the table. If the graph cannot start, the page shows the table.
+
+The colours come from the tokens of `hl.css` (`--map-<kind>` in `static/map.css`). When the theme changes, the page
+reads them again and sets the graph style again.
+
+The graph library is the core of [Cytoscape.js](https://js.cytoscape.org/) 3.35.0 (MIT), with no extensions. The file
+is `internal/policy/static/vendor/cytoscape.min.js`, with its `LICENSE`. The page loads it from node-control, not from
+a CDN.
+
+`make vulncheck` and Dependabot do not see this file. `make check-vendored` (part of `make lint`) compares its
+version and SHA-256 with `static/vendor/VENDORED`. Thus a changed file fails CI. To update the library, do these steps:
+
+1. Download the npm tarball of the new release (`npm pack cytoscape@<version>`).
+2. Compare the tarball with the registry value (`npm view cytoscape@<version> dist.integrity`).
+3. Copy `package/dist/cytoscape.min.js` and `package/LICENSE` into `static/vendor/`.
+4. Write the new version and SHA-256 values in `static/vendor/VENDORED`.
+5. Run `make check-vendored` and `make test-node-control`.
+
+The page works under `ui.PageCSP`. Cytoscape.js usually adds an inline style element, which the CSP blocks. The
+page prevents this: its style sheet `static/map.css` has the ID that Cytoscape.js looks for.
+
+The test `TestMapPageRunsUnderPageCSP` loads the page in headless Chrome or Chromium and fails on a CSP violation. It needs a
+browser (`HEADLAMP_CHROME`, or `google-chrome` or `chromium` on `PATH`). Without a browser, the test does not run.
+With `HEADLAMP_BROWSER_TEST=require`, a missing browser fails the test.
+
+#### The API
 
 `GET /policy/api/map` returns the graph of the live policy. It needs `policy.view`, the same as the console. It changes
 nothing. It is available when the console is active (`POLICY_DB`).

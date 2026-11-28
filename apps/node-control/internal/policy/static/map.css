@@ -1,0 +1,33 @@
+/* headlamp console: the policy map (#429). This sheet carries the id __________cytoscape_stylesheet, so Cytoscape.js
+   finds "its" sheet and does not insert an inline style element (PageCSP allows styles from this origin only). The rule
+   below is the one Cytoscape would insert. */
+.__________cytoscape_container{position:relative}
+
+/* Map colours: hl.css tokens, read by map.js with getComputedStyle and set again when the theme changes. */
+.hl{--map-group:var(--ok);--map-tag:var(--warn);--map-user:var(--text);--map-host:var(--t2);--map-cidr:var(--t3);--map-autogroup:var(--ok);--map-internet:var(--crit);--map-any:var(--crit);--map-unknown:var(--t3);--map-edge:var(--line2);--map-label:var(--t2);--map-hi:var(--text);--map-bg:var(--surface)}
+
+.chips a.chip{text-decoration:none}
+.mapbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.mapbar .input{max-width:280px}
+.mapbar select.input{width:auto}
+.mapwrap{position:relative;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.mapcanvas{flex:1 1 480px;min-width:0;height:70vh;min-height:360px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.maptip{position:absolute;z-index:5;max-width:360px;padding:8px 10px;border:1px solid var(--line2);border-radius:6px;background:var(--raised);color:var(--text);font-size:12.5px;pointer-events:none;white-space:pre-line}
+.maplegend{flex:0 0 180px;list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--t2)}
+.maplegend li{display:flex;align-items:center;gap:8px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--map-unknown)}
+.sw.k-group{background:var(--map-group)}
+.sw.k-tag{background:var(--map-tag)}
+.sw.k-user{background:var(--map-user)}
+.sw.k-host{background:var(--map-host)}
+.sw.k-cidr{background:var(--map-cidr)}
+.sw.k-autogroup{background:var(--map-autogroup)}
+.sw.k-internet{background:var(--map-internet)}
+.sw.k-any{background:var(--map-any)}
+.sw.edge{height:2px;border-radius:0;background:var(--map-edge)}
+.sw.dashed{height:0;border-top:2px dashed var(--map-edge);background:transparent}
+.mapth{padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer}
+th[aria-sort="ascending"] .mapth::after{content:" \2191"}
+th[aria-sort="descending"] .mapth::after{content:" \2193"}
+@media (max-width:760px){.mapcanvas{height:55vh}.maplegend{flex-basis:100%;flex-direction:row;flex-wrap:wrap}}
+.sw.unused{background:transparent;border:2px dashed var(--map-label)}

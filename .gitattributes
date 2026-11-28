@@ -1,3 +1,7 @@
 # Encrypted blobs: sops rewrites every value on each write, so diffs are noise and a
 # textual merge is meaningless -- show them as binary and force a manual pick on conflict.
 terraform/*.enc.json  -diff -merge linguist-generated
+
+# Vendored third-party files (#429): byte-exact pins checked by scripts/check-vendored.sh; never normalise them.
+apps/node-control/internal/policy/static/vendor/** -text -diff linguist-vendored
+apps/node-control/internal/policy/static/vendor/VENDORED text diff -linguist-vendored

@@ -23,6 +23,19 @@ var pageHTML []byte
 //go:embed static/policy.js
 var pageJS []byte
 
+// The Map tab (#429, ADR 0005 section 5): its page, script and sheet, and the vendored Cytoscape.js core, whose
+// version and SHA-256 make check-vendored pins (static/vendor/VENDORED).
+var (
+	//go:embed static/map.html
+	mapHTML []byte
+	//go:embed static/map.js
+	mapJS []byte
+	//go:embed static/map.css
+	mapCSS []byte
+	//go:embed static/vendor/cytoscape.min.js
+	cytoscapeJS []byte
+)
+
 const (
 	historyLimit = 50
 	bodySlack    = 8192 // room for the JSON wrapper around a policy
@@ -49,6 +62,10 @@ func (c *console) register(mux *core.Mux, gate func(http.Handler) http.Handler) 
 	}
 	get("GET /policy", asset("text/html; charset=utf-8", pageHTML))
 	get("GET /policy/static/policy.js", asset("text/javascript; charset=utf-8", pageJS))
+	get("GET /policy/map", asset("text/html; charset=utf-8", mapHTML))
+	get("GET /policy/static/map.js", asset("text/javascript; charset=utf-8", mapJS))
+	get("GET /policy/static/map.css", asset("text/css; charset=utf-8", mapCSS))
+	get("GET /policy/static/vendor/cytoscape.min.js", asset("text/javascript; charset=utf-8", cytoscapeJS))
 	get("GET /policy/state", c.state)
 	get("GET /policy/api/map", c.policyMap)
 	post("POST /policy/preview", c.preview)

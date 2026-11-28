@@ -1,7 +1,7 @@
 # Developer targets for the headlamp core repo. Site operations (terraform, ansible, deploys) live in
 # YOUR private repo: see examples/private-repo/ and CLAUDE.md.
 .PHONY: test-sh bats-init test-control-host-gcp test-exit-node-gcp test-gateway-controller test-gateway-controller-e2e test-ssh-ca test-ssh-ca-e2e test-fleet-run test-fleet-check test-tailguard check-compat test-check-compat test-fly-snapshot test-site-mk release-preflight check-feature-defaults test-feature-defaults hooks test-tf-run test-check-denylist test-exit-node-state test-exit-node-health test-headscale-policy test-headscale-policy-e2e test-bridge-policy-e2e test-policy-apply-e2e test-serve-e2e test-serve-acme-e2e test-tailnet-dns-e2e test-funnel-tls-e2e test-edge-ddns-e2e test-exit-node-key-e2e test-relogin-e2e test-hysteria-e2e test-tailnet-access-e2e test-oidc-e2e test-ingress-agent test-ansible-roles test-ansible-os check-tailscale-pins test-tailscale-pins check-headscale-pin test-headscale-pin test-route-approval test-compose-control test-compose-env test-profile-clients test-control-host-aws test-runtime-config lint test-ssm-state-e2e test-ssm-state-vm-e2e \
-  test-tasks-cli test-bridge-selection test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals
+  test-tasks-cli test-bridge-selection test-task-runner test-node-control test-headscale-tag-node test-release test-manual-style check-manuals check-vendored
 
 hooks:
 	@git config core.hooksPath .githooks
@@ -86,6 +86,10 @@ test-tailscale-pins:
 
 check-headscale-pin:
 	scripts/check-headscale-pin.sh
+
+# #429: vendored third-party files (the policy map's Cytoscape.js) are the pinned release, by version and SHA-256.
+check-vendored:
+	scripts/check-vendored.sh
 
 test-headscale-pin:
 	scripts/test/headscale-pin/run_tests.sh
@@ -215,12 +219,13 @@ lint:
 	  scripts/headscale-tag-node.sh scripts/test/headscale-tag-node/run.sh scripts/test/bridge-selection/run.sh \
 	  .githooks/pre-commit .githooks/commit-msg \
 	  apps/tailguard/*.sh apps/headscale/*.sh scripts/test/feature-defaults/run.sh scripts/check-enroll-paths.sh scripts/smoke-test.sh scripts/test/exit-node-health/run_tests.sh \
-	  scripts/fleet-check.sh scripts/check-set-eu.sh \
+	  scripts/fleet-check.sh scripts/check-set-eu.sh scripts/check-vendored.sh \
 	  scripts/check-compat.sh scripts/test/check-compat/run_tests.sh \
 	  scripts/ssh-cert-sign.sh scripts/test/ssh-ca/run_tests.sh scripts/test/ssh-ca/e2e-docker.sh ansible/roles/ssh-ca/tests/render.sh
 	./scripts/check-set-eu.sh
 	./scripts/check-feature-defaults.sh
 	./scripts/check-enroll-paths.sh
+	./scripts/check-vendored.sh
 	-./scripts/check-statestore-port.sh
 
 # Helm chart charts/tailnet-connector (#103): helm lint, helm template | kubeconform (docker images if not installed).

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Policy map</title>
+<link rel="stylesheet" id="__________cytoscape_stylesheet" href="/policy/static/map.css">
+</head>
+<body>
+<div class="hl" id="policymap">
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>Policy map</h1>
+        <p class="t2" id="sub" aria-live="polite"></p>
+      </div>
+      <nav class="chips" aria-label="Policy views">
+        <a class="chip" href="/policy">Editor</a>
+        <a class="chip on" href="/policy/map" aria-current="page">Map</a>
+      </nav>
+    </div>
+
+    <div class="note crit" id="error" role="alert" hidden></div>
+    <div class="note warn" id="truncated" role="status" hidden>The policy has more selectors or paths than the map shows. Filter by kind, or use the table.</div>
+    <ul class="t2 small" id="warnings" aria-label="Map warnings"></ul>
+
+    <div class="mapbar">
+      <label class="sr" for="search">Search names, ports and protocols</label>
+      <input class="input" id="search" type="search" placeholder="Search names, ports, protocols" autocomplete="off" spellcheck="false">
+      <label class="t2 small" for="layout">Layout</label>
+      <select class="input" id="layout">
+        <option value="cose">Force (cose)</option>
+        <option value="breadthfirst">Who → what (breadthfirst)</option>
+      </select>
+      <div class="seg" role="group" aria-label="View">
+        <button type="button" class="on" id="showgraph" aria-pressed="true">Graph</button>
+        <button type="button" id="showtable" aria-pressed="false">Table</button>
+      </div>
+      <button type="button" class="btn sm" id="fit">Fit</button>
+      <span class="t3 small" id="count" aria-live="polite"></span>
+    </div>
+    <div class="chips" id="kinds" role="group" aria-label="Filter by kind"></div>
+
+    <section class="mapwrap" id="graphbox" aria-label="Graph">
+      <div class="mapcanvas" id="cy" role="img" aria-label="Graph of the policy. The table view lists the same paths as text."></div>
+      <div class="maptip" id="tip" role="tooltip" hidden></div>
+      <ul class="maplegend" id="legend" aria-label="Legend"></ul>
+    </section>
+
+    <section class="stack" id="tablebox" aria-label="Paths" hidden>
+      <div class="tw">
+        <table>
+          <thead><tr id="heads"></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+<script src="/policy/static/vendor/cytoscape.min.js" defer></script>
+<script src="/policy/static/map.js" defer></script>
+</body>
+</html>

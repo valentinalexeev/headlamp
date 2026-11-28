@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -37,7 +38,11 @@ type SelfUser struct {
 	LastLogin     int64
 	LastCheck     int64
 	CheckFailed   int64 // when the last re-check could not reach the issuer, 0 when it did
-	refresh       []byte
+	// Groups are the admitted values of the groups claim at the last sign-in or re-check (#461),
+	// GroupsAt when they were stored. GroupsAt 0: none (never stored, or the person signed out).
+	Groups   []string
+	GroupsAt int64
+	refresh  []byte
 }
 
 const selfSchema = `
@@ -52,7 +57,9 @@ CREATE TABLE IF NOT EXISTS oidc_users (
 	last_check   INTEGER NOT NULL DEFAULT 0,
 	check_failed INTEGER NOT NULL DEFAULT 0,
 	refresh      BLOB,
-	email_verified INTEGER NOT NULL DEFAULT 0
+	email_verified INTEGER NOT NULL DEFAULT 0,
+	oidc_groups  TEXT NOT NULL DEFAULT '',
+	groups_at    INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS oidc_sessions (
 	id_hash    TEXT PRIMARY KEY,
@@ -87,6 +94,15 @@ func OpenSelfStore(path string, key []byte, clock func() time.Time) (*SelfStore,
 	// A database of 0.15.x and before has no email_verified column (#253).
 	err = addSelfColumn(context.Background(), db, "oidc_users", "email_verified",
 		"INTEGER NOT NULL DEFAULT 0")
+	// A database of 0.21.x and before has no stored groups (#461).
+	if err == nil {
+		err = addSelfColumn(context.Background(), db, "oidc_users", "oidc_groups",
+			"TEXT NOT NULL DEFAULT ''")
+	}
+	if err == nil {
+		err = addSelfColumn(context.Background(), db, "oidc_users", "groups_at",
+			"INTEGER NOT NULL DEFAULT 0")
+	}
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open OIDC db: %w", err)
@@ -167,15 +183,19 @@ func addSelfColumn(ctx context.Context, db *sql.DB, table, col, decl string) err
 }
 
 const userCols = "subject, email, hs_user_id, locked, locked_by, lock_reason, last_login, " +
-	"last_check, check_failed, refresh, email_verified"
+	"last_check, check_failed, refresh, email_verified, oidc_groups, groups_at"
 
 func scanUser(sc interface{ Scan(...any) error }) (SelfUser, error) {
 	var u SelfUser
 	var locked, verified int
+	var groups string
 	err := sc.Scan(&u.Subject, &u.Email, &u.HSUserID, &locked, &u.LockedBy, &u.LockReason,
-		&u.LastLogin, &u.LastCheck, &u.CheckFailed, &u.refresh, &verified)
+		&u.LastLogin, &u.LastCheck, &u.CheckFailed, &u.refresh, &verified, &groups, &u.GroupsAt)
 	u.Locked = locked != 0
 	u.EmailVerified = verified != 0
+	if groups != "" {
+		_ = json.Unmarshal([]byte(groups), &u.Groups)
+	}
 	return u, err
 }
 
@@ -226,7 +246,38 @@ func (s *SelfStore) Checked(sub string, ok bool, refresh string) error {
 	return err
 }
 
-// SetLocked locks or unlocks a person. Locking also ends every session of the person and drops the refresh token.
+// SetGroups stores the admitted groups of a person at a sign-in (#461) and marks them fresh.
+func (s *SelfStore) SetGroups(sub string, groups []string) error {
+	return s.setGroups("UPDATE oidc_users SET oidc_groups=?, groups_at=? WHERE subject=?", sub, groups)
+}
+
+// RefreshGroups stores the groups of a re-check. It changes nothing for a person who signed out
+// since the last sign-in: only a new sign-in stores groups again.
+func (s *SelfStore) RefreshGroups(sub string, groups []string) error {
+	return s.setGroups(
+		"UPDATE oidc_users SET oidc_groups=?, groups_at=? WHERE subject=? AND groups_at>0", sub, groups)
+}
+
+func (s *SelfStore) setGroups(q, sub string, groups []string) error {
+	if groups == nil {
+		groups = []string{}
+	}
+	b, err := json.Marshal(groups)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(q, string(b), s.now(), sub)
+	return err
+}
+
+// ClearGroups drops the stored groups of a person (sign-out, lock): they count no more.
+func (s *SelfStore) ClearGroups(sub string) error {
+	_, err := s.db.Exec("UPDATE oidc_users SET oidc_groups='', groups_at=0 WHERE subject=?", sub)
+	return err
+}
+
+// SetLocked locks or unlocks a person. Locking also ends every session of the person and drops
+// the refresh token and the stored groups.
 func (s *SelfStore) SetLocked(sub string, locked bool, by, reason string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -241,7 +292,9 @@ func (s *SelfStore) SetLocked(sub string, locked bool, by, reason string) error 
 		return ErrNotFound
 	}
 	if locked {
-		if _, err := tx.Exec("UPDATE oidc_users SET refresh=NULL WHERE subject=?", sub); err != nil {
+		_, err = tx.Exec("UPDATE oidc_users SET refresh=NULL, oidc_groups='', groups_at=0 "+
+			"WHERE subject=?", sub)
+		if err != nil {
 			return err
 		}
 		if _, err := tx.Exec("DELETE FROM oidc_sessions WHERE subject=?", sub); err != nil {

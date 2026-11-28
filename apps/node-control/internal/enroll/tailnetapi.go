@@ -31,6 +31,7 @@ type grantBridgeView struct {
 	ConfigMode string           `json:"config_mode"`
 	Groups     []grantGroupView `json:"groups"`
 	Unresolved []string         `json:"unresolved"`
+	Resolved   []ResolvedGroup  `json:"resolved"`
 	Error      string           `json:"error,omitempty"`
 }
 
@@ -66,10 +67,11 @@ func (a *Admin) grantState(
 			ConfigMode: Ingress{TailnetAccess: in.TailnetAccess}.modeOrOff(),
 			Groups:     []grantGroupView{},
 			Unresolved: []string{},
+			Resolved:   []ResolvedGroup{},
 		}
 		if bg, ok := plan.bridges[in.Name]; ok {
 			resolved = append(resolved, bg)
-			bv.Unresolved, bv.Error = bg.Unresolved, bg.Error
+			bv.Unresolved, bv.Resolved, bv.Error = bg.Unresolved, bg.Resolved, bg.Error
 			have, known := stateGroups(cur, in.Name)
 			for _, g := range bg.Groups {
 				bv.Groups = append(

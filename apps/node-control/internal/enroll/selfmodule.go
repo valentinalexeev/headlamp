@@ -56,6 +56,9 @@ func selfConfig(env core.Env) (oidc.Config, SelfConfig, string, error) {
 			sc.ExtendWindow = time.Duration(n) * day
 		}},
 		{"OIDC_EXTEND_GRACE_DAYS", 0, 365, func(n int) { sc.ExtendGrace = time.Duration(n) * day }},
+		{"OIDC_GROUP_GRANT_HOURS", 0, 720, func(n int) {
+			sc.GroupGrantAge = time.Duration(n) * time.Hour
+		}},
 	}
 	for _, x := range ints {
 		v := strings.TrimSpace(env.Getenv(x.key))
@@ -83,6 +86,9 @@ func selfConfig(env core.Env) (oidc.Config, SelfConfig, string, error) {
 		return oidc.Config{}, SelfConfig{}, "", errors.New(errInviteVerifiedValue)
 	}
 	sc.defaults()
+	if sc.GroupGrantAge > 0 && sc.GroupGrantAge <= sc.Recheck {
+		return oidc.Config{}, SelfConfig{}, "", errors.New(errGroupGrantAge)
+	}
 	return rp, sc, env.Getenv("OIDC_DB"), nil
 }
 
@@ -131,6 +137,11 @@ func (m *Module) registerSelf(r *core.Routes, key []byte) error {
 	admin.registerInvites(r.Admin)
 	return nil
 }
+
+// errGroupGrantAge says why OIDC_GROUP_GRANT_HOURS must be longer than the re-check interval.
+const errGroupGrantAge = "OIDC_GROUP_GRANT_HOURS must be longer than OIDC_RECHECK_MINUTES " +
+	"(0, the default: tailnet grants to group:<name> give no access; N: they match the groups " +
+	"of the owner's last sign-in or re-check while these are at most N hours old)"
 
 // errInviteOnlyValue says what each value of OIDC_INVITE_ONLY does.
 const errInviteOnlyValue = "OIDC_INVITE_ONLY must be true or false (true: only an invitation " +

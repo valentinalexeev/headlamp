@@ -230,9 +230,13 @@ func newTailnetPlan(
 		}
 	}
 	all := AllTargets(cfg.Targets, doc)
+	var groups map[string][]string
+	if slices.ContainsFunc(doc.Grants, func(g TailnetGrant) bool { return g.Kind == SubjectGroup }) {
+		groups = cfg.OwnerGroups()
+	}
 	for _, in := range ings {
 		if doc.EffectiveMode(in) == TailnetGrants {
-			p.bridges[in.Name] = ResolveGrants(doc, all, in.Name, active)
+			p.bridges[in.Name] = ResolveGrants(doc, all, in.Name, active, groups)
 		}
 	}
 	return p

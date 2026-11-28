@@ -38,7 +38,7 @@ func TestResolveGrantsSubjects(t *testing.T) {
 		{Bridge: "other", Kind: SubjectDevice, Subject: "4", Target: "nas"},
 	}}
 	devs := []Device{dev(1, "alice"), dev(2, "bob"), dev(3, "carol"), dev(4, "dave"), dev(5, "carol")}
-	r := ResolveGrants(doc, gTargets, "b", devs)
+	r := ResolveGrants(doc, gTargets, "b", devs, nil)
 	if len(r.Groups) != 3 {
 		t.Fatalf("groups %+v", r.Groups)
 	}
@@ -67,7 +67,7 @@ func TestResolveGrantsLimit(t *testing.T) {
 		doc.Grants = append(doc.Grants, grant(SubjectDevice, fmt.Sprint(i), n))
 		devs = append(devs, dev(int64(i), ""))
 	}
-	r := ResolveGrants(doc, ts, "b", devs)
+	r := ResolveGrants(doc, ts, "b", devs, nil)
 	if len(r.Groups) != MaxGroupsPerBridge+2 || r.Error == "" {
 		t.Fatalf("%d %q", len(r.Groups), r.Error)
 	}

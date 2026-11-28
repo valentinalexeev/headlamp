@@ -576,10 +576,12 @@ func (s *SelfWeb) extend(w http.ResponseWriter, r *http.Request, sub, csrf strin
 	s.render(w, status, v)
 }
 
-func (s *SelfWeb) logout(w http.ResponseWriter, r *http.Request, _, _ string) {
+func (s *SelfWeb) logout(w http.ResponseWriter, r *http.Request, sub, _ string) {
+	sid := ""
 	if c, err := r.Cookie(sessionCookie); err == nil {
-		_ = s.self.users.EndSession(c.Value)
+		sid = c.Value
 	}
+	s.self.SignOut(sub, sid)
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	secHeaders(w)
 	http.Redirect(w, r, "/me", http.StatusSeeOther)

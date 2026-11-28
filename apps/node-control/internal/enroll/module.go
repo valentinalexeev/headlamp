@@ -133,7 +133,7 @@ func (m *Module) Register(r *core.Routes) error {
 	if len(key) < 16 {
 		return errors.New("ENROLL_SECRET_KEY must be at least 16 bytes")
 	}
-	cfg = cfg.WithKey([]byte(key)).WithTailnetDNS(m.tdns)
+	cfg = cfg.WithKey([]byte(key)).WithTailnetDNS(m.tdns).WithOwnerGroups(m.ownerGroups)
 	agentURL := m.env.Getenv("AGENT_URL")
 	if agentURL != "" {
 		u, err := url.Parse(agentURL)
@@ -185,6 +185,10 @@ func (m *Module) Register(r *core.Routes) error {
 	newPublicFor(store, reg, m.admin.sel).Register(r.Public)
 	return nil
 }
+
+// ownerGroups are the owner groups of self-enrolment for tailnet group grants (#461); nil without
+// self-enrolment.
+func (m *Module) ownerGroups() map[string][]string { return m.self.OwnerGroups() }
 
 // tailnetACL builds the generated tailnet ACL entry: always, so the console can report it, with the tag from
 // ENROLL_INGRESS_TAG (default tag:ingress) and the destinations from ENROLL_TAILNET_DST.

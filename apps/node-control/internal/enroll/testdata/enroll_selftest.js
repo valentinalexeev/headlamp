@@ -1201,6 +1201,13 @@ const fieldValue = (els, label) => {
     const bsec = new FakeNode('section'); bsec.hidden = true; const root = new FakeNode('div');
     await tn.mountBridge({ section: bsec, root: root, error: new FakeNode('div') }, 'b').load();
     assert.ok(textOf(root).includes('needs provisioning') && textOf(root).includes('group:ops') && textOf(root).includes('ACL preview'));
+    // a resolved group grant (#461) shows with the number of matching devices
+    const rview = Object.assign({}, view, { bridges: [Object.assign({}, view.bridges[0], { unresolved: [], resolved: [{ subject: 'group:vpn-users', devices: 2 }] })] });
+    global.window.hl.api = (m, u) => Promise.resolve(u === '/enroll/tailnet-acl' ? acl : rview);
+    const rroot = new FakeNode('div');
+    await tn.mountBridge({ section: new FakeNode('section'), root: rroot, error: new FakeNode('div') }, 'b').load();
+    assert.ok(textOf(rroot).includes('group:vpn-users (2)') && !textOf(rroot).includes('Not resolved'));
+    global.window.hl.api = (m, u) => { calls.push([m, u]); return Promise.resolve(u === '/enroll/tailnet-acl' ? acl : view); };
     buttonNamed(root, 'Apply through policy console').click();
     await flush();
     assert.ok(calls.some((c) => c[0] === 'POST' && c[1] === '/enroll/tailnet-acl'));

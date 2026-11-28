@@ -61,7 +61,17 @@ type SelfConfig struct {
 	ExtendWindow time.Duration
 	// ExtendGrace: and up to ExtendGrace after the expiry (OIDC_EXTEND_GRACE_DAYS). Default 0.
 	ExtendGrace time.Duration
+	// GroupGrantAge: tailnet grants to group:<name> match the groups that the person's last sign-in
+	// or re-check stored, while they are at most this old (OIDC_GROUP_GRANT_HOURS, #461). 0, the
+	// default: group grants stay not resolved, as before.
+	GroupGrantAge time.Duration
 }
+
+// Limits of the stored groups of one person (#461).
+const (
+	maxStoredGroups   = 64
+	maxStoredGroupLen = 200
+)
 
 func (c *SelfConfig) defaults() {
 	if c.GroupsClaim == "" {
@@ -137,7 +147,80 @@ func (s *Self) Login(id oidc.Identity) error {
 	if !s.Allowed(id.Groups) {
 		return ErrNotInGroup
 	}
-	return s.users.RecordLogin(id.Subject, id.Email, id.EmailVerified, id.RefreshToken)
+	err := s.users.RecordLogin(id.Subject, id.Email, id.EmailVerified, id.RefreshToken)
+	if err != nil {
+		return err
+	}
+	if s.cfg.GroupGrantAge > 0 {
+		return s.users.SetGroups(id.Subject, s.admittedGroups(id.Groups))
+	}
+	return nil
+}
+
+// admittedGroups are the groups of a sign-in that node-control stores for group grants (#461):
+// with OIDC_ALLOWED_GROUPS, only the allowed ones; without it, all. Sorted, without duplicates, at
+// most maxStoredGroups values of at most maxStoredGroupLen bytes.
+func (s *Self) admittedGroups(groups []string) []string {
+	out := []string{}
+	for _, g := range groups {
+		if g == "" || len(g) > maxStoredGroupLen ||
+			(len(s.cfg.AllowedGroups) > 0 && !slices.Contains(s.cfg.AllowedGroups, g)) {
+			continue
+		}
+		out = append(out, g)
+	}
+	slices.Sort(out)
+	out = slices.Compact(out)
+	if len(out) > maxStoredGroups {
+		out = out[:maxStoredGroups]
+	}
+	return out
+}
+
+// refreshGroups stores the groups of a successful re-check. A refresh without an ID token does not
+// know the groups: the stored ones then keep their age and stop counting after GroupGrantAge.
+func (s *Self) refreshGroups(id oidc.Identity, sub string) {
+	if s.cfg.GroupGrantAge <= 0 || !id.GroupsKnown {
+		return
+	}
+	if err := s.users.RefreshGroups(sub, s.admittedGroups(id.Groups)); err != nil {
+		slog.Warn("oidc groups not stored", "error_type", errType(err))
+	}
+}
+
+// SignOut ends a session of the person. The stored groups of the person stop counting at once
+// (#461), also for their other sessions: a new sign-in stores them again.
+func (s *Self) SignOut(sub, session string) {
+	if session != "" {
+		_ = s.users.EndSession(session)
+	}
+	if sub != "" && s.cfg.GroupGrantAge > 0 {
+		if err := s.users.ClearGroups(sub); err != nil {
+			slog.Warn("oidc groups not cleared", "error_type", errType(err))
+		}
+	}
+}
+
+// OwnerGroups maps the owner of each person ("oidc:<subject>") to the groups that count for group
+// grants now (#461): not locked, and stored at most GroupGrantAge ago. It is nil when group grants
+// are off, and when the store cannot be read: then group grants stay not resolved.
+func (s *Self) OwnerGroups() map[string][]string {
+	if s == nil || s.cfg.GroupGrantAge <= 0 {
+		return nil
+	}
+	users, err := s.users.Users()
+	if err != nil {
+		slog.Warn("oidc groups not read", "error_type", errType(err))
+		return nil
+	}
+	oldest := s.users.clock().Add(-s.cfg.GroupGrantAge).Unix()
+	out := make(map[string][]string, len(users))
+	for _, u := range users {
+		if !u.Locked && u.GroupsAt > 0 && u.GroupsAt >= oldest && len(u.Groups) > 0 {
+			out[ownerOf(u.Subject)] = u.Groups
+		}
+	}
+	return out
 }
 
 // Devices are the person's devices, newest first.
@@ -431,6 +514,7 @@ func (s *Self) checkNow(ctx context.Context, sub string) error {
 		return ErrNotInGroup
 	}
 	_ = s.users.Checked(sub, true, id.RefreshToken)
+	s.refreshGroups(id, sub)
 	return nil
 }
 
@@ -526,6 +610,7 @@ func (s *Self) Recheck(ctx context.Context) {
 			}
 		default:
 			_ = s.users.Checked(u.Subject, true, id.RefreshToken)
+			s.refreshGroups(id, u.Subject)
 		}
 	}
 }

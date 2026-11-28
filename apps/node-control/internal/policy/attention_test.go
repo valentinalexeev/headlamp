@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/valentinalexeev/headlamp/apps/node-control/internal/core"
+	"github.com/valentinalexeev/headlamp/apps/node-control/internal/headscale"
 )
 
 var _ core.AttentionSource = (*Module)(nil)
@@ -310,4 +311,96 @@ func TestPolicyActivityOutcomeBeforeItsApplyInTheSameSecond(t *testing.T) {
 	if got[0].Action != "change.reverted_on_request" || got[1].Action != "change.applied" {
 		t.Fatalf("newest first: %+v", got)
 	}
+}
+
+// nodesAPI is a headscale client that can also list nodes and users, for the unmatched-selector items (#432).
+type nodesAPI struct {
+	*fakeAPI
+	nodes   []headscale.Node
+	users   []headscale.User
+	listErr error
+}
+
+func (n *nodesAPI) ListNodes(context.Context) ([]headscale.Node, error) { return n.nodes, n.listErr }
+func (n *nodesAPI) ListUsers(context.Context) ([]headscale.User, error) { return n.users, n.listErr }
+
+const unmatchedPolicy = `{
+  "groups": {"group:ops": ["alice@"]},
+  "tagOwners": {"tag:web": ["group:ops"]},
+  "acls": [{"action": "accept", "src": ["group:ops"], "dst": ["tag:web:443"]}]
+}`
+
+func unmatchedModule(t *testing.T) (*Module, *Service, *nodesAPI) {
+	t.Helper()
+	api := &nodesAPI{fakeAPI: newFakeAPI(unmatchedPolicy),
+		users: []headscale.User{{ID: 1, Name: "alice"}},
+		nodes: []headscale.Node{{ID: 1, GivenName: "laptop", UserID: 1}}}
+	svc, _, _ := newTestService(t, api)
+	return &Module{env: core.MapEnv(map[string]string{"POLICY_ADMIN_USERS": "alice"}), store: svc.store, svc: svc}, svc, api
+}
+
+func TestPolicyAttentionUnmatchedSelectors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a tag that no node has is one info item that links to the map", func(t *testing.T) {
+		m, _, _ := unmatchedModule(t)
+		items, lines, err := m.Attention(ctx, "alice@")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("want one item for tag:web: %+v", items)
+		}
+		it := items[0]
+		if it.ID != "policy-unmatched-tag:web" || it.Level != core.LevelInfo || it.Source != "policy" ||
+			it.ActionPath != "/policy/map?select=tag%3Aweb" || it.ActionLabel == "" || !strings.Contains(it.Title, "tag:web") {
+			t.Errorf("%+v", it)
+		}
+		if len(lines) != 1 || lines[0].State != "ok" {
+			t.Errorf("an info item leaves the line ok: %+v", lines)
+		}
+	})
+
+	t.Run("the item goes away when a node gets the tag", func(t *testing.T) {
+		m, _, api := unmatchedModule(t)
+		api.nodes = append(api.nodes, headscale.Node{ID: 2, GivenName: "web1", UserID: 1, Tags: []string{"tag:web"}})
+		items, _, err := m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 0 {
+			t.Fatalf("%+v %v", items, err)
+		}
+	})
+
+	t.Run("a tagged node does not count for its user", func(t *testing.T) {
+		m, _, api := unmatchedModule(t)
+		api.nodes = []headscale.Node{{ID: 2, GivenName: "web1", UserID: 1, Tags: []string{"tag:web"}}}
+		items, _, err := m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 1 || items[0].ID != "policy-unmatched-group:ops" {
+			t.Fatalf("want only group:ops: %+v %v", items, err)
+		}
+	})
+
+	t.Run("the items follow a pending change", func(t *testing.T) {
+		m, svc, _ := unmatchedModule(t)
+		applyOK(t, svc, unmatchedPolicy+"\n")
+		items, _, err := m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 2 || items[0].Level != core.LevelTimed || items[1].Level != core.LevelInfo {
+			t.Fatalf("%+v %v", items, err)
+		}
+	})
+
+	t.Run("a failed node list is an unknown line, not a calm answer", func(t *testing.T) {
+		m, _, api := unmatchedModule(t)
+		api.listErr = errors.New("headscale is down")
+		items, lines, err := m.Attention(ctx, "alice@")
+		if err != nil || len(items) != 0 || len(lines) != 1 || lines[0].State != "unknown" {
+			t.Fatalf("%+v %+v %v", items, lines, err)
+		}
+	})
+
+	t.Run("a caller outside POLICY_ADMIN_USERS sees nothing", func(t *testing.T) {
+		m, _, _ := unmatchedModule(t)
+		if items, _, err := m.Attention(ctx, "bob@"); !errors.Is(err, core.ErrNotVisible) || len(items) != 0 {
+			t.Fatalf("%+v %v", items, err)
+		}
+	})
 }

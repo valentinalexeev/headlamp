@@ -967,7 +967,21 @@ A **grant** gives one subject one target on one bridge. The subject is one of th
 
 - A device.
 - An owner. The grant applies to all devices of the owner, also to devices that the owner enrols later.
-- A group (`group:<name>`). node-control keeps the grant, but it gives no access until node-control knows the group of the device owner (OIDC enrolment, #102). The bridge page shows it as "not resolved".
+- A group (`group:<name>`). The grant applies to the devices of each OIDC-enrolled person who is in the group now. It needs `OIDC_GROUP_GRANT_HOURS` (see "Group grants"). Without it, node-control keeps the grant, but the grant gives no access, and the bridge page shows it as "not resolved".
+
+#### Group grants
+
+With `OIDC_GROUP_GRANT_HOURS` set to a value N that is more than 0 (#461), node-control resolves the grants to `group:<name>`:
+
+- At each sign-in on `/me`, node-control stores the values of the groups claim (`OIDC_GROUPS_CLAIM`) with the person. With `OIDC_ALLOWED_GROUPS`, it stores only the allowed values. It stores at most 64 values.
+- Each re-check at the identity provider (`OIDC_RECHECK_MINUTES`) stores the groups again, if the answer has an ID token. An answer without an ID token does not change the stored groups.
+- A grant to `group:<name>` matches a device when the owner of the device (`oidc:<subject>`) has the value `<name>` in the stored groups. A grant subject without the `group:` prefix also matches the bare value.
+- The stored groups stop counting when they are more than N hours old, when the person signs out on `/me`, and when an administrator locks the person. After a sign-out, only a new sign-in stores the groups again. Thus a person who leaves the group loses the access at the next re-check, or N hours after the last sign-in or re-check.
+- The bridges get the change at the next sync, at most 5 minutes later.
+
+The bridge page shows each group grant with the number of active devices whose owner is in the group now.
+
+NOTE: A person without a refresh token is not checked again. The groups of this person stop counting N hours after the sign-in. The person must sign in on `/me` again to keep the access.
 
 The bridge sees only credential uuids and opaque group ids. It never sees device names, owners or target names.
 
@@ -1010,7 +1024,7 @@ To read the grants, a user needs `enroll.view`. To change them, a user needs `en
 
 | Request | Body | Effect |
 |---|---|---|
-| `GET /enroll/tailnet-grants` | | Targets, grants, and for each bridge the mode, the groups with their status, and the subjects that are not resolved. |
+| `GET /enroll/tailnet-grants` | | Targets, grants, and for each bridge the mode, the groups with their status, the group subjects with their number of matching devices (`resolved`), and the subjects that are not resolved (`unresolved`). |
 | `POST /enroll/tailnet-grants/mode` | `{"bridge", "mode"}` | Sets `tailnet_access` of the bridge in the console. This value overrides `enroll.json`. |
 | `POST /enroll/tailnet-grants/targets` | `{"name", "dst"}` | Adds or changes a console target. |
 | `DELETE /enroll/tailnet-grants/targets/{name}` | `{}` | Removes a console target and its grants. |
@@ -1577,6 +1591,7 @@ Set `OIDC_ISSUER` to turn it on. It needs:
 | `OIDC_SESSION_MINUTES` | The browser session, 5 to 1440 minutes. The default is 480. |
 | `OIDC_EXTEND_WINDOW_DAYS` | Self-extend (#301): a person can extend their own device on `/me` in the last N days before it expires, 0 to 365. The default is 0: off. |
 | `OIDC_EXTEND_GRACE_DAYS` | Self-extend: also up to N days after the expiry, 0 to 365. The default is 0. |
+| `OIDC_GROUP_GRANT_HOURS` | Group grants (#461): the tailnet grants to `group:<name>` match the stored groups of the owner while they are at most N hours old, 0 to 720. N must be more than `OIDC_RECHECK_MINUTES`. The default is 0: off, and group grants give no access. See "Group grants". |
 | `OIDC_INVITE_ONLY` | `true` or `false`. The default is `false`. With `true`, a person can add a device only with an invitation: `/me` has no "Add a device" form, and node-control refuses the form with 403. With `false`, the form stays, as before. Invitations work with both values. |
 | `OIDC_INVITE_REQUIRE_VERIFIED` | `true` or `false`. The default is `true`: an invitation makes a device only when the ID token has `email_verified` set to `true`. Set `false` only when your identity provider does not send the claim and people cannot change the email of their account. See "Invitations". |
 | `ENROLL_CLIENT_ICON_DIR` | Optional. A directory with the app icons of the app picker: `<id>.svg`, `<id>.png` or `<id>.webp` for each `id` of the catalog, 64 KiB or less for each file. node-control reads the files at start and ignores other files. Without an icon, the button shows the first letter of the app. This repository has no app icons, because they are the marks of their makers. Keep the icons in your private repo and lay them over the app. |

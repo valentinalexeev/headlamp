@@ -75,6 +75,23 @@ type IngressConfig struct {
 	// tailnetDNS gives the tailnet resolver of the bridges (#286); nil: none. Set by
 	// WithTailnetDNS.
 	tailnetDNS func() (TailnetDNS, bool)
+	// ownerGroups gives the groups of each owner for tailnet group grants (#461); nil, or a nil
+	// result: group grants are not resolved. Set by WithOwnerGroups.
+	ownerGroups func() map[string][]string
+}
+
+// WithOwnerGroups returns a copy that resolves tailnet group grants with the owner groups from fn.
+func (c IngressConfig) WithOwnerGroups(fn func() map[string][]string) IngressConfig {
+	c.ownerGroups = fn
+	return c
+}
+
+// OwnerGroups are the groups of each owner now, nil when group grants are not resolved.
+func (c IngressConfig) OwnerGroups() map[string][]string {
+	if c.ownerGroups == nil {
+		return nil
+	}
+	return c.ownerGroups()
 }
 
 // TailnetDNS is the tailnet resolver a bridge uses for the tailnet names (#286): node-control's DNS

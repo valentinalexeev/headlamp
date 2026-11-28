@@ -127,6 +127,10 @@
         row(tb.body, [hl.plain(g.tag, 40), names(g.targets), String(hl.arr(g.devices).length), hl.status(s[0], s[1])]);
       });
       els.root.appendChild(tb.wrap);
+      if (hl.arr(b.resolved).length) {
+        els.root.appendChild(hl.el('p', 't2 small', 'Group grants (devices whose owner is in the group now): ' +
+          hl.arr(b.resolved).map(function (g) { return hl.plain(g.subject, 200) + ' (' + Number(g.devices) + ')'; }).join(', ')));
+      }
       if (hl.arr(b.unresolved).length) {
         els.root.appendChild(hl.el('p', 't2 small', 'Not resolved (no access until node-control knows the group of the owner): ' + names(b.unresolved)));
       }
